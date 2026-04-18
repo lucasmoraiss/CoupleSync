@@ -1,0 +1,185 @@
+// AC-002: notification-patterns.json — bank-specific regex patterns for transaction parsing.
+// Pattern maintenance: update patterns here and ship via app release.
+// Amount regex captures Brazilian number format: 1.234,56 → normalised to 1234.56 by parser.
+{
+  "version": "1.0.0",
+  "banks": [
+    {
+      "name": "Nubank",
+      "packageNames": ["com.nu.production"],
+      "patterns": [
+        {
+          "id": "nu-purchase",
+          "transactionType": "debit",
+          "regex": "Compra(?:\\s+no\\s+(?:d[eé]bito|cr[eé]dito))?:?\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s+em\\s+([^|\\n]+?)(?:\\s*[|\\-]|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "nu-pix-sent",
+          "transactionType": "debit",
+          "regex": "Pix\\s+enviado:?\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s+para\\s+([^|\\n]+?)(?:\\s*\\.|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "nu-pix-received",
+          "transactionType": "credit",
+          "regex": "(?:Pix\\s+recebido|Voc[eê]\\s+recebeu):?\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s+de\\s+([^|\\n]+?)(?:\\s*\\.|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "nu-generic-amount",
+          "transactionType": "debit",
+          "regex": "R\\$\\s*([\\d.]+,[\\d]{2})",
+          "amountGroup": 1,
+          "merchantGroup": null
+        }
+      ]
+    },
+    {
+      "name": "Itaú",
+      "packageNames": ["com.itau", "br.com.italiquido", "com.itau.empresas"],
+      "patterns": [
+        {
+          "id": "itau-purchase",
+          "transactionType": "debit",
+          "regex": "Compra(?:\\s+no\\s+(?:cart[aã]o|d[eé]bito|cr[eé]dito))?:?\\s*R\\$\\s*([\\d.]+,[\\d]{2})\\s*[-–]?\\s*([^|\\n]+?)(?:\\s*[|\\-]|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "itau-pix-sent",
+          "transactionType": "debit",
+          "regex": "Pix\\s+enviado:?\\s*R\\$\\s*([\\d.]+,[\\d]{2})\\s+para\\s+([^|\\n]+?)(?:\\s*\\.|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "itau-debit",
+          "transactionType": "debit",
+          "regex": "D[eé]bito\\s+de\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s*[-–]?\\s*([^|\\n]+?)(?:\\s*[|\\-]|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "itau-generic-amount",
+          "transactionType": "debit",
+          "regex": "R\\$\\s*([\\d.]+,[\\d]{2})",
+          "amountGroup": 1,
+          "merchantGroup": null
+        }
+      ]
+    },
+    {
+      "name": "Inter",
+      "packageNames": ["br.com.intermedium"],
+      "patterns": [
+        {
+          "id": "inter-purchase",
+          "transactionType": "debit",
+          "regex": "Compra\\s+aprovada:?\\s*R\\$\\s*([\\d.]+,[\\d]{2})\\s+em\\s+([^|\\n]+?)(?:\\s*[|\\-]|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "inter-pix-sent",
+          "transactionType": "debit",
+          "regex": "Pix\\s+de\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s+enviado\\s+para\\s+([^|\\n]+?)(?:\\s*\\.|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "inter-pix-received",
+          "transactionType": "credit",
+          "regex": "Pix\\s+de\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s+recebido\\s+de\\s+([^|\\n]+?)(?:\\s*\\.|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "inter-spend",
+          "transactionType": "debit",
+          "regex": "Voc[eê]\\s+gastou\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s+no\\s+Inter\\s+em\\s+([^|\\n]+?)(?:\\s*\\.|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "inter-generic-amount",
+          "transactionType": "debit",
+          "regex": "R\\$\\s*([\\d.]+,[\\d]{2})",
+          "amountGroup": 1,
+          "merchantGroup": null
+        }
+      ]
+    },
+    {
+      "name": "C6 Bank",
+      "packageNames": ["com.c6bank.app"],
+      "patterns": [
+        {
+          "id": "c6-purchase",
+          "transactionType": "debit",
+          "regex": "(?:Compra|Transa[cç][aã]o)\\s+(?:de|aprovada):?\\s*R\\$\\s*([\\d.]+,[\\d]{2})\\s+em\\s+([^|\\n]+?)(?:\\s+aprovada|\\s*[|\\-]|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "c6-pix-sent",
+          "transactionType": "debit",
+          "regex": "Voc[eê]\\s+enviou\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s+via\\s+Pix\\s+para\\s+([^|\\n]+?)(?:\\s*\\.|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "c6-generic-amount",
+          "transactionType": "debit",
+          "regex": "R\\$\\s*([\\d.]+,[\\d]{2})",
+          "amountGroup": 1,
+          "merchantGroup": null
+        }
+      ]
+    },
+    {
+      "name": "Bradesco",
+      "packageNames": ["com.bradesco", "com.bradesco.prestoandroid", "com.bradesco.next"],
+      "patterns": [
+        {
+          "id": "bradesco-purchase",
+          "transactionType": "debit",
+          "regex": "Compra\\s+de\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s+em\\s+([^|\\n]+?)(?:\\s*[|\\-]|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "bradesco-debit",
+          "transactionType": "debit",
+          "regex": "D[eé]bito\\s+de\\s+R\\$\\s*([\\d.]+,[\\d]{2})\\s+em\\s+sua\\s+conta",
+          "amountGroup": 1,
+          "merchantGroup": null
+        },
+        {
+          "id": "bradesco-pix-sent",
+          "transactionType": "debit",
+          "regex": "Pix\\s+enviado:?\\s*R\\$\\s*([\\d.]+,[\\d]{2})\\s+para\\s+([^|\\n]+?)(?:\\s*\\.|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "bradesco-pix-received",
+          "transactionType": "credit",
+          "regex": "Pix\\s+recebido:?\\s*R\\$\\s*([\\d.]+,[\\d]{2})\\s+de\\s+([^|\\n]+?)(?:\\s*\\.|\\s*$)",
+          "amountGroup": 1,
+          "merchantGroup": 2
+        },
+        {
+          "id": "bradesco-generic-amount",
+          "transactionType": "debit",
+          "regex": "R\\$\\s*([\\d.]+,[\\d]{2})",
+          "amountGroup": 1,
+          "merchantGroup": null
+        }
+      ]
+    }
+  ]
+}

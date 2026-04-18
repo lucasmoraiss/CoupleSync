@@ -1,0 +1,153 @@
+{
+  "session": "2026-04-17_v16-bugfixes-bank-import-ux",
+  "acceptance_criteria": [
+    {
+      "id": "AC-601",
+      "description": "OCR file upload endpoint receives the file correctly (IFormFile is not null) when called from React Native with FormData — multipart boundary is present.",
+      "priority": "P0",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'OCR' --no-build",
+        "manual: upload a PDF from the mobile app in dev environment; backend logs show 'File received: <filename>', not '400 FILE_REQUIRED'"
+      ]
+    },
+    {
+      "id": "AC-602",
+      "description": "Docker container appuser can write to /app/uploads directory; LocalFileStorageAdapter creates subdirectories successfully at runtime.",
+      "priority": "P0",
+      "verify": [
+        "cmd: docker build -t couplesync-api ./backend",
+        "manual: docker run couplesync-api and verify /app/uploads is owned by appuser via 'docker exec ... ls -la /app/'"
+      ]
+    },
+    {
+      "id": "AC-603",
+      "description": "PdfPig successfully extracts non-empty text from a text-based Brazilian bank statement PDF (at least 50 characters extracted).",
+      "priority": "P0",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'PdfExtraction' --no-build",
+        "unit: LocalPdfParserProviderTests.ExtractsTextFromTextBasedPdf_ReturnsNonEmptyText"
+      ]
+    },
+    {
+      "id": "AC-604",
+      "description": "Bank auto-detection correctly identifies the bank from extracted PDF text for at least 5 of the 7 supported banks using keyword matching.",
+      "priority": "P2",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'BankDetection' --no-build",
+        "unit: BankDetectorTests with fixture text samples for Inter, Nubank, Itau, Santander, BB"
+      ]
+    },
+    {
+      "id": "AC-605",
+      "description": "Bank-specific regex parsers return correctly structured ParsedTransaction lists (date, description, amount, type) from representative PDF text fixtures for at least 3 banks.",
+      "priority": "P2",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'BankParser' --no-build",
+        "unit: InterBankParserTests, NubankParserTests, ItauParserTests with sample fixture strings"
+      ]
+    },
+    {
+      "id": "AC-606",
+      "description": "When USE_LOCAL_PDF_PARSER=true (default), DependencyInjection registers LocalPdfParserProvider for IOcrProvider; AzureDocumentIntelligenceAdapter is NOT invoked.",
+      "priority": "P2",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'OcrProviderRegistration' --no-build",
+        "manual: set USE_LOCAL_PDF_PARSER=true in docker-compose.yml and verify Gemini/Azure API is never called during an OCR job"
+      ]
+    },
+    {
+      "id": "AC-607",
+      "description": "No Alert.alert() calls remain in mutation error handlers in the mobile app (budget/index.tsx, OcrReviewScreen.tsx, and any other onError handlers).",
+      "priority": "P1",
+      "verify": [
+        "cmd: grep -r \"Alert.alert\" mobile/app/ mobile/src/ --include='*.tsx' --include='*.ts' (must return 0 results in mutation onError blocks)",
+        "static: code review confirms all onError handlers use useToast() hook"
+      ]
+    },
+    {
+      "id": "AC-608",
+      "description": "Styled toast/snackbar component renders with error styling (red background, white text, dismiss button) when a mutation fails; auto-dismisses after 4 seconds.",
+      "priority": "P1",
+      "verify": [
+        "manual: on physical Android device, trigger budget save failure (disconnect network) and observe styled toast instead of native dialog",
+        "manual: toast auto-dismisses after ~4 seconds"
+      ]
+    },
+    {
+      "id": "AC-609",
+      "description": "When a 403 COUPLE_REQUIRED error is received, the app displays 'Conecte-se com seu parceiro primeiro' with a navigation link to the couple setup screen — not a generic error message.",
+      "priority": "P1",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'CoupleRequired' --no-build",
+        "manual: log in as a user without a couple; attempt budget save; verify specific message and nav link appear"
+      ]
+    },
+    {
+      "id": "AC-610",
+      "description": "Budget screen renders the ErrorState component with a retry button when the budget query returns an error; the retry button calls refetch().",
+      "priority": "P1",
+      "verify": [
+        "unit: BudgetScreenTests.RendersErrorState_WhenQueryFails (mock query hook to return isError=true)",
+        "manual: simulate network failure on budget screen load; confirm ErrorState is visible with retry option"
+      ]
+    },
+    {
+      "id": "AC-611",
+      "description": "Quick Income Update modal on Dashboard sends a PATCH /api/v1/budget/income request; the Dashboard income display reflects the new value within 1 navigation cycle without requiring a full budget flow.",
+      "priority": "P3",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'QuickIncome' --no-build",
+        "manual: tap 'Atualizar renda' on Dashboard; enter new income; save; verify amount updates on Dashboard without navigating to budget screen"
+      ]
+    },
+    {
+      "id": "AC-612",
+      "description": "After OCR processing completes, each extracted transaction candidate has a suggestedCategoryId populated (or null if Gemini call fails/times out); categorization failure does not block import confirmation.",
+      "priority": "P3",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'AutoCategorization' --no-build",
+        "integration: OcrProcessingServiceTests.AutoCategorizes_Transactions_WhenGeminiReturnsValidCategory (Gemini mocked)",
+        "integration: OcrProcessingServiceTests.ImportSucceeds_WhenGeminiCallFails (Gemini mock throws)"
+      ]
+    },
+    {
+      "id": "AC-613",
+      "description": "ChatContextService.BuildSystemPromptAsync() includes a 'Financial Goals' section listing active goal names, target amounts, progress amounts, progress %, and deadlines when the couple has at least one active goal.",
+      "priority": "P3",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'ChatContext' --no-build",
+        "unit: ChatContextServiceTests.BuildsSystemPrompt_IncludesGoalsSummary_WhenActiveGoalsExist",
+        "unit: ChatContextServiceTests.BuildsSystemPrompt_OmitsGoalsSection_WhenNoActiveGoals"
+      ]
+    },
+    {
+      "id": "AC-614",
+      "description": "Reports screen renders a bar chart (last 6 months per-category totals) and a pie chart (current month category breakdown) with real data from the couple's transaction history.",
+      "priority": "P3",
+      "verify": [
+        "manual: navigate to Reports tab; verify bar and pie charts render with data labels and are interactive (tap to view details)",
+        "manual: verify charts are empty/zero-state when couple has no transaction history (no crash)"
+      ]
+    },
+    {
+      "id": "AC-615",
+      "description": "GET /api/v1/reports/spending?months=6 returns couple-scoped monthly spending aggregated by category; couples cannot see each other's data; unauthenticated requests return 401.",
+      "priority": "P3",
+      "verify": [
+        "cmd: cd backend && dotnet test --filter 'ReportsSpending' --no-build",
+        "integration: ReportsControllerTests.ReturnsSpendingData_ForAuthenticatedCouple",
+        "integration: ReportsControllerTests.Returns401_WhenUnauthenticated",
+        "integration: ReportsControllerTests.ReturnsEmptyArrays_WhenNoTransactionHistory"
+      ]
+    },
+    {
+      "id": "AC-616",
+      "description": "docs/app-usage-guide.md exists, covers: what CoupleSync is, key features, how to use the app, and a comparison table with Mobills, Organizze, YNAB, Splitwise, and Honeydue.",
+      "priority": "P4",
+      "verify": [
+        "cmd: Test-Path docs/app-usage-guide.md (must return True)",
+        "manual: document contains comparison table with at least 5 competitor entries and CoupleSync column"
+      ]
+    }
+  ]
+}

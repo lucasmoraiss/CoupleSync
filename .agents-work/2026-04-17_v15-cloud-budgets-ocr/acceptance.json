@@ -1,0 +1,442 @@
+{
+  "session": "2026-04-17_v15-cloud-budgets-ocr",
+  "v1_reference": ".agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json",
+  "note": "V1 acceptance criteria are AC-001 through AC-012. V1.5 uses AC-101 through AC-150 to avoid collision.",
+  "acceptance_criteria": [
+    {
+      "id": "AC-101",
+      "area": "cloud-deployment",
+      "description": "Backend API is containerized (Dockerfile present) and builds successfully into a Docker image < 200 MB.",
+      "verify": [
+        "cmd: docker build -t couplesync-api ./backend && docker image inspect couplesync-api --format='{{.Size}}'",
+        "manual: confirm image size is under 200 MB"
+      ]
+    },
+    {
+      "id": "AC-102",
+      "area": "cloud-deployment",
+      "description": "Backend deploys to Azure Container Apps Consumption Plan and is reachable at a public HTTPS URL.",
+      "verify": [
+        "manual: deploy via GitHub Actions workflow and confirm the revision is running in Azure portal",
+        "cmd: curl -s https://<app>.azurecontainerapps.io/api/v1/health | jq .status"
+      ]
+    },
+    {
+      "id": "AC-103",
+      "area": "cloud-deployment",
+      "description": "EF Core migrations run on startup against Neon.tech PostgreSQL; all existing schema objects are created correctly.",
+      "verify": [
+        "manual: deploy fresh container with empty Neon database and confirm migrations complete without error",
+        "manual: verify all V1 tables (users, couples, transactions, goals, etc.) exist in Neon via psql"
+      ]
+    },
+    {
+      "id": "AC-104",
+      "area": "cloud-deployment",
+      "description": "All runtime secrets (DATABASE_URL, JWT_SECRET, FCM credentials, OCR keys, GEMINI_API_KEY) are stored as Azure Container Apps secrets or environment variables and never committed to the repository.",
+      "verify": [
+        "manual: CI secret scan (git-secrets or trufflehog) passes with no findings on main branch",
+        "manual: confirm each secret is present in Azure Container Apps configuration and absent from all source files"
+      ]
+    },
+    {
+      "id": "AC-105",
+      "area": "cloud-deployment",
+      "description": "EAS Build with preview profile (buildType: apk) produces a valid installable APK artifact.",
+      "verify": [
+        "cmd: eas build --platform android --profile preview --non-interactive",
+        "manual: download and install APK on a physical Android device"
+      ]
+    },
+    {
+      "id": "AC-106",
+      "area": "cloud-deployment",
+      "description": "GitHub Actions workflow uploads the APK to Firebase App Distribution and notifies the configured pilot tester group.",
+      "verify": [
+        "manual: trigger CI on main; confirm APK appears in Firebase App Distribution console with correct tester group",
+        "manual: tester receives email invite and can install APK"
+      ]
+    },
+    {
+      "id": "AC-107",
+      "area": "cloud-deployment",
+      "description": "Health endpoint (GET /api/v1/health) returns HTTP 200 with {status: 'healthy'} from the cloud deployment.",
+      "verify": [
+        "cmd: curl -f https://<app>.azurecontainerapps.io/api/v1/health"
+      ]
+    },
+    {
+      "id": "AC-108",
+      "area": "cloud-deployment",
+      "description": "GitHub Actions CI pipeline runs dotnet test and Expo type checks; deployment is blocked if any step fails.",
+      "verify": [
+        "manual: introduce a failing test and confirm deployment step is skipped",
+        "cmd: dotnet test --no-build (must exit 0 on main branch)"
+      ]
+    },
+    {
+      "id": "AC-109",
+      "area": "cloud-deployment",
+      "description": "Existing 219 tests continue to pass against the Neon.tech PostgreSQL connection string (integration tests use test DB).",
+      "verify": [
+        "cmd: dotnet test --no-build (green, 219+ passing)",
+        "manual: integration tests configured to point at test Neon DB or local SQLite in CI"
+      ]
+    },
+    {
+      "id": "AC-110",
+      "area": "cloud-deployment",
+      "description": "All cloud services used are on 100% free tier; no paid tier is required for pilot operation.",
+      "verify": [
+        "manual: Azure portal shows Consumption Plan with no cost commitment",
+        "manual: Neon dashboard shows free tier project",
+        "manual: Firebase / Google Cloud console shows no billing charges"
+      ]
+    },
+    {
+      "id": "AC-111",
+      "area": "budget-management",
+      "description": "A couple can set their monthly gross income via PUT/POST /api/v1/budgets and retrieve it in GET /api/v1/budgets/current.",
+      "verify": [
+        "cmd: integration test — POST /api/v1/budgets with gross_income=10000, GET /api/v1/budgets/current returns gross_income=10000",
+        "manual: UI — Budget screen shows gross income field editable by either partner"
+      ]
+    },
+    {
+      "id": "AC-112",
+      "area": "budget-management",
+      "description": "A couple can create budget allocations per category (e.g., Food=2000, Transport=500) and persist them.",
+      "verify": [
+        "cmd: integration test — PUT /api/v1/budgets/{id}/allocations with category list, GET returns same list",
+        "manual: UI — Budget screen lists categories with allocated amounts"
+      ]
+    },
+    {
+      "id": "AC-113",
+      "area": "budget-management",
+      "description": "GET /api/v1/budgets/current returns per-category actual spending computed from current-month transactions alongside allocated amounts.",
+      "verify": [
+        "cmd: integration test — seed 3 transactions in current month, GET /api/v1/budgets/current shows correct actual_spent per matching category",
+        "manual: dashboard/budget screen shows 'Spent R$X of R$Y' per category"
+      ]
+    },
+    {
+      "id": "AC-114",
+      "area": "budget-management",
+      "description": "Both partners see identical budget plan and spending data when querying GET /api/v1/budgets/current (couple-scoped).",
+      "verify": [
+        "manual: login as Partner A and Partner B, both GET /api/v1/budgets/current return same JSON payload"
+      ]
+    },
+    {
+      "id": "AC-115",
+      "area": "budget-management",
+      "description": "An FCM alert of type BUDGET_EXCEEDED is triggered when actual spending exceeds the allocated amount for a category.",
+      "verify": [
+        "manual: seed transactions that exceed category budget, confirm FCM message delivered with type BUDGET_EXCEEDED"
+      ]
+    },
+    {
+      "id": "AC-116",
+      "area": "budget-management",
+      "description": "GET /api/v1/budgets/current includes budget_gap = gross_income minus sum of all allocated_amount.",
+      "verify": [
+        "cmd: integration test — verify budget_gap field value matches arithmetic"
+      ]
+    },
+    {
+      "id": "AC-117",
+      "area": "budget-management",
+      "description": "Budget endpoints return HTTP 403 when accessed by a user from a different couple.",
+      "verify": [
+        "cmd: integration test — user from couple B attempts GET /api/v1/budgets/current scoped to couple A; expect 403"
+      ]
+    },
+    {
+      "id": "AC-118",
+      "area": "budget-management",
+      "description": "Budget plan is keyed per calendar month (YYYY-MM); creating a budget in a new month does not overwrite the previous month's plan.",
+      "verify": [
+        "cmd: integration test — create budget for 2026-04, create budget for 2026-05, GET for each month returns independent plans"
+      ]
+    },
+    {
+      "id": "AC-119",
+      "area": "budget-management",
+      "description": "Budget management UI is accessible from the mobile app within 3 taps from the main navigation.",
+      "verify": [
+        "manual: tap count walkthrough — bottom nav → Budget tab → Budget screen (2 taps from any screen)"
+      ]
+    },
+    {
+      "id": "AC-120",
+      "area": "budget-management",
+      "description": "Budget endpoints have integration tests covering create, update, read, couple isolation, and overspend detection.",
+      "verify": [
+        "cmd: dotnet test --filter Category=Budget (all budget integration tests green)"
+      ]
+    },
+    {
+      "id": "AC-121",
+      "area": "ocr-import",
+      "description": "Mobile app provides camera capture and file-picker (image or PDF) on the Transactions screen for OCR import.",
+      "verify": [
+        "manual: open Transactions screen, tap import button, confirm camera and file picker options appear"
+      ]
+    },
+    {
+      "id": "AC-122",
+      "area": "ocr-import",
+      "description": "File upload via POST /api/v1/ocr/upload stores the file securely in cloud storage with couple-scoped path and returns upload_id.",
+      "verify": [
+        "cmd: integration test — POST a JPEG and a PDF; confirm upload_id returned and file exists in storage under /{couple_id}/{upload_id}/",
+        "manual: verify no cross-couple path access possible via path traversal check"
+      ]
+    },
+    {
+      "id": "AC-123",
+      "area": "ocr-import",
+      "description": "Backend triggers OCR processing and GET /api/v1/ocr/{upload_id}/results returns extracted transaction candidates with date, description, amount, currency, and confidence.",
+      "verify": [
+        "manual: upload a sample bank statement JPEG; confirm results contain at least one transaction candidate with all required fields",
+        "manual: confidence values are between 0 and 1"
+      ]
+    },
+    {
+      "id": "AC-124",
+      "area": "ocr-import",
+      "description": "Mobile displays a diff/merge review screen listing extracted candidates with checkboxes and editable description and amount fields.",
+      "verify": [
+        "manual: complete an OCR upload cycle; confirm review screen appears with selectable, editable rows"
+      ]
+    },
+    {
+      "id": "AC-125",
+      "area": "ocr-import",
+      "description": "POST /api/v1/ocr/{upload_id}/confirm with selected_indices creates only the selected transactions and skips unselected ones.",
+      "verify": [
+        "cmd: integration test — upload, extract 3 candidates, confirm indices [0, 2] only; verify 2 transactions created"
+      ]
+    },
+    {
+      "id": "AC-126",
+      "area": "ocr-import",
+      "description": "Duplicate fingerprint detection flags candidates that match existing transactions; duplicates are shown with a warning but user can still import.",
+      "verify": [
+        "cmd: integration test — import a transaction, re-upload same statement, verify duplicate_suspected=true on matching candidate",
+        "manual: confirm user can still check and import the flagged candidate"
+      ]
+    },
+    {
+      "id": "AC-127",
+      "area": "ocr-import",
+      "description": "Confirmed imported transactions appear in the shared transaction list and are included in dashboard aggregations.",
+      "verify": [
+        "manual: complete OCR import, open Transactions list, confirm imported items appear; check dashboard totals updated"
+      ]
+    },
+    {
+      "id": "AC-128",
+      "area": "ocr-import",
+      "description": "All OCR endpoints return HTTP 403 for requests with a couple_id that does not own the upload_id.",
+      "verify": [
+        "cmd: integration test — couple B attempts GET /api/v1/ocr/{upload_id_of_couple_A}/results; expect 403"
+      ]
+    },
+    {
+      "id": "AC-129",
+      "area": "ocr-import",
+      "description": "GET /api/v1/ocr/{upload_id}/status returns correct state (PENDING, PROCESSING, READY, FAILED) during OCR lifecycle.",
+      "verify": [
+        "cmd: integration test with mocked OCR service — verify all four status transitions reachable",
+        "manual: mobile polls status and shows progress indicator until READY or FAILED"
+      ]
+    },
+    {
+      "id": "AC-130",
+      "area": "ocr-import",
+      "description": "When Azure AI Document Intelligence quota is exhausted, POST /api/v1/ocr/upload returns HTTP 429 with error code quota_exhausted and a reset date; mobile surfaces recovery guidance.",
+      "verify": [
+        "cmd: integration test with mocked quota error — confirm 429 response shape",
+        "manual: mobile shows 'OCR unavailable this month, quota reached. Try again on [date]'"
+      ]
+    },
+    {
+      "id": "AC-131",
+      "area": "ui-polish",
+      "description": "mobile/src/theme/index.ts exists and exports colors, spacing, typography, borderRadius, and shadows tokens.",
+      "verify": [
+        "cmd: npx tsc --noEmit (no TypeScript errors in theme module)",
+        "manual: inspect theme file exports match all five token groups"
+      ]
+    },
+    {
+      "id": "AC-132",
+      "area": "ui-polish",
+      "description": "No hardcoded hex color values exist in .tsx files outside mobile/src/theme/index.ts.",
+      "verify": [
+        "cmd: grep -rn '#[0-9A-Fa-f]{3,6}' mobile/src/modules mobile/app --include='*.tsx' (zero results)"
+      ]
+    },
+    {
+      "id": "AC-133",
+      "area": "ui-polish",
+      "description": "A reusable LoadingState component is used on all data-fetching screens while async operations are in progress.",
+      "verify": [
+        "manual: simulate slow network (Android emulator network throttle), confirm spinner visible on Dashboard, Transactions, Goals, Budget screens"
+      ]
+    },
+    {
+      "id": "AC-134",
+      "area": "ui-polish",
+      "description": "A reusable EmptyState component with title, subtitle, and optional CTA is used on Goals, Transactions, Budget, and Dashboard screens when no data exists.",
+      "verify": [
+        "manual: fresh account with no data — confirm empty state appears on each of the four screens"
+      ]
+    },
+    {
+      "id": "AC-135",
+      "area": "ui-polish",
+      "description": "A reusable ErrorState component with message and retry button is used on all async screens when data fetching fails.",
+      "verify": [
+        "manual: disconnect network, open Dashboard — confirm error state with retry button appears",
+        "manual: tap retry — confirm loading state then data or error reappears"
+      ]
+    },
+    {
+      "id": "AC-136",
+      "area": "ui-polish",
+      "description": "react-native-reanimated fade/slide transitions are applied between main tab screens.",
+      "verify": [
+        "manual: navigate between tabs on device — smooth animated transition visible, no jank on mid-tier Android"
+      ]
+    },
+    {
+      "id": "AC-137",
+      "area": "ui-polish",
+      "description": "expo-haptics impact feedback fires on primary CTA presses (save budget, confirm OCR import, create goal) and on alert acknowledgements.",
+      "verify": [
+        "manual: tap each CTA on physical Android device and confirm haptic feedback"
+      ]
+    },
+    {
+      "id": "AC-138",
+      "area": "ui-polish",
+      "description": "All interactive tap targets are at least 48 dp in both dimensions.",
+      "verify": [
+        "manual: accessibility inspector (Android Layout Inspector or Expo) — verify tap target sizes"
+      ]
+    },
+    {
+      "id": "AC-139",
+      "area": "ui-polish",
+      "description": "Core actions (create budget, import receipt, create goal, view dashboard) remain reachable within 3 taps from any main screen.",
+      "verify": [
+        "manual: tap count walkthrough for each core action from each bottom tab"
+      ]
+    },
+    {
+      "id": "AC-140",
+      "area": "ui-polish",
+      "description": "UI is visually validated on at least two Android screen sizes: compact (360dp) and medium (411dp).",
+      "verify": [
+        "manual: run on Android emulator at 360dp and 411dp screen widths; verify no layout overflow or clipping"
+      ]
+    },
+    {
+      "id": "AC-141",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "GEMINI_API_KEY environment variable is configured in Azure Container Apps; key is never present in any source file or git history.",
+      "verify": [
+        "manual: git log --all -S GEMINI_API_KEY (zero results)",
+        "manual: Azure Container Apps environment variables include GEMINI_API_KEY"
+      ]
+    },
+    {
+      "id": "AC-142",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "AI Chat tab is visible in mobile bottom navigation when AI_CHAT_ENABLED=true and hidden when false.",
+      "verify": [
+        "manual: set AI_CHAT_ENABLED=false, confirm chat tab absent from navigation",
+        "manual: set AI_CHAT_ENABLED=true, confirm chat tab appears"
+      ]
+    },
+    {
+      "id": "AC-143",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "POST /api/v1/ai/chat system prompt includes current month budget summary, per-category spending totals, couple city (Belo Horizonte), and today's date.",
+      "verify": [
+        "manual: inspect outbound Gemini API payload (debug log); confirm system prompt fields present",
+        "manual: ask assistant 'what is my food budget this month?' — response reflects actual budget data"
+      ]
+    },
+    {
+      "id": "AC-144",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "Chat assistant can suggest restaurants and activities in Belo Horizonte within the user's current remaining category budget.",
+      "verify": [
+        "manual: ask 'where can we eat tonight under R$80?' and confirm response names BH venues with price context"
+      ]
+    },
+    {
+      "id": "AC-145",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "Chat history is client-session only; refreshing or reopening the app clears chat history and there is no server-side chat log.",
+      "verify": [
+        "manual: send 5 messages, close and reopen app — chat history is empty",
+        "manual: database inspection confirms no chat_messages table or similar structure"
+      ]
+    },
+    {
+      "id": "AC-146",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "Per-couple rate limiting of 30 requests/hour is enforced on POST /api/v1/ai/chat; request 31 returns HTTP 429.",
+      "verify": [
+        "cmd: integration test — send 31 requests within 1 hour window, confirm 31st returns 429"
+      ]
+    },
+    {
+      "id": "AC-147",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "When Gemini API returns quota error (429), mobile displays 'assistant unavailable, try again later' without crashing.",
+      "verify": [
+        "manual: mock Gemini 429 response — confirm graceful mobile error message appears"
+      ]
+    },
+    {
+      "id": "AC-148",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "Responses to investment or legal advice requests include a redirect to consult a qualified professional.",
+      "verify": [
+        "manual: send 'Should I invest in stocks?' — response includes disclaimer to consult a financial advisor"
+      ]
+    },
+    {
+      "id": "AC-149",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "GEMINI_MODEL environment variable controls the model ID; default value is set in app configuration.",
+      "verify": [
+        "manual: confirm GEMINI_MODEL env var present with default value in app config",
+        "manual: override GEMINI_MODEL and confirm backend uses updated model ID without redeployment"
+      ]
+    },
+    {
+      "id": "AC-150",
+      "area": "ai-chat",
+      "gate": "BLOCKED_UNTIL_AC101_TO_AC140_VERIFIED",
+      "description": "AI Chat feature is only built and integrated after all other V1.5 features (AC-101 through AC-140) are complete and verified.",
+      "verify": [
+        "manual: confirm tasks.yaml shows all Area 1-4 tasks as done before any AI Chat tasks begin"
+      ]
+    }
+  ]
+}

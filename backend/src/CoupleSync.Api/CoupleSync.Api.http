@@ -1,0 +1,6 @@
+@CoupleSync.Api_HostAddress = http://localhost:5210
+
+GET {{CoupleSync.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

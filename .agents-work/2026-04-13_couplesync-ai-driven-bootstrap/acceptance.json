@@ -1,0 +1,92 @@
+{
+  "acceptance_criteria": [
+    {
+      "id": "AC-001",
+      "description": "Users can create/join a couple using a join code and both partners see a shared workspace.",
+      "verify": [
+        "manual: create two users, pair them with one join code, confirm shared dashboard visibility"
+      ]
+    },
+    {
+      "id": "AC-002",
+      "description": "Bank integration is enabled through Android Notification Listener permission flow without storing raw banking credentials.",
+      "verify": [
+        "manual: enable notification permission in Android settings flow and confirm integration status",
+        "manual: security review confirms no raw banking credentials are collected or stored"
+      ]
+    },
+    {
+      "id": "AC-003",
+      "description": "Notification-captured transaction events are uploaded, validated, deduplicated, persisted, and categorized automatically.",
+      "verify": [
+        "manual: trigger a supported bank push notification and confirm transaction creation with category",
+        "manual: send repeated equivalent events and verify deduplication prevents duplicate transaction records"
+      ]
+    },
+    {
+      "id": "AC-004",
+      "description": "Dashboard shows combined net worth, individual balances, and shared expenses.",
+      "verify": [
+        "manual: login as each partner and validate consistent shared aggregates"
+      ]
+    },
+    {
+      "id": "AC-005",
+      "description": "Users can create, edit, archive, and track goals with target amount, current progress, and deadline.",
+      "verify": [
+        "manual: create, update, archive a goal and confirm state transitions"
+      ]
+    },
+    {
+      "id": "AC-006",
+      "description": "Projected cash flow is available for at least 30-day and 90-day horizons.",
+      "verify": [
+        "manual: compare generated projections for 30 and 90 day windows using seeded data"
+      ]
+    },
+    {
+      "id": "AC-007",
+      "description": "Push alerts are sent for low balance, large transaction, and upcoming bill events.",
+      "verify": [
+        "manual: simulate each alert condition and confirm FCM delivery"
+      ]
+    },
+    {
+      "id": "AC-008",
+      "description": "Authorization enforces couple-level data isolation across all read/write endpoints.",
+      "verify": [
+        "manual: attempt cross-couple data access and confirm denial",
+        "manual: API authorization review for couple-scoped queries"
+      ]
+    },
+    {
+      "id": "AC-009",
+      "description": "System handles notification capture/parsing/upload failures with retry and user-visible integration status.",
+      "verify": [
+        "manual: simulate parser/upload failure and confirm retry behavior plus UI status messaging"
+      ]
+    },
+    {
+      "id": "AC-010",
+      "description": "Mobile UX supports core actions in up to three taps and dashboard load target under 2.5 seconds under normal conditions.",
+      "verify": [
+        "manual: execute tap-count walkthrough for connect account, create goal, and open projection",
+        "manual: performance check on mid-tier Android test device"
+      ]
+    },
+    {
+      "id": "AC-011",
+      "description": "AI workflow artifacts exist and remain current for each session (spec, acceptance, tasks, status, report).",
+      "verify": [
+        "manual: check .agents-work/<session>/ files are present and logically consistent"
+      ]
+    },
+    {
+      "id": "AC-012",
+      "description": "Pilot deployment approach for backend, database, and Android distribution is documented and executable.",
+      "verify": [
+        "manual: review deployment runbook for PaaS backend and APK/internal testing distribution"
+      ]
+    }
+  ]
+}

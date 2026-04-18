@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+tests/
+.git/
+*.md
+docker-compose*
+mobile/
+.vs/
+.vscode/
+*.user
+src/**/appsettings.Development.json

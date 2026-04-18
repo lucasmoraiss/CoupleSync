@@ -1,0 +1,82 @@
+{
+  "session": "2026-04-17_v15-cloud-budgets-ocr",
+  "current_state": "DONE",
+  "last_update": "2026-04-18T03:00:00Z",
+  "title": "V1.5 Spec: Cloud deployment, budget management, OCR import, UI polish, and AI chat",
+  "v1_reference_session": "2026-04-13_couplesync-ai-driven-bootstrap",
+  "areas": [
+    "cloud-deployment",
+    "budget-management",
+    "ocr-import",
+    "ui-polish",
+    "ai-chat"
+  ],
+  "runtime_flags": {
+    "copilot_instructions_exists": true,
+    "contract_md_read": true,
+    "v1_spec_read": true,
+    "v1_acceptance_read": true,
+    "v1_architecture_read": true,
+    "lean_mode": false
+  },
+  "assumptions": [
+    "T-102: GHCR package assumed to be public (no registry pull-secret in ACA). If private, add --registry-server/--registry-username/--registry-password to az containerapp create.",
+    "T-102: ACA resource group=couplesync-rg, app name=couplesync-api, env=couplesync-env are hardcoded in deploy.yml env: block; update there if names differ.",
+    "T-102: OIDC federated credential subject set to refs/heads/main only; workflow_dispatch runs must also use the main branch or the subject must be broadened.",
+    "T-102: Liveness probe az CLI flag --probe-type is available in az containerapp update; if CLI version is older, use the Azure Portal to configure the probe.",
+    "T-102: deploy.yml uses workflow_run trigger so deploy only runs when CI passes on main; no additional gate is needed.",
+    "T-122: AzureDocumentIntelligenceAdapter returns a stub response when AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT or AZURE_DOCUMENT_INTELLIGENCE_KEY is absent — suitable for dev/test without Azure billing.",
+    "T-122: OcrBackgroundJob breaks out of the per-batch loop on quota_exhausted to avoid hammering Azure when the quota is already gone; remaining Pending jobs will be retried in the next poll cycle."
+  ],
+  "known_issues": [],
+  "user_decisions": [
+    {
+      "id": "UD-APPROVE-DESIGN",
+      "status": "answered",
+      "question": "Approve V1.5 architecture design?",
+      "answer": "approved",
+      "answered_at": "2026-04-17T13:00:00Z"
+    },
+    {
+      "id": "UD-REVIEW-STRATEGY",
+      "status": "answered",
+      "question": "Review strategy: per-batch or single-final?",
+      "answer": "per-batch",
+      "answered_at": "2026-04-17T13:30:00Z"
+    },
+    {
+      "id": "UD-001",
+      "decision": "Azure Container Apps Consumption Plan (free tier) for backend hosting",
+      "source": "constraints"
+    },
+    {
+      "id": "UD-002",
+      "decision": "Neon.tech PostgreSQL free tier (10 GB) as managed database",
+      "source": "constraints"
+    },
+    {
+      "id": "UD-003",
+      "decision": "EAS Build preview profile (buildType: apk) + Firebase App Distribution for APK delivery",
+      "source": "constraints"
+    },
+    {
+      "id": "UD-004",
+      "decision": "Azure AI Document Intelligence (5,000 pages/month free) as primary OCR provider",
+      "source": "constraints"
+    },
+    {
+      "id": "UD-005",
+      "decision": "Gemini Flash (Google AI Studio free tier) for AI chat — last priority, only after AC-101 to AC-140 are complete",
+      "source": "constraints"
+    },
+    {
+      "id": "UD-006",
+      "decision": "All cloud services must remain on 100% free tiers",
+      "source": "constraints"
+    }
+  ],
+  "acceptance_range": {
+    "v15": "AC-101 to AC-150",
+    "v1_preserved": "AC-001 to AC-012"
+  }
+}

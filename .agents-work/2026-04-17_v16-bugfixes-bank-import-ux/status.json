@@ -1,0 +1,35 @@
+{
+  "session": "2026-04-17_v16-bugfixes-bank-import-ux",
+  "current_state": "DONE",
+  "last_update": "2026-04-17T08:45:00Z",
+  "summary": "V1.6 spec created. Covers 3 P0 production blockers (OCR multipart boundary, Docker uploads permissions, bank PDF model mismatch), P1 UX improvements (toast errors, COUPLE_REQUIRED differentiation, budget ErrorState), P2 local PDF bank statement parser (PdfPig + regex for 7 banks), P3 feature enhancements (Quick Income modal, AI auto-categorization, Goals in AI chat, Visual Reports), and P4 App Usage Guide.",
+  "assumptions": [
+    "V1.5 test baseline is >= 316 tests green before V1.6 work starts.",
+    "PdfPig (Apache 2.0) successfully extracts text from major Brazilian banks' standard PDF exports.",
+    "Tesseract.NET is available as optional fallback for scanned PDFs but not required for primary flow.",
+    "Existing IOcrProvider abstraction allows swapping to LocalPdfParserProvider via USE_LOCAL_PDF_PARSER env var.",
+    "IGoalRepository.GetByCouple(coupleId) can be created from existing Goal query infrastructure.",
+    "react-native-gifted-charts or victory-native is compatible with the current Expo SDK.",
+    "Reports bar/pie chart data can be derived from existing transactions table with GROUP BY queries — no new tables required.",
+    "Swile parser is nice-to-have; shipping without it does not block P2 milestone.",
+    "T-625r: Orchestrator dispatch used T-625 (already taken); added T-625r as the review-fix task ID to avoid conflict.",
+    "T-625r: UglyToad.PdfPig 1.7.0-custom-5 verified as valid on NuGet.org (published by grinay) — no version change needed.",
+    "T-625r: OcrCandidate.Type set to nullable TransactionType? — Azure OCR path leaves it null (no breaking change)."
+  ],
+  "known_issues": [],
+  "user_decisions": [
+    "Priority banks for PDF parser: Inter, Banco do Brasil, Mercantil, Nubank, Caixa, Itau, Santander. Swile is nice-to-have.",
+    "PDF parsing approach: free open-source .NET-native. PdfPig for text-based PDFs; Tesseract as image fallback. NOT Azure Document Intelligence.",
+    "AI + Goals: YES — include goals progress/amounts/deadlines in AI chat system prompt.",
+    "Extra features selected: Quick income update modal, AI auto-categorization via Gemini, Visual reports (bar/pie charts).",
+    "All cloud services must remain 100% free tier."
+  ],
+  "previous_session": "2026-04-17_v15-cloud-budgets-ocr",
+  "test_baseline": {
+    "total": 316,
+    "unit": 185,
+    "integration": 130,
+    "e2e": 1
+  },
+  "target_test_count": 335
+}

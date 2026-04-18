@@ -1,0 +1,883 @@
+project:
+  name: "CoupleSync V1.6 — Bugfixes, Bank Import, UX, Features"
+  session: "2026-04-17_v16-bugfixes-bank-import-ux"
+  definition_of_done:
+    - "CI green (dotnet test --no-build passes)"
+    - "All AC references met"
+    - "No Alert.alert() in mutation onError handlers"
+    - "No hardcoded secrets"
+    - "Couple-level data isolation preserved on every new endpoint"
+    - "tasks.yaml is the single source of truth for task status"
+
+tasks:
+
+  # ─────────────────────────────────────────────
+  # MACRO-P0: Critical Bugfixes
+  # ─────────────────────────────────────────────
+
+  - id: T-600
+    status: implemented
+    type: fix
+    title: "P0 — Fix OCR multipart boundary + Docker uploads dir permissions + docker-compose env vars"
+    depends_on: []
+    goal: >
+      Fix the three production blockers that prevent OCR from working in any environment:
+      (1) Remove the manual Content-Type header override in mobile ocrApiClient so React Native
+      auto-sets the multipart/form-data boundary.
+      (2) Add mkdir + chown for /app/uploads in Dockerfile so appuser can write uploaded files.
+      (3) Ensure docker-compose.yml exposes all required env vars (USE_LOCAL_PDF_PARSER, etc.)
+      so the container starts correctly.
+    non_goals:
+      - "Implementing the local PDF parser (T-620+)"
+      - "Any UX changes"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "mobile/src/services/apiClient.ts"
+      - "backend/Dockerfile"
+      - "docker-compose.yml"
+    acceptance_checks:
+      - "cmd: grep -n 'Content-Type' mobile/src/services/apiClient.ts (must NOT show multipart/form-data manual override in OCR upload call)"
+      - "cmd: grep -n 'chown appuser' backend/Dockerfile (must return a line after RUN mkdir -p /app/uploads)"
+      - "cmd: docker build -t couplesync-api ./backend (must succeed)"
+      - "manual: docker run couplesync-api and verify /app/uploads is owned by appuser via 'docker exec ... ls -la /app/'"
+      - "manual: upload a PDF from mobile dev environment; backend logs show 'File received: <filename>', not '400 FILE_REQUIRED'"
+    risk_flags:
+      - "breaking-change (mobile upload function signature unchanged; only header removed)"
+    done_when:
+      - "Manual Content-Type header for OCR upload removed from apiClient.ts"
+      - "Dockerfile contains RUN mkdir -p /app/uploads && chown appuser:appgroup /app/uploads before USER appuser"
+      - "docker build succeeds"
+      - "Meets AC-601, AC-602"
+
+  - id: T-601
+    status: not-started
+    type: chore
+    title: "P0 checkpoint — verify all P0 fixes integrate cleanly"
+    depends_on: ["T-600"]
+    goal: >
+      Run the full backend test suite and a manual smoke test of the OCR upload endpoint
+      to confirm all P0 fixes work together without regressions.
+    non_goals:
+      - "Any code changes — checkpoint only"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/acceptance.json"
+    files_expected: []
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --no-build"
+      - "manual: POST /api/v1/ocr/upload with a sample PDF from Postman; verify 202 and job ID returned"
+    risk_flags: []
+    done_when:
+      - "dotnet test passes with 0 failures"
+      - "OCR upload returns 202 in dev environment"
+      - "Meets AC-601, AC-602"
+
+  # ─────────────────────────────────────────────
+  # MACRO-P1: UX Improvements
+  # ─────────────────────────────────────────────
+
+  - id: T-610
+    status: implemented
+    type: feat
+    title: "P1 — Create ToastProvider, Toast component, and useToast hook"
+    depends_on: ["T-601"]
+    goal: >
+      Implement the in-app toast notification system: ToastProvider.tsx (context + overlay),
+      Toast.tsx (visual component using theme tokens error/success/info), and useToast.ts hook.
+      Wire ToastProvider into app/_layout.tsx above the tab navigator.
+      Toast auto-dismisses after 4 seconds; tap-dismissable; accessible (role="alert").
+    non_goals:
+      - "Replacing existing Alert.alert() calls (T-611)"
+      - "Queue stacking — single active toast only for V1.6"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/adr/ADR-002.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "mobile/src/components/Toast/ToastProvider.tsx"
+      - "mobile/src/components/Toast/Toast.tsx"
+      - "mobile/src/components/Toast/useToast.ts"
+      - "mobile/app/_layout.tsx"
+    acceptance_checks:
+      - "cmd: Set-Location mobile ; npx tsc --noEmit (no TypeScript errors)"
+      - "manual: call toast.error('test') from any screen; styled red toast renders above bottom tab bar and auto-dismisses in ~4 s"
+      - "manual: toast does not obscure action buttons on budget or OCR screens"
+    risk_flags: []
+    done_when:
+      - "ToastProvider, Toast, useToast created with correct theme token usage"
+      - "ToastProvider wraps navigator in app/_layout.tsx"
+      - "TypeScript compiles with no errors"
+      - "Meets AC-608"
+
+  - id: T-611
+    status: implemented
+    type: fix
+    title: "P1 — Replace all Alert.alert() mutation error handlers with useToast()"
+    depends_on: ["T-610"]
+    goal: >
+      Replace every Alert.alert() call in mutation onError handlers across the mobile app
+      with the useToast() hook. Verify zero Alert.alert() calls remain in onError blocks.
+      Screens in scope: budget/index.tsx, OcrReviewScreen.tsx, goals mutation handlers,
+      chat mutation handlers, and any other onError occurrences found by grep.
+    non_goals:
+      - "Replacing Alert.alert() calls used for confirmation dialogs (delete confirmations etc.)"
+      - "COUPLE_REQUIRED differentiation (T-612)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+    files_expected:
+      - "mobile/app/(main)/budget/index.tsx"
+      - "mobile/src/modules/ocr/screens/OcrReviewScreen.tsx"
+    acceptance_checks:
+      - "cmd: grep -r \"Alert.alert\" mobile/app/ mobile/src/ --include='*.tsx' --include='*.ts' (must return 0 results in onError mutation handlers)"
+      - "cmd: Set-Location mobile ; npx tsc --noEmit"
+      - "manual: trigger a network failure during budget save; observe styled toast instead of native dialog"
+    risk_flags: []
+    done_when:
+      - "No Alert.alert() in onError mutation handlers"
+      - "All replaced calls use useToast().toast.error()"
+      - "TypeScript compiles with no errors"
+      - "Meets AC-607"
+
+  - id: T-612
+    status: implemented
+    type: feat
+    title: "P1 — Differentiate COUPLE_REQUIRED 403 + add Budget query ErrorState"
+    depends_on: ["T-611"]
+    goal: >
+      (1) In the 403 error handler (interceptor or per-screen onError), detect
+      error.response?.data?.code === 'COUPLE_REQUIRED' and show toast message
+      "Conecte-se com seu parceiro primeiro" with a navigation link to couple setup.
+      For background query 403s (non-mutation), show non-intrusive toast without navigating (EC-005).
+      (2) In budget/index.tsx, render <ErrorState onRetry={() => refetch()} /> when isError is true.
+    non_goals:
+      - "Changing backend 403 response shape"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+    files_expected:
+      - "mobile/app/(main)/budget/index.tsx"
+      - "mobile/src/services/apiClient.ts"
+    acceptance_checks:
+      - "manual: log in as a user without a couple; attempt budget save; verify 'Conecte-se com seu parceiro primeiro' toast with nav link appears"
+      - "manual: simulate network failure on budget screen load; confirm ErrorState with retry button is visible"
+      - "cmd: Set-Location mobile ; npx tsc --noEmit"
+    risk_flags: []
+    done_when:
+      - "COUPLE_REQUIRED 403 shows dedicated message with couple-setup navigation"
+      - "Budget screen renders ErrorState when isError=true"
+      - "Background query 403 shows toast only (no navigation)"
+      - "Meets AC-609, AC-610"
+
+  - id: T-613
+    status: not-started
+    type: test
+    title: "P1 tests + checkpoint"
+    depends_on: ["T-612"]
+    goal: >
+      Add or update tests for P1 UX work: unit test for ErrorState render when isError=true
+      (mock budget query hook), static grep check for Alert.alert() absence, and TypeScript
+      compile check. Run full test suite.
+    non_goals:
+      - "E2E tests"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/acceptance.json"
+    files_expected:
+      - "mobile/tests/"
+    acceptance_checks:
+      - "cmd: grep -r \"Alert.alert\" mobile/app/ mobile/src/ --include='*.tsx' --include='*.ts' (must return 0 results in onError blocks)"
+      - "cmd: Set-Location mobile ; npx tsc --noEmit"
+      - "cmd: cd backend && dotnet test --no-build"
+    risk_flags: []
+    done_when:
+      - "TypeScript compiles clean"
+      - "dotnet test passes with 0 failures"
+      - "Meets AC-607, AC-608, AC-609, AC-610"
+
+  # ─────────────────────────────────────────────
+  # MACRO-P2: Bank Statement Parser
+  # ─────────────────────────────────────────────
+
+  - id: T-620
+    status: implemented
+    type: chore
+    title: "P2 — Install PdfPig NuGet + create IPdfTextExtractor + PdfPigTextExtractor"
+    depends_on: ["T-601"]
+    goal: >
+      Add PdfPig (UglyToad.PdfPig, Apache 2.0) to CoupleSync.Infrastructure.csproj.
+      Create IPdfTextExtractor interface (ExtractText(Stream): string) and
+      PdfPigTextExtractor implementation. Handle EncryptedPdfException → throw OcrException
+      with code PDF_ENCRYPTED (EC-001). Handle degenerate text (length < 50) by returning
+      as-is (caller decides to throw EC-002).
+    non_goals:
+      - "Bank detection or parsing (T-621+)"
+      - "Tesseract fallback (deferred per ADR-001)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/adr/ADR-001.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "backend/src/CoupleSync.Infrastructure/CoupleSync.Infrastructure.csproj"
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/IPdfTextExtractor.cs"
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/PdfPigTextExtractor.cs"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet build --no-incremental (must succeed)"
+      - "cmd: cd backend && dotnet test --filter 'PdfExtraction' --no-build"
+      - "unit: PdfPigTextExtractorTests.ExtractsText_FromTextBasedPdf_ReturnsNonEmptyString"
+      - "unit: PdfPigTextExtractorTests.ThrowsOcrException_WhenPdfIsEncrypted"
+    risk_flags: []
+    done_when:
+      - "PdfPig NuGet added to Infrastructure project"
+      - "IPdfTextExtractor + PdfPigTextExtractor created"
+      - "dotnet build succeeds"
+      - "Meets AC-603"
+
+  - id: T-621
+    status: implemented
+    type: feat
+    title: "P2 — Create IBankStatementParser interface + ParsedTransaction + ParsedBankStatement + BankDetector"
+    depends_on: ["T-620"]
+    goal: >
+      Add domain types and the bank detection infrastructure:
+      (1) IBankStatementParser interface (BankName, CanParse(string), Parse(string)) in CoupleSync.Domain/Interfaces/.
+      (2) ParsedTransaction value object (Date, Description, Amount, Type: Credit/Debit) in CoupleSync.Domain/ValueObjects/.
+      (3) ParsedBankStatement value object (BankName, IReadOnlyList<ParsedTransaction>) in CoupleSync.Domain/ValueObjects/.
+      (4) BankDetector class in Infrastructure/Integrations/LocalPdfParser/ — iterates registered
+      IBankStatementParser list, first CanParse() match wins; throws BankFormatUnknownException
+      if none match (EC-003).
+    non_goals:
+      - "Bank-specific parser implementations (T-622+)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "backend/src/CoupleSync.Domain/Interfaces/IBankStatementParser.cs"
+      - "backend/src/CoupleSync.Domain/ValueObjects/ParsedTransaction.cs"
+      - "backend/src/CoupleSync.Domain/ValueObjects/ParsedBankStatement.cs"
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/BankDetector.cs"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet build --no-incremental"
+      - "cmd: cd backend && dotnet test --filter 'BankDetection' --no-build"
+      - "unit: BankDetectorTests.ReturnsFirstMatchingParser_WhenMultipleParsersRegistered"
+      - "unit: BankDetectorTests.ThrowsBankFormatUnknownException_WhenNoParsersMatch"
+    risk_flags: []
+    done_when:
+      - "Domain interfaces and value objects created"
+      - "BankDetector implemented with exception for unrecognized banks"
+      - "dotnet build succeeds"
+      - "Meets AC-604"
+
+  - id: T-622
+    status: implemented
+    type: feat
+    title: "P2 — NubankParser + InterParser"
+    depends_on: ["T-621"]
+    goal: >
+      Implement NubankParser and InterBankParser, each implementing IBankStatementParser.
+      CanParse() uses bank-name keyword matching on the extracted PDF text.
+      Parse() uses regex patterns to extract date, description, and amount columns
+      from the respective bank's statement format.
+      Return IReadOnlyList<ParsedTransaction> with correct Credit/Debit type per row.
+    non_goals:
+      - "Other banks (T-623, T-624)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/Parsers/NubankParser.cs"
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/Parsers/InterBankParser.cs"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --filter 'NubankParser|InterParser' --no-build"
+      - "unit: NubankParserTests.Parse_ReturnsCorrectTransactionList_FromFixtureText"
+      - "unit: InterBankParserTests.Parse_ReturnsCorrectTransactionList_FromFixtureText"
+      - "unit: NubankParserTests.CanParse_ReturnsFalse_ForNonNubankText"
+    risk_flags: []
+    done_when:
+      - "NubankParser and InterBankParser pass unit tests with fixture strings"
+      - "Meets AC-605 (contributes)"
+
+  - id: T-623
+    status: implemented
+    type: feat
+    title: "P2 — BancoDoBrasilParser + ItauParser"
+    depends_on: ["T-621"]
+    goal: >
+      Implement BancoBrasilParser and ItauParser, each implementing IBankStatementParser.
+      CanParse() uses bank-name keyword matching. Parse() extracts transactions via bank-specific
+      regex patterns for BB and Itaú statement formats.
+    non_goals:
+      - "Other banks"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/Parsers/BancoBrasilParser.cs"
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/Parsers/ItauParser.cs"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --filter 'BancoBrasilParser|ItauParser' --no-build"
+      - "unit: BancoBrasilParserTests.Parse_ReturnsCorrectTransactionList_FromFixtureText"
+      - "unit: ItauParserTests.Parse_ReturnsCorrectTransactionList_FromFixtureText"
+    risk_flags: []
+    done_when:
+      - "BancoBrasilParser and ItauParser pass unit tests with fixture strings"
+      - "Meets AC-605 (contributes)"
+
+  - id: T-624
+    status: implemented
+    type: feat
+    title: "P2 — SantanderParser + CaixaParser + MercantilParser"
+    depends_on: ["T-621"]
+    goal: >
+      Implement SantanderParser, CaixaParser, and MercantilParser, each implementing
+      IBankStatementParser. CanParse() uses keyword matching; Parse() extracts transactions
+      via bank-specific regex for Santander, Caixa Econômica Federal, and Mercantil do Brasil
+      statement formats.
+    non_goals:
+      - "Swile parser (nice-to-have, out of V1.6 scope)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+    files_expected:
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/Parsers/SantanderParser.cs"
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/Parsers/CaixaParser.cs"
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/Parsers/MercantilParser.cs"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --filter 'SantanderParser|CaixaParser|MercantilParser' --no-build"
+      - "unit: SantanderParserTests.Parse_ReturnsCorrectTransactionList_FromFixtureText"
+      - "unit: CaixaParserTests.Parse_ReturnsCorrectTransactionList_FromFixtureText"
+      - "unit: MercantilParserTests.Parse_ReturnsCorrectTransactionList_FromFixtureText"
+    risk_flags: []
+    done_when:
+      - "SantanderParser, CaixaParser, MercantilParser pass unit tests"
+      - "Meets AC-604 (contributes), AC-605 (contributes)"
+
+  - id: T-625
+    status: implemented
+    type: feat
+    title: "P2 — Create LocalPdfParserProvider (IOcrProvider implementation)"
+    depends_on: ["T-622", "T-623", "T-624"]
+    goal: >
+      Create LocalPdfParserProvider implementing IOcrProvider.AnalyzeAsync():
+      (1) Load stream from IStorageAdapter using storagePath.
+      (2) Call IPdfTextExtractor.ExtractText() — catch EncryptedPdfException → 400 PDF_ENCRYPTED.
+      (3) If text.Length < 50 → throw OcrUnavailableException (EC-002).
+      (4) BankDetector.Detect(text) — throws BankFormatUnknownException on unknown bank (EC-003).
+      (5) parser.Parse(text) → IReadOnlyList<ParsedTransaction>.
+      (6) If count == 0 → throw NoTransactionsFoundException (EC-003 variant).
+      (7) Build ParsedBankStatement and serialize to JSON with discriminator "provider":"local-pdf".
+      Log only: transaction count + detected bank name (NFR-004).
+    non_goals:
+      - "DI wiring (T-626)"
+      - "OcrProcessingService changes (T-626)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/adr/ADR-001.md"
+    files_expected:
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/LocalPdfParserProvider.cs"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet build --no-incremental"
+      - "unit: LocalPdfParserProviderTests.AnalyzeAsync_ThrowsOcrException_WhenTextTooShort"
+      - "unit: LocalPdfParserProviderTests.AnalyzeAsync_ThrowsBankFormatUnknownException_WhenBankNotDetected"
+      - "unit: LocalPdfParserProviderTests.AnalyzeAsync_ReturnsJsonWithLocalPdfDiscriminator_OnSuccess"
+    risk_flags:
+      - "security (log must not include raw bank statement content — NFR-004)"
+    done_when:
+      - "LocalPdfParserProvider created and implements IOcrProvider"
+      - "Exception handling covers all EC-001, EC-002, EC-003 cases"
+      - "Logging is restricted to bank name + transaction count"
+      - "dotnet build succeeds"
+
+  - id: T-626
+    status: implemented
+    type: feat
+    title: "P2 — Wire DI + USE_LOCAL_PDF_PARSER feature flag + OcrProcessingService discriminator"
+    depends_on: ["T-625"]
+    goal: >
+      (1) In DependencyInjection.cs, conditionally register LocalPdfParserProvider for IOcrProvider
+      when USE_LOCAL_PDF_PARSER env var is "true" (default); otherwise register
+      AzureDocumentIntelligenceAdapter (rollback path, not deleted).
+      (2) In OcrProcessingService.ParseCandidates(), add discriminator check: if JSON contains
+      "provider":"local-pdf", call ParseLocalPdfCandidates(); else fall through to existing
+      Azure format parser.
+      (3) Add USE_LOCAL_PDF_PARSER=true to docker-compose.yml env section.
+    non_goals:
+      - "Deleting AzureDocumentIntelligenceAdapter"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/adr/ADR-001.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "backend/src/CoupleSync.Infrastructure/DependencyInjection.cs"
+      - "backend/src/CoupleSync.Application/OcrImport/"
+      - "docker-compose.yml"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --filter 'OcrProviderRegistration' --no-build"
+      - "unit: DI test: USE_LOCAL_PDF_PARSER=true → resolves LocalPdfParserProvider for IOcrProvider"
+      - "unit: DI test: USE_LOCAL_PDF_PARSER=false → resolves AzureDocumentIntelligenceAdapter for IOcrProvider"
+      - "manual: set USE_LOCAL_PDF_PARSER=true in docker-compose.yml; verify Azure API is NOT called during OCR job"
+    risk_flags:
+      - "breaking-change (OcrProcessingService.ParseCandidates modified — ensure existing Azure path unchanged)"
+    done_when:
+      - "Feature flag toggles IOcrProvider registration correctly"
+      - "OcrProcessingService handles local-pdf discriminator"
+      - "docker-compose.yml includes USE_LOCAL_PDF_PARSER=true"
+      - "Meets AC-606"
+
+  - id: T-627
+    status: not-started
+    type: test
+    title: "P2 — Bank parser unit tests (fixture text per bank)"
+    depends_on: ["T-622", "T-623", "T-624"]
+    goal: >
+      Create unit test fixtures (representative text strings for each of the 7 banks)
+      and corresponding unit tests confirming CanParse() and Parse() behaviour.
+      Tests must cover: correct transaction count, correct amount sign (debit/credit),
+      correct date parsing, and CanParse() negative cases (another bank's text).
+    non_goals:
+      - "Real PDF files as test fixtures (use extracted text strings only)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/acceptance.json"
+    files_expected:
+      - "backend/tests/CoupleSync.UnitTests/OcrImport/BankParsers/"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --filter 'BankParser' --no-build"
+      - "cmd: cd backend && dotnet test --filter 'BankDetection' --no-build"
+    risk_flags: []
+    done_when:
+      - "Unit tests for all 7 bank parsers present and passing"
+      - "BankDetector tests present and passing"
+      - "Meets AC-604, AC-605"
+
+  - id: T-628
+    status: not-started
+    type: test
+    title: "P2 — Integration tests for LocalPdfParserProvider pipeline"
+    depends_on: ["T-626", "T-627"]
+    goal: >
+      Integration tests for LocalPdfParserProvider end-to-end (using mocked IStorageAdapter
+      and real PdfPig on a sample text-based PDF): verify successful pipeline from stream
+      to ParsedBankStatement JSON, encrypted PDF → 400, short text → 422, unknown bank → 422.
+    non_goals:
+      - "Real network OCR calls"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/acceptance.json"
+    files_expected:
+      - "backend/tests/CoupleSync.IntegrationTests/OcrImport/"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --filter 'PdfExtraction|LocalPdfParser' --no-build"
+    risk_flags: []
+    done_when:
+      - "Integration tests cover success and all EC-001/EC-002/EC-003 failure paths"
+      - "Meets AC-603, AC-606"
+
+  - id: T-625r
+    status: implemented
+    type: fix
+    title: "P2 — Fix bank parser Reviewer findings (security + correctness)"
+    depends_on: ["T-625", "T-626"]
+    goal: >
+      Fix 2 majors + 4 minors surfaced by Reviewer:
+      MAJOR-1: Path traversal in LocalFileStorageAdapter.DownloadAsync (reject absolute paths +
+      canonicalization check + safe FileNotFoundException).
+      MAJOR-2: TransactionType not propagated through OcrCandidate — add Type property and
+      read tx.type from local-pdf JSON.
+      MINOR-1: ItauParser leap year crash — wrap DateTime ctor in try/catch(ArgumentOutOfRangeException).
+      MINOR-2: PdfPig version verified valid on NuGet (1.7.0-custom-5 confirmed — no change needed).
+      MINOR-3: Remove DateTimeKind.Utc from ItauParser DateTime construction.
+      MINOR-4: FileNotFoundException path disclosure — covered by MAJOR-1 fix.
+    non_goals:
+      - "Changing parser logic beyond the specific fixes listed"
+    context_files: []
+    files_expected:
+      - "backend/src/CoupleSync.Infrastructure/Integrations/Storage/LocalFileStorageAdapter.cs"
+      - "backend/src/CoupleSync.Application/OcrImport/OcrCandidate.cs"
+      - "backend/src/CoupleSync.Application/OcrImport/OcrProcessingService.cs"
+      - "backend/src/CoupleSync.Infrastructure/Integrations/LocalPdfParser/Parsers/ItauParser.cs"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet build"
+      - "cmd: cd backend && dotnet test --no-build"
+    risk_flags:
+      - "security: path traversal (OWASP A01)"
+    done_when:
+      - "Path traversal guard active in DownloadAsync"
+      - "OcrCandidate.Type propagated from local-pdf JSON"
+      - "ItauParser handles Feb 29 on non-leap years without crash"
+      - "dotnet build + dotnet test green"
+
+  - id: T-629
+    status: not-started
+    type: chore
+    title: "P2 checkpoint — full backend test suite green"
+    depends_on: ["T-628"]
+    goal: >
+      Run the complete backend test suite to confirm P2 (bank parser) work integrates
+      cleanly with P0 fixes and all other existing tests.
+    non_goals:
+      - "Any code changes — checkpoint only"
+    context_files: []
+    files_expected: []
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --no-build"
+    risk_flags: []
+    done_when:
+      - "dotnet test passes with 0 failures"
+      - "Meets AC-603, AC-604, AC-605, AC-606"
+
+  # ─────────────────────────────────────────────
+  # MACRO-P3: Feature Enhancements
+  # ─────────────────────────────────────────────
+
+  - id: T-640
+    status: implemented
+    type: feat
+    title: "P3 — PATCH /api/v1/budget/income endpoint + BudgetService.UpdateIncomeAsync"
+    depends_on: ["T-629"]
+    goal: >
+      Add PATCH /api/v1/budget/income endpoint to BudgetController.
+      Request body: { grossIncome: number (> 0), currency?: string (ISO 4217, default "BRL") }.
+      Delegate to BudgetService.UpdateIncomeAsync(coupleId, grossIncome, currency, ct):
+        - GetByMonthAsync(coupleId, currentMonth) → if null, UpsertPlanAsync (zero allocations).
+        - If found → plan.Update(grossIncome, currency) + SaveChanges.
+      Response: 200 { planId, month, grossIncome, currency }.
+      Apply [RequireCouple] filter; unauthenticated → 401, couple-less → 403 COUPLE_REQUIRED.
+      Input validation: grossIncome > 0; currency 3-letter when provided.
+    non_goals:
+      - "Mobile modal (T-641)"
+      - "Changing existing POST /budgets behaviour"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/adr/ADR-005.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "backend/src/CoupleSync.Api/Controllers/BudgetController.cs"
+      - "backend/src/CoupleSync.Application/Budget/"
+      - "backend/src/CoupleSync.Api/Contracts/"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet build --no-incremental"
+      - "cmd: cd backend && dotnet test --filter 'QuickIncome' --no-build"
+      - "integration: PATCH /budget/income with valid body → 200 with updated plan"
+      - "integration: PATCH /budget/income unauthenticated → 401"
+      - "integration: PATCH /budget/income for couple-less user → 403 COUPLE_REQUIRED"
+      - "integration: PATCH /budget/income grossIncome=0 → 400"
+      - "integration: PATCH /budget/income when no plan exists → 200 with new plan auto-created"
+    risk_flags:
+      - "security (couple-level isolation — RequireCouple filter mandatory)"
+    done_when:
+      - "Endpoint implemented, validated, couple-scoped"
+      - "Auto-creates plan when none exists (per ADR-005)"
+      - "Meets AC-611"
+
+  - id: T-641
+    status: implemented
+    type: feat
+    title: "P3 — Mobile QuickIncomeModal on Dashboard"
+    depends_on: ["T-640", "T-613"]
+    goal: >
+      Add QuickIncomeModal component (mobile/src/components/QuickIncomeModal.tsx).
+      Rendered as a bottom sheet on the Dashboard screen, triggered by tapping
+      "Atualizar renda" button/chip near the income display widget.
+      Modal sends PATCH /api/v1/budget/income {grossIncome}.
+      On success: invalidate "dashboard" + "budget" React Query keys; Dashboard re-renders.
+      On failure: use useToast().toast.error().
+      Modal is dismissible by tapping outside or Android back button (NFR-008).
+    non_goals:
+      - "Currency selector — default to BRL for V1.6"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "mobile/src/components/QuickIncomeModal.tsx"
+      - "mobile/app/(main)/(tabs)/index.tsx"
+    acceptance_checks:
+      - "cmd: Set-Location mobile ; npx tsc --noEmit"
+      - "manual: tap 'Atualizar renda' on Dashboard → modal opens; enter income → save; Dashboard income value updates without navigating to budget screen"
+      - "manual: tap outside modal → modal dismisses; Android back button → modal dismisses"
+      - "manual: PATCH fails (network off) → toast.error shown"
+    risk_flags: []
+    done_when:
+      - "QuickIncomeModal implemented and wired to Dashboard"
+      - "Invalidates relevant queries on success"
+      - "Meets AC-611"
+
+  - id: T-642
+    status: in-progress
+    type: feat
+    title: "P3 — ICategoryClassifier interface + GeminiCategoryClassifier"
+    depends_on: ["T-629"]
+    goal: >
+      Add ICategoryClassifier interface (SuggestCategoryAsync(description, categories, ct) → string?)
+      in CoupleSync.Application/Common/Interfaces/.
+      Implement GeminiCategoryClassifier in CoupleSync.Infrastructure/Integrations/Gemini/:
+        - Uses structured prompt template per ADR-004 (description inside triple-quote delimiters,
+          never interpolated into instructions — NFR-003 prompt injection guard).
+        - Calls Gemini Flash 2.0 via existing GeminiChatAdapter/options.
+        - Validates returned value against availableCategories (case-insensitive).
+        - Returns null on any failure or unrecognized value.
+        - Sequential short-circuit: stop after 2 consecutive Gemini errors.
+    non_goals:
+      - "Wiring into OCR flow (T-643)"
+      - "Default category list management"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/adr/ADR-004.md"
+    files_expected:
+      - "backend/src/CoupleSync.Application/Common/Interfaces/ICategoryClassifier.cs"
+      - "backend/src/CoupleSync.Infrastructure/Integrations/Gemini/GeminiCategoryClassifier.cs"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet build --no-incremental"
+      - "unit: GeminiCategoryClassifierTests.ReturnsNull_WhenGeminiThrows"
+      - "unit: GeminiCategoryClassifierTests.ReturnsNull_WhenResponseNotInCategoryList"
+      - "unit: GeminiCategoryClassifierTests.ReturnsCategory_WhenGeminiMatchesCaseInsensitive"
+    risk_flags:
+      - "security (prompt injection — transaction description must be in delimited section per NFR-003)"
+    done_when:
+      - "ICategoryClassifier + GeminiCategoryClassifier created"
+      - "Prompt template uses delimited user content (no direct interpolation)"
+      - "Returns null on all failure paths"
+      - "Meets AC-612 (partial)"
+
+  - id: T-643
+    status: implemented
+    type: feat
+    title: "P3 — Wire auto-categorization into OCR confirm flow"
+    depends_on: ["T-642", "T-626"]
+    goal: >
+      In OcrProcessingService.ParseAndDeduplicateAsync(), after deduplication fingerprinting:
+        1. Retrieve couple's active budget allocation category names (fallback to default list
+           if no active plan: Alimentação, Transporte, Lazer, Saúde, Moradia, Educação, Outros).
+        2. For each candidate, call ICategoryClassifier.SuggestCategoryAsync(); on failure → null.
+        3. Populate OcrCandidate.SuggestedCategoryId.
+        4. Failure of any single classification must not block import (swallow exception, null).
+      Mobile OcrReviewScreen: display suggestedCategoryId as pre-selected chip per transaction;
+      user can override before confirming.
+    non_goals:
+      - "Manual transaction entry auto-categorization (separate, lower priority)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/adr/ADR-004.md"
+    files_expected:
+      - "backend/src/CoupleSync.Application/OcrImport/"
+      - "mobile/src/modules/ocr/screens/OcrReviewScreen.tsx"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --filter 'AutoCategorization' --no-build"
+      - "integration: OcrProcessingServiceTests.AutoCategorizes_Transactions_WhenGeminiReturnsValidCategory (Gemini mocked)"
+      - "integration: OcrProcessingServiceTests.ImportSucceeds_WhenGeminiCallFails (Gemini mock throws)"
+      - "cmd: Set-Location mobile ; npx tsc --noEmit"
+    risk_flags:
+      - "security (prompt injection guard must carry through from GeminiCategoryClassifier)"
+      - "perf (sequential per-transaction Gemini calls — short-circuit after 2 failures per ADR-004)"
+    done_when:
+      - "OcrProcessingService populates SuggestedCategoryId for each candidate"
+      - "Import never blocked by categorization failure"
+      - "Mobile shows suggested category chip in review screen"
+      - "Meets AC-612"
+
+  - id: T-644
+    status: implemented
+    type: feat
+    title: "P3 — Add goals context to ChatContextService system prompt"
+    depends_on: ["T-629"]
+    goal: >
+      In ChatContextService.BuildSystemPromptAsync(), inject IGoalRepository dependency
+      and append an active-goals section to the Gemini system prompt.
+      Query: IGoalRepository.GetByCoupleAsync(coupleId) → filter Status == Active.
+      If no active goals → omit the section entirely (no empty section).
+      Format per goal: name, targetAmount, progressAmount, progress%, deadline (ISO date).
+    non_goals:
+      - "Mobile UI changes"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "backend/src/CoupleSync.Application/AiChat/"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --filter 'ChatContext' --no-build"
+      - "unit: ChatContextServiceTests.BuildsSystemPrompt_IncludesGoalsSummary_WhenActiveGoalsExist"
+      - "unit: ChatContextServiceTests.BuildsSystemPrompt_OmitsGoalsSection_WhenNoActiveGoals"
+    risk_flags: []
+    done_when:
+      - "ChatContextService queries and injects goals when active goals exist"
+      - "Section omitted for users with no active goals"
+      - "Meets AC-613"
+
+  - id: T-645
+    status: implemented
+    type: feat
+    title: "P3 — GET /api/v1/reports/ endpoints (spending-by-category, trends)"
+    depends_on: ["T-629"]
+    goal: >
+      Create Reports module:
+        - IReportsRepository interface in Application/Common/Interfaces/.
+        - ReportsRepository in Infrastructure/Persistence/ (SQL GROUP BY DATE_TRUNC month + category
+          over last N months; couple-scoped; no new tables).
+        - ReportsService.GetSpendingAsync(coupleId, months, ct) → ReportsSpendingDto.
+        - ReportsController at GET /api/v1/reports/spending?months=6.
+        - Couple-scoped isolation: only the authenticated couple's data returned.
+        - Performance: responds within 2 s for ≤ 5,000 transactions (NFR-006).
+        - Unauthenticated → 401; missing couple → 403.
+    non_goals:
+      - "Mobile Reports screen (T-646)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "backend/src/CoupleSync.Application/Reports/ReportsService.cs"
+      - "backend/src/CoupleSync.Application/Reports/ReportsSpendingDto.cs"
+      - "backend/src/CoupleSync.Application/Common/Interfaces/IReportsRepository.cs"
+      - "backend/src/CoupleSync.Infrastructure/Persistence/ReportsRepository.cs"
+      - "backend/src/CoupleSync.Api/Controllers/ReportsController.cs"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet build --no-incremental"
+      - "cmd: cd backend && dotnet test --filter 'ReportsSpending' --no-build"
+      - "integration: ReportsControllerTests.ReturnsSpendingData_ForAuthenticatedCouple"
+      - "integration: ReportsControllerTests.Returns401_WhenUnauthenticated"
+      - "integration: ReportsControllerTests.ReturnsEmptyArrays_WhenNoTransactionHistory"
+    risk_flags:
+      - "security (couple-level isolation — RequireCouple filter mandatory)"
+      - "perf (SQL aggregation query — add index on (couple_id, date) if not present)"
+    done_when:
+      - "Reports module (service, repository, controller) created"
+      - "Couple isolation enforced"
+      - "Meets AC-615"
+
+  - id: T-646
+    status: implemented
+    type: feat
+    title: "P3 — Mobile Reports screen with bar + pie charts (react-native-gifted-charts)"
+    depends_on: ["T-645", "T-641"]
+    goal: >
+      Add a Reports tab/screen: mobile/app/(main)/reports/index.tsx.
+      Install react-native-gifted-charts (MIT) and react-native-svg if not already present.
+      Bar chart: last 6 months spending per category (data from GET /reports/spending?months=6).
+      Pie chart: current-month category breakdown (derived from same dataset, last entry).
+      Empty/zero state: show friendly "Sem dados ainda" message, no crash.
+      Charts are interactive (tap bar/slice shows label + value).
+    non_goals:
+      - "Trends line chart (future V2)"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/adr/ADR-003.md"
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/architecture.md"
+    files_expected:
+      - "mobile/app/(main)/reports/index.tsx"
+      - "mobile/package.json"
+    acceptance_checks:
+      - "cmd: Set-Location mobile ; npx tsc --noEmit"
+      - "manual: navigate to Reports tab; bar and pie charts render with real data and labels"
+      - "manual: couple with no transactions sees 'Sem dados ainda' — no crash"
+      - "manual: tapping a bar slice shows category name + amount"
+    risk_flags: []
+    done_when:
+      - "Reports screen with bar + pie charts implemented"
+      - "Empty state handled without crash"
+      - "react-native-gifted-charts installed"
+      - "TypeScript compiles clean"
+      - "Meets AC-614"
+
+  - id: T-647
+    status: not-started
+    type: test
+    title: "P3 tests — backend integration tests for all P3 features"
+    depends_on: ["T-643", "T-644", "T-645"]
+    goal: >
+      Add or update integration tests for all P3 backend work:
+        - QuickIncome endpoint (covered by T-640 but consolidated here if tests deferred)
+        - AutoCategorization in OcrProcessingService (success + Gemini failure path)
+        - ChatContext goals section (active goals + no goals)
+        - Reports endpoint (spending data, 401, 403, empty array)
+      Ensure all filter tags work: QuickIncome, AutoCategorization, ChatContext, ReportsSpending.
+    non_goals:
+      - "Mobile unit tests"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/acceptance.json"
+    files_expected:
+      - "backend/tests/CoupleSync.IntegrationTests/"
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --filter 'QuickIncome|AutoCategorization|ChatContext|ReportsSpending' --no-build"
+    risk_flags: []
+    done_when:
+      - "All P3 integration tests present and passing"
+      - "Meets AC-611, AC-612, AC-613, AC-615"
+
+  - id: T-648
+    status: not-started
+    type: chore
+    title: "P3 checkpoint — full test suite green"
+    depends_on: ["T-647", "T-646"]
+    goal: >
+      Run the complete backend test suite and TypeScript compile to confirm all
+      P3 features integrate cleanly with no regressions.
+    non_goals:
+      - "Any code changes — checkpoint only"
+    context_files: []
+    files_expected: []
+    acceptance_checks:
+      - "cmd: cd backend && dotnet test --no-build"
+      - "cmd: Set-Location mobile ; npx tsc --noEmit"
+    risk_flags: []
+    done_when:
+      - "dotnet test passes with 0 failures"
+      - "TypeScript compiles clean"
+      - "Meets AC-611, AC-612, AC-613, AC-614, AC-615"
+
+  # ─────────────────────────────────────────────
+  # MACRO-P5: Reviewer Fixes
+  # ─────────────────────────────────────────────
+
+  - id: T-661
+    status: implemented
+    type: fix
+    title: "Fix P0+P1 review findings (router nav + minor/nit polish)"
+    depends_on: ["T-611", "T-612"]
+    goal: >
+      Fix 1 blocker and 4 minor/nit findings from Reviewer:
+      BLOCKER: add router.replace to COUPLE_REQUIRED 403 interceptor.
+      MINOR 1: onError isCoupleRequiredError guard before invalidateQueries in budget.
+      MINOR 2: ToastProvider timerRef cleanup on unmount.
+      MINOR 3: Replace Alert.alert in OcrReviewScreen with toast.warning.
+      NIT: Toast accessibilityLiveRegion assertive for errors.
+      NIT: useToast wraps toast object in useMemo.
+    files_expected:
+      - "mobile/src/services/apiClient.ts"
+      - "mobile/app/(main)/budget/index.tsx"
+      - "mobile/src/components/Toast/ToastProvider.tsx"
+      - "mobile/src/modules/ocr/screens/OcrReviewScreen.tsx"
+      - "mobile/src/components/Toast/Toast.tsx"
+      - "mobile/src/components/Toast/useToast.ts"
+    acceptance_checks:
+      - "cmd: cd mobile && npx tsc --noEmit"
+    risk_flags: []
+    done_when:
+      - "TypeScript compiles with no errors"
+      - "No Alert.alert in OcrReviewScreen"
+      - "COUPLE_REQUIRED interceptor navigates to /(auth)/couple-setup"
+
+  # ─────────────────────────────────────────────
+  # MACRO-P4: Documentation
+  # ─────────────────────────────────────────────
+
+  - id: T-660
+    status: implemented
+    type: docs
+    title: "P4 — App usage guide (docs/guia-de-uso.md)"
+    depends_on: ["T-648"]
+    goal: >
+      Create docs/guia-de-uso.md covering:
+        1. What CoupleSync is and what problem it solves for couples.
+        2. Key features with a brief how-to for each (budget, OCR import, goals, AI chat, reports).
+        3. Step-by-step onboarding flow (create couple, set budget, import statement).
+        4. Comparison table: CoupleSync vs Mobills, Organizze, YNAB, Splitwise, Honeydue
+           (columns: couple-first, passive capture, bank import, AI chat, free tier).
+        5. CoupleSync unique value proposition.
+      Language: Portuguese (pt-BR) as primary; English subtitle optional.
+    non_goals:
+      - "Technical architecture documentation"
+      - "API reference"
+    context_files:
+      - ".agents-work/2026-04-17_v16-bugfixes-bank-import-ux/spec.md"
+    files_expected:
+      - "docs/guia-de-uso.md"
+    acceptance_checks:
+      - "cmd: Test-Path docs/guia-de-uso.md (must return True)"
+      - "manual: document contains a comparison table with at least 5 competitor entries and a CoupleSync column"
+      - "manual: document covers all 5 key features with usage instructions"
+    risk_flags: []
+    done_when:
+      - "docs/guia-de-uso.md exists with all required sections"
+      - "Comparison table covers Mobills, Organizze, YNAB, Splitwise, Honeydue"
+      - "Meets AC-616"

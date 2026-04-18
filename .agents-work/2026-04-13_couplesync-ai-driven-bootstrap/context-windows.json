@@ -1,0 +1,64 @@
+{
+  "session": "2026-04-13_couplesync-ai-driven-bootstrap",
+  "macro_context_window": {
+    "current_macro_id": "MACRO-001",
+    "current_macro_title": "Backend Foundation",
+    "completed_minor_tasks": [
+      "T-001"
+    ],
+    "next_minor_task": "T-002",
+    "macro_progress": {
+      "completed": 1,
+      "total": 4
+    },
+    "cross_task_dependencies_ready": [
+      "JWT auth foundation",
+      "User and refresh token persistence",
+      "Auth error envelope and validators"
+    ],
+    "deferred_risks": [
+      "Auth rate limiting and lockout (fix-later)",
+      "DB credential literals in tracked config (fix-later)"
+    ]
+  },
+  "minor_context_window": {
+    "task_id": "T-001",
+    "status": "completed",
+    "input_context": [
+      "spec.md",
+      "acceptance.json",
+      "architecture.md",
+      "tasks.yaml"
+    ],
+    "outputs": [
+      "backend/.NET 8 solution scaffold created",
+      "Auth endpoints implemented: register/login/refresh",
+      "JWT + BCrypt + hashed refresh token flow",
+      "EF Core migration InitialAuth created",
+      "Atomic refresh rotation against replay/concurrency"
+    ],
+    "validation": {
+      "reviewer": "passed",
+      "qa": "passed",
+      "security": "passed"
+    },
+    "test_summary": {
+      "backend_tests_passed": true,
+      "latest_total_tests": 21,
+      "latest_failed_tests": 0
+    },
+    "handoff_to_next_task": [
+      "Use user_id/couple_id claims for T-002 coupling logic",
+      "Reuse auth middleware and error envelope for Couples API",
+      "Keep deferred risks tracked in status.json known_issues"
+    ]
+  },
+  "history": [
+    {
+      "task_id": "T-001",
+      "result": "completed",
+      "notes": "Two FIX_SECURITY iterations required to harden replay against concurrent refresh."
+    }
+  ],
+  "last_update": "2026-04-13T21:20:00.0000000-03:00"
+}

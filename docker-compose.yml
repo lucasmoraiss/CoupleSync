@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:8080"
+    environment:
+      DATABASE_URL: "Host=postgres;Port=5432;Database=couplesync;Username=couplesync;Password=${POSTGRES_PASSWORD:-localdev};SslMode=Disable"
+      JWT__SECRET: "${JWT__SECRET}"  # REQUIRED: set in .env or export before running
+      JWT__ISSUER: "${JWT__ISSUER:-CoupleSync}"
+      JWT__AUDIENCE: "${JWT__AUDIENCE:-CoupleSync}"
+      AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: ""
+      AZURE_DOCUMENT_INTELLIGENCE_KEY: ""
+      USE_LOCAL_PDF_PARSER: "true"
+      Storage__BasePath: "/app/uploads"
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: couplesync
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-localdev}"
+      POSTGRES_DB: couplesync
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U couplesync -d couplesync"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  uploads_data:

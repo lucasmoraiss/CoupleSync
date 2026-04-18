@@ -1,0 +1,190 @@
+{
+  "current_state": "DONE",
+  "session": "2026-04-13_couplesync-ai-driven-bootstrap",
+  "last_update": "2026-04-16T18:00:00Z",
+  "assumptions": [
+    "Escalated from lean to full workflow per user request for macro/micro task breakdown.",
+    "Bank integration: Android NotificationListenerService (reads bank push notifications) instead of Open Finance/Pluggy. User confirmed this is intentional — no retroactive history, requires notifications enabled.",
+    "Review strategy will be per-batch: user validates after each macro task group.",
+    "T-001 fix-now scope applies refresh-token single-use rotation only; rate limiting and DB secret cleanup remain deferred per user decision.",
+    "T-001 replay race mitigation uses atomic conditional refresh-token rotation by exact current token hash and unexpired validity; 0 affected rows map to generic unauthorized response.",
+    "T-009 FIX_REVIEW: Added Guid CoupleId to ITransactionRepository.GetByIdAsync and UpdateTransactionCategoryCommand to enable explicit couple-scoped fetch; controller extracts coupleId from JWT for PatchCategory. This is defence-in-depth on top of the EF ICoupleScoped global filter.",
+    "T-009 FIX_REVIEW: Removed CoupleId from TransactionResponse (API contract). Integration test TransactionResponseDto still declares CoupleId but no assertion checks it — JSON field is absent/ignored cleanly.",
+    "T-011: Migration generated without --output-dir flag — existing migrations live in Migrations/ (not Persistence/Migrations/ as spec stated). Used default location to keep EF chain intact. Migration named AddDashboardPerformanceIndexes, timestamp 20260416012151.",
+    "T-011: SQLite cannot aggregate decimal via Sum at SQL level (EF NotSupportedException). Used provider check (_dbContext.Database.ProviderName contains 'Sqlite') to branch: PostgreSQL uses SQL GROUP BY, SQLite falls back to projected in-memory aggregation (only Category/UserId/Amount columns fetched — not full entity rows). This is explicitly permitted by T-011 constraints.",
+    "T-011 FIX_REVIEW: Eliminated SumAsync round-trip in PostgreSQL path — totalExpenses now derived from categoryRows.Sum (3 DB calls instead of 4). Added nit comment above dual-branch code. Added ArgumentException guard in GetDashboardQueryHandler for inverted date ranges. Added 1 unit test (HandleAsync_WhenStartDateAfterEndDate_ThrowsArgumentException). 135 tests pass.",
+    "T-013 FIX_REVIEW: (1) Removed CoupleId from GoalDto and GoalResponse (BLOCKER). Updated 5 handlers + controller MapToResponse + integration test GoalResponseDto + 2 unit test assertions in GoalCommandHandlerTests and GoalQueryHandlerTests. (2) Goal.Archive() now idempotent — early return if already Archived. (3) Goal.Update() now validates deadline > nowUtc, throws ArgumentException. UpdateGoalRequestValidator adds GreaterThan rule for deadline. (4) CreateGoalRequestValidator now injects IDateTimeProvider and uses _dateTimeProvider.UtcNow for deadline comparison. (5) UpdateGoalCommandHandler throws ConflictException(GOAL_ARCHIVED) if goal is already archived. Added 3 new unit tests: ArchiveGoal_AlreadyArchivedGoal_IsIdempotentAndDoesNotUpdateTimestamp, UpdateGoal_WithPastDeadline_ThrowsArgumentException, UpdateGoal_ArchivedGoal_ThrowsConflictException. Total: 169 tests passing (95 unit + 74 integration).",
+    "T-015: Implemented cash flow projection service. Created ICashFlowRepository, CashFlowData, GetCashFlowQuery/Handler/Result in Application layer, CashFlowRepository in Infrastructure, GetCashFlowResponse and CashFlowController in Api layer. Registered ICashFlowRepository/CashFlowRepository in DependencyInjection.cs and GetCashFlowQueryHandler in Program.cs. Added 4 unit tests (GetCashFlowQueryHandlerTests) and 5 integration tests (CashFlowIntegrationTests). Total: 199 tests, 0 failed.",
+    "T-019: FcmAdapter uses double-checked lock for FirebaseApp singleton init (one app per process). GetByUserIdAsync(userId, ct) overload on IDeviceTokenRepository queries across all device tokens for a user regardless of couple — required for the background worker which has no couple context. If only some device tokens succeed, event is marked Delivered; all-failed marks Failed. Retry loop uses exponential backoff 1s/2s/4s; permanent FCM failure (false return) exits retry immediately. Unit tests use Task.Delay(100ms) + CancellationTokenSource to let one polling pass execute before stopping.",
+    "T-021: node_modules absent in mobile/ — tsc --noEmit check skipped. Created all files without running npm install/expo install per constraint. Expo Router v4 uses tab root name 'goals/index', 'cashflow/index', 'settings/index' for Tabs.Screen name prop matching file-based routes. baseURL sourced from EXPO_PUBLIC_API_BASE_URL env var (Expo public env convention).",
+    "T-023: Kotlin files (NotificationCaptureService.kt, NotificationBridgeModule.kt, NotificationBridgePackage.kt) placed in mobile/android/app/src/main/java/com/couplesync/app/ matching android.package. These files must be committed to source control; expo prebuild --clean regenerates the android/ dir so users must ensure the files are restored (they remain in git). The config plugin handles AndroidManifest injection and MainApplication.kt package registration. SUPPORTED_PACKAGES in NotificationCaptureService.kt mirrors packageNames in notification-patterns.json — update both when adding new banks. @expo/config-plugins ~9.0.0 added as devDependency.",
+    "T-025: Replaced DashboardResponse shape in api.ts to match actual backend GetDashboardResponse (totalExpenses, expensesByCategory, partnerBreakdown, transactionCount, periodStart, periodEnd, generatedAtUtc). TransactionItem preserved for backward compat; added new TransactionResponse and GetTransactionsResponse matching backend contracts. Partner breakdown shows 'Você' vs 'Parceiro(a)' using sessionStore.userId — no name lookup needed. Transactions tab added to main layout as 5th tab. Category editing uses inline bottom-sheet Modal (no new npm packages). @expo/vector-icons is available via expo bundling even though not listed in package.json explicitly.",
+    "T-025 FIX_REVIEW: (1) NotificationSettingsResponse fields fixed (lowBalanceEnabled/largeTransactionEnabled/billReminderEnabled/updatedAtUtc). Added UpdateNotificationSettingsRequest interface; notificationsApiClient.updateSettings arg updated. (2) GoalDto re-aligned to GoalResponse: removed coupleId/currentAmount, renamed name→title, isArchived→status:string, added description/currency/createdByUserId/createdAtUtc/updatedAtUtc. (3) GetGoalsResponse interface added; goalsApiClient.list typed as GetGoalsResponse. (4) goalsApiClient.archive changed from .patch to .delete. (5) CreateGoalRequest in apiClient updated to {title, description?, targetAmount, currency?, deadline}. (6) GetCashFlowResponse replaced entirely to match backend (horizon, historicalPeriodStart, historicalPeriodEnd, transactionCount, totalHistoricalSpend, averageDailySpend, projectedSpend, categoryBreakdown, assumptions, generatedAtUtc); CashFlowProjectionItem removed. (7) authApiClient.refresh typed as RefreshResponse; RefreshResponse interface added. (8) Dead TransactionItem interface removed. (9) onError Alert added to category useMutation. (10) Sort comparator in index.tsx fixed to use both a and b params. (11) 401 handler wrapped in try/finally.",
+    "T-026: goalsApiClient extended with getById (GET /api/v1/goals/{id}) and update (PATCH /api/v1/goals/{id}) — task spec said PUT but backend controller uses [HttpPatch]. No new npm packages. Date picker implemented as text input with auto-slash insertion (DD/MM/AAAA) since @react-native-community/datetimepicker is not installed. Amount input stores cents integer, formatted with pt-BR locale. Active/Archived tabs use includeArchived query param. Edit/create use bottom-sheet modals inside index.tsx.",
+    "T-027: CashFlow screen replaces stub at app/(main)/cashflow/index.tsx with 30/90-day horizon toggle, BRL-formatted summary cards, category breakdown, and assumptions block using TanStack Query. Alert settings screen created at app/(main)/settings/alerts.tsx with optimistic-update Switch toggles (useMutation + onMutate rollback) for lowBalanceEnabled/largeTransactionEnabled/billReminderEnabled. Settings screen updated with 'Alertas' nav item. pushTokenService.ts uses getDevicePushTokenAsync() (raw FCM, not Expo push token) — suitable for backend FCM direct send; gracefully no-ops if permission denied or Play Services unavailable. FCM registration fires in MainLayout once authenticated. alerts.tsx excluded from tab bar via href:null. expo-notifications ~0.29.0 added to package.json; plugin added to app.json. google-services.json added to .gitignore; google-services.json.example created.",
+    "T-030: Created comprehensive pilot deployment runbook (docs/deployment/pilot-runbook.md) with 4 major sections: (1) Firebase Project Setup — step-by-step project creation, Android app registration, google-services.json placement, service account JSON generation, project ID capture; (2) Backend Deployment — env vars table (JWT__SECRET, DATABASE_URL, FIREBASE_CREDENTIAL_JSON, FIREBASE_PROJECT_ID), service account JSON encoding (base64 or raw), dotnet publish/restore, EF migration application via 'dotnet ef database update'; (3) PostgreSQL Database Setup — managed vs self-hosted, connectivity verification, automated migration via backend; (4) Android Build & Distribution — Expo prerequisites, API endpoint config via EXPO_PUBLIC_API_BASE_URL, EAS cloud build and local Gradle build, Google Play Internal Testing distribution, tester flow; plus Security Considerations section (secret files gitignore: google-services.json and Firebase service account .json), Environment Variables Reference table for backend and mobile, Validation Checklist (API health, auth, DB tables, mobile install, onboarding flow, permission grant, dashboard load time, Firebase project status, FCM credentials), Troubleshooting section (6 common issues), Rollback & Recovery instructions. Also created backend/README.md (quick-start in 6 steps, features, requirements, project structure, tests, build/deploy, security, troubleshooting, links to runbook) and mobile/README.md (quick-start in 5 steps, features, requirements, project structure, env vars, google-services.json setup, build options via EAS and Gradle, bank notification capture flow, performance targets, deployment link to runbook). All three files explicitly state that google-services.json and Firebase admin service account JSON must not be committed."
+  ],
+  "user_decisions": [
+    {
+      "id": "UD-BANK-INTEGRATION",
+      "status": "answered",
+      "question": "Which Open Finance provider for bank integration?",
+      "answer": "Android NotificationListenerService — reads bank push notification text, parses transactions locally on device, sends structured events to backend. No third-party API, free, real-time.",
+      "answered_at": "2026-04-13T12:10:00Z"
+    },
+    {
+      "id": "UD-PRD-UPDATE",
+      "status": "answered",
+      "question": "Update PRD to reflect notification listener approach?",
+      "answer": "Yes — user explicitly requested PRD update.",
+      "answered_at": "2026-04-13T12:10:00Z"
+    },
+    {
+      "id": "UD-APPROVE-DESIGN",
+      "status": "answered",
+      "question": "Approve updated architecture (NotificationListenerService)?",
+      "answer": "approved",
+      "answered_at": "2026-04-13T12:15:00Z"
+    },
+    {
+      "id": "UD-REVIEW-STRATEGY",
+      "status": "answered",
+      "question": "Review strategy: per-batch or single-final?",
+      "answer": "per-batch",
+      "answered_at": "2026-04-13T12:20:00Z"
+    },
+    {
+      "id": "UD-SEC-T001-REFRESH-REPLAY",
+      "status": "answered",
+      "question": "SEC-1 Refresh Replay",
+      "answer": "fix-now",
+      "answered_at": "2026-04-13T12:30:00Z"
+    },
+    {
+      "id": "UD-SEC-T001-RATE-LIMITING",
+      "status": "answered",
+      "question": "SEC-2 Rate Limiting",
+      "answer": "fix-later",
+      "answered_at": "2026-04-13T12:30:00Z"
+    },
+    {
+      "id": "UD-SEC-T001-DB-SECRETS",
+      "status": "answered",
+      "question": "SEC-3 DB Secrets",
+      "answer": "fix-later",
+      "answered_at": "2026-04-13T12:30:00Z"
+    },
+    {
+      "id": "UD-SEC-T002-JOIN-RATELIMIT",
+      "status": "answered",
+      "question": "SEC-T002 Join code rate limiting",
+      "answer": "fix-later",
+      "answered_at": "2026-04-14T00:00:00Z"
+    }
+  ],
+  "gate_tracking": {
+    "APPROVE_DESIGN": "completed",
+    "REVIEW_STRATEGY": "completed"
+  },
+  "runtime_flags": {
+    "copilot_instructions_exists": true,
+    "copilot_checked_at": "2026-04-13T00:19:07.7337234-03:00",
+    "workflow_mode": "full",
+    "escalated_from_lean_at": "2026-04-13T12:00:00Z"
+  },
+  "known_issues": [
+    "T-001 security medium deferred: add auth rate limiting and lockout protections.",
+    "T-001 security medium deferred: remove database credential literals from tracked appsettings files (required before T-030/pilot deploy).",
+    "T-002 security medium deferred: add rate limiting to POST /api/v1/couples/join (join-code brute-force protection). User chose fix-later. Low risk at V1 pilot scale."
+  ],
+  "retry_counts": {
+    "T-001": {
+      "FIX_REVIEW": 1,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 2
+    },
+    "T-002": {
+      "FIX_REVIEW": 0,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 0
+    },
+    "T-003": {
+      "FIX_REVIEW": 0,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 0
+    },
+    "T-003-B": {
+      "FIX_REVIEW": 0,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 0
+    },
+    "T-005": {
+      "FIX_REVIEW": 0,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 0
+    },
+    "T-006": {
+      "FIX_REVIEW": 1,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 0
+    },
+    "T-007": {
+      "FIX_REVIEW": 1,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 0
+    },
+    "T-008": {
+      "FIX_REVIEW": 0,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 0
+    },
+    "T-010": {
+      "FIX_REVIEW": 0,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 0
+    },
+    "T-023": {
+      "FIX_REVIEW": 2,
+      "FIX_TESTS": 0,
+      "FIX_SECURITY": 0
+    }
+  },
+  "last_ci_result": "green",
+  "last_update": "2026-04-16T18:30:00Z",
+  "qa_results": {
+    "T-003": {
+      "status": "qa-passed",
+      "tests_run": 43,
+      "tests_passed": 43,
+      "tests_failed": 0,
+      "coverage_checks": [
+        "AC-008: COVERED — CoupleScoped_AuthenticatedButNoCoupleId_ShouldReturn403WithCoupleRequired returns 403 with COUPLE_REQUIRED",
+        "AC-001: COVERED — CoupleScoped_AuthenticatedAndInCouple_ShouldReturn200 returns 200 for paired user",
+        "Unauthenticated: COVERED — CoupleScoped_WithoutAuth_ShouldReturn401 returns 401",
+        "RequireCoupleAttribute E2E: COVERED — TestCoupleController registered via AddApplicationPart"
+      ],
+      "qa_at": "2026-04-13T20:00:00Z"
+    },
+    "T-005": {
+      "status": "review-passed",
+      "tests_run": 57,
+      "tests_passed": 57,
+      "tests_failed": 0,
+      "coverage_checks": [
+        "AC-003: COVERED — IngestEvent_WithValidPayload_ShouldReturn201WithIngestId creates record with Accepted status",
+        "AC-009: COVERED — negative amount, unsupported bank, future timestamp each return 400",
+        "AC-002: COVERED — couple_id derived from JWT only; RawNotificationTextRedacted field sanitized before storage",
+        "AC-008: COVERED — RequireCoupleAttribute applies 403 for unpaired users; 401 for unauthenticated",
+        "Sanitizer: COVERED — HTML stripped (unit), XSS in description returns 201 (integration)",
+        "Truncation: COVERED — 600-char raw text truncated to 512"
+      ],
+      "notes": [
+        "EventTimestamp property name lacks Utc suffix (cosmetic inconsistency — column is correctly named event_timestamp_utc)",
+        "RawNotificationText validator cap is 2048 chars while handler/storage cap is 512 — intentional, documented in validator message",
+        "Missing integration test for cross-couple ingest record isolation — query filter tested at T-003-B level; acceptable for T-005 scope",
+        "NotificationEventSanitizer does not strip null bytes/control chars — acceptable for spec scope"
+      ],
+      "reviewed_at": "2026-04-14T06:00:00Z"
+    }
+  }
+}

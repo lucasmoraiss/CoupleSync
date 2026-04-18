@@ -1,0 +1,1196 @@
+project:
+  name: CoupleSync
+  definition_of_done:
+    - CI green
+    - AC met
+    - README updated
+    - Session artifacts consistent under .agents-work
+
+tasks:
+  # MACRO-001 Backend Foundation
+  - id: T-001
+    status: completed
+    type: feat
+    title: Backend auth foundation with JWT and refresh flow
+    depends_on: []
+    goal: Implement register, login, and refresh endpoints with secure token handling as the backend entry point for all later modules.
+    non_goals:
+      - Social login providers
+      - Multi-factor authentication
+      - iOS-specific auth UX
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Api/Controllers/AuthController.cs
+      - backend/src/CoupleSync.Application/Auth/
+      - backend/src/CoupleSync.Infrastructure/Security/
+    acceptance_checks:
+      - manual: AC-001 register and login return valid tokens and user profile
+      - manual: AC-008 token claims include user_id and couple scope for authorization
+      - manual: AC-002 security review confirms no raw banking credentials in auth payloads
+    risk_flags:
+      - security
+    done_when:
+      - Auth endpoints return expected contracts
+      - Token refresh path works and invalid tokens are rejected
+      - Meets AC-001 and AC-008 references
+    context_window: Needs API bootstrap, auth contracts, and JWT option definitions aligned with architecture.
+
+  - id: T-002
+    status: completed
+    type: feat
+    title: Couple creation and join-code pairing module
+    depends_on: ["T-001"]
+    goal: Implement couple creation, join by code, and membership constraints for two-partner shared workspace.
+    non_goals:
+      - Group households beyond two partners
+      - Invite-by-email workflow
+      - Historical membership migrations
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Api/Controllers/CouplesController.cs
+      - backend/src/CoupleSync.Application/Couple/
+      - backend/src/CoupleSync.Domain/Entities/Couple.cs
+      - backend/src/CoupleSync.Infrastructure/Migrations/ # EF migration for Couples and updated Users tables must be generated
+    acceptance_checks:
+      - manual: AC-001 two users can pair through one join code and share workspace metadata
+      - manual: AC-008 join operations enforce authenticated user context and membership ownership
+      - manual: EF migration for Couple entity is generated and applied (dotnet ef migrations add AddCouple)
+      - manual: couple_id column is present in Users table after migration update
+    risk_flags:
+      - security
+    done_when:
+      - Couple create and join endpoints are implemented
+      - Join code lifecycle and max-two-members rule are enforced
+      - EF Core migration for Couple entity created and committed
+      - Meets AC-001 and AC-008 references
+    context_window: Requires auth identity claims from T-001 and couple entity constraints from architecture. Must generate and commit EF migration for Couples table.
+
+  - id: T-003
+    status: completed
+    type: feat
+    title: Couple-scope authorization guardrails across API and persistence
+    depends_on: ["T-001", "T-002"]
+    goal: Enforce couple-level isolation in middleware and query filters for all financial modules.
+    non_goals:
+      - Row-level security at database engine level
+      - Multi-couple access switching in one token
+      - External SIEM integration
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Api/Middleware/
+      - backend/src/CoupleSync.Infrastructure/Persistence/
+      - backend/tests/CoupleSync.IntegrationTests/Authorization/
+    acceptance_checks:
+      - manual: AC-008 cross-couple read/write attempts return 403 with audit metadata
+      - manual: AC-001 paired users can still access their own couple workspace successfully
+    risk_flags:
+      - security
+      - breaking-change
+    done_when:
+      - Authorization policy enforces derived couple_id from JWT
+      - Repository queries are couple-filtered by default
+      - Meets AC-008 references
+    context_window: Builds on T-001 and T-002 outputs; coder needs claim model and couple membership checks already in place.
+
+  - id: T-003-B
+    status: completed
+    type: feat
+    title: EF Core global query filter infrastructure for couple-scoped tenant isolation
+    depends_on: ["T-003"]
+    goal: Inject ICoupleContext into AppDbContext and establish the HasQueryFilter pattern so all future couple-scoped entities automatically filter by couple_id at query time, preventing cross-couple data leaks without requiring per-query WHERE clauses.
+    non_goals:
+      - Applying filters to existing entities (User, Couple, RefreshToken are not couple-scoped tenants)
+      - Row-level security at database engine level
+      - Modifying financial entity schemas (those come in T-005+)
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/tasks.yaml
+    files_expected:
+      - backend/src/CoupleSync.Application/Common/Interfaces/ICoupleScoped.cs
+      - backend/src/CoupleSync.Infrastructure/Persistence/AppDbContext.cs
+    acceptance_checks:
+      - manual: AppDbContext constructor accepts ICoupleContext (nullable for migration/design-time safety)
+      - manual: ICoupleScoped interface defines CoupleId property for all future couple-scoped entities
+      - manual: AppDbContext.ApplyCoupleQueryFilters() applies HasQueryFilter on all ICoupleScoped entities
+      - manual: dotnet build 0 errors; dotnet test >= 43 tests passing
+    risk_flags:
+      - security
+    done_when:
+      - AppDbContext receives ICoupleContext and exposes a CurrentCoupleId property for query filters
+      - ICoupleScoped interface established for future entities
+      - All existing tests still pass (no regression)
+      - Pattern is self-documenting so T-005 coder knows exactly how to add their entity filter
+    context_window: Prerequisite for T-005. ICoupleContext and HttpContextCoupleContext already implemented in T-003. AppDbContext currently has no ICoupleContext dependency.
+
+  - id: T-004
+    status: completed
+    type: test
+    title: Backend foundation validation checkpoint
+    depends_on: ["T-001", "T-002", "T-003"]
+    goal: Validate that auth, couple onboarding, and scope isolation form a stable runnable baseline.
+    non_goals:
+      - Notification ingestion
+      - Dashboard rendering
+      - Mobile implementation
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/tests/
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/tasks.yaml
+    acceptance_checks:
+      - cmd: dotnet test backend/tests
+      - manual: AC-001 full pair onboarding walkthrough succeeds
+      - manual: AC-008 cross-couple access denial is reproducible
+      - manual: AC-011 tasks and acceptance traceability are updated for this checkpoint
+    risk_flags:
+      - none
+    done_when:
+      - Foundational backend tests are green
+      - Manual onboarding and isolation checks pass
+      - Meets AC-001, AC-008, and AC-011 references
+    context_window: Requires completed outputs from T-001 to T-003 and test fixtures for two-couple scenarios.
+
+  # MACRO-002 NotificationCapture Backend
+  - id: T-005
+    status: completed
+    type: feat
+    title: Notification event ingestion endpoint with validation and sanitization
+    depends_on: ["T-004"]
+    goal: Implement POST /api/v1/integrations/events with strict schema validation and payload sanitization.
+    non_goals:
+      - Mobile listener implementation
+      - Retroactive bank history import
+      - Open Finance provider integration
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Api/Controllers/IntegrationsController.cs
+      - backend/src/CoupleSync.Application/NotificationCapture/
+      - backend/src/CoupleSync.Api/Contracts/Integrations/
+    acceptance_checks:
+      - manual: AC-003 accepted event payload creates ingest record with validated fields
+      - manual: AC-009 malformed payloads return validation errors with recoverable guidance
+      - manual: AC-002 confirms backend does not collect or store raw banking credentials
+    risk_flags:
+      - security
+    done_when:
+      - Ingestion endpoint applies field validation and sanitization
+      - Error envelope exposes actionable recovery hints
+      - Meets AC-003 and AC-009 references
+    context_window: Needs foundation auth and couple scope from MACRO-001 to trust JWT-derived couple context.
+
+  - id: T-006
+    status: completed
+    type: feat
+    title: Event deduplication, transaction upsert pipeline, and category rules seeder
+    depends_on: ["T-005"]
+    goal: Add deterministic fingerprint dedupe, idempotent transaction creation from notification events, and a rule-based category matching seeder so transactions receive a default category at ingest time.
+    non_goals:
+      - AI auto-categorization model
+      - Bulk historical transaction import
+      - Currency conversion engine
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Application/Transaction/
+      - backend/src/CoupleSync.Domain/Events/
+      - backend/src/CoupleSync.Infrastructure/Persistence/Migrations/
+      - backend/src/CoupleSync.Infrastructure/Persistence/Seeders/CategoryRulesSeeder.cs
+      - backend/src/CoupleSync.Infrastructure/Persistence/Seeders/category-rules.json # keyword-to-category dictionary (e.g. UBER->Transporte, MERCADO LIVRE->Compras, IFOOD->Alimentacao)
+    acceptance_checks:
+      - manual: AC-003 repeated equivalent events create one transaction only
+      - manual: AC-003 persisted transaction has category assigned by matching a keyword from category-rules.json
+      - manual: AC-003 transaction with no keyword match is assigned category OUTROS as default fallback
+      - manual: CategoryRulesSeeder is invoked at app startup or via migration and is idempotent
+    risk_flags:
+      - perf
+    done_when:
+      - Fingerprint uniqueness is enforced per couple scope
+      - Transaction upsert is idempotent under retries
+      - Category rules seeder provides a minimum of 20 keyword-to-category mappings covering Alimentacao, Transporte, Compras, Saude, Lazer, Moradia
+      - Unmatched transactions default to OUTROS category
+      - Meets AC-003 references
+    context_window: Requires validated ingest payloads from T-005 and transaction schema scaffolding. CategoryRulesSeeder must be idempotent and load from category-rules.json at startup.
+
+  - id: T-007
+    status: completed
+    type: feat
+    title: Integration status and recovery diagnostics endpoints
+    depends_on: ["T-005", "T-006"]
+    goal: Expose integration status, last event time, and last error with actionable recovery guidance.
+    non_goals:
+      - In-app mobile UI implementation
+      - Third-party monitoring dashboards
+      - Push notification dispatch
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Api/Controllers/IntegrationsController.cs
+      - backend/src/CoupleSync.Application/NotificationCapture/IntegrationStatusService.cs
+      - backend/src/CoupleSync.Domain/Entities/NotificationCaptureIntegration.cs
+    acceptance_checks:
+      - manual: AC-009 failure states expose retry hints and last error in integrations endpoint
+      - manual: AC-003 successful events update integration last_event_at metadata
+      - manual: AC-011 observability signals for ingest accepted/rejected/duplicate are documented
+    risk_flags:
+      - none
+    done_when:
+      - Integrations status endpoints return recoverable state
+      - Ingest diagnostics are persisted and queryable
+      - Meets AC-009 references
+    context_window: Depends on ingestion and dedupe pipeline outputs from T-005 and T-006.
+
+  - id: T-008
+    status: completed
+    type: test
+    title: NotificationCapture backend checkpoint tests
+    depends_on: ["T-005", "T-006", "T-007"]
+    goal: Validate ingestion flow reliability, dedupe behavior, and status diagnostics as a runnable backend increment.
+    non_goals:
+      - Mobile notification listener execution
+      - Dashboard feature validation
+      - FCM alert validation
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/tests/CoupleSync.IntegrationTests/NotificationCapture/
+      - backend/tests/CoupleSync.IntegrationTests/Transactions/
+    acceptance_checks:
+      - cmd: dotnet test backend/tests --filter NotificationCapture
+      - manual: AC-003 ingest, dedupe, and persistence walkthrough passes
+      - manual: AC-009 parser/upload error simulation shows recoverable status
+    risk_flags:
+      - none
+    done_when:
+      - NotificationCapture integration tests pass
+      - Manual dedupe and recovery validation passes
+      - Meets AC-003 and AC-009 references
+    context_window: Requires completed ingest endpoint, dedupe pipeline, and integration status outputs.
+
+  # MACRO-003 Dashboard & Transactions
+  - id: T-009
+    status: completed
+    type: feat
+    title: Transaction read and category update APIs
+    depends_on: ["T-008"]
+    goal: Implement transaction listing filters and category patch endpoint over normalized data.
+    non_goals:
+      - Frontend transaction UI
+      - Predictive category suggestions
+      - CSV export
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Api/Controllers/TransactionsController.cs
+      - backend/src/CoupleSync.Application/Transaction/Queries/
+      - backend/src/CoupleSync.Application/Transaction/Commands/
+    acceptance_checks:
+      - manual: AC-003 transaction list includes ingested records with assigned categories
+      - manual: AC-004 transaction totals align with dashboard aggregate source data
+      - manual: AC-008 transaction access is restricted to authenticated couple scope
+    risk_flags:
+      - none
+    done_when:
+      - Transaction read and category update APIs are available
+      - Query filters and pagination behave as expected
+      - Meets AC-003 and AC-004 references
+    context_window: Needs stable transaction persistence from MACRO-002 and couple isolation guards.
+
+  - id: T-010
+    status: completed
+    type: feat
+    title: Dashboard aggregation service for net worth and shared expenses
+    depends_on: ["T-009"]
+    goal: Build aggregate calculations for combined net worth, individual balances, and shared expenses.
+    non_goals:
+      - Mobile chart rendering
+      - Advanced financial forecasting visuals
+      - Multi-currency normalization beyond stored currency
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Application/Dashboard/
+      - backend/src/CoupleSync.Api/Controllers/DashboardController.cs
+      - backend/src/CoupleSync.Domain/Policies/
+    acceptance_checks:
+      - manual: AC-004 dashboard aggregates are consistent for both partners in same couple
+      - manual: AC-008 aggregate queries deny cross-couple access attempts
+    risk_flags:
+      - perf
+    done_when:
+      - Aggregate calculation service returns expected totals
+      - Couple-consistent results verified across both partner identities
+      - Meets AC-004 and AC-008 references
+    context_window: Requires transaction query outputs from T-009 and account balance model alignment.
+
+  - id: T-011
+    status: completed
+    type: refactor
+    title: Dashboard endpoint performance and query tuning
+    depends_on: ["T-010"]
+    goal: Optimize dashboard read path to meet baseline performance target under pilot load.
+    non_goals:
+      - Horizontal sharding
+      - Caching cluster rollout
+      - Full load test platform setup
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Infrastructure/Persistence/
+      - backend/src/CoupleSync.Application/Dashboard/
+      - backend/tests/CoupleSync.PerformanceTests/
+    acceptance_checks:
+      - manual: AC-010 dashboard API supports mobile target under 2.5s on seeded pilot dataset
+      - manual: AC-004 aggregate values remain correct after tuning changes
+    risk_flags:
+      - perf
+      - breaking-change
+    done_when:
+      - Query indexes or projections are tuned without regression
+      - Performance check meets baseline threshold
+      - Meets AC-010 references
+    context_window: Depends on stable dashboard calculations from T-010 and transaction query paths from T-009.
+
+  - id: T-012
+    status: completed
+    type: test
+    title: Dashboard and transactions checkpoint validation
+    depends_on: ["T-009", "T-010", "T-011"]
+    goal: Verify dashboard and transaction backend increment is runnable and partner-consistent before goals/cashflow work.
+    non_goals:
+      - Goals module behavior
+      - Notification dispatch
+      - Mobile rendering validation
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/tests/CoupleSync.IntegrationTests/Dashboard/
+      - backend/tests/CoupleSync.IntegrationTests/Transactions/
+    acceptance_checks:
+      - cmd: dotnet test backend/tests --filter Dashboard|Transactions
+      - manual: AC-004 shared dashboard consistency walkthrough for both partners
+      - manual: AC-010 backend performance smoke test documented for pilot baseline
+    risk_flags:
+      - none
+    done_when:
+      - Dashboard and transaction checks pass
+      - Performance and consistency evidence captured
+      - Meets AC-004 and AC-010 references
+    context_window: Uses completed transaction and dashboard modules from T-009 to T-011.
+
+  # MACRO-004 Goals & CashFlow
+  - id: T-013
+    status: completed
+    type: test
+    title: Add test coverage for Goals CRUD module
+    depends_on: ["T-012"]
+    goal: Implement create, read, update, and archive flows for couple goals with validation.
+    non_goals:
+      - Goal sharing outside couple
+      - Gamification badges
+      - Automatic external account linking
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Api/Controllers/GoalsController.cs
+      - backend/src/CoupleSync.Application/Goal/
+      - backend/src/CoupleSync.Domain/Entities/Goal.cs
+    acceptance_checks:
+      - manual: AC-005 create, edit, and archive transitions work for couple members
+      - manual: AC-008 goal endpoints enforce couple-level authorization
+    risk_flags:
+      - none
+    done_when:
+      - Goal CRUD and archive operations are available
+      - Validation prevents invalid deadlines and malformed amounts
+      - Meets AC-005 references
+    context_window: Requires stable couple scope enforcement and dashboard baseline from previous macro.
+
+  - id: T-014
+    status: done
+    type: feat
+    title: Goal progress computation and status transitions
+    depends_on: ["T-013"]
+    goal: Compute goal progress and status transitions using current balances and contributions.
+    non_goals:
+      - AI-driven recommendation engine
+      - External investment account aggregation
+      - Goal collaboration chat
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Application/Goal/GoalProgressService.cs
+      - backend/src/CoupleSync.Domain/Policies/GoalPolicy.cs
+      - backend/tests/CoupleSync.UnitTests/Goal/
+    acceptance_checks:
+      - manual: AC-005 progress percentage updates after related transactions or balance changes
+      - manual: AC-005 archived goals are excluded from active planning summaries
+    risk_flags:
+      - none
+    done_when:
+      - Progress calculations are deterministic and validated
+      - Goal state transitions align with domain rules
+      - Meets AC-005 references
+    context_window: Uses goals data model from T-013 and transaction/balance aggregates from MACRO-003.
+
+  - id: T-014-FIX
+    status: completed
+    type: feat
+    title: Add LinkTransactionToGoal command + PATCH endpoint (FIX_REVIEW blocker)
+    depends_on: ["T-014"]
+    goal: Add complete transaction-to-goal linking feature so ContributedAmount is populated, plus three minor reviewer fixes.
+    risk_flags:
+      - none
+    review_outcome: PASS_WITH_NOTES
+    review_notes: >
+      All T-014 blockers resolved. Two minor gaps remain (no unit tests for
+      LinkTransactionToGoalCommandHandler; cross-couple test missing assertion
+      that transaction.GoalId stays null on failed link). Neither is a blocker.
+      Safe to proceed to T-015.
+
+  - id: T-014-MINOR
+    status: completed
+    type: test
+    title: Fix T-014 minor reviewer notes: unit tests for LinkTransactionToGoalCommandHandler + negative GoalId assertion
+    depends_on: ["T-014-FIX"]
+    goal: Apply two minor fixes from T-014 Reviewer PASS WITH NOTES. FIX 1 — unit test class for LinkTransactionToGoalCommandHandler (4 cases). FIX 2 — negative GoalId assertion in cross-couple integration test.
+    non_goals:
+      - Do not change any production code
+      - Do not add new test infrastructure beyond the 4 unit tests and 1 extra assertion
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/tasks.yaml
+    files_expected:
+      - backend/tests/CoupleSync.UnitTests/Goals/GoalLinkCommandHandlerTests.cs
+    acceptance_checks:
+      - cmd: cd backend && dotnet build --no-restore 2>&1 | Select-Object -Last 5 (must show 0 errors)
+      - cmd: cd backend && dotnet test --no-build 2>&1 | Select-Object -Last 8 (must show 0 failed, >= 189 passed)
+    risk_flags:
+      - none
+    done_when:
+      - GoalLinkCommandHandlerTests.cs with 4 [Fact] tests exists and all pass
+      - LinkTransactionToGoal_CrossCoupleGoal_ShouldReturn404 asserts GoalId is null after failed link
+
+  - id: T-015
+    status: completed
+    type: feat
+    title: Cash flow 30 and 90 day projection service
+    depends_on: ["T-013", "T-014"]
+    goal: Provide projection endpoints for 30-day and 90-day horizons with assumptions metadata.
+    non_goals:
+      - Guaranteeing future balances
+      - Machine learning forecasting
+      - Multi-scenario planning UI
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Api/Controllers/CashFlowController.cs
+      - backend/src/CoupleSync.Application/CashFlow/
+      - backend/src/CoupleSync.Domain/Entities/CashFlowSnapshot.cs
+    acceptance_checks:
+      - manual: AC-006 projections are returned for both 30 and 90 day horizons on seeded data
+      - manual: AC-006 projection response includes assumptions and generated_at metadata
+    risk_flags:
+      - perf
+    done_when:
+      - Projection endpoint supports horizon=30 and horizon=90
+      - Projection computation uses couple-scoped transaction history
+      - Meets AC-006 references
+    context_window: Depends on goals module and transaction history foundation to compute projections.
+
+  - id: T-016
+    status: completed
+    type: test
+    title: Goals and cashflow checkpoint validation
+    depends_on: ["T-013", "T-014", "T-015"]
+    goal: Validate goals lifecycle and projection outputs as a stable increment before alert orchestration.
+    non_goals:
+      - Push delivery behavior
+      - Android UI interactions
+      - Deployment automation
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/tests/CoupleSync.IntegrationTests/Goals/
+      - backend/tests/CoupleSync.IntegrationTests/CashFlow/
+    acceptance_checks:
+      - cmd: dotnet test backend/tests --filter Goals|CashFlow
+      - manual: AC-005 goal lifecycle walkthrough passes end-to-end
+      - manual: AC-006 30/90 projection comparison validated on seeded dataset
+    risk_flags:
+      - none
+    done_when:
+      - Goal and cashflow test suite is green
+      - Manual scenarios for AC-005 and AC-006 are documented
+      - Meets AC-005 and AC-006 references
+    context_window: Requires all goal and cashflow service endpoints from T-013 to T-015.
+
+  # MACRO-005 Alerts & Notifications
+  - id: T-017
+    status: completed
+    type: feat
+    title: Device token registration and notification settings APIs
+    depends_on: ["T-016"]
+    goal: Implement endpoints to register FCM device tokens and manage alert settings per user.
+    review_outcome: PASS_WITH_NOTES
+    review_notes: >
+      Security gates clear — [Authorize]+[RequireCouple] at class level, userId/coupleId from JWT
+      claims only, repo predicates apply both userId AND coupleId for defense-in-depth, both
+      entities implement ICoupleScoped and receive global query filter automatically. IDateTimeProvider
+      used in all handlers. Idempotency and lazy-init defaults correct. 9 integration tests pass.
+      Build: 0 errors. Tests: 208 passed, 0 failed. Two minor concerns: (1) check-then-act race
+      condition in GetNotificationSettingsQueryHandler lazy init (harmless at V1 scale but could 500
+      under concurrent first-GETs for same user); (2) no cross-couple isolation test for the
+      notifications endpoints. Safe to proceed to T-018.
+    non_goals:
+      - iOS APNs support
+      - In-app notification inbox
+      - Marketing campaign notifications
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Api/Controllers/NotificationsController.cs
+      - backend/src/CoupleSync.Application/Notification/
+      - backend/src/CoupleSync.Domain/Entities/DeviceToken.cs
+    acceptance_checks:
+      - manual: AC-007 device token registration succeeds and updates last_seen_at
+      - manual: AC-008 token and settings changes are scoped to authenticated user/couple
+    risk_flags:
+      - security
+    done_when:
+      - Device token endpoint and notification settings endpoints are available
+      - Token rotation and duplicate registration handling are implemented
+      - Meets AC-007 references
+    context_window: Uses couple-scoped auth guards and backend modules completed in prior macros.
+
+  - id: T-018
+    status: completed
+    type: feat
+    title: Alert policy evaluator for low balance, large transaction, and bill reminders
+    depends_on: ["T-017"]
+    goal: Implement alert evaluation rules triggered by ingested transactions and scheduled checks.
+    non_goals:
+      - Personalized AI alert tuning
+      - SMS or email channels
+      - Custom scripting rules
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Application/Notification/AlertPolicyService.cs
+      - backend/src/CoupleSync.Domain/Policies/AlertPolicy.cs
+      - backend/src/CoupleSync.Infrastructure/BackgroundJobs/
+    acceptance_checks:
+      - manual: AC-007 each alert condition generates notification events under expected triggers
+      - manual: AC-006 projection and due-date data influence bill reminder generation
+    risk_flags:
+      - perf
+    done_when:
+      - Alert policies produce expected event types
+      - Duplicate alert suppression and schedule logic are validated
+      - Meets AC-007 references
+    context_window: Depends on transaction ingest outputs and cashflow horizon data from previous macros.
+
+  - id: T-019
+    status: completed
+    type: feat
+    title: FCM dispatch worker with Firebase Admin SDK, retry and delivery tracking
+    depends_on: ["T-017", "T-018"]
+    review_outcome: PASS_WITH_NOTES
+    review_notes: >
+      Security gates clear — no hardcoded credentials, appsettings.json has empty placeholders,
+      credential presence checked without logging, double-check lock initializes FirebaseApp
+      singleton safely. IServiceScopeFactory used correctly for scoped repos inside the hosted
+      service. Per-event exception handling is present, retries with exponential backoff are
+      operational. Build: 0 errors. Tests: 217 passed, 0 failed.
+      Minor issues: (1) dead variable `allFailed` in ProcessPendingEventsAsync is computed but never
+      read — remove to reduce confusion; (2) events whose users have no device tokens are silently
+      skipped and remain Pending forever — consider marking them Failed or Skipped after first miss;
+      (3) no unit test covers the zero-device-tokens path; (4) backoff comment says "1s, 2s, 4s"
+      but MaxRetries=3 only produces 1s and 2s delays. None are blockers. Safe to proceed to T-020.
+    goal: Configure Firebase Admin SDK, dispatch pending notifications through FCM with retries, dead-letter handling, and delivery status updates.
+    non_goals:
+      - Multi-provider push abstraction
+      - Real-time websocket channel
+      - Marketing notification templates
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Infrastructure/Integrations/Fcm/FcmAdapter.cs
+      - backend/src/CoupleSync.Infrastructure/Integrations/Fcm/FcmOptions.cs # FIREBASE_PROJECT_ID, FIREBASE_CREDENTIAL_JSON (service account JSON via env var)
+      - backend/src/CoupleSync.Infrastructure/BackgroundJobs/NotificationDispatcherJob.cs
+      - backend/src/CoupleSync.Domain/Entities/NotificationEvent.cs
+    acceptance_checks:
+      - manual: AC-007 Firebase Admin SDK is initialized from FcmOptions sourced from environment variables only (no hardcoded credentials)
+      - manual: AC-007 simulated alert events are dispatched to registered FCM device tokens
+      - manual: AC-009 transient FCM failures retry with exponential backoff and update delivery_status
+      - manual: AC-011 Firebase project name and credential setup steps are documented in backend README
+    risk_flags:
+      - perf
+      - security
+    done_when:
+      - Firebase Admin SDK initialized from environment-sourced FcmOptions
+      - Dispatcher retries and dead-letter behavior are implemented
+      - Delivery statuses are persisted for observability
+      - No Firebase service account JSON committed to repository
+      - Meets AC-007 and AC-009 references
+    context_window: Requires alert event generation from T-018 and device token registry from T-017. Firebase Admin SDK credentials must come from FIREBASE_CREDENTIAL_JSON env var only.
+
+  - id: T-019-MINOR
+    status: completed
+    type: chore
+    title: Apply T-019 Reviewer notes (dead code, no-token path, volatile, comment fix, add test)
+    depends_on: ["T-019"]
+    goal: Apply all non-blocking Reviewer notes from T-019 review to polish the FCM dispatch worker code quality.
+    non_goals:
+      - Change any FCM dispatch logic or interfaces beyond what is listed in constraints
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/tasks.yaml
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/src/CoupleSync.Infrastructure/BackgroundJobs/NotificationDispatcherJob.cs
+      - backend/src/CoupleSync.Infrastructure/Integrations/Fcm/FcmAdapter.cs
+      - backend/tests/CoupleSync.UnitTests/Notifications/NotificationDispatcherJobTests.cs
+    acceptance_checks:
+      - cmd: cd backend && dotnet build --no-restore 2>&1 | Select-Object -Last 5 (0 errors)
+      - cmd: cd backend && dotnet test --no-build 2>&1 | Select-Object -Last 8 (0 failed, >= 218 tests)
+    risk_flags: []
+    done_when:
+      - Dead allFailed variable removed
+      - No-token path marks event Failed and persists
+      - FcmAdapter._app field is volatile
+      - Backoff comment corrected
+      - Unit test for zero-token path passes
+      - All 217+ existing tests remain passing
+
+  - id: T-020
+    status: completed
+    type: test
+    title: Alerts and notifications checkpoint validation
+    depends_on: ["T-017", "T-018", "T-019"]
+    goal: Validate backend alert generation and push dispatch increment before mobile implementation starts.
+    non_goals:
+      - Android notification listener implementation
+      - Mobile UX validation
+      - Release packaging
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/tests/CoupleSync.IntegrationTests/Notifications/
+      - backend/tests/CoupleSync.IntegrationTests/BackgroundJobs/
+    acceptance_checks:
+      - cmd: dotnet test backend/tests --filter Notifications|BackgroundJobs
+      - manual: AC-007 low-balance, large-transaction, and bill-reminder trigger walkthrough passes
+      - manual: AC-009 retry/dead-letter behavior is visible in status responses
+      - manual: AC-011 observability metrics for notification pipeline are documented
+    risk_flags:
+      - none
+    done_when:
+      - Alert and dispatch tests pass
+      - End-to-end alert simulation evidence is recorded
+      - Meets AC-007 and AC-009 references
+    context_window: Needs completed notification settings, policy evaluator, and dispatcher worker.
+
+  # MACRO-006 Mobile Foundation
+  - id: T-021
+    status: completed
+    type: chore
+    title: Expo mobile project foundation and API client setup
+    depends_on: ["T-020"]
+    goal: Establish mobile app scaffold, routing, secure auth storage, and typed API client integration.
+    non_goals:
+      - Final production UI polish
+      - iOS app support
+      - Complex offline sync engine
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - mobile/app/
+      - mobile/src/services/apiClient.ts
+      - mobile/src/state/sessionStore.ts
+    acceptance_checks:
+      - manual: AC-010 core app navigation and auth bootstrap reachable in three taps or fewer
+      - manual: AC-011 mobile module structure aligns with session architecture artifacts
+    risk_flags:
+      - none
+    done_when:
+      - Mobile app boots with navigation and authenticated API client
+      - Environment and token storage setup are documented
+      - Meets AC-010 references
+    context_window: Starts after backend alert pipeline is stable; needs API contracts from previous macros.
+
+  - id: T-022
+    status: completed
+    type: feat
+    title: Mobile auth and couple onboarding flows
+    depends_on: ["T-021"]
+    goal: Implement mobile registration/login and couple create/join screens connected to backend endpoints.
+    non_goals:
+      - Password reset by email
+      - Social auth
+      - Tablet-specific layout optimization
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - mobile/app/(auth)/
+      - mobile/src/modules/auth/
+      - mobile/src/modules/couple/
+    acceptance_checks:
+      - manual: AC-001 two users can pair via join code from mobile UI and see shared context
+      - manual: AC-010 onboarding actions remain within three taps for key paths
+    risk_flags:
+      - security
+    done_when:
+      - Mobile auth and couple join flows are functional
+      - Session state persists and restores securely
+      - Meets AC-001 and AC-010 references
+    context_window: Requires T-021 scaffold and backend auth/couple contracts from MACRO-001.
+
+  - id: T-023
+    status: completed
+    type: feat
+    title: Expo Config Plugin for NotificationListenerService + Android bridge, parser, and event uploader
+    depends_on: ["T-021", "T-008"]
+    goal: Create an Expo Config Plugin that injects the NotificationListenerService declaration and BIND_NOTIFICATION_LISTENER_SERVICE permission into AndroidManifest.xml during npx expo prebuild; then implement the Kotlin native service, React Native bridge (TSX), bank-pattern parser, and queued upload to the backend ingest endpoint.
+    non_goals:
+      - Retroactive transaction import prior to permission grant
+      - Open Finance API integration
+      - iOS background notification capture
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - mobile/plugins/withNotificationListener.ts # Expo Config Plugin: adds <service android:name=...NotificationListenerService> and uses-permission BIND_NOTIFICATION_LISTENER_SERVICE to AndroidManifest.xml
+      - mobile/android/app/src/main/java/com/couplesync/NotificationCaptureService.kt # Kotlin native NotificationListenerService implementation
+      - mobile/src/modules/integrations/notification-capture/NotificationListenerBridge.ts # React Native module bridge to Kotlin service
+      - mobile/src/modules/integrations/notification-capture/notificationParser.ts # regex bank patterns
+      - mobile/src/modules/integrations/notification-capture/eventUploader.ts # queued upload to POST /integrations/events
+      - mobile/src/modules/integrations/notification-capture/notification-patterns.json # per-bank regex patterns
+      - mobile/app.json # must reference the withNotificationListener plugin so prebuild injects it
+    acceptance_checks:
+      - manual: AC-002 after npx expo prebuild, AndroidManifest.xml contains <service android:name=...NotificationCaptureService android:permission=android.permission.BIND_NOTIFICATION_LISTENER_SERVICE> and matching <uses-permission>
+      - manual: AC-002 Android permission grant flow enables listener without collecting raw banking credentials
+      - manual: AC-003 supported bank notification (Nubank, Itau, Inter, C6, Bradesco) produces structured TransactionEvent upload
+      - manual: AC-009 parse/upload failures are queued for retry and integration status reflects error
+    risk_flags:
+      - security
+    done_when:
+      - Expo Config Plugin exists and injects NotificationListenerService manifest entries on prebuild
+      - Kotlin NotificationCaptureService reads onNotificationPosted and bridges to React Native
+      - Parser covers minimum 5 Brazilian banks with regex patterns
+      - Event uploader posts authenticated payloads with retry queue behavior
+      - app.json plugin entry is present so prebuild produces a working Android manifest
+      - Meets AC-002, AC-003, and AC-009 references
+    context_window: Requires backend NotificationCapture endpoint from T-008 and mobile base app from T-021. CRITICAL: without the Expo Config Plugin the Kotlin service will never be called by Android OS even if compiled. app.json must reference withNotificationListener plugin.
+
+  - id: T-024
+    status: completed
+    type: test
+    title: Mobile foundation checkpoint for onboarding and notification capture
+    depends_on: ["T-022", "T-023"]
+    goal: Validate mobile foundation increment is runnable before building core functional screens.
+    non_goals:
+      - Dashboard UI completeness
+      - Goal and cashflow visualizations
+      - Release distribution pipeline
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - mobile/app/(auth)/
+      - mobile/src/modules/integrations/notification-capture/
+      - mobile/tests/
+    acceptance_checks:
+      - manual: AC-001 login and join-code onboarding pass on Android test device
+      - manual: AC-002 permission enable/disable flow is visible and recoverable
+      - manual: AC-009 offline capture and retry upload behavior is observable in integration status
+      - manual: AC-010 key setup actions are reachable in three taps
+    risk_flags:
+      - none
+    done_when:
+      - Mobile onboarding and capture flows validate end-to-end
+      - Known mobile foundation issues are documented for next macro
+      - Meets AC-001, AC-002, AC-009, and AC-010 references
+    context_window: Needs working outputs from T-022 and T-023 on a real Android environment.
+
+  # UI/UX Refinement
+  - id: T-UI-POLISH
+    status: not-started
+    type: feat
+    title: UI/UX refinement pass — premium design quality across all mobile screens
+    depends_on: ["T-024"]
+    goal: >
+      Apply a comprehensive UI/UX refinement pass across all mobile screens to achieve
+      premium, Big-Tech-quality design. Consolidate the design system into a shared
+      theme module, add polished loading states, empty states, error states, micro-animations,
+      responsive typography, consistent spacing, and haptic feedback where appropriate.
+    non_goals:
+      - Full redesign of existing flows
+      - Custom illustration assets
+      - iOS-specific design language
+      - Complex animation libraries (Reanimated only if already installed)
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - mobile/src/theme/colors.ts
+      - mobile/src/theme/spacing.ts
+      - mobile/src/theme/typography.ts
+      - mobile/src/components/ui/
+    acceptance_checks:
+      - manual: All screens use shared theme tokens — no hardcoded color/spacing values
+      - manual: Every screen has proper loading, empty, and error states
+      - manual: Tab bar, headers, and recurring UI elements are visually consistent
+      - manual: Font sizes and weights follow a clear typographic scale
+    risk_flags: []
+    done_when:
+      - Shared theme module is created and used across all screens
+      - Loading, empty, and error states exist for every data-driven screen
+      - Visual consistency across auth, onboarding, and main tab flows
+      - No raw hardcoded colors remain outside theme module
+    context_window: Requires all mobile screens from T-022 through T-024 to be complete.
+
+  # MACRO-007 Mobile Core Screens
+  - id: T-025
+    status: completed
+    type: feat
+    review_outcome: PASS
+    review_notes: >
+      RE-REVIEW PASS. All 11 fixes confirmed:
+      (1) NotificationSettingsResponse — fields match backend exactly (lowBalanceEnabled,
+      largeTransactionEnabled, billReminderEnabled, updatedAtUtc, userId; no phantom fields).
+      (2) GoalDto — matches GoalResponse exactly (id, createdByUserId, title, description,
+      targetAmount, currency, deadline, status, createdAtUtc, updatedAtUtc).
+      (3) GetGoalsResponse — totalCount+items matching backend; no stray GoalDto[] list.
+      (4) goalsApiClient.archive — uses axiosInstance.delete (HTTP DELETE); confirmed against
+      [HttpDelete("{id:guid}/archive")] in GoalsController.cs.
+      (5) CreateGoalRequest — uses title:string; matches backend CreateGoalRequest.Title.
+      (6) GetCashFlowResponse — all 10 fields match backend GetCashFlowResponse exactly.
+      (7) RefreshResponse — interface added and authApiClient.refresh typed correctly.
+      (8) TransactionItem — removed from api.ts.
+      (9) onError — Alert.alert handler present on category useMutation.
+      (10) Sort comparator — (a.userId===currentUserId?-1:0)-(b.userId===currentUserId?-1:0)
+      is correct; current user sorted first in PartnerBreakdownRow.
+      (11) 401 handler — try/finally present; isHandling401 reset unconditionally.
+      No new blockers or majors found. Safe to proceed to T-026.
+    title: Mobile dashboard and transactions screens
+    depends_on: ["T-024", "T-012"]
+    goal: Implement dashboard and transaction list/category screens using backend aggregates and transaction APIs.
+    non_goals:
+      - Advanced charting package integration
+      - Desktop web experience
+      - Budget recommendation assistant
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - mobile/app/(main)/dashboard/
+      - mobile/src/modules/transactions/
+      - mobile/src/state/dashboardStore.ts
+    acceptance_checks:
+      - manual: AC-004 dashboard displays net worth, per-user balances, and shared expenses
+      - manual: AC-003 transaction list reflects ingested and categorized events
+      - manual: AC-010 dashboard open and transaction drill-down stay within usability tap targets
+    risk_flags:
+      - none
+    done_when:
+      - Dashboard and transaction views render backend data correctly
+      - Category updates from mobile are persisted and reflected
+      - Meets AC-004 and AC-003 references
+    context_window: Requires mobile foundation and backend dashboard/transaction checkpoints completed.
+
+  - id: T-026
+    status: completed
+    type: feat
+    title: Mobile goals management screens
+    depends_on: ["T-024", "T-016"]
+    goal: Build create, edit, archive, and progress views for goals in mobile app.
+    non_goals:
+      - Social goal sharing
+      - Goal templates marketplace
+      - Gamified streaks
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - mobile/app/(main)/goals/
+      - mobile/src/modules/goals/
+      - mobile/src/components/goals/
+    acceptance_checks:
+      - manual: AC-005 create/edit/archive goal operations work from mobile app
+      - manual: AC-010 goal creation flow remains within usability tap target
+    risk_flags:
+      - none
+    done_when:
+      - Goal lifecycle screens are functional with backend sync
+      - Progress indicators match backend computations
+      - Meets AC-005 references
+    context_window: Needs mobile foundation from T-024 and goals/cashflow backend contracts from T-016.
+
+  - id: T-027
+    status: completed
+    type: feat
+    title: Mobile cashflow, alert settings screens, and FCM device token registration
+    depends_on: ["T-024", "T-020"]
+    goal: Deliver mobile cashflow horizon views and alert settings controls with FCM device token registration, including full Firebase SDK integration via google-services.json and Expo notification plugin.
+    non_goals:
+      - Push inbox history timeline
+      - AI-based cashflow coaching
+      - Wearable notifications
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - mobile/app/(main)/cashflow/
+      - mobile/app/(main)/settings/
+      - mobile/google-services.json # must be obtained from Firebase Console and NOT committed to repo; add to .gitignore; document in mobile/README.md
+      - mobile/google-services.json.example # placeholder with structure but no real credentials
+      - mobile/src/modules/cashflow/
+      - mobile/src/modules/notifications/
+      - mobile/src/services/pushTokenService.ts # requests FCM permission, obtains Expo/FCM token, POSTs to /devices/token
+      - mobile/app.json # must include expo-notifications plugin entry with appropriate Android permissions
+    acceptance_checks:
+      - manual: AC-006 cashflow screens show both 30-day and 90-day horizons
+      - manual: AC-007 alert settings map to backend notification policies and device token registration
+      - manual: AC-007 FCM device token obtained from expo-notifications and registered to backend /devices/token
+      - manual: AC-007 google-services.json is in place (not committed) and Firebase can be reached from test device
+      - manual: AC-010 open projection and alerts settings within tap-count target
+    risk_flags:
+      - security
+    done_when:
+      - Cashflow and alert settings screens are operational
+      - FCM device token registration flow from mobile is stable using expo-notifications
+      - google-services.json.example documents required structure; real file added to .gitignore
+      - app.json expo-notifications plugin entry is present
+      - Meets AC-006 and AC-007 references
+    context_window: Depends on alerts backend checkpoint and mobile foundation state handling. Firebase project must already exist; google-services.json from Firebase Console must be in mobile/ (gitignored) for push to work on real device.
+
+  - id: T-028
+    status: completed
+    type: test
+    review_outcome: PASS
+    review_notes: >
+      End-to-end typing from mobile to backend passes.
+      - Types matching backend contracts: Auth, Couple, Dashboard, Transactions, Goals, CashFlow, NotificationSettings.
+      - No TS errors on client app after syntax fix.
+      - expo-notifications plugin is injected correctly.
+      - FCM token service configured to call backend securely.
+      - Back-end tests consistently passing (218 out of 218).
+    title: Mobile core screens checkpoint and usability validation
+    depends_on: ["T-025", "T-026", "T-027"]
+    goal: Validate end-to-end mobile core screens before final integration and deploy tasks.
+    non_goals:
+      - Production release publishing
+      - CI/CD pipeline hardening
+      - Post-launch analytics dashboard
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - mobile/tests/
+      - mobile/app/(main)/
+    acceptance_checks:
+      - manual: AC-004, AC-005, and AC-006 workflows complete successfully from mobile home navigation
+      - manual: AC-007 alerts can be configured and received after trigger simulation
+      - manual: AC-010 three-tap walkthrough passes for connect account, create goal, and open projections
+    risk_flags:
+      - none
+    done_when:
+      - Cross-screen mobile walkthrough succeeds for core scenarios
+      - Usability and performance observations are documented
+      - Meets AC-004, AC-005, AC-006, AC-007, and AC-010 references
+    context_window: Requires all mobile core screen features implemented and connected to backend.
+
+  # MACRO-008 Integration & Deploy
+  - id: T-029
+    status: completed
+    type: chore
+    review_outcome: PASS
+    review_notes: >
+      PASS WITH NOTES. No blockers or majors found. All constraints verified:
+      (1) WebApplicationFactory<Program> + SQLite in-memory used correctly with keepalive connection
+      pattern for shared-cache datasource. (2) Guid-based emails prevent test conflicts. (3) Seed script
+      has no hardcoded API tokens or banking credentials; $password="PilotPass123!" is a known-demo
+      seed credential (acceptable for pilot throwaway data, not a banking secret). (4) Manual walkthrough
+      covers all 10 ACs with checkbox steps, expected results, and sign-off table. (5) PATCH /transactions/{id}/goal
+      and GET /couples/me endpoints verified to exist in production controllers. Minor notes:
+      (a) DashboardDto.PartnerBreakdown typed as List<object> — no assertions possible on breakdown;
+      (b) AC-006 cash flow not covered in automated E2E (manual only); (c) goal progress after
+      transaction link not verified in step 9; (d) device token in seed uses ExponentPushToken format
+      which is Expo push proxy format — backend tolerance depends on validation in DevicesController.
+      Safe to proceed to T-030.
+    title: End-to-end integration harness and pilot seed scenarios
+    depends_on: ["T-028"]
+    goal: Prepare repeatable seeded scenarios to validate full backend-mobile flow for pilot couples.
+    non_goals:
+      - Synthetic scale testing for thousands of users
+      - Production analytics warehouse
+      - Non-Android client setup
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - backend/tests/CoupleSync.E2ETests/
+      - mobile/tests/e2e/
+      - scripts/pilot-seed/
+    acceptance_checks:
+      - manual: AC-001 through AC-010 core user journeys run using seeded pilot data
+      - manual: AC-003 and AC-007 integrated ingest-to-alert pipeline works end-to-end
+    risk_flags:
+      - none
+    done_when:
+      - Seed data and integration harness are executable
+      - End-to-end scenario script is documented for pilot validation
+      - Meets AC-001 to AC-010 references
+    context_window: Uses all prior macro outputs to construct repeatable integrated validation scenarios.
+
+  - id: T-030
+    status: completed
+    type: docs
+    title: Pilot deployment runbook including Firebase project setup, backend, DB, and Android distribution
+    depends_on: ["T-029"]
+    goal: Document and verify repeatable deployment steps for pilot environment including Firebase project creation, backend deployment, database setup, and internal Android app distribution.
+    non_goals:
+      - Multi-region failover architecture
+      - Fully automated enterprise release train
+      - iOS TestFlight process
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+    files_expected:
+      - docs/deployment/pilot-runbook.md # must include Firebase project creation section
+      - backend/README.md
+      - mobile/README.md
+    acceptance_checks:
+      - manual: AC-012 runbook contains Section Firebase Setup covering create Firebase project, register Android app, download google-services.json, generate Firebase Admin SDK service account JSON for backend
+      - manual: AC-012 runbook covers backend deployment, PostgreSQL setup, env secrets (JWT__SECRET, DATABASE_URL, FIREBASE_CREDENTIAL_JSON, FIREBASE_PROJECT_ID), and APK/Play Internal Testing distribution
+      - manual: AC-012 runbook explicitly states google-services.json and Firebase service account JSON are secret artifacts not committed to repo
+      - manual: AC-010 deployment notes include baseline device and performance validation steps
+    risk_flags:
+      - security
+    done_when:
+      - Deployment runbook is complete and executable by a team member from zero
+      - Firebase project setup section is present with step-by-step instructions
+      - Environment variable and secret handling instructions are explicit for all required secrets
+      - All secret files listed as gitignored artifacts
+      - Meets AC-012 references
+    context_window: Requires validated integrated system behavior from T-029 before documenting deployment. Runbook must be self-contained enough for a new engineer to deploy from scratch.
+
+  - id: T-031
+    status: completed
+    type: docs
+    title: AI workflow artifact consistency and traceability update
+    depends_on: ["T-030"]
+    goal: Ensure session artifacts remain consistent and traceable from tasks to acceptance and implementation outcomes.
+    non_goals:
+      - Rewriting historical sessions
+      - Creating extra process documents outside session scope
+      - Changing workflow contract schema
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/tasks.yaml
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/status.json
+    files_expected:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/report.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/status.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/tasks.yaml
+    acceptance_checks:
+      - manual: AC-011 session artifacts (spec, acceptance, architecture, tasks, status, report) are present and consistent
+      - manual: AC-012 report links deployment runbook and validation evidence
+    risk_flags:
+      - none
+    done_when:
+      - Artifact traceability is complete for the session
+      - Report and status references align with implemented increments
+      - Meets AC-011 references
+    context_window: Needs deployment docs and integrated test evidence from T-029 and T-030.
+
+  - id: T-032
+    status: completed
+    type: test
+    title: Final pilot readiness gate and release checklist
+    depends_on: ["T-031"]
+    goal: Execute final validation gate for pilot release readiness with explicit acceptance and security checklist signoff.
+    non_goals:
+      - Feature expansion beyond V1 scope
+      - Post-release roadmap planning
+      - Marketing launch activities
+    context_files:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/spec.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/acceptance.json
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/architecture.md
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/tasks.yaml
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/status.json
+    files_expected:
+      - .agents-work/2026-04-13_couplesync-ai-driven-bootstrap/report.md
+      - docs/deployment/pilot-runbook.md
+    acceptance_checks:
+      - manual: AC-001 through AC-012 final checklist is explicitly marked pass or fail with evidence
+      - manual: AC-008 and AC-009 security-sensitive flows are revalidated before pilot handoff
+      - manual: AC-011 final artifact set is complete for session closure
+    risk_flags:
+      - security
+    done_when:
+      - Full acceptance checklist has evidence and signoff notes
+      - Outstanding critical blockers are zero for pilot scope
+      - Meets AC-001 through AC-012 references
+    context_window: Requires all macro checkpoints complete and deployment/artifact docs finalized for release decision.
+

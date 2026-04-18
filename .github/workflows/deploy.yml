@@ -1,0 +1,107 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    # NOTE: workflow_dispatch can be triggered from any branch.
+    # This is intentional as an escape hatch for the small pilot team.
+    # The deploy always uses the SHA of the triggering branch.
+
+# OIDC token required for azure/login; packages:write required for GHCR push
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+
+env:
+  AZURE_RESOURCE_GROUP: couplesync-rg
+  AZURE_CONTAINER_APP_NAME: couplesync-api
+  AZURE_CONTAINER_APP_ENV: couplesync-env
+
+jobs:
+  deploy:
+    name: Build, Push & Deploy
+    runs-on: ubuntu-latest
+
+    # Only run when triggered manually, or when the CI workflow succeeded
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Use the SHA that triggered the CI run; fall back to current SHA for
+          # manual workflow_dispatch runs
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # Store the exact commit SHA we're deploying so both Docker tag and ACA
+      # update steps agree on the same value regardless of trigger source
+      - name: Set deployment SHA
+        run: |
+          DEPLOY_SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "DEPLOY_SHA=${DEPLOY_SHA}" >> $GITHUB_ENV
+
+      # Lowercase the repository slug so it is a valid Docker image name
+      - name: Compute image name
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/${REPO_LC}/api" >> $GITHUB_ENV
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}:sha-${{ env.DEPLOY_SHA }}
+
+      # Federated/OIDC login — requires a GitHub Actions federated credential
+      # configured on the Azure AD app registration (no client secret stored)
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update Azure Container App revision
+        run: |
+          az containerapp update \
+            --name "${{ env.AZURE_CONTAINER_APP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --image "${{ env.IMAGE }}:sha-${{ env.DEPLOY_SHA }}"
+
+      # Retrieve the public FQDN from ACA and poll the health endpoint until it
+      # returns HTTP 200, or fail after 5 minutes (20 × 15s)
+      - name: Wait for health endpoint
+        run: |
+          FQDN=$(az containerapp show \
+            --name "${{ env.AZURE_CONTAINER_APP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" \
+            --output tsv)
+          URL="https://${FQDN}/api/v1/health"
+          echo "Polling: ${URL}"
+          for i in $(seq 1 20); do
+            STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" "${URL}")
+            if [ "${STATUS}" = "200" ]; then
+              echo "Health check passed (HTTP ${STATUS}) on attempt ${i}"
+              exit 0
+            fi
+            echo "Attempt ${i}: HTTP ${STATUS} — retrying in 15s..."
+            sleep 15
+          done
+          echo "Health check failed after 20 attempts (300 s total)"
+          exit 1
