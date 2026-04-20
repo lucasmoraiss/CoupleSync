@@ -14,4 +14,9 @@ public interface IStorageAdapter
     /// Downloads content from the given storage path. Caller is responsible for disposing the stream.
     /// </summary>
     Task<Stream> DownloadAsync(string storagePath, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes the file at the given storage path. No-op if the file does not exist.
+    /// </summary>
+    Task DeleteAsync(string storagePath, CancellationToken ct);
 }

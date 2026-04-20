@@ -59,6 +59,7 @@ public sealed class OcrBackgroundJob : BackgroundService
         var repo = scope.ServiceProvider.GetRequiredService<IImportJobRepository>();
         var ocrProvider = scope.ServiceProvider.GetRequiredService<IOcrProvider>();
         var ocrProcessingService = scope.ServiceProvider.GetRequiredService<OcrProcessingService>();
+        var storageAdapter = scope.ServiceProvider.GetRequiredService<IStorageAdapter>();
         var dateTimeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
 
         var pendingJobs = await repo.GetPendingAsync(5, ct);
@@ -98,6 +99,25 @@ public sealed class OcrBackgroundJob : BackgroundService
                 job.MarkFailed("processing_error", "Internal processing error.", dateTimeProvider.UtcNow);
                 await repo.SaveChangesAsync(ct);
             }
+            finally
+            {
+                // Delete the uploaded file regardless of outcome — the PDF is only needed
+                // during parsing. Results are persisted in ImportJob.OcrResultJson.
+                // This is a best-effort operation; failure to delete must not affect the job result.
+                await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
+            }
+        }
+    }
+
+    private async Task TryDeleteFileAsync(IStorageAdapter storage, string storagePath, Guid jobId, CancellationToken ct)
+    {
+        try
+        {
+            await storage.DeleteAsync(storagePath, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to delete uploaded file for job {JobId} at path '{Path}'. Manual cleanup may be required.", jobId, storagePath);
         }
     }
 }

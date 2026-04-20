@@ -369,6 +369,9 @@ internal sealed class OcrIntegrationFakeStorageAdapter : IStorageAdapter
 
     public Task<Stream> DownloadAsync(string storagePath, CancellationToken ct)
         => Task.FromResult<Stream>(new MemoryStream());
+
+    public Task DeleteAsync(string storagePath, CancellationToken ct)
+        => Task.CompletedTask;
 }
 
 internal sealed class OcrIntegrationFakeOcrProvider : IOcrProvider

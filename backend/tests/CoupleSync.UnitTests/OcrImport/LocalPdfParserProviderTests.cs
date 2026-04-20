@@ -139,6 +139,9 @@ public sealed class LocalPdfParserProviderTests
 
         public Task<Stream> DownloadAsync(string storagePath, CancellationToken ct)
             => Task.FromResult<Stream>(new MemoryStream());
+
+        public Task DeleteAsync(string storagePath, CancellationToken ct)
+            => Task.CompletedTask;
     }
 
     private sealed class FakeExtractor : IPdfTextExtractor

@@ -69,4 +69,26 @@ public sealed class LocalFileStorageAdapter : IStorageAdapter
         Stream stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81920, useAsync: true);
         return Task.FromResult(stream);
     }
+
+    public Task DeleteAsync(string storagePath, CancellationToken ct)
+    {
+        if (Path.IsPathRooted(storagePath))
+            throw new UnauthorizedAccessException("Access to the requested path is denied.");
+
+        var suffix = storagePath.StartsWith("uploads/", StringComparison.Ordinal)
+            ? storagePath["uploads/".Length..]
+            : storagePath;
+
+        var fullPath = Path.Combine(_basePath, suffix);
+
+        var canonicalBase = Path.GetFullPath(_basePath);
+        var canonicalFull = Path.GetFullPath(fullPath);
+        if (!canonicalFull.StartsWith(canonicalBase + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("Access to the requested path is denied.");
+
+        if (File.Exists(fullPath))
+            File.Delete(fullPath);
+
+        return Task.CompletedTask;
+    }
 }
