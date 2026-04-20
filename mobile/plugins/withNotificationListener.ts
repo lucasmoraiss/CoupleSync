@@ -5,7 +5,7 @@ import {
   withAndroidManifest,
   withMainApplication,
   AndroidConfig,
-} from '@expo/config-plugins';
+} from 'expo/config-plugins';
 
 const SERVICE_CLASS = 'com.couplesync.app.NotificationCaptureService';
 const BIND_PERMISSION = 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE';

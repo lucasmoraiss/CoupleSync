@@ -5,13 +5,17 @@
     "scheme": "couplesync",
     "version": "1.0.0",
     "orientation": "portrait",
-    "platforms": ["android"],
-    "newArchEnabled": true,
+    "platforms": [
+      "android"
+    ],
+    "icon": "./assets/icon.png",
+    "newArchEnabled": false,
     "android": {
       "package": "com.couplesync.app",
+      "icon": "./assets/icon.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0F172A"
       }
     },
     "plugins": [
@@ -22,10 +26,16 @@
         }
       ],
       "./plugins/withNotificationListener",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6cc9e838-76ac-43e0-8448-be42d0345570"
+      }
     }
   }
 }

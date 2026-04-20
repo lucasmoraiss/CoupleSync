@@ -4,8 +4,7 @@
 // and registers NotificationBridgePackage in MainApplication.kt during expo prebuild.
 'use strict';
 
-const { withAndroidManifest, withMainApplication } = require('@expo/config-plugins');
-const { AndroidConfig } = require('@expo/config-plugins');
+const { withAndroidManifest, withMainApplication, AndroidConfig } = require('expo/config-plugins');
 
 const SERVICE_CLASS = 'com.couplesync.app.NotificationCaptureService';
 const BIND_PERMISSION = 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE';
