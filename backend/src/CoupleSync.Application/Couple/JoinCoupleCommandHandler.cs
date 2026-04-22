@@ -7,11 +7,16 @@ public sealed class JoinCoupleCommandHandler
 {
     private readonly ICoupleRepository _coupleRepository;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IJwtTokenService _jwtTokenService;
 
-    public JoinCoupleCommandHandler(ICoupleRepository coupleRepository, IDateTimeProvider dateTimeProvider)
+    public JoinCoupleCommandHandler(
+        ICoupleRepository coupleRepository,
+        IDateTimeProvider dateTimeProvider,
+        IJwtTokenService jwtTokenService)
     {
         _coupleRepository = coupleRepository;
         _dateTimeProvider = dateTimeProvider;
+        _jwtTokenService = jwtTokenService;
     }
 
     public async Task<JoinCoupleResult> HandleAsync(JoinCoupleCommand command, CancellationToken cancellationToken)
@@ -49,6 +54,10 @@ public sealed class JoinCoupleCommandHandler
             .Select(member => new CoupleMemberDto(member.Id, member.Name, member.Email))
             .ToArray();
 
-        return new JoinCoupleResult(couple.Id, members);
+        // Regenerate JWT so the user's couple_id claim is populated immediately.
+        // Without this, the app stays in a "no couple" state until re-login.
+        var accessToken = _jwtTokenService.GenerateAccessToken(user);
+
+        return new JoinCoupleResult(couple.Id, members, accessToken);
     }
 }

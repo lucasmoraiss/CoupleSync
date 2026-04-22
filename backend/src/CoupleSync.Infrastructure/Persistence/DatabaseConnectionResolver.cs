@@ -39,12 +39,19 @@ public static class DatabaseConnectionResolver
             throw new InvalidOperationException("Database connection string is missing. Set DATABASE_URL or ConnectionStrings:DefaultConnection.");
         }
 
-        return fallback;
+        return ParseDatabaseUrl(fallback);
     }
 
     public static string ParseDatabaseUrl(string databaseUrl)
     {
         if (databaseUrl.StartsWith("Host=", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApplyNeonSettingsIfNeeded(databaseUrl);
+        }
+
+        // Npgsql key=value connection strings commonly start with one of these keys.
+        // If the input is clearly key=value format, hand it to Npgsql directly.
+        if (LooksLikeNpgsqlKeyValue(databaseUrl))
         {
             return ApplyNeonSettingsIfNeeded(databaseUrl);
         }
@@ -90,6 +97,17 @@ public static class DatabaseConnectionResolver
 
     private static bool IsNeonHost(string? host) =>
         host != null && host.Contains("neon.tech", StringComparison.OrdinalIgnoreCase);
+
+    private static bool LooksLikeNpgsqlKeyValue(string value)
+    {
+        // Common Npgsql key=value prefixes (case-insensitive) that are NOT valid URL schemes.
+        ReadOnlySpan<string> prefixes = new[] { "Host=", "Server=", "Database=", "User ID=", "Username=", "Port=" };
+        foreach (var p in prefixes)
+        {
+            if (value.StartsWith(p, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
 
     private static void ApplyNeonSettings(NpgsqlConnectionStringBuilder builder)
     {

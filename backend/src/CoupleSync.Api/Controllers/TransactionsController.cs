@@ -23,15 +23,18 @@ public sealed class TransactionsController : ControllerBase
     private readonly GetTransactionsQueryHandler _getTransactionsHandler;
     private readonly UpdateTransactionCategoryCommandHandler _updateCategoryHandler;
     private readonly LinkTransactionToGoalCommandHandler _linkToGoalHandler;
+    private readonly CreateManualTransactionCommandHandler _createManualHandler;
 
     public TransactionsController(
         GetTransactionsQueryHandler getTransactionsHandler,
         UpdateTransactionCategoryCommandHandler updateCategoryHandler,
-        LinkTransactionToGoalCommandHandler linkToGoalHandler)
+        LinkTransactionToGoalCommandHandler linkToGoalHandler,
+        CreateManualTransactionCommandHandler createManualHandler)
     {
         _getTransactionsHandler = getTransactionsHandler;
         _updateCategoryHandler = updateCategoryHandler;
         _linkToGoalHandler = linkToGoalHandler;
+        _createManualHandler = createManualHandler;
     }
 
     [HttpGet]
@@ -95,6 +98,41 @@ public sealed class TransactionsController : ControllerBase
             result.EventTimestampUtc, result.Description, result.Merchant, result.Category, result.CreatedAtUtc));
     }
 
+    /// <summary>
+    /// Creates a transaction manually entered by the user (no bank notification / no OCR).
+    /// Useful when the user wants to record an expense on the fly.
+    /// </summary>
+    [HttpPost]
+    [ProducesResponseType(typeof(TransactionResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<TransactionResponse>> CreateManual(
+        [FromBody] CreateManualTransactionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var coupleId = GetAuthenticatedCoupleId();
+        var userId = GetAuthenticatedUserId();
+
+        var currency = string.IsNullOrWhiteSpace(request.Currency) ? "BRL" : request.Currency;
+        var eventTs = request.EventTimestampUtc ?? DateTime.UtcNow;
+        if (eventTs.Kind == DateTimeKind.Unspecified)
+            eventTs = DateTime.SpecifyKind(eventTs, DateTimeKind.Utc);
+
+        var transaction = await _createManualHandler.HandleAsync(
+            new CreateManualTransactionCommand(
+                coupleId, userId, request.Amount, currency, eventTs,
+                request.Description, request.Merchant, request.Category),
+            cancellationToken);
+
+        var response = new TransactionResponse(
+            transaction.Id, transaction.UserId, transaction.Bank, transaction.Amount, transaction.Currency,
+            transaction.EventTimestampUtc, transaction.Description, transaction.Merchant, transaction.Category,
+            transaction.CreatedAtUtc);
+
+        return StatusCode(StatusCodes.Status201Created, response);
+    }
+
     [HttpPatch("{id:guid}/goal")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -121,5 +159,13 @@ public sealed class TransactionsController : ControllerBase
         if (!Guid.TryParse(claimValue, out var coupleId))
             throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired couple context.");
         return coupleId;
+    }
+
+    private Guid GetAuthenticatedUserId()
+    {
+        var claimValue = User.FindFirstValue("user_id");
+        if (!Guid.TryParse(claimValue, out var userId))
+            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired session.");
+        return userId;
     }
 }

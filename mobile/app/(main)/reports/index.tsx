@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { PieChart, BarChart } from 'react-native-gifted-charts';
 import { reportsApiClient } from '@/services/apiClient';
 import { colors, spacing, typography, borderRadius } from '@/theme';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const PERIOD_OPTIONS = [
   { label: '3m', months: 3 },
@@ -27,6 +28,14 @@ function formatBRL(value: number): string {
 }
 
 export default function ReportsScreen() {
+  return (
+    <ErrorBoundary fallbackTitle="Erro ao carregar Relatórios">
+      <ReportsScreenInner />
+    </ErrorBoundary>
+  );
+}
+
+function ReportsScreenInner() {
   const [period, setPeriod] = useState<Period>(6);
 
   const {
@@ -55,21 +64,26 @@ export default function ReportsScreen() {
   const hasError = spendingError || trendsError;
 
   const pieData =
-    spendingData?.categories.map((c) => ({
-      value: c.total,
-      color: c.color,
-      text: `${c.percentage.toFixed(0)}%`,
-      label: c.name,
-      focused: false,
-    })) ?? [];
+    spendingData?.categories
+      // Defensive: gifted-charts crashes when `value` is 0, negative or `color` is missing.
+      ?.filter((c) => typeof c.total === 'number' && c.total > 0 && typeof c.color === 'string' && c.color.length > 0)
+      .map((c) => ({
+        value: c.total,
+        color: c.color,
+        text: `${(c.percentage ?? 0).toFixed(0)}%`,
+        label: c.name,
+        focused: false,
+      })) ?? [];
 
   const barData =
-    trendsData?.months.map((m) => ({
-      value: m.expense,
-      label: m.month.slice(5), // "MM" portion
-      frontColor: colors.primary,
-      topLabelComponent: () => null,
-    })) ?? [];
+    trendsData?.months
+      ?.filter((m) => typeof m.expense === 'number' && !Number.isNaN(m.expense))
+      .map((m) => ({
+        value: Math.max(0, m.expense),
+        label: (m.month ?? '').slice(5), // "MM" portion
+        frontColor: colors.primary,
+        topLabelComponent: () => null,
+      })) ?? [];
 
   const hasSpendingData = pieData.length > 0 && pieData.some((d) => d.value > 0);
   const hasTrendsData = barData.length > 0 && barData.some((d) => d.value > 0);

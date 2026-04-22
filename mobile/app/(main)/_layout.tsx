@@ -90,6 +90,7 @@ export default function MainLayout() {
       <Tabs.Screen name="settings/alerts" options={{ href: null }} />
       <Tabs.Screen name="ocr-upload" options={{ href: null }} />
       <Tabs.Screen name="ocr-review" options={{ href: null }} />
+      <Tabs.Screen name="transactions/new" options={{ href: null }} />
     </Tabs>
   );
 }

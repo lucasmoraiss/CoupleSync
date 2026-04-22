@@ -25,7 +25,8 @@ export default function CoupleSetupScreen() {
     setLoading(true);
     try {
       const { data } = await coupleApiClient.create();
-      await useSessionStore.getState().setCoupleId(data.coupleId);
+      // Persist new JWT (backend returns a fresh token containing couple_id claim).
+      await useSessionStore.getState().setAccessTokenAndCouple(data.accessToken, data.coupleId);
       setCreatedCode(data.joinCode);
       setMode('create');
     } catch (err: any) {
@@ -47,7 +48,8 @@ export default function CoupleSetupScreen() {
     setLoading(true);
     try {
       const { data } = await coupleApiClient.join({ joinCode: joinCode.trim().toUpperCase() });
-      await useSessionStore.getState().setCoupleId(data.coupleId);
+      // Persist new JWT so the next requests send couple_id in the claim.
+      await useSessionStore.getState().setAccessTokenAndCouple(data.accessToken, data.coupleId);
       router.replace('/' as any);
     } catch (err: any) {
       const status = err?.response?.status;

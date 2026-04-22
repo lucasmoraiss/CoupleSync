@@ -1,3 +1,3 @@
 namespace CoupleSync.Api.Contracts.Couple;
 
-public sealed record CreateCoupleResponse(Guid CoupleId, string JoinCode);
+public sealed record CreateCoupleResponse(Guid CoupleId, string JoinCode, string AccessToken);

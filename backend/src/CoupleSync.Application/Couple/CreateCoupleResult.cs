@@ -1,3 +1,3 @@
 namespace CoupleSync.Application.Couples;
 
-public sealed record CreateCoupleResult(Guid CoupleId, string JoinCode);
+public sealed record CreateCoupleResult(Guid CoupleId, string JoinCode, string AccessToken);

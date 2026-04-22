@@ -11,15 +11,18 @@ public sealed class CreateCoupleCommandHandler
     private readonly ICoupleRepository _coupleRepository;
     private readonly ICoupleJoinCodeGenerator _joinCodeGenerator;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IJwtTokenService _jwtTokenService;
 
     public CreateCoupleCommandHandler(
         ICoupleRepository coupleRepository,
         ICoupleJoinCodeGenerator joinCodeGenerator,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        IJwtTokenService jwtTokenService)
     {
         _coupleRepository = coupleRepository;
         _joinCodeGenerator = joinCodeGenerator;
         _dateTimeProvider = dateTimeProvider;
+        _jwtTokenService = jwtTokenService;
     }
 
     public async Task<CreateCoupleResult> HandleAsync(CreateCoupleCommand command, CancellationToken cancellationToken)
@@ -44,7 +47,12 @@ public sealed class CreateCoupleCommandHandler
         await _coupleRepository.AddCoupleAsync(couple, cancellationToken);
         await _coupleRepository.SaveChangesAsync(cancellationToken);
 
-        return new CreateCoupleResult(couple.Id, couple.JoinCode);
+        // Regenerate JWT so the user's couple_id claim reflects the new couple membership.
+        // Without this, subsequent authenticated requests would fail COUPLE_REQUIRED checks
+        // until the user logs in again.
+        var accessToken = _jwtTokenService.GenerateAccessToken(user);
+
+        return new CreateCoupleResult(couple.Id, couple.JoinCode, accessToken);
     }
 
     private async Task<string> GenerateUniqueJoinCodeAsync(CancellationToken cancellationToken)

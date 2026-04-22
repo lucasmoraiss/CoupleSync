@@ -229,6 +229,14 @@ export default function TransactionsScreen() {
           )}
           <TouchableOpacity
             style={styles.importBtn}
+            onPress={() => router.push('/(main)/transactions/new' as any)}
+            accessibilityLabel="Adicionar transação manualmente"
+            activeOpacity={0.8}
+          >
+            <Ionicons name="add" size={22} color={TEXT} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.importBtn}
             onPress={() => router.push('/(main)/ocr-upload' as any)}
             accessibilityLabel="Importar extrato via OCR"
             activeOpacity={0.8}

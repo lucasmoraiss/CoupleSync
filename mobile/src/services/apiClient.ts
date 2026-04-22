@@ -177,7 +177,20 @@ export const transactionsApiClient = {
 
   updateCategory: (id: string, category: string): Promise<AxiosResponse<TransactionResponse>> =>
     axiosInstance.patch<TransactionResponse>(`/api/v1/transactions/${id}/category`, { category }),
+
+  /** Creates a transaction manually (without relying on OCR or push notifications). */
+  createManual: (data: CreateManualTransactionBody): Promise<AxiosResponse<TransactionResponse>> =>
+    axiosInstance.post<TransactionResponse>('/api/v1/transactions', data),
 };
+
+export interface CreateManualTransactionBody {
+  amount: number;
+  currency?: string;
+  eventTimestampUtc?: string;
+  description?: string;
+  merchant?: string;
+  category: string;
+}
 
 // --- Goals API ---
 interface CreateGoalRequest {

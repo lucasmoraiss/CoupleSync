@@ -15,6 +15,7 @@ export interface AuthResponse {
 export interface CreateCoupleResponse {
   readonly coupleId: string;
   readonly joinCode: string;
+  readonly accessToken: string;
 }
 
 export interface CoupleMemberResponse {
@@ -26,6 +27,7 @@ export interface CoupleMemberResponse {
 export interface JoinCoupleResponse {
   readonly coupleId: string;
   readonly members: readonly CoupleMemberResponse[];
+  readonly accessToken: string;
 }
 
 export interface GetCoupleMeResponse {
