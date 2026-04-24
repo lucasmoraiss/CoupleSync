@@ -1,0 +1,60 @@
+{
+  "acceptance_criteria": [
+    {
+      "id": "AC-001",
+      "description": "dotnet build completes with zero errors after test constructor fixes",
+      "verify": [
+        "cmd: cd backend && dotnet build --no-restore 2>&1 | Select-String -Pattern '\\berror\\b' -NotMatch"
+      ]
+    },
+    {
+      "id": "AC-002",
+      "description": "All unit tests pass, including CreateCoupleCommandHandlerTests and JoinCoupleCommandHandlerTests",
+      "verify": [
+        "cmd: cd backend && dotnet test --no-build 2>&1"
+      ]
+    },
+    {
+      "id": "AC-003",
+      "description": "Uploading a password-protected PDF via OCR upload shows the descriptive error message returned by the backend (HTTP 422) instead of the generic fallback",
+      "verify": [
+        "manual: open OCR upload screen → pick a password-protected PDF → confirm the displayed error text matches the backend OcrException message, not 'Falha ao enviar o arquivo. Tente novamente.'"
+      ]
+    },
+    {
+      "id": "AC-004",
+      "description": "Manual transaction entry button is visible in the Transactions screen and navigates correctly to the new transaction form",
+      "verify": [
+        "manual: open Transactions screen → locate the add-transaction button → tap it → confirm navigation to manual transaction form"
+      ]
+    },
+    {
+      "id": "AC-005",
+      "description": "App launches in Expo Go (dev) without a gradient-related crash or red error screen",
+      "verify": [
+        "manual: npx expo start → scan QR → app reaches home screen without exception"
+      ]
+    },
+    {
+      "id": "AC-006",
+      "description": "Reports tab does not crash in an EAS production build",
+      "verify": [
+        "manual: install EAS production APK → navigate to Reports tab → charts render without crash"
+      ]
+    },
+    {
+      "id": "AC-007",
+      "description": "All icons render correctly across all screens in an EAS production build",
+      "verify": [
+        "manual: install EAS production APK → navigate through all main screens → confirm no broken/missing icons"
+      ]
+    },
+    {
+      "id": "AC-008",
+      "description": "expo-linear-gradient is declared as a direct dependency in mobile/package.json",
+      "verify": [
+        "cmd: Select-String -Path mobile/package.json -Pattern 'expo-linear-gradient'"
+      ]
+    }
+  ]
+}

@@ -228,12 +228,13 @@ export default function TransactionsScreen() {
             <Text style={styles.headerCount}>{data.totalCount} no total</Text>
           )}
           <TouchableOpacity
-            style={styles.importBtn}
+            style={styles.addBtn}
             onPress={() => router.push('/(main)/transactions/new' as any)}
             accessibilityLabel="Adicionar transação manualmente"
             activeOpacity={0.8}
           >
-            <Ionicons name="add" size={22} color={TEXT} />
+            <Ionicons name="add" size={20} color="#fff" />
+            <Text style={styles.addBtnLabel}>Nova</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.importBtn}
@@ -318,6 +319,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: PRIMARY,
+    gap: 4,
+  },
+  addBtnLabel: { fontSize: 13, fontWeight: '600', color: '#fff' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadingText: { color: MUTED, marginTop: 12, fontSize: 14 },
   flatListContent: { paddingHorizontal: 16, paddingBottom: 24 },

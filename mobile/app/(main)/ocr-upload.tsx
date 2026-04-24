@@ -111,9 +111,13 @@ export default function OcrUploadScreen() {
         if (!isMounted.current) return;
         setState({ phase: 'polling', uploadId });
         pollStatus(uploadId);
-      } catch {
+      } catch (err: any) {
         if (isMounted.current) {
-          setState({ phase: 'error', message: 'Falha ao enviar o arquivo. Tente novamente.' });
+          const serverMessage = err?.response?.data?.message;
+          setState({
+            phase: 'error',
+            message: serverMessage || 'Falha ao enviar o arquivo. Tente novamente.',
+          });
         }
       }
     },

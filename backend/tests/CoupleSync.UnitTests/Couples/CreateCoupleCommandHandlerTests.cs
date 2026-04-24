@@ -15,7 +15,7 @@ public sealed class CreateCoupleCommandHandlerTests
     public async Task HandleAsync_WhenUserNotFound_ShouldThrowUnauthorized()
     {
         var repo = new FakeCoupleRepository();
-        var handler = new CreateCoupleCommandHandler(repo, new FixedJoinCodeGenerator("ABC123"), new FixedDateTimeProvider(FixedNow));
+        var handler = new CreateCoupleCommandHandler(repo, new FixedJoinCodeGenerator("ABC123"), new FixedDateTimeProvider(FixedNow), new StubJwtTokenService());
         var command = new CreateCoupleCommand(Guid.NewGuid());
 
         var ex = await Assert.ThrowsAsync<UnauthorizedException>(() => handler.HandleAsync(command, CancellationToken.None));
@@ -32,7 +32,7 @@ public sealed class CreateCoupleCommandHandlerTests
         repo.Users.Add(user);
         repo.Couples.Add(existingCouple);
 
-        var handler = new CreateCoupleCommandHandler(repo, new FixedJoinCodeGenerator("NEWCOD"), new FixedDateTimeProvider(FixedNow));
+        var handler = new CreateCoupleCommandHandler(repo, new FixedJoinCodeGenerator("NEWCOD"), new FixedDateTimeProvider(FixedNow), new StubJwtTokenService());
         var command = new CreateCoupleCommand(user.Id);
 
         var ex = await Assert.ThrowsAsync<ConflictException>(() => handler.HandleAsync(command, CancellationToken.None));
@@ -46,7 +46,7 @@ public sealed class CreateCoupleCommandHandlerTests
         var user = User.Create(EmailAddress.From("happy@example.com"), "Happy User", "hashed", FixedNow);
         repo.Users.Add(user);
 
-        var handler = new CreateCoupleCommandHandler(repo, new FixedJoinCodeGenerator("AB1234"), new FixedDateTimeProvider(FixedNow));
+        var handler = new CreateCoupleCommandHandler(repo, new FixedJoinCodeGenerator("AB1234"), new FixedDateTimeProvider(FixedNow), new StubJwtTokenService());
         var command = new CreateCoupleCommand(user.Id);
 
         var result = await handler.HandleAsync(command, CancellationToken.None);
@@ -68,7 +68,7 @@ public sealed class CreateCoupleCommandHandlerTests
         repo.Couples.Add(existingCouple);
 
         // Generator always returns the same code that already exists
-        var handler = new CreateCoupleCommandHandler(repo, new FixedJoinCodeGenerator("FIXED1"), new FixedDateTimeProvider(FixedNow));
+        var handler = new CreateCoupleCommandHandler(repo, new FixedJoinCodeGenerator("FIXED1"), new FixedDateTimeProvider(FixedNow), new StubJwtTokenService());
         var command = new CreateCoupleCommand(user.Id);
 
         var ex = await Assert.ThrowsAsync<AppException>(() => handler.HandleAsync(command, CancellationToken.None));

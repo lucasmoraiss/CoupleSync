@@ -1,0 +1,17 @@
+{
+  "session": "2026-04-23_critical-bugfixes-ci-ocr-prod",
+  "current_state": "DONE",
+  "last_update": "2026-04-23T12:30:00Z",
+  "assumptions": [
+    "BUG 5 (icons): @expo/vector-icons was already a direct dep at ~14.0.4 — no change needed.",
+    "BUG 3 (button): Added pill-shaped button with icon + 'Nova' label instead of FAB to stay within header layout.",
+    "expo-linear-gradient installed at SDK-52-pinned version ~14.0.2 via npx expo install."
+  ],
+  "known_issues": [],
+  "user_decisions": [],
+  "runtime_flags": {
+    "copilot_instructions_exists": true,
+    "copilot_checked_at": "2026-04-23T12:00:00Z"
+  },
+  "retry_counts": {}
+}

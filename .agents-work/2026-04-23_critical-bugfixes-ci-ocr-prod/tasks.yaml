@@ -1,0 +1,41 @@
+tasks:
+  - id: T-001
+    title: "Critical bugfixes: CI, OCR errors, gradient, prod discrepancies"
+    status: completed
+    goal: >
+      Fix five urgent defects in CoupleSync:
+      (1) Restore green CI by injecting StubJwtTokenService into CreateCoupleCommandHandlerTests and
+          JoinCoupleCommandHandlerTests constructors.
+      (2) Improve OCR error surfacing in ocr-upload.tsx so that backend 422 messages are forwarded
+          to the user instead of the generic fallback.
+      (3) Verify and improve manual transaction button visibility in transactions/index.tsx.
+      (4) Add expo-linear-gradient to mobile/package.json dependencies.
+      (5) Fix production build regressions — Reports tab crash (resolved by #4) and broken icons
+          (ensure @expo/vector-icons is a direct dependency).
+    files:
+      - backend/tests/CoupleSync.UnitTests/Couples/CreateCoupleCommandHandlerTests.cs
+      - backend/tests/CoupleSync.UnitTests/Couples/JoinCoupleCommandHandlerTests.cs
+      - mobile/app/(main)/ocr-upload.tsx
+      - mobile/app/(main)/transactions/index.tsx
+      - mobile/package.json
+    acceptance_checks:
+      - id: AC-001
+        verify: "cmd: cd backend && dotnet build --no-restore 2>&1 | Select-String -Pattern '\\berror\\b' -NotMatch"
+      - id: AC-002
+        verify: "cmd: cd backend && dotnet test --no-build 2>&1"
+      - id: AC-003
+        verify: "manual: upload password-protected PDF via OCR → UI shows backend error message, not generic fallback"
+      - id: AC-004
+        verify: "manual: open Transactions screen → add-transaction button visible → tapping navigates to form"
+      - id: AC-005
+        verify: "manual: launch in Expo Go → no gradient crash"
+      - id: AC-006
+        verify: "manual: EAS production APK → Reports tab loads without crash"
+      - id: AC-007
+        verify: "manual: EAS production APK → all icons visible across screens"
+      - id: AC-008
+        verify: "cmd: Select-String -Path mobile/package.json -Pattern 'expo-linear-gradient'"
+    constraints:
+      - Bug fixes only — no scope expansion
+      - All changes on main branch
+      - No new migrations or schema changes
