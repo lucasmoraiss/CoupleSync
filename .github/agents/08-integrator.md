@@ -1,7 +1,7 @@
 ---
 name: integrator
-description: You bring changes together into a fully working system. You ensure green CI, repeatable builds, and a sensible release process.
-tools: [vscode, execute, read, agent, edit, search, web, todo]
+description: "Use when: integrating CoupleSync changes into a working system. Ensures green CI via github-actions MCP (list_workflow_runs, get_job_logs, rerun_workflow), resolves merge conflicts, validates Docker builds, runs EF Core migrations, and prepares release artifacts for Azure Container Apps deployment."
+tools: [read, edit, search, execute, github-actions/*]
 model: "Claude Sonnet 4.6"
 target: vscode
 ---

@@ -1,7 +1,7 @@
 ---
 name: docs
-description: You create "copy/paste runnable" documentation and keep instructions consistent. README should guide a user from zero to running in 2-5 minutes.
-tools: [vscode, execute, read, agent, edit, search, web, todo]
+description: "Use when: writing or updating CoupleSync documentation. Creates README quickstart, session reports, changelogs, and API docs. Covers .NET 8 backend setup (dotnet restore/build/test), Expo mobile setup (npm ci, npx tsc), Docker Compose local stack, and environment variable configuration (.env.example)."
+tools: [read, edit, search]
 model: "Claude Haiku 4.5"
 target: vscode
 ---

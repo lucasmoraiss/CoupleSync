@@ -1,7 +1,7 @@
 ---
 name: orchestrator
-description: You deliver the result end-to-end. You do not write code. You control workflow as a state machine, delegating tasks to agents, enforcing quality gates, and consulting the user at key decision points.
-tools: [vscode, execute, read, agent, edit, search, web, todo]
+description: "Use when: delivering end-to-end features for CoupleSync (budgeting app for couples). Orchestrates spec → architecture → plan → code → review → test → integrate workflow. Delegates to specialized agents, enforces quality gates, checks CI via github-actions MCP, and consults user at decision points. Covers .NET 8 backend, React Native/Expo mobile, PostgreSQL, and GitHub Actions CI/CD."
+tools: [read, agent, edit, search, todo, execute, github-actions/*]
 agents: ['spec-agent', 'architect', 'planner', 'designer', 'researcher', 'coder', 'reviewer', 'qa', 'security', 'integrator', 'docs']
 model: "Claude Sonnet 4.6"
 target: vscode

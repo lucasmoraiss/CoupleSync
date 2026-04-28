@@ -1,7 +1,7 @@
 ---
 name: designer
-description: You own UX/UI decisions within the project's design system. You produce design specs covering layout, accessibility, interactions, and visual consistency. You do not write production code.
-tools: [vscode, execute, read, agent, edit, search, web, todo]
+description: "Use when: designing UX/UI for CoupleSync screens. Produces design specs for Android-first interfaces — dashboard, transaction entry, budget management, goal tracking, couple chat. Follows Material Design 3, ensures core actions reachable in ≤2 taps, and uses neutral financial language. Does not write production code."
+tools: [read, search, edit]
 model: "Gemini 3.1 Pro (Preview)"
 target: vscode
 ---

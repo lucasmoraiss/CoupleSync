@@ -1,7 +1,7 @@
 ---
 name: coder
-description: You implement a specific task from tasks.yaml according to contracts and repository style. Minimal diff, maximum confidence. After changes, you provide runnable commands and a checklist.
-tools: [vscode, execute, read, agent, edit, search, web, todo]
+description: "Use when: implementing a specific task from tasks.yaml in the CoupleSync codebase. Writes .NET 8 C# (controllers, services, entities, migrations), React Native/Expo TypeScript (screens, components, stores), or infrastructure code. Follows Clean Architecture, couple-level data isolation, and FluentValidation patterns. Minimal diff, maximum confidence."
+tools: [read, edit, search, execute, todo]
 model: "Claude Sonnet 4.6"
 target: vscode
 ---

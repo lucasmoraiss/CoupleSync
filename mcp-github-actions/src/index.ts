@@ -33,13 +33,14 @@ const repo = GITHUB_REPO;
 const server = new McpServer({
   name: "github-actions-mcp",
   version: "1.0.0",
+  description: "GitHub Actions CI/CD tools for the CoupleSync repository. Use these tools to check CI pipeline status, debug build/test failures, trigger deployments, and validate workflow files. The main workflow is ci.yml which runs .NET 8 backend build+tests, mobile type-check, secret scan, and Docker validation.",
 });
 
 // --- Tool: list_workflows ----------------------------------------------------
 
 server.tool(
   "list_workflows",
-  "List all GitHub Actions workflows in the repository",
+  "List all GitHub Actions workflows defined in the CoupleSync repository. CoupleSync currently has one main workflow (ci.yml) that handles build, test, and validation. Use this to discover workflow IDs needed by other tools.",
   {},
   async () => {
     const { data } = await octokit.actions.listRepoWorkflows({ owner, repo });
@@ -59,7 +60,7 @@ server.tool(
 
 server.tool(
   "list_workflow_runs",
-  "List recent runs for a specific workflow (by name or ID). Returns up to 10 most recent runs with status, conclusion, branch, and timing info.",
+  "List recent CI/CD runs for a CoupleSync workflow. Use workflow='ci.yml' for the main pipeline. Check after pushing code changes to verify build+test status, or filter by branch to see PR check results. Returns status (queued/in_progress/completed) and conclusion (success/failure).",
   {
     workflow: z.string().describe("Workflow filename (e.g. 'ci.yml') or numeric workflow ID"),
     branch: z.string().optional().describe("Filter by branch name"),
@@ -109,7 +110,7 @@ server.tool(
 
 server.tool(
   "get_workflow_run",
-  "Get detailed information about a specific workflow run by its run ID",
+  "Get detailed info about a specific CoupleSync CI run by its run ID. Use after list_workflow_runs to drill into a specific run — shows commit SHA, actor, timing, and links to logs. Useful for debugging why a particular push or PR failed.",
   {
     run_id: z.number().describe("The workflow run ID"),
   },
@@ -142,7 +143,7 @@ server.tool(
 
 server.tool(
   "list_workflow_jobs",
-  "List all jobs for a specific workflow run, including step-level status and timing",
+  "List all jobs and their step-level status for a CoupleSync CI run. The ci.yml workflow has a single 'build-and-test' job with steps: checkout, .NET restore, build, migrate, unit tests, integration tests, E2E tests, mobile type-check, secret scan, Docker build. Use to identify which specific step failed.",
   {
     run_id: z.number().describe("The workflow run ID"),
   },
@@ -176,7 +177,7 @@ server.tool(
 
 server.tool(
   "get_job_logs",
-  "Download and return the logs for a specific job in a workflow run. Useful for debugging failed steps.",
+  "Download full logs for a specific CI job. Use after list_workflow_jobs to read error messages from failed steps — .NET build errors, test failures, migration issues, TypeScript errors, or Docker build failures. Returns up to 50k characters (last portion if truncated).",
   {
     job_id: z.number().describe("The job ID (get from list_workflow_jobs)"),
   },
@@ -198,7 +199,7 @@ server.tool(
 
 server.tool(
   "trigger_workflow",
-  "Trigger a workflow_dispatch event to start a new workflow run. The workflow must have 'workflow_dispatch' in its 'on' triggers.",
+  "Trigger a manual workflow_dispatch event on the CoupleSync repository. The workflow must have 'workflow_dispatch' in its 'on' triggers. Use for deployment workflows or manual pipeline runs. Default ref is 'main'.",
   {
     workflow: z.string().describe("Workflow filename (e.g. 'deploy.yml') or numeric workflow ID"),
     ref: z.string().default("main").describe("Git ref (branch or tag) to run the workflow on"),
@@ -231,7 +232,7 @@ server.tool(
 
 server.tool(
   "cancel_workflow_run",
-  "Cancel a workflow run that is currently in progress or queued",
+  "Cancel a CoupleSync CI run that is currently queued or in progress. Use when a run is outdated (e.g., newer push supersedes it) or stuck.",
   {
     run_id: z.number().describe("The workflow run ID to cancel"),
   },
@@ -245,7 +246,7 @@ server.tool(
 
 server.tool(
   "rerun_workflow",
-  "Re-run a completed workflow run. Can re-run all jobs or only failed jobs.",
+  "Re-run a completed CoupleSync CI run. Set only_failed=true to retry just the failed steps (faster than full re-run). Useful after fixing a flaky test or transient infrastructure issue without pushing a new commit.",
   {
     run_id: z.number().describe("The workflow run ID to re-run"),
     only_failed: z.boolean().default(false).describe("If true, only re-run failed jobs"),
@@ -265,7 +266,7 @@ server.tool(
 
 server.tool(
   "get_workflow_file",
-  "Read the content of a workflow YAML file from the .github/workflows directory",
+  "Read the content of a CoupleSync workflow YAML file (e.g., 'ci.yml'). Use to understand the current CI pipeline configuration, check trigger conditions, or review test/build steps before making changes.",
   {
     filename: z.string().describe("Workflow filename (e.g. 'ci.yml')"),
   },
@@ -295,7 +296,7 @@ server.tool(
 
 server.tool(
   "validate_workflow_file",
-  "Validate the YAML syntax and basic structure of a GitHub Actions workflow file. Checks for valid YAML, required top-level keys ('name', 'on', 'jobs'), and common structural issues.",
+  "Validate YAML syntax and structure of a CoupleSync GitHub Actions workflow file. Checks for valid YAML, required keys (name, on, jobs), job structure (runs-on, steps), and trigger validity. Use before committing workflow changes to catch errors early.",
   {
     filename: z.string().describe("Workflow filename (e.g. 'ci.yml')"),
   },
@@ -422,7 +423,7 @@ server.tool(
 
 server.tool(
   "get_workflow_usage",
-  "Get billing usage information for a specific workflow",
+  "Get GitHub Actions billing/usage information for a specific CoupleSync workflow. Shows compute minutes consumed per OS runner type. Use to monitor CI costs.",
   {
     workflow_id: z.number().describe("The workflow ID (get from list_workflows)"),
   },
@@ -440,7 +441,7 @@ server.tool(
 
 server.tool(
   "list_run_artifacts",
-  "List all artifacts produced by a workflow run",
+  "List all build artifacts produced by a CoupleSync CI run (e.g., test result .trx files, coverage reports, Docker images). Use to find and download specific outputs from a completed pipeline run.",
   {
     run_id: z.number().describe("The workflow run ID"),
   },

@@ -1,7 +1,7 @@
 ---
 name: reviewer
-description: You perform thorough, structured code review — quality, correctness, security, maintainability, architecture alignment, and adversarial analysis. You block only for real risk.
-tools: [vscode, execute, read, agent, edit, search, web, todo]
+description: "Use when: reviewing code changes in CoupleSync. Performs structured review of .NET 8 backend and React Native mobile code. Checks couple-level data isolation (CoupleId filtering), Clean Architecture layer boundaries, FluentValidation usage, TypeScript strictness, and overall quality. Uses github-actions MCP to verify CI status. Blocks only for real risk."
+tools: [read, search, execute, github-actions/*]
 model: "Claude Sonnet 4.6"
 target: vscode
 ---

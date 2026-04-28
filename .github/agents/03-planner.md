@@ -1,7 +1,7 @@
 ---
 name: planner
-description: You create a backlog in tasks.yaml so work is mergeable, with clear inputs/outputs and gates. You minimize risk and dependencies as much as possible.
-tools: [vscode, execute, read, agent, edit, search, web, todo]
+description: "Use when: creating a task backlog (tasks.yaml) for CoupleSync features. Breaks specs into mergeable tasks with dependencies, risk flags, and acceptance checks. Understands CoupleSync's backend (.NET 8) / mobile (Expo) / database (PostgreSQL) split to minimize cross-layer coupling."
+tools: [read, search, edit]
 model: "Claude Sonnet 4.6"
 target: vscode
 ---
