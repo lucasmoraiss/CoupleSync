@@ -1,0 +1,52 @@
+{
+	"servers": {
+		"io.github.upstash/context7": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"@upstash/context7-mcp@1.0.31"
+			],
+			"env": {
+				"CONTEXT7_API_KEY": "${input:CONTEXT7_API_KEY}"
+			},
+			"gallery": "https://api.mcp.github.com",
+			"version": "1.0.31"
+		},
+		"github-actions": {
+			"type": "stdio",
+			"command": "node",
+			"args": [
+				"${workspaceFolder}/mcp-github-actions/dist/index.js"
+			],
+			"env": {
+				"GITHUB_TOKEN": "${input:GITHUB_PAT}",
+				"GITHUB_OWNER": "${input:GITHUB_OWNER}",
+				"GITHUB_REPO": "${input:GITHUB_REPO}"
+			}
+		}
+	},
+	"inputs": [
+		{
+			"id": "CONTEXT7_API_KEY",
+			"type": "promptString",
+			"description": "API key for authentication",
+			"password": true
+		},
+		{
+			"id": "GITHUB_PAT",
+			"type": "promptString",
+			"description": "GitHub Personal Access Token (Fine-grained) with Actions read/write permissions",
+			"password": true
+		},
+		{
+			"id": "GITHUB_OWNER",
+			"type": "promptString",
+			"description": "GitHub repository owner (e.g. 'lucasmoraiss')"
+		},
+		{
+			"id": "GITHUB_REPO",
+			"type": "promptString",
+			"description": "GitHub repository name (e.g. 'CoupleSync')"
+		}
+	]
+}

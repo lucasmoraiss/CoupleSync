@@ -1,0 +1,24 @@
+{
+  "name": "mcp-github-actions",
+  "version": "1.0.0",
+  "description": "MCP server for GitHub Actions integration with Copilot agents",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "keywords": ["mcp", "github-actions"],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@octokit/rest": "^22.0.1",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
+  }
+}

@@ -63,5 +63,17 @@ Desktop.ini
 .vscode/launch.json
 .vscode/tasks.json
 
+# ─── BMad Method – personal / generated files ────────────────────────────────
+_bmad/config.user.toml
+_bmad/custom/config.user.toml
+_bmad-output/
+
+# ─── Orchestrator session artifacts ──────────────────────────────────────────
+.agents-work/
+
+# ─── MCP server build artifacts ──────────────────────────────────────────────
+mcp-github-actions/node_modules/
+mcp-github-actions/dist/
+
 # ─── Azure CLI garbage (args accidentally saved as files) ────────────────────
 backend/--*
