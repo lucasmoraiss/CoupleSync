@@ -8,7 +8,7 @@ COPY src/CoupleSync.Api/CoupleSync.Api.csproj               src/CoupleSync.Api/
 COPY src/CoupleSync.Application/CoupleSync.Application.csproj src/CoupleSync.Application/
 COPY src/CoupleSync.Domain/CoupleSync.Domain.csproj           src/CoupleSync.Domain/
 COPY src/CoupleSync.Infrastructure/CoupleSync.Infrastructure.csproj src/CoupleSync.Infrastructure/
-RUN dotnet restore CoupleSync.sln
+RUN dotnet restore src/CoupleSync.Api/CoupleSync.Api.csproj
 
 # Copy remaining source and publish
 COPY src/ src/
