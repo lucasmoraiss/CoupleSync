@@ -72,11 +72,3 @@ Priorizados para iterações seguintes. Fora do escopo da correção imediata de
 ### Expo SDK 53 upgrade
 - SDK 52 é o target atual. Avaliar upgrade quando o ecosystem de libs (charts,
   secure-store) estiver estável em 53.
-
-### iOS build
-- Fora do V1 do piloto. Revisitar quando tivermos 100+ usuários Android
-  estáveis.
-
-### Microserviços
-- Manter monolito modular. Só decompor se/quando um módulo específico precisar
-  de escala ou linguagem diferente.

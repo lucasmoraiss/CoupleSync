@@ -11,7 +11,9 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import axios from 'axios';
 import { authApiClient, coupleApiClient } from '@/services/apiClient';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors } from '@/theme';
@@ -20,6 +22,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -54,9 +57,24 @@ export default function LoginScreen() {
         router.replace('/couple-setup' as any);
       }
     } catch (err: any) {
-      const msg = err?.response?.status === 401
-        ? 'E-mail ou senha incorretos.'
-        : err?.response?.data?.message || 'Erro ao fazer login. Tente novamente.';
+      let msg: string;
+      if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
+        msg = 'Tempo esgotado. Tente novamente.';
+      } else if (axios.isAxiosError(err) && err.response) {
+        const status = err.response.status;
+        if (status === 401) {
+          msg = 'E-mail ou senha incorretos.';
+        } else if (status >= 500 && status < 600) {
+          msg = 'Servidor com problemas. Tente novamente mais tarde.';
+        } else {
+          msg = 'Erro inesperado. Tente novamente.';
+        }
+      } else if (err.request) {
+        msg = 'Servidor indisponível. Verifique a conexão com o servidor.';
+      } else {
+        msg = 'Sem conexão. Verifique sua internet.';
+      }
+      if (__DEV__) console.log('[Login] Error:', { code: err?.code, status: err?.response?.status, message: err?.response?.data?.message ?? err?.message });
       Alert.alert('Erro', msg);
     } finally {
       setLoading(false);
@@ -93,15 +111,24 @@ export default function LoginScreen() {
           />
 
           <Text style={styles.label}>Senha</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="••••••••"
-            placeholderTextColor={colors.placeholder}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            editable={!loading}
-          />
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.inputField}
+              placeholder="••••••••"
+              placeholderTextColor={colors.placeholder}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              editable={!loading}
+            />
+            <TouchableOpacity
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.eyeButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
@@ -116,6 +143,7 @@ export default function LoginScreen() {
             )}
           </TouchableOpacity>
 
+          {/* TODO(future): Forgot password flow — link here to password recovery screen */}
           <TouchableOpacity
             style={styles.linkButton}
             onPress={() => router.push('/register' as any)}
@@ -209,5 +237,24 @@ const styles = StyleSheet.create({
   linkTextBold: {
     color: colors.primaryLight,
     fontWeight: '600',
+  },
+  inputWrapper: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inputField: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: colors.text,
+  },
+  eyeButton: {
+    padding: 12,
   },
 });

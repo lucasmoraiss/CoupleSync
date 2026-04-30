@@ -11,6 +11,7 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { authApiClient } from '@/services/apiClient';
 import { useSessionStore } from '@/state/sessionStore';
@@ -22,6 +23,8 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleRegister = async () => {
     if (!name.trim() || !email.trim() || !password.trim()) {
@@ -41,7 +44,6 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      if (__DEV__) console.log('Registering user with email:', email);
       const { data } = await authApiClient.register({
         name: name.trim(),
         email: email.trim(),
@@ -56,6 +58,7 @@ export default function RegisterScreen() {
       );
 
       // New user — always go to couple setup
+      // TODO(future): Email confirmation — send verification email on registration and require confirmation before full access
       router.replace('/couple-setup' as any);
     } catch (err: any) {
       const status = err?.response?.status;
@@ -73,6 +76,7 @@ export default function RegisterScreen() {
       } else if (status === 400) {
         msg = data?.message || data?.title || 'Dados inválidos.';
       }
+      if (__DEV__) console.log('[Register] Error:', { code: err?.code, status: err?.response?.status, message: err?.response?.data?.message ?? err?.message });
       Alert.alert('Erro', msg);
     } finally {
       setLoading(false);
@@ -119,26 +123,44 @@ export default function RegisterScreen() {
           />
 
           <Text style={styles.label}>Senha</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Mínimo 8 caracteres"
-            placeholderTextColor={colors.placeholder}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            editable={!loading}
-          />
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.inputField}
+              placeholder="Mínimo 8 caracteres"
+              placeholderTextColor={colors.placeholder}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              editable={!loading}
+            />
+            <TouchableOpacity
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.eyeButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
 
           <Text style={styles.label}>Confirmar senha</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Repita a senha"
-            placeholderTextColor={colors.placeholder}
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            editable={!loading}
-          />
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.inputField}
+              placeholder="Repita a senha"
+              placeholderTextColor={colors.placeholder}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry={!showConfirmPassword}
+              editable={!loading}
+            />
+            <TouchableOpacity
+              onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+              style={styles.eyeButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name={showConfirmPassword ? 'eye-off' : 'eye'} size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
@@ -242,5 +264,24 @@ const styles = StyleSheet.create({
   linkTextBold: {
     color: colors.primaryLight,
     fontWeight: '600',
+  },
+  inputWrapper: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inputField: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: colors.text,
+  },
+  eyeButton: {
+    padding: 12,
   },
 });

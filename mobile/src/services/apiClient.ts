@@ -63,13 +63,19 @@ axiosInstance.interceptors.request.use((config) => {
 axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error?.response?.status === 401 && !isHandling401) {
-      isHandling401 = true;
-      try {
-        await useSessionStore.getState().clearSession();
-        router.replace('/login' as any);
-      } finally {
-        isHandling401 = false;
+    if (error?.response?.status === 401) {
+      const url = error.config?.url ?? '';
+      if (url.includes('/api/v1/auth')) {
+        return Promise.reject(error); // Let auth screens handle their own 401s
+      }
+      if (!isHandling401) {
+        isHandling401 = true;
+        try {
+          await useSessionStore.getState().clearSession();
+          router.replace('/login' as any);
+        } finally {
+          isHandling401 = false;
+        }
       }
     }
     // AC-609: Surface COUPLE_REQUIRED with dedicated message
