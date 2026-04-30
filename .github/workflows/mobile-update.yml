@@ -54,6 +54,7 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           eas update \
+            --platform android \
             --branch preview \
             --message "ci: ${{ github.sha }}" \
             --non-interactive
