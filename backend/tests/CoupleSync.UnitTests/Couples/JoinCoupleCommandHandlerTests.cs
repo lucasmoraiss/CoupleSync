@@ -3,6 +3,7 @@ using CoupleSync.Application.Couples;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
 using CoupleSync.UnitTests.Support;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CoupleSync.UnitTests.Couples;
 
@@ -14,7 +15,7 @@ public sealed class JoinCoupleCommandHandlerTests
     public async Task HandleAsync_WhenUserNotFound_ShouldThrowUnauthorized()
     {
         var repo = new FakeCoupleRepository();
-        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService());
+        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService(), new FakeNotificationEventRepository(), NullLogger<JoinCoupleCommandHandler>.Instance);
         var command = new JoinCoupleCommand(Guid.NewGuid(), "ABC123");
 
         var ex = await Assert.ThrowsAsync<UnauthorizedException>(() => handler.HandleAsync(command, CancellationToken.None));
@@ -31,7 +32,7 @@ public sealed class JoinCoupleCommandHandlerTests
         repo.Users.Add(user);
         repo.Couples.Add(couple);
 
-        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService());
+        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService(), new FakeNotificationEventRepository(), NullLogger<JoinCoupleCommandHandler>.Instance);
         var command = new JoinCoupleCommand(user.Id, "EXIST1");
 
         var ex = await Assert.ThrowsAsync<ConflictException>(() => handler.HandleAsync(command, CancellationToken.None));
@@ -45,7 +46,7 @@ public sealed class JoinCoupleCommandHandlerTests
         var user = User.Create(EmailAddress.From("nocouple@example.com"), "No Couple", "hashed", FixedNow);
         repo.Users.Add(user);
 
-        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService());
+        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService(), new FakeNotificationEventRepository(), NullLogger<JoinCoupleCommandHandler>.Instance);
         var command = new JoinCoupleCommand(user.Id, "NOPEX1");
 
         var ex = await Assert.ThrowsAsync<NotFoundException>(() => handler.HandleAsync(command, CancellationToken.None));
@@ -72,7 +73,7 @@ public sealed class JoinCoupleCommandHandlerTests
         repo.Users.Add(joiner);
         repo.Couples.Add(fullCouple);
 
-        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService());
+        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService(), new FakeNotificationEventRepository(), NullLogger<JoinCoupleCommandHandler>.Instance);
         var command = new JoinCoupleCommand(joiner.Id, "FULL01");
 
         var ex = await Assert.ThrowsAsync<ConflictException>(() => handler.HandleAsync(command, CancellationToken.None));
@@ -94,7 +95,7 @@ public sealed class JoinCoupleCommandHandlerTests
         repo.Users.Add(joiner);
         repo.Couples.Add(couple);
 
-        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService());
+        var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService(), new FakeNotificationEventRepository(), NullLogger<JoinCoupleCommandHandler>.Instance);
         var command = new JoinCoupleCommand(joiner.Id, "JOIN01");
 
         var result = await handler.HandleAsync(command, CancellationToken.None);

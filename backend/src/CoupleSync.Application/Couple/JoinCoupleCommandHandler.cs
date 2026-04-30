@@ -1,5 +1,7 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.Couples;
 
@@ -8,15 +10,21 @@ public sealed class JoinCoupleCommandHandler
     private readonly ICoupleRepository _coupleRepository;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IJwtTokenService _jwtTokenService;
+    private readonly INotificationEventRepository _notificationEventRepository;
+    private readonly ILogger<JoinCoupleCommandHandler> _logger;
 
     public JoinCoupleCommandHandler(
         ICoupleRepository coupleRepository,
         IDateTimeProvider dateTimeProvider,
-        IJwtTokenService jwtTokenService)
+        IJwtTokenService jwtTokenService,
+        INotificationEventRepository notificationEventRepository,
+        ILogger<JoinCoupleCommandHandler> logger)
     {
         _coupleRepository = coupleRepository;
         _dateTimeProvider = dateTimeProvider;
         _jwtTokenService = jwtTokenService;
+        _notificationEventRepository = notificationEventRepository;
+        _logger = logger;
     }
 
     public async Task<JoinCoupleResult> HandleAsync(JoinCoupleCommand command, CancellationToken cancellationToken)
@@ -49,6 +57,28 @@ public sealed class JoinCoupleCommandHandler
         var now = _dateTimeProvider.UtcNow;
         couple.AddMember(user, now);
         await _coupleRepository.SaveChangesAsync(cancellationToken);
+
+        // Notify the existing member that a partner has joined.
+        var otherMember = couple.Members.FirstOrDefault(m => m.Id != command.UserId);
+        if (otherMember is not null)
+        {
+            try
+            {
+                var notification = NotificationEvent.Create(
+                    couple.Id,
+                    otherMember.Id,
+                    "PartnerJoined",
+                    "Novo parceiro(a)!",
+                    $"{user.Name} entrou no seu casal! 💕",
+                    now);
+                await _notificationEventRepository.AddRangeAsync([notification], cancellationToken);
+                await _notificationEventRepository.SaveChangesAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "PartnerJoined notification dispatch failed for couple {CoupleId}", couple.Id);
+            }
+        }
 
         var members = couple.Members
             .Select(member => new CoupleMemberDto(member.Id, member.Name, member.Email))

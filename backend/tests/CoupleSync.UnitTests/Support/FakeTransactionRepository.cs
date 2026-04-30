@@ -56,6 +56,20 @@ public sealed class FakeTransactionRepository : ITransactionRepository
         return Task.FromResult(Transactions.FirstOrDefault(t => t.Id == id && t.CoupleId == coupleId));
     }
 
+    public Task<Transaction?> GetByIdRawAsync(Guid id, CancellationToken ct)
+    {
+        return Task.FromResult(Transactions.FirstOrDefault(t => t.Id == id));
+    }
+
+    public Task DeleteAsync(Transaction transaction, CancellationToken ct)
+    {
+        Transactions.Remove(transaction);
+        DeleteCalled = true;
+        return Task.CompletedTask;
+    }
+
+    public bool DeleteCalled { get; private set; }
+
     public Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
     {
         IReadOnlyList<Transaction> result = Transactions

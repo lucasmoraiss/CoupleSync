@@ -1,6 +1,7 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.Transactions.Commands;
 
@@ -16,15 +17,27 @@ public sealed class CreateManualTransactionCommandHandler
     private readonly ITransactionRepository _transactionRepository;
     private readonly INotificationCaptureRepository _ingestRepository;
     private readonly IDateTimeProvider _clock;
+    private readonly IAlertPolicyService _alertPolicyService;
+    private readonly INotificationEventRepository _notificationEventRepository;
+    private readonly INotificationSettingsRepository _notificationSettingsRepository;
+    private readonly ILogger<CreateManualTransactionCommandHandler> _logger;
 
     public CreateManualTransactionCommandHandler(
         ITransactionRepository transactionRepository,
         INotificationCaptureRepository ingestRepository,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IAlertPolicyService alertPolicyService,
+        INotificationEventRepository notificationEventRepository,
+        INotificationSettingsRepository notificationSettingsRepository,
+        ILogger<CreateManualTransactionCommandHandler> logger)
     {
         _transactionRepository = transactionRepository;
         _ingestRepository = ingestRepository;
         _clock = clock;
+        _alertPolicyService = alertPolicyService;
+        _notificationEventRepository = notificationEventRepository;
+        _notificationSettingsRepository = notificationSettingsRepository;
+        _logger = logger;
     }
 
     public async Task<Transaction> HandleAsync(CreateManualTransactionCommand cmd, CancellationToken ct)
@@ -72,6 +85,29 @@ public sealed class CreateManualTransactionCommandHandler
 
         await _transactionRepository.AddTransactionAsync(transaction, ct);
         await _transactionRepository.SaveChangesAsync(ct);
+
+        // Fire-and-not-propagate: alert policy evaluation after successful transaction persist.
+        try
+        {
+            var nowUtc = _clock.UtcNow;
+            var since = nowUtc.AddDays(-30);
+            var settings = await _notificationSettingsRepository.GetByUserIdAsync(cmd.UserId, cmd.CoupleId, ct);
+            if (settings is not null)
+            {
+                var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(cmd.CoupleId, since, ct);
+                var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
+                    cmd.CoupleId, cmd.UserId, transaction, recentTransactions, settings, nowUtc, ct);
+                if (alertEvents.Count > 0)
+                {
+                    await _notificationEventRepository.AddRangeAsync(alertEvents, ct);
+                    await _notificationEventRepository.SaveChangesAsync(ct);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Alert policy evaluation failed for couple {CoupleId}", cmd.CoupleId);
+        }
 
         return transaction;
     }

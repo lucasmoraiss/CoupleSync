@@ -68,8 +68,12 @@ public sealed class OcrBackgroundJob : BackgroundService
         {
             if (ct.IsCancellationRequested) break;
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
             try
             {
+                _logger.LogInformation("OCR job {IngestId} starting (mimeType={MimeType})", job.Id, job.FileMimeType);
+
                 job.MarkProcessing(dateTimeProvider.UtcNow);
                 await repo.SaveChangesAsync(ct);
 
@@ -80,12 +84,14 @@ public sealed class OcrBackgroundJob : BackgroundService
 
                 job.MarkReady(candidatesJson, dateTimeProvider.UtcNow);
                 await repo.SaveChangesAsync(ct);
+
+                _logger.LogInformation("OCR job {IngestId} completed in {ElapsedMs}ms with {TransactionCount} candidates", job.Id, sw.ElapsedMilliseconds, candidates.Count);
             }
             catch (OcrQuotaExhaustedException ex)
             {
                 _logger.LogWarning(
-                    "OCR quota exhausted for job {JobId}. ResetDate={ResetDate}",
-                    job.Id, ex.QuotaResetDate);
+                    "OCR quota exhausted for job {JobId} after {ElapsedMs}ms. ResetDate={ResetDate}",
+                    job.Id, sw.ElapsedMilliseconds, ex.QuotaResetDate);
 
                 job.MarkFailed("quota_exhausted", ex.Message, dateTimeProvider.UtcNow, ex.QuotaResetDate);
                 await repo.SaveChangesAsync(ct);
@@ -93,9 +99,15 @@ public sealed class OcrBackgroundJob : BackgroundService
                 // Stop processing remaining jobs — quota is exhausted for all
                 break;
             }
+            catch (OcrException ex)
+            {
+                _logger.LogWarning(ex, "OCR job {JobId} failed with code {Code} after {ElapsedMs}ms", job.Id, ex.Code, sw.ElapsedMilliseconds);
+                job.MarkFailed(ex.Code, ex.Message, dateTimeProvider.UtcNow);
+                await repo.SaveChangesAsync(ct);
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "OCR processing failed for job {JobId}", job.Id);
+                _logger.LogError(ex, "OCR processing failed for job {JobId} after {ElapsedMs}ms", job.Id, sw.ElapsedMilliseconds);
                 job.MarkFailed("processing_error", "Internal processing error.", dateTimeProvider.UtcNow);
                 await repo.SaveChangesAsync(ct);
             }

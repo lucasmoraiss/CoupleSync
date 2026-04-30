@@ -59,17 +59,38 @@ jobs:
           --no-build --configuration Release
           --logger "trx;LogFileName=unit-results.trx"
 
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: backend/tests/CoupleSync.UnitTests/TestResults/*.trx
+
       - name: Test — Integration
         run: >
           dotnet test backend/tests/CoupleSync.IntegrationTests/CoupleSync.IntegrationTests.csproj
           --no-build --configuration Release
           --logger "trx;LogFileName=integration-results.trx"
 
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: backend/tests/CoupleSync.IntegrationTests/TestResults/*.trx
+
       - name: Test — E2E
         run: >
           dotnet test backend/tests/CoupleSync.E2ETests/CoupleSync.E2ETests.csproj
           --no-build --configuration Release
           --logger "trx;LogFileName=e2e-results.trx"
+
+      - name: Upload e2e test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: backend/tests/CoupleSync.E2ETests/TestResults/*.trx
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -78,11 +99,18 @@ jobs:
           cache: 'npm'
           cache-dependency-path: mobile/package-lock.json
 
+      - name: Mobile — install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Expo Doctor
+        working-directory: mobile
+        run: npx expo-doctor
+        continue-on-error: true   # informational only — don't fail PRs yet
+
       - name: Mobile type-check
-        run: |
-          cd mobile
-          npm ci
-          npx tsc --noEmit
+        working-directory: mobile
+        run: npx tsc --noEmit
 
       - name: Secret scan
         uses: trufflesecurity/trufflehog@main

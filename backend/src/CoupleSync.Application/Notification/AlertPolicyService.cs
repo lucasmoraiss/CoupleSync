@@ -78,6 +78,12 @@ public sealed class AlertPolicyService : IAlertPolicyService
 
             if (budgetExceededEvent is not null)
                 events.Add(budgetExceededEvent);
+
+            var budgetWarningEvent = await CheckBudgetWarningAsync(
+                coupleId, userId, newTransaction, nowUtc, ct);
+
+            if (budgetWarningEvent is not null)
+                events.Add(budgetWarningEvent);
         }
 
         return events;
@@ -121,6 +127,49 @@ public sealed class AlertPolicyService : IAlertPolicyService
 
         var title = $"Budget exceeded: {category}";
         var body = $"Spent {actualSpent:F2} {allocation.Currency} of {allocation.AllocatedAmount:F2} {allocation.Currency} {category} budget.";
+
+        return NotificationEvent.Create(coupleId, userId, dedupeAlertType, title, body, nowUtc);
+    }
+
+    private async Task<NotificationEvent?> CheckBudgetWarningAsync(
+        Guid coupleId,
+        Guid userId,
+        Transaction transaction,
+        DateTime nowUtc,
+        CancellationToken ct)
+    {
+        var currentMonth = $"{nowUtc.Year:D4}-{nowUtc.Month:D2}";
+        var plan = await _budgetRepository!.GetByMonthAsync(coupleId, currentMonth, ct);
+
+        if (plan is null)
+            return null;
+
+        var category = transaction.Category;
+        var allocation = plan.Allocations
+            .FirstOrDefault(a => string.Equals(a.Category, category, StringComparison.OrdinalIgnoreCase));
+
+        if (allocation is null)
+            return null;
+
+        // Only fire once per category per month.
+        var dedupeAlertType = $"BudgetWarning|{category}|{currentMonth}";
+        var alreadySent = await _notificationEventRepository!.ExistsByAlertTypeAsync(coupleId, dedupeAlertType, ct);
+        if (alreadySent)
+            return null;
+
+        var monthStart = new DateTime(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var monthEnd = monthStart.AddMonths(1);
+        var actualSpentMap = await _transactionRepository!.GetActualSpentByCategoryAsync(
+            coupleId, monthStart, monthEnd, ct);
+
+        var actualSpent = actualSpentMap.GetValueOrDefault(category, 0m);
+
+        // Fire only in the 80–99% band (strictly below budget limit to avoid overlap with BudgetExceeded).
+        if (actualSpent < allocation.AllocatedAmount * 0.8m || actualSpent >= allocation.AllocatedAmount)
+            return null;
+
+        var title = $"Atenção: orçamento de {category}";
+        var body = $"Atenção: você usou 80% do orçamento de {category} este mês.";
 
         return NotificationEvent.Create(coupleId, userId, dedupeAlertType, title, body, nowUtc);
     }

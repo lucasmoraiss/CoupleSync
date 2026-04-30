@@ -33,7 +33,7 @@ const POLL_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 type ScreenState =
   | { phase: 'idle' }
   | { phase: 'uploading' }
-  | { phase: 'polling'; uploadId: string }
+  | { phase: 'polling'; uploadId: string; jobStatus?: string }
   | { phase: 'error'; message: string };
 
 export default function OcrUploadScreen() {
@@ -68,6 +68,8 @@ export default function OcrUploadScreen() {
 
         if (status === 'Failed') {
           if (!isMounted.current) return;
+          if (__DEV__) console.log('[OCR] Failed:', { errorCode, status });
+          let errorMessage: string;
           if (errorCode === 'quota_exhausted') {
             const dateStr = quotaResetDate
               ? new Date(quotaResetDate).toLocaleDateString('pt-BR', {
@@ -76,14 +78,25 @@ export default function OcrUploadScreen() {
                   year: 'numeric',
                 })
               : '—';
-            setState({
-              phase: 'error',
-              message: `OCR indisponível este mês. Cota atingida. Tente novamente em ${dateStr}.`,
-            });
+            errorMessage = `OCR indisponível este mês. Cota atingida. Tente novamente em ${dateStr}.`;
+          } else if (errorCode === 'PDF_ENCRYPTED') {
+            errorMessage = 'O PDF está protegido por senha. Por enquanto, exporte o extrato sem senha e tente novamente. (Suporte a senha será adicionado em breve.)';
+          } else if (errorCode === 'PDF_TOO_SHORT') {
+            errorMessage = 'O PDF parece ser uma imagem digitalizada. Envie um extrato em PDF digital (texto selecionável).';
+          } else if (errorCode === 'NO_TRANSACTIONS_FOUND') {
+            errorMessage = 'Nenhuma transação encontrada. Verifique se o PDF é um extrato bancário válido.';
+          } else if (errorCode === 'BANK_FORMAT_UNKNOWN') {
+            errorMessage = 'Formato do banco não reconhecido. Tente um extrato de outro banco ou cadastre as transações manualmente.';
           } else {
-            setState({ phase: 'error', message: 'Falha no processamento. Tente novamente.' });
+            errorMessage = 'Falha no processamento. Tente novamente.';
           }
+          setState({ phase: 'error', message: errorMessage });
           return;
+        }
+
+        // Non-terminal status — update jobStatus for contextual pt-BR message
+        if (isMounted.current) {
+          setState({ phase: 'polling', uploadId, jobStatus: status });
         }
       } catch {
         // network hiccup — keep polling
@@ -214,7 +227,15 @@ export default function OcrUploadScreen() {
       {state.phase === 'uploading' && <LoadingState message="Enviando arquivo..." />}
 
       {/* Polling */}
-      {state.phase === 'polling' && <LoadingState message="Processando extrato..." />}
+      {state.phase === 'polling' && (
+        <LoadingState
+          message={
+            state.jobStatus === 'Pending'
+              ? 'Aguardando processamento...'
+              : 'Processando extrato...'
+          }
+        />
+      )}
 
       {/* Error */}
       {state.phase === 'error' && (

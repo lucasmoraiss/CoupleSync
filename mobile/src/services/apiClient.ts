@@ -187,6 +187,9 @@ export const transactionsApiClient = {
   /** Creates a transaction manually (without relying on OCR or push notifications). */
   createManual: (data: CreateManualTransactionBody): Promise<AxiosResponse<TransactionResponse>> =>
     axiosInstance.post<TransactionResponse>('/api/v1/transactions', data),
+
+  delete: (id: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.delete<void>(`/api/v1/transactions/${id}`),
 };
 
 export interface CreateManualTransactionBody {

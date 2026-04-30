@@ -28,7 +28,7 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
-        <TouchableOpacity style={styles.menuItem} onPress={openNotificationListenerSettings}>
+        <TouchableOpacity style={styles.menuItem} onPress={openNotificationListenerSettings} accessibilityLabel="Abrir configurações de notificações do sistema" accessibilityRole="button">
           <Text style={styles.menuText}>Notificações do sistema</Text>
           <Text style={styles.menuArrow}>›</Text>
         </TouchableOpacity>
@@ -36,17 +36,19 @@ export default function SettingsScreen() {
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() => router.push('/(main)/settings/alerts' as any)}
+          accessibilityLabel="Abrir configurações de alertas"
+          accessibilityRole="button"
         >
           <Text style={styles.menuText}>Alertas</Text>
           <Text style={styles.menuArrow}>›</Text>
         </TouchableOpacity>
         <View style={styles.divider} />
-        <TouchableOpacity style={[styles.menuItem, styles.menuItemDisabled]}>
+        <TouchableOpacity style={[styles.menuItem, styles.menuItemDisabled]} accessibilityLabel="Código do casal" accessibilityRole="button">
           <Text style={[styles.menuText, styles.menuTextMuted]}>Código do casal</Text>
           {/* V1: couple code shown on couple-setup screen; deep-link not yet implemented */}
         </TouchableOpacity>
         <View style={styles.divider} />
-        <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
+        <TouchableOpacity style={styles.menuItem} onPress={handleLogout} accessibilityLabel="Sair da conta" accessibilityRole="button">
           <Text style={[styles.menuText, { color: colors.error }]}>Sair da conta</Text>
           <Text style={[styles.menuArrow, { color: colors.error }]}>›</Text>
         </TouchableOpacity>

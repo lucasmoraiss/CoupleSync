@@ -121,6 +121,9 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     onSuccess: (res) => {
       const count = res.data.transactionsCreated;
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      queryClient.invalidateQueries({ queryKey: ['budget'] });
       const label = count === 1 ? 'transação importada' : 'transações importadas';
       setSuccessMsg(`${count} ${label} com sucesso!`);
       setTimeout(() => {

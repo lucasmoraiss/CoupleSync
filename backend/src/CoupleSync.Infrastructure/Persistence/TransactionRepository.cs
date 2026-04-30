@@ -63,6 +63,17 @@ public sealed class TransactionRepository : ITransactionRepository
         return await _dbContext.Transactions.FirstOrDefaultAsync(t => t.Id == id && t.CoupleId == coupleId, ct);
     }
 
+    public async Task<Transaction?> GetByIdRawAsync(Guid id, CancellationToken ct)
+    {
+        return await _dbContext.Transactions.FirstOrDefaultAsync(t => t.Id == id, ct);
+    }
+
+    public Task DeleteAsync(Transaction transaction, CancellationToken ct)
+    {
+        _dbContext.Transactions.Remove(transaction);
+        return Task.CompletedTask;
+    }
+
     public async Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
     {
         return await _dbContext.Transactions

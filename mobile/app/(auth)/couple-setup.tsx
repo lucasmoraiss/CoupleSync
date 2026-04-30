@@ -97,6 +97,8 @@ export default function CoupleSetupScreen() {
               style={styles.copyButton}
               onPress={handleCopyCode}
               activeOpacity={0.7}
+              accessibilityLabel="Copiar código do casal"
+              accessibilityRole="button"
             >
               <Text style={styles.copyButtonText}>
                 {copied ? '✓ Copiado!' : 'Copiar código'}
@@ -112,6 +114,8 @@ export default function CoupleSetupScreen() {
             style={styles.button}
             onPress={goToDashboard}
             activeOpacity={0.8}
+            accessibilityLabel="Ir para o Dashboard"
+            accessibilityRole="button"
           >
             <Text style={styles.buttonText}>Ir para o Dashboard</Text>
           </TouchableOpacity>
@@ -151,6 +155,8 @@ export default function CoupleSetupScreen() {
               onPress={handleJoin}
               disabled={loading}
               activeOpacity={0.8}
+              accessibilityLabel="Confirmar entrada no casal"
+              accessibilityRole="button"
             >
               {loading ? (
                 <ActivityIndicator color={colors.white} />
@@ -163,6 +169,8 @@ export default function CoupleSetupScreen() {
               style={styles.linkButton}
               onPress={() => setMode('choose')}
               disabled={loading}
+              accessibilityLabel="Voltar para escolha de modo"
+              accessibilityRole="button"
             >
               <Text style={styles.linkText}>← Voltar</Text>
             </TouchableOpacity>
@@ -190,6 +198,8 @@ export default function CoupleSetupScreen() {
             onPress={handleCreate}
             disabled={loading}
             activeOpacity={0.8}
+            accessibilityLabel="Criar casal"
+            accessibilityRole="button"
           >
             {loading ? (
               <ActivityIndicator color={colors.primary} />
@@ -209,6 +219,8 @@ export default function CoupleSetupScreen() {
             onPress={() => setMode('join')}
             disabled={loading}
             activeOpacity={0.8}
+            accessibilityLabel="Entrar em um casal com código de convite"
+            accessibilityRole="button"
           >
             <Text style={styles.optionEmoji}>🔗</Text>
             <Text style={styles.optionTitle}>Entrar em um casal</Text>

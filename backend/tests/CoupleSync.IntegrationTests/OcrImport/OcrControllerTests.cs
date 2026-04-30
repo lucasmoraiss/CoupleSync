@@ -396,6 +396,10 @@ internal sealed class FakeOcrTransactionRepository : ITransactionRepository
         => Task.FromResult<(int, IReadOnlyList<Transaction>)>((0, []));
     public Task<Transaction?> GetByIdAsync(Guid id, Guid coupleId, CancellationToken ct)
         => Task.FromResult<Transaction?>(null);
+    public Task<Transaction?> GetByIdRawAsync(Guid id, CancellationToken ct)
+        => Task.FromResult<Transaction?>(null);
+    public Task DeleteAsync(Transaction transaction, CancellationToken ct)
+        => Task.CompletedTask;
     public Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<Transaction>>([]);
     public Task<IReadOnlyList<Transaction>> GetRecentByCoupleAsync(Guid coupleId, DateTime since, CancellationToken ct)

@@ -12,6 +12,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -60,15 +61,18 @@ function formatRelativeDate(dateStr: string): string {
 function TransactionRow({
   item,
   onPress,
+  onLongPress,
 }: {
   item: TransactionResponse;
   onPress: (item: TransactionResponse) => void;
+  onLongPress: (item: TransactionResponse) => void;
 }) {
   const label = item.merchant ?? item.description ?? item.bank;
   return (
     <TouchableOpacity
       style={styles.txRow}
       onPress={() => onPress(item)}
+      onLongPress={() => onLongPress(item)}
       accessibilityLabel={`Transação: ${label}, ${formatBRL(item.amount)}`}
       activeOpacity={0.7}
     >
@@ -193,6 +197,21 @@ export default function TransactionsScreen() {
     },
   });
 
+  const { mutate: deleteTransaction } = useMutation({
+    mutationFn: (id: string) => transactionsApiClient.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      queryClient.invalidateQueries({ queryKey: ['budget'] });
+      toast.success('Transação excluída.');
+    },
+    onError: (error) => {
+      if (isCoupleRequiredError(error)) return;
+      toast.error('Não foi possível excluir a transação. Tente novamente.');
+    },
+  });
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await refetch();
@@ -217,6 +236,25 @@ export default function TransactionsScreen() {
     setModalVisible(false);
     setSelectedTx(null);
   }, [isUpdating]);
+
+  const handleLongPress = useCallback(
+    (item: TransactionResponse) => {
+      const label = item.merchant ?? item.description ?? item.bank;
+      Alert.alert(
+        'Excluir transação?',
+        `"${label}" — ${formatBRL(item.amount)}\n\nEsta ação não pode ser desfeita.`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Excluir',
+            style: 'destructive',
+            onPress: () => deleteTransaction(item.id),
+          },
+        ]
+      );
+    },
+    [deleteTransaction]
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -264,7 +302,7 @@ export default function TransactionsScreen() {
           data={data?.items ?? []}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <TransactionRow item={item} onPress={handleTxPress} />
+            <TransactionRow item={item} onPress={handleTxPress} onLongPress={handleLongPress} />
           )}
           ListEmptyComponent={
             <EmptyState

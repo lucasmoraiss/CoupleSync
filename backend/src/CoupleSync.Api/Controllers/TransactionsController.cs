@@ -24,17 +24,20 @@ public sealed class TransactionsController : ControllerBase
     private readonly UpdateTransactionCategoryCommandHandler _updateCategoryHandler;
     private readonly LinkTransactionToGoalCommandHandler _linkToGoalHandler;
     private readonly CreateManualTransactionCommandHandler _createManualHandler;
+    private readonly DeleteTransactionCommandHandler _deleteHandler;
 
     public TransactionsController(
         GetTransactionsQueryHandler getTransactionsHandler,
         UpdateTransactionCategoryCommandHandler updateCategoryHandler,
         LinkTransactionToGoalCommandHandler linkToGoalHandler,
-        CreateManualTransactionCommandHandler createManualHandler)
+        CreateManualTransactionCommandHandler createManualHandler,
+        DeleteTransactionCommandHandler deleteHandler)
     {
         _getTransactionsHandler = getTransactionsHandler;
         _updateCategoryHandler = updateCategoryHandler;
         _linkToGoalHandler = linkToGoalHandler;
         _createManualHandler = createManualHandler;
+        _deleteHandler = deleteHandler;
     }
 
     [HttpGet]
@@ -148,6 +151,25 @@ public sealed class TransactionsController : ControllerBase
 
         await _linkToGoalHandler.HandleAsync(
             new LinkTransactionToGoalCommand(id, request.GoalId, coupleId),
+            cancellationToken);
+
+        return NoContent();
+    }
+
+    [HttpDelete("{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteTransaction(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var coupleId = GetAuthenticatedCoupleId();
+        var userId = GetAuthenticatedUserId();
+
+        await _deleteHandler.HandleAsync(
+            new DeleteTransactionCommand(id, userId, coupleId),
             cancellationToken);
 
         return NoContent();

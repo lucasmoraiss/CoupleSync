@@ -3,26 +3,44 @@ using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.OcrImport;
 
 public sealed class ImportJobService
 {
+    private const string OcrBank = "OCR";
+
     private readonly IImportJobRepository _repository;
     private readonly IStorageAdapter _storageAdapter;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly ITransactionRepository _transactionRepository;
+    private readonly INotificationCaptureRepository _ingestRepository;
+    private readonly IAlertPolicyService _alertPolicyService;
+    private readonly INotificationEventRepository _notificationEventRepository;
+    private readonly INotificationSettingsRepository _notificationSettingsRepository;
+    private readonly ILogger<ImportJobService> _logger;
 
     public ImportJobService(
         IImportJobRepository repository,
         IStorageAdapter storageAdapter,
         IDateTimeProvider dateTimeProvider,
-        ITransactionRepository transactionRepository)
+        ITransactionRepository transactionRepository,
+        INotificationCaptureRepository ingestRepository,
+        IAlertPolicyService alertPolicyService,
+        INotificationEventRepository notificationEventRepository,
+        INotificationSettingsRepository notificationSettingsRepository,
+        ILogger<ImportJobService> logger)
     {
         _repository = repository;
         _storageAdapter = storageAdapter;
         _dateTimeProvider = dateTimeProvider;
         _transactionRepository = transactionRepository;
+        _ingestRepository = ingestRepository;
+        _alertPolicyService = alertPolicyService;
+        _notificationEventRepository = notificationEventRepository;
+        _notificationSettingsRepository = notificationSettingsRepository;
+        _logger = logger;
     }
 
     /// <summary>
@@ -117,6 +135,20 @@ public sealed class ImportJobService
                 category = candidate.SuggestedCategory;
             }
 
+            var ingest = TransactionEventIngest.Create(
+                coupleId: coupleId,
+                userId: userId,
+                bank: OcrBank,
+                amount: candidate.Amount,
+                currency: candidate.Currency,
+                eventTimestamp: candidate.Date,
+                description: candidate.Description,
+                merchant: null,
+                rawNotificationTextRedacted: null,
+                createdAtUtc: now);
+
+            await _ingestRepository.AddIngestEventAsync(ingest, ct);
+
             var txn = Transaction.Create(
                 coupleId: coupleId,
                 userId: userId,
@@ -128,7 +160,7 @@ public sealed class ImportJobService
                 description: candidate.Description,
                 merchant: null,
                 category: category,
-                ingestEventId: Guid.Empty,
+                ingestEventId: ingest.Id,
                 createdAtUtc: now);
 
             await _transactionRepository.AddTransactionAsync(txn, ct);
@@ -141,6 +173,32 @@ public sealed class ImportJobService
         var job = await _repository.GetByIdAsync(uploadId, coupleId, ct);
         job!.MarkConfirmed(_dateTimeProvider.UtcNow);
         await _repository.SaveChangesAsync(ct);
+
+        // Fire-and-not-propagate: alert policy evaluation after successful transaction persist.
+        try
+        {
+            var nowUtc = _dateTimeProvider.UtcNow;
+            var since = nowUtc.AddDays(-30);
+            var settings = await _notificationSettingsRepository.GetByUserIdAsync(userId, coupleId, ct);
+            if (settings is not null)
+            {
+                var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(coupleId, since, ct);
+                foreach (var txn in created)
+                {
+                    var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
+                        coupleId, userId, txn, recentTransactions, settings, nowUtc, ct);
+                    if (alertEvents.Count > 0)
+                    {
+                        await _notificationEventRepository.AddRangeAsync(alertEvents, ct);
+                        await _notificationEventRepository.SaveChangesAsync(ct);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Alert policy evaluation failed for couple {CoupleId}", coupleId);
+        }
 
         return created;
     }

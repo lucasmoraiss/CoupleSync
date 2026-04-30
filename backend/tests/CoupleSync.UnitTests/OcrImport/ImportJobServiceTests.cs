@@ -4,6 +4,8 @@ using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.OcrImport;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
+using CoupleSync.UnitTests.Support;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CoupleSync.UnitTests.OcrImport;
 
@@ -24,7 +26,11 @@ public sealed class ImportJobServiceTests
         txnRepo = new FakeTransactionRepository();
         storage ??= new FakeStorageAdapter();
         var dateTime = new FakeDateTimeProvider(FixedNow);
-        return new ImportJobService(jobRepo, storage, dateTime, txnRepo);
+        var ingestRepo = new FakeNotificationCaptureRepository();
+        var alertPolicy = new FakeAlertPolicyService();
+        var notifEventRepo = new FakeNotificationEventRepository();
+        var notifSettingsRepo = new FakeNotificationSettingsRepository();
+        return new ImportJobService(jobRepo, storage, dateTime, txnRepo, ingestRepo, alertPolicy, notifEventRepo, notifSettingsRepo, NullLogger<ImportJobService>.Instance);
     }
 
     // ── UploadAsync ────────────────────────────────────────────────────────
@@ -338,6 +344,12 @@ internal sealed class FakeTransactionRepository : ITransactionRepository
 
     public Task<Transaction?> GetByIdAsync(Guid id, Guid coupleId, CancellationToken ct)
         => Task.FromResult<Transaction?>(null);
+
+    public Task<Transaction?> GetByIdRawAsync(Guid id, CancellationToken ct)
+        => Task.FromResult<Transaction?>(null);
+
+    public Task DeleteAsync(Transaction transaction, CancellationToken ct)
+        => Task.CompletedTask;
 
     public Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<Transaction>>([]);

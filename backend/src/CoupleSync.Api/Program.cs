@@ -59,6 +59,7 @@ builder.Services.AddScoped<GetTransactionsQueryHandler>();
 builder.Services.AddScoped<UpdateTransactionCategoryCommandHandler>();
 builder.Services.AddScoped<LinkTransactionToGoalCommandHandler>();
 builder.Services.AddScoped<CreateManualTransactionCommandHandler>();
+builder.Services.AddScoped<DeleteTransactionCommandHandler>();
 builder.Services.AddScoped<GetDashboardQueryHandler>();
 builder.Services.AddScoped<CreateGoalCommandHandler>();
 builder.Services.AddScoped<UpdateGoalCommandHandler>();
