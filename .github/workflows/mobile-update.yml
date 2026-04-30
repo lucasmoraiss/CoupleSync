@@ -1,0 +1,59 @@
+name: Mobile — OTA Update
+
+# Triggered after Deploy succeeds on main, ensuring the backend is live
+# before the mobile bundle is pushed. Also supports manual dispatch.
+#
+# Uses EAS Update (Over-the-Air) — 100% free, unlimited pushes.
+# No native rebuild required; the installed APK fetches the new JS bundle
+# on next launch automatically.
+#
+# Required secret: EXPO_TOKEN
+#   expo.dev → Settings → Access Tokens → Create token
+
+on:
+  workflow_run:
+    workflows: ["Deploy"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ota-update:
+    name: EAS Update — OTA (preview branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Setup EAS CLI
+        run: npm install --global eas-cli@12
+
+      - name: EAS Update — push OTA bundle to preview branch
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas update \
+            --branch preview \
+            --message "ci: ${{ github.sha }}" \
+            --non-interactive

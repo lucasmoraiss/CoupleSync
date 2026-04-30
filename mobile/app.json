@@ -5,6 +5,14 @@
     "scheme": "couplesync",
     "version": "1.0.0",
     "orientation": "portrait",
+    "updates": {
+      "url": "https://u.expo.dev/6cc9e838-76ac-43e0-8448-be42d0345570",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "platforms": [
       "android"
     ],
