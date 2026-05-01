@@ -61,11 +61,6 @@ public sealed class Couple
             throw new InvalidOperationException("User is already in this couple.");
         }
 
-        if (_members.Count >= 2)
-        {
-            throw new InvalidOperationException("Couple already has the maximum number of members.");
-        }
-
         user.AssignCouple(Id, joinedAtUtc);
         _members.Add(user);
     }

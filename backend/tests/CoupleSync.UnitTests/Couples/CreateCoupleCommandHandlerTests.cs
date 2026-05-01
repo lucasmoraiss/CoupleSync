@@ -27,7 +27,7 @@ public sealed class CreateCoupleCommandHandlerTests
     {
         var repo = new FakeCoupleRepository();
         var user = User.Create(EmailAddress.From("user@example.com"), "Test User", "hashed", FixedNow);
-        var existingCouple = Domain.Entities.Couple.Create("XYZ999", FixedNow);
+        var existingCouple = Couple.Create("XYZ999", FixedNow);
         existingCouple.AddMember(user, FixedNow);
         repo.Users.Add(user);
         repo.Couples.Add(existingCouple);
@@ -64,7 +64,7 @@ public sealed class CreateCoupleCommandHandlerTests
         repo.Users.Add(user);
 
         // Pre-seed the code so JoinCodeExistsAsync always returns true
-        var existingCouple = Domain.Entities.Couple.Create("FIXED1", FixedNow);
+        var existingCouple = Couple.Create("FIXED1", FixedNow);
         repo.Couples.Add(existingCouple);
 
         // Generator always returns the same code that already exists

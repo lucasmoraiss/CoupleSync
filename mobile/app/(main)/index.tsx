@@ -66,10 +66,10 @@ function PartnerBreakdownRow({
       {sorted.map((p, i) => (
         <View
           key={p.userId}
-          style={[styles.miniCard, i === 0 ? { marginRight: 8 } : { marginLeft: 8 }]}
+          style={[styles.miniCard, { marginLeft: i > 0 ? 8 : 0 }]}
         >
           <Text style={styles.miniLabel}>
-            {p.userId === currentUserId ? 'Você' : 'Parceiro(a)'}
+            {p.userId === currentUserId ? 'Você' : 'Membro'}
           </Text>
           <Text style={styles.miniValue}>{formatBRL(p.totalAmount)}</Text>
         </View>

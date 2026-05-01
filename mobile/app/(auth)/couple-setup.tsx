@@ -55,7 +55,7 @@ export default function CoupleSetupScreen() {
       const status = err?.response?.status;
       let msg = 'Erro ao entrar no casal. Tente novamente.';
       if (status === 404) msg = 'Código de convite inválido ou expirado.';
-      else if (status === 409) msg = 'Você já faz parte de um casal, ou o casal já está completo.';
+      else if (status === 409) msg = 'Você já faz parte de um casal.';
       Alert.alert('Erro', msg);
     } finally {
       setLoading(false);

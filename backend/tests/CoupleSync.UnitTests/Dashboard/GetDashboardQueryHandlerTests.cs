@@ -200,6 +200,37 @@ public sealed class GetDashboardQueryHandlerTests
     }
 
     [Fact]
+    public async Task GetDashboardQueryHandler_EndDate_MidnightIsSnappedToEndOfDay()
+    {
+        // A date-only endDate arrives as midnight UTC; handler must snap to 23:59:59.999.
+        var handler = BuildHandler();
+        var coupleId = Guid.NewGuid();
+        var endDateMidnight = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc);
+
+        var result = await handler.HandleAsync(
+            new GetDashboardQuery(coupleId, null, endDateMidnight),
+            CancellationToken.None);
+
+        var expectedEnd = new DateTime(2026, 4, 30, 23, 59, 59, 999, DateTimeKind.Utc);
+        Assert.Equal(expectedEnd, result.PeriodEnd);
+    }
+
+    [Fact]
+    public async Task GetDashboardQueryHandler_EndDate_ExplicitTimeIsNotOverridden()
+    {
+        // When endDate already has a non-zero time component, the handler must NOT override it.
+        var handler = BuildHandler();
+        var coupleId = Guid.NewGuid();
+        var endDateExplicit = new DateTime(2026, 4, 30, 15, 30, 0, DateTimeKind.Utc);
+
+        var result = await handler.HandleAsync(
+            new GetDashboardQuery(coupleId, null, endDateExplicit),
+            CancellationToken.None);
+
+        Assert.Equal(endDateExplicit, result.PeriodEnd);
+    }
+
+    [Fact]
     public async Task HandleAsync_WhenStartDateAfterEndDate_ThrowsArgumentException()
     {
         var handler = BuildHandler();

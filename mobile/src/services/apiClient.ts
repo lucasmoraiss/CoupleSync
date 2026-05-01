@@ -277,7 +277,9 @@ export default axiosInstance;
 // --- OCR API ---
 export const ocrApiClient = {
   upload: (file: FormData): Promise<AxiosResponse<OcrUploadResponse>> =>
-    axiosInstance.post<OcrUploadResponse>('/api/v1/ocr/upload', file),
+    axiosInstance.post<OcrUploadResponse>('/api/v1/ocr/upload', file, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
 
   getStatus: (uploadId: string): Promise<AxiosResponse<OcrStatusResponse>> =>
     axiosInstance.get<OcrStatusResponse>(`/api/v1/ocr/${uploadId}/status`),

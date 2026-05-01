@@ -110,36 +110,36 @@ public sealed class CoupleIntegrationSmokeTests
 
         var joinPayload = await joinResponse.Content.ReadFromJsonAsync<JoinCoupleDto>();
         Assert.NotNull(joinPayload);
-        Assert.Equal(2, joinPayload!.Members.Count);
+        Assert.True(joinPayload!.Members.Count >= 2);
     }
 
     [Fact]
-    public async Task JoinCouple_WhenCoupleFull_ShouldReturnConflict()
+    public async Task JoinCouple_ThirdUser_ShouldSucceed()
     {
         await using var factory = new CoupleIntegrationWebApplicationFactory();
         using var clientA = factory.CreateClient();
         using var clientB = factory.CreateClient();
         using var clientC = factory.CreateClient();
 
-        var tokenA = await RegisterAndGetTokenAsync(clientA, $"full-a-{Guid.NewGuid():N}@example.com");
+        var tokenA = await RegisterAndGetTokenAsync(clientA, $"three-a-{Guid.NewGuid():N}@example.com");
         clientA.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenA);
         var createResponse = await clientA.PostAsJsonAsync("/api/v1/couples", new { });
         var created = await createResponse.Content.ReadFromJsonAsync<CreateCoupleDto>();
         Assert.NotNull(created);
 
-        var tokenB = await RegisterAndGetTokenAsync(clientB, $"full-b-{Guid.NewGuid():N}@example.com");
+        var tokenB = await RegisterAndGetTokenAsync(clientB, $"three-b-{Guid.NewGuid():N}@example.com");
         clientB.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenB);
         var joinB = await clientB.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = created!.JoinCode });
         Assert.Equal(HttpStatusCode.OK, joinB.StatusCode);
 
-        var tokenC = await RegisterAndGetTokenAsync(clientC, $"full-c-{Guid.NewGuid():N}@example.com");
+        var tokenC = await RegisterAndGetTokenAsync(clientC, $"three-c-{Guid.NewGuid():N}@example.com");
         clientC.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenC);
         var joinC = await clientC.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = created.JoinCode });
-        Assert.Equal(HttpStatusCode.Conflict, joinC.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, joinC.StatusCode);
 
-        var payload = await joinC.Content.ReadFromJsonAsync<ErrorDto>();
+        var payload = await joinC.Content.ReadFromJsonAsync<JoinCoupleDto>();
         Assert.NotNull(payload);
-        Assert.Equal("COUPLE_FULL", payload!.Code);
+        Assert.True(payload!.Members.Count >= 3);
     }
 
     [Fact]
@@ -202,7 +202,7 @@ public sealed class CoupleIntegrationSmokeTests
         Assert.NotNull(mePayload);
         Assert.NotEqual(Guid.Empty, mePayload!.CoupleId);
         Assert.Equal(6, mePayload.JoinCode.Length);
-        Assert.Equal(2, mePayload.Members.Count);
+        Assert.True(mePayload.Members.Count >= 2);
     }
 
     private static async Task<string> RegisterAndGetTokenAsync(HttpClient client, string email)

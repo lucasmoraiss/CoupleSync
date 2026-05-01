@@ -126,11 +126,23 @@ export default function OcrUploadScreen() {
         pollStatus(uploadId);
       } catch (err: any) {
         if (isMounted.current) {
-          const serverMessage = err?.response?.data?.message;
-          setState({
-            phase: 'error',
-            message: serverMessage || 'Falha ao enviar o arquivo. Tente novamente.',
-          });
+          let message: string;
+          if (!err?.response) {
+            message = 'Sem conexão. Verifique sua internet e tente novamente.';
+          } else {
+            const data = err.response.data;
+            const isObj = typeof data === 'object' && data !== null;
+            if (isObj && typeof (data as any).message === 'string') {
+              message = (data as any).message;
+            } else if (isObj && typeof (data as any).error === 'string') {
+              message = (data as any).error;
+            } else if (err.response.statusText) {
+              message = err.response.statusText;
+            } else {
+              message = 'Falha ao enviar o arquivo. Tente novamente.';
+            }
+          }
+          setState({ phase: 'error', message });
         }
       }
     },

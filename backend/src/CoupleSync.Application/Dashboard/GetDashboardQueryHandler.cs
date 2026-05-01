@@ -21,6 +21,10 @@ public sealed class GetDashboardQueryHandler
         var periodEnd = query.EndDate
             ?? new DateTime(now.Year, now.Month, DateTime.DaysInMonth(now.Year, now.Month), 23, 59, 59, DateTimeKind.Utc);
 
+        // Snap date-only endDate (midnight) to end-of-day so the upper bound is inclusive.
+        if (query.EndDate.HasValue && query.EndDate.Value.TimeOfDay == TimeSpan.Zero)
+            periodEnd = new DateTime(periodEnd.Year, periodEnd.Month, periodEnd.Day, 23, 59, 59, 999, DateTimeKind.Utc);
+
         if (periodStart > periodEnd)
             throw new ArgumentException("INVALID_DATE_RANGE: startDate must not be after endDate.", nameof(query));
 

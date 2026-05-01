@@ -49,11 +49,6 @@ public sealed class JoinCoupleCommandHandler
             throw new NotFoundException("COUPLE_NOT_FOUND", "Couple was not found.");
         }
 
-        if (couple.Members.Count >= 2)
-        {
-            throw new ConflictException("COUPLE_FULL", "Couple already has two members.");
-        }
-
         var now = _dateTimeProvider.UtcNow;
         couple.AddMember(user, now);
         await _coupleRepository.SaveChangesAsync(cancellationToken);

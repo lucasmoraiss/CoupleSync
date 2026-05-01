@@ -27,7 +27,7 @@ public sealed class JoinCoupleCommandHandlerTests
     {
         var repo = new FakeCoupleRepository();
         var user = User.Create(EmailAddress.From("already@example.com"), "Already In", "hashed", FixedNow);
-        var couple = Domain.Entities.Couple.Create("EXIST1", FixedNow);
+        var couple = Couple.Create("EXIST1", FixedNow);
         couple.AddMember(user, FixedNow);
         repo.Users.Add(user);
         repo.Couples.Add(couple);
@@ -54,30 +54,30 @@ public sealed class JoinCoupleCommandHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_WhenCoupleFull_ShouldThrowConflict()
+    public async Task HandleAsync_ThirdUserCanJoin_ShouldSucceed()
     {
         var repo = new FakeCoupleRepository();
 
-        // Create two existing members that fill the couple
         var member1 = User.Create(EmailAddress.From("member1@example.com"), "Member One", "hashed", FixedNow);
         var member2 = User.Create(EmailAddress.From("member2@example.com"), "Member Two", "hashed", FixedNow);
-        var fullCouple = Domain.Entities.Couple.Create("FULL01", FixedNow);
-        fullCouple.AddMember(member1, FixedNow);
-        fullCouple.AddMember(member2, FixedNow);
+        var twoMemberCouple = Couple.Create("TWO001", FixedNow);
+        twoMemberCouple.AddMember(member1, FixedNow);
+        twoMemberCouple.AddMember(member2, FixedNow);
 
-        // Third user trying to join
-        var joiner = User.Create(EmailAddress.From("joiner@example.com"), "Joiner", "hashed", FixedNow);
+        var joiner = User.Create(EmailAddress.From("joiner3@example.com"), "Joiner Three", "hashed", FixedNow);
 
         repo.Users.Add(member1);
         repo.Users.Add(member2);
         repo.Users.Add(joiner);
-        repo.Couples.Add(fullCouple);
+        repo.Couples.Add(twoMemberCouple);
 
         var handler = new JoinCoupleCommandHandler(repo, new FixedDateTimeProvider(FixedNow), new StubJwtTokenService(), new FakeNotificationEventRepository(), NullLogger<JoinCoupleCommandHandler>.Instance);
-        var command = new JoinCoupleCommand(joiner.Id, "FULL01");
+        var command = new JoinCoupleCommand(joiner.Id, "TWO001");
 
-        var ex = await Assert.ThrowsAsync<ConflictException>(() => handler.HandleAsync(command, CancellationToken.None));
-        Assert.Equal("COUPLE_FULL", ex.Code);
+        var result = await handler.HandleAsync(command, CancellationToken.None);
+
+        Assert.Equal(twoMemberCouple.Id, result.CoupleId);
+        Assert.Equal(3, result.Members.Count);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class JoinCoupleCommandHandlerTests
         var repo = new FakeCoupleRepository();
 
         var owner = User.Create(EmailAddress.From("owner@example.com"), "Owner", "hashed", FixedNow);
-        var couple = Domain.Entities.Couple.Create("JOIN01", FixedNow);
+        var couple = Couple.Create("JOIN01", FixedNow);
         couple.AddMember(owner, FixedNow);
 
         var joiner = User.Create(EmailAddress.From("joiner2@example.com"), "Joiner", "hashed", FixedNow);
