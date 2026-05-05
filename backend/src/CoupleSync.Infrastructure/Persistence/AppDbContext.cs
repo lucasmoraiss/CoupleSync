@@ -45,6 +45,8 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<ImportJob> ImportJobs => Set<ImportJob>();
 
+    public DbSet<IncomeSource> IncomeSources => Set<IncomeSource>();
+
     // BudgetAllocation is NOT exposed as a top-level DbSet.
     // All allocation access must go through BudgetPlan.Allocations navigation
     // to ensure couple-level data isolation via ICoupleScoped query filter on BudgetPlan.
@@ -296,6 +298,31 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
 
             entity.HasIndex(x => new { x.BudgetPlanId, x.Category });
+        });
+
+        modelBuilder.Entity<IncomeSource>(entity =>
+        {
+            entity.ToTable("income_sources");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(x => x.Month).HasColumnName("month").HasMaxLength(7).IsRequired();
+            entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Amount).HasColumnName("amount").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(3).IsRequired();
+            entity.Property(x => x.IsShared).HasColumnName("is_shared").IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+
+            entity.HasIndex(x => new { x.CoupleId, x.Month });
+            entity.HasIndex(x => new { x.UserId, x.Month });
+            entity.HasIndex(x => new { x.CoupleId, x.UserId, x.Month, x.Name }).IsUnique();
+
+            entity.HasOne(x => x.Couple)
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ImportJob>(entity =>

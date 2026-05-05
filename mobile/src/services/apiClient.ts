@@ -22,6 +22,10 @@ import type {
   ReplaceAllocationsRequest,
   UpdateIncomeRequest,
   UpdateIncomeResponse,
+  MonthlyIncomeResponse,
+  IncomeSourceResponse,
+  CreateIncomeSourceRequest,
+  UpdateIncomeSourceRequest,
   OcrUploadResponse,
   OcrStatusResponse,
   OcrResultsResponse,
@@ -256,6 +260,24 @@ export const budgetApiClient = {
 
   updateIncome: (data: UpdateIncomeRequest): Promise<AxiosResponse<UpdateIncomeResponse>> =>
     axiosInstance.patch<UpdateIncomeResponse>('/api/v1/budgets/income', data),
+};
+
+// --- Income Sources API ---
+export const incomeApiClient = {
+  getCurrent: (): Promise<AxiosResponse<MonthlyIncomeResponse>> =>
+    axiosInstance.get<MonthlyIncomeResponse>('/api/v1/incomes/current'),
+
+  getByMonth: (month: string): Promise<AxiosResponse<MonthlyIncomeResponse>> =>
+    axiosInstance.get<MonthlyIncomeResponse>(`/api/v1/incomes/${month}`),
+
+  create: (data: CreateIncomeSourceRequest): Promise<AxiosResponse<IncomeSourceResponse>> =>
+    axiosInstance.post<IncomeSourceResponse>('/api/v1/incomes', data),
+
+  update: (id: string, data: UpdateIncomeSourceRequest): Promise<AxiosResponse<IncomeSourceResponse>> =>
+    axiosInstance.put<IncomeSourceResponse>(`/api/v1/incomes/${id}`, data),
+
+  delete: (id: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.delete<void>(`/api/v1/incomes/${id}`),
 };
 
 // --- Notifications API ---

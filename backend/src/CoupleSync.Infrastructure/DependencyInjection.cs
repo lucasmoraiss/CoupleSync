@@ -35,6 +35,7 @@ public static class DependencyInjection
         services.AddScoped<ICategoryRuleRepository, CategoryRuleRepository>();
         services.AddScoped<IGoalRepository, GoalRepository>();
         services.AddScoped<IBudgetRepository, BudgetRepository>();
+        services.AddScoped<IIncomeSourceRepository, IncomeSourceRepository>();
         services.AddScoped<ICashFlowRepository, CashFlowRepository>();
         services.AddScoped<IDeviceTokenRepository, DeviceTokenRepository>();
         services.AddScoped<INotificationSettingsRepository, NotificationSettingsRepository>();

@@ -179,6 +179,48 @@ export interface UpdateIncomeResponse {
   readonly currency: string;
 }
 
+// --- Income Sources ---
+export interface IncomeSourceResponse {
+  readonly id: string;
+  readonly userId: string;
+  readonly name: string;
+  readonly amount: number;
+  readonly currency: string;
+  readonly isShared: boolean;
+  readonly createdAtUtc: string;
+  readonly updatedAtUtc: string;
+}
+
+export interface IncomeGroupResponse {
+  readonly userId: string | null;
+  readonly userName: string | null;
+  readonly sources: readonly IncomeSourceResponse[];
+  readonly total: number;
+}
+
+export interface MonthlyIncomeResponse {
+  readonly month: string;
+  readonly currency: string;
+  readonly personalIncome: IncomeGroupResponse;
+  readonly partnerIncome: IncomeGroupResponse | null;
+  readonly sharedIncome: IncomeGroupResponse;
+  readonly coupleTotal: number;
+}
+
+export interface CreateIncomeSourceRequest {
+  readonly month: string;
+  readonly name: string;
+  readonly amount: number;
+  readonly currency: string;
+  readonly isShared: boolean;
+}
+
+export interface UpdateIncomeSourceRequest {
+  readonly name?: string;
+  readonly amount?: number;
+  readonly isShared?: boolean;
+}
+
 // --- OCR ---
 export interface OcrUploadResponse {
   readonly uploadId: string;
