@@ -1,5 +1,6 @@
 // AC-005: Goals management screen — list, create, edit, archive
 import React, { useState, useCallback } from 'react';
+import axios from 'axios';
 import {
   View,
   Text,
@@ -50,16 +51,16 @@ function formatDeadline(dateStr: string): string {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-/** Parse DD/MM/YYYY → ISO string for API, returns null if invalid */
+/** Parse DD/MM/YYYY → ISO string (UTC noon) for API, returns null if invalid */
 function parseDateInput(value: string): string | null {
   const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!match) return null;
   const [, day, month, year] = match;
-  const d = new Date(Number(year), Number(month) - 1, Number(day));
+  const d = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12, 0, 0));
   if (
-    d.getFullYear() !== Number(year) ||
-    d.getMonth() !== Number(month) - 1 ||
-    d.getDate() !== Number(day)
+    d.getUTCFullYear() !== Number(year) ||
+    d.getUTCMonth() !== Number(month) - 1 ||
+    d.getUTCDate() !== Number(day)
   ) {
     return null;
   }
@@ -158,7 +159,13 @@ function GoalFormModal({
 
   const titleError = !form.title.trim() ? 'Título é obrigatório' : null;
   const amountError = form.amountCents <= 0 ? 'Valor deve ser maior que zero' : null;
-  const deadlineError = !parseDateInput(form.deadlineInput) ? 'Data inválida (DD/MM/AAAA)' : null;
+  const deadlineError = (() => {
+    const iso = parseDateInput(form.deadlineInput);
+    if (!iso) return 'Data inválida (DD/MM/AAAA)';
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (new Date(iso) < today) return 'O prazo deve ser hoje ou uma data futura';
+    return null;
+  })();
   const isValid = !titleError && !amountError && !deadlineError;
 
   return (
@@ -400,7 +407,8 @@ export default function GoalsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível criar a meta. Tente novamente.');
+      const apiMsg = axios.isAxiosError(error) ? (error.response?.data as any)?.message : undefined;
+      toast.error(apiMsg ?? 'Não foi possível criar a meta. Tente novamente.');
     },
   });
 
@@ -423,7 +431,8 @@ export default function GoalsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível atualizar a meta. Tente novamente.');
+      const apiMsg = axios.isAxiosError(error) ? (error.response?.data as any)?.message : undefined;
+      toast.error(apiMsg ?? 'Não foi possível atualizar a meta. Tente novamente.');
     },
   });
 

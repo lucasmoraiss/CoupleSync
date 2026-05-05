@@ -28,7 +28,7 @@ public sealed class CreateGoalRequestValidator : AbstractValidator<CreateGoalReq
             .When(x => x.Currency is not null);
 
         RuleFor(x => x.Deadline)
-            .GreaterThan(_ => _dateTimeProvider.UtcNow)
-            .WithMessage("Deadline must be a future date.");
+            .Must(d => d.Date >= _dateTimeProvider.UtcNow.Date)
+            .WithMessage("O prazo deve ser hoje ou uma data futura.");
     }
 }

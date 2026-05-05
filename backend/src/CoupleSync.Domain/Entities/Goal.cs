@@ -70,8 +70,8 @@ public sealed class Goal : ICoupleScoped
         if (deadline.Kind == DateTimeKind.Unspecified)
             deadline = DateTime.SpecifyKind(deadline, DateTimeKind.Utc);
 
-        if (deadline <= createdAtUtc)
-            throw new ArgumentException("Deadline must be in the future.", nameof(deadline));
+        if (deadline.Date < createdAtUtc.Date)
+            throw new ArgumentException("Deadline must not be in the past.", nameof(deadline));
 
         if (description is not null && description.Length > 512)
             throw new ArgumentException("Description must be at most 512 characters.", nameof(description));
@@ -114,8 +114,8 @@ public sealed class Goal : ICoupleScoped
             var d = deadline.Value;
             if (d.Kind == DateTimeKind.Unspecified)
                 d = DateTime.SpecifyKind(d, DateTimeKind.Utc);
-            if (d <= nowUtc)
-                throw new ArgumentException("Deadline must be a future date.", nameof(deadline));
+            if (d.Date < nowUtc.Date)
+                throw new ArgumentException("Deadline must not be in the past.", nameof(deadline));
             Deadline = d;
         }
 

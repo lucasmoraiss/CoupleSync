@@ -14,7 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { transactionsApiClient } from '@/services/apiClient';
@@ -29,6 +29,17 @@ export default function NewTransactionScreen() {
   const [merchant, setMerchant] = useState('');
   const [category, setCategory] = useState<string>(PREDEFINED_CATEGORIES[0].value);
   const [submitting, setSubmitting] = useState(false);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!submitting) {
+        setAmountText('');
+        setDescription('');
+        setMerchant('');
+        setCategory(PREDEFINED_CATEGORIES[0].value);
+      }
+    }, [submitting])
+  );
 
   const parseAmount = (raw: string): number | null => {
     // Accept both "12,34" and "12.34"
