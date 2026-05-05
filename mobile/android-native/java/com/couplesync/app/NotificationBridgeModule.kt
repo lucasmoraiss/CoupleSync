@@ -3,10 +3,8 @@
 package com.couplesync.app
 
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.provider.Settings
-import android.text.TextUtils
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -25,7 +23,6 @@ class NotificationBridgeModule(private val reactContext: ReactApplicationContext
             if (reactContext.hasActiveReactInstance()) {
                 val params = WritableNativeMap().apply {
                     putString("packageName", packageName)
-                    // 'title' and 'body' are the original notification fields from the status bar
                     putString("title", title)
                     putString("body", body)
                     putDouble("timestampMs", timestampMs.toDouble())
@@ -33,7 +30,24 @@ class NotificationBridgeModule(private val reactContext: ReactApplicationContext
                 reactContext
                     .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                     .emit("NotificationCaptured", params)
+            } else {
+                // Bridge registered but React instance not yet active — re-buffer (FR-005)
+                NotificationEventBus.dispatch(packageName, title, body, timestampMs)
             }
+        }
+
+        // Flush events buffered while the bridge was inactive (NFR-001: no title/body logged)
+        // Safe to emit unconditionally: init guarantees a valid ReactApplicationContext
+        NotificationEventBus.flush { packageName, title, body, timestampMs ->
+            val params = WritableNativeMap().apply {
+                putString("packageName", packageName)
+                putString("title", title)
+                putString("body", body)
+                putDouble("timestampMs", timestampMs.toDouble())
+            }
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                .emit("NotificationCaptured", params)
         }
     }
 

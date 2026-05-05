@@ -38,6 +38,12 @@ public sealed class LocalPdfParserProvider : IOcrProvider
     /// <inheritdoc/>
     public async Task<string> AnalyzeAsync(string storagePath, string mimeType, CancellationToken ct)
     {
+        // 0. Reject image uploads — PdfPig cannot process JPEG/PNG (FR-002)
+        if (mimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            throw new OcrException(
+                "IMAGE_NOT_SUPPORTED",
+                "Processamento de imagens ainda não está disponível. Envie um extrato em PDF digital.");
+
         // 1. Load stream from storage
         await using var stream = await _storage.DownloadAsync(storagePath, ct);
 

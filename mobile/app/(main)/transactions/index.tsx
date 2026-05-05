@@ -1,5 +1,5 @@
 // AC-003: Transactions list screen — FlatList + pull-to-refresh + inline category editor
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Pressable,
   ScrollView,
   Alert,
+  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -25,6 +26,11 @@ import {
 } from '@/modules/transactions/categories';
 import type { TransactionResponse, GetTransactionsResponse } from '@/types/api';
 import { colors } from '@/theme';
+import {
+  checkNotificationListenerPermission,
+  openNotificationListenerSettings,
+  isNotificationBridgeAvailable,
+} from '@/modules/integrations/notification-capture/NotificationListenerBridge';
 import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -40,6 +46,7 @@ const MUTED = colors.textMuted;
 const BORDER = colors.border;
 const ERROR = colors.error;
 const OVERLAY = colors.overlay;
+const WARNING = colors.warning;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function formatBRL(amount: number): string {
@@ -173,6 +180,13 @@ export default function TransactionsScreen() {
   const [selectedTx, setSelectedTx] = useState<TransactionResponse | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && isNotificationBridgeAvailable()) {
+      checkNotificationListenerPermission().then(setNotifPermission);
+    }
+  }, []);
 
   const { data, isLoading, isError, refetch } = useQuery<GetTransactionsResponse>({
     queryKey: ['transactions', 1, 20],
@@ -284,6 +298,17 @@ export default function TransactionsScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Notification permission banner */}
+      {notifPermission === false && (
+        <View style={styles.permissionBanner}>
+          <Ionicons name="notifications-off-outline" size={18} color={WARNING} />
+          <Text style={styles.bannerText}>Captura de notificações desativada</Text>
+          <TouchableOpacity onPress={openNotificationListenerSettings}>
+            <Text style={styles.bannerAction}>Ativar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Loading state */}
       {isLoading && <LoadingState message="Carregando transações..." />}
@@ -483,4 +508,20 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
   },
   cancelText: { color: MUTED, fontSize: 15, fontWeight: '600' },
+  permissionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    borderLeftWidth: 3,
+    borderLeftColor: WARNING,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 8,
+  },
+  bannerText: { flex: 1, fontSize: 13, color: TEXT },
+  bannerAction: { fontSize: 13, fontWeight: '700', color: WARNING },
 });

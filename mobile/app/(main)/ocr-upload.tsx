@@ -81,6 +81,8 @@ export default function OcrUploadScreen() {
             errorMessage = `OCR indisponível este mês. Cota atingida. Tente novamente em ${dateStr}.`;
           } else if (errorCode === 'PDF_ENCRYPTED') {
             errorMessage = 'O PDF está protegido por senha. Por enquanto, exporte o extrato sem senha e tente novamente. (Suporte a senha será adicionado em breve.)';
+          } else if (errorCode === 'IMAGE_NOT_SUPPORTED') {
+            errorMessage = 'Fotos de recibos ainda não são processadas automaticamente. Envie um extrato bancário em PDF.';
           } else if (errorCode === 'PDF_TOO_SHORT') {
             errorMessage = 'O PDF parece ser uma imagem digitalizada. Envie um extrato em PDF digital (texto selecionável).';
           } else if (errorCode === 'NO_TRANSACTIONS_FOUND') {
