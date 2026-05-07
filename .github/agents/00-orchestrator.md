@@ -83,6 +83,9 @@ Do NOT enter ASK_USER for:
 - Trivial decisions you can make autonomously.
 - Technical implementation details (pick the simplest correct approach).
 - Anything where best-effort + documented assumption is sufficient.
+- **Committing and pushing code** — git commit + push is ALWAYS part of INTEGRATE. Never ask the user for permission. Just do it.
+- **Running tests, CI, or deployment pipelines** — these are mandatory validation steps, not optional choices.
+- **Standard delivery actions** (tag, release notes generation, triggering workflows) — these are mechanical steps in INTEGRATE/RELEASE.
 
 When in ASK_USER:
 - Use `ask_questions` tool to present the question (NEVER plain text that ends your turn).
@@ -155,7 +158,7 @@ For trivial, well-scoped changes (typo fix, config change, single-line bug fix, 
 INTAKE_LEAN -> IMPLEMENT_LOOP -> INTEGRATE -> DONE
 - **INTAKE_LEAN**: Orchestrator dispatches SpecAgent with a `lean: true` flag to create minimal artifacts: short `spec.md` (goal + acceptance criteria only), `acceptance.json`, single-task `tasks.yaml`, and initial `status.json`. If SpecAgent is not available, Orchestrator MAY create these minimal artifacts directly as the sole exception to the no-edit rule.
 - **IMPLEMENT_LOOP**: Coder implements → Reviewer reviews → QA (if behavior changed).
-- **INTEGRATE → DONE**: Orchestrator performs integration checks directly (runs acceptance_checks commands, verifies build). Integrator agent is NOT dispatched in lean mode. If checks fail, enter FIX_BUILD as normal. Orchestrator creates `report.md` directly (Docs agent is not dispatched in lean mode).
+- **INTEGRATE → DONE**: Orchestrator performs integration steps directly — `git add -A && git commit && git push`, then polls `github-actions MCP` until CI concludes green. Integrator agent is NOT dispatched in lean mode. If CI fails, enter FIX_BUILD as normal. Orchestrator creates `report.md` directly (Docs agent is not dispatched in lean mode). No user confirmation is needed at any step.
 
 ### Lean mode rules
 - Security agent is still called if the change touches auth/input/network - this is a safety net, not a contradiction with the "no security implications" entry criterion. The criterion filters intent; the safety net catches missed risks.
@@ -257,10 +260,13 @@ You are the logical owner of `status.json`. You REQUIRE agents to update it when
 **Invariant**: After leaving any user-decision state (`ASK_USER`, `APPROVE_DESIGN`, or `REVIEW_STRATEGY`), there MUST be no unresolved `user_decisions` with `status: pending` that were created during that state.
 
 ## End condition
-DONE only when:
+DONE only when ALL of the following are verified — not assumed:
 - All acceptance criteria are satisfied (or explicitly waived with reasons)
-- CI green (if available)
-- `.agents-work/<session>/report.md` contains final summary, known issues, and run instructions
+- **CI verified green** — checked via `github-actions MCP list_workflow_runs` for the pushed SHA. CI green is not assumed. If CI is unavailable, document why in `report.md` and all local acceptance_checks pass.
+- **All downstream workflows verified** — Deploy, mobile-update, mobile-apk etc. checked individually via MCP after push.
+- **Actual test results present** — QA must have provided real runner output (not assumed). Unit + integration + E2E all passed.
+- **Mobile validated** — when mobile files changed, either mobile-validation MCP confirms app works OR OTA workflow confirmed green.
+- `.agents-work/<session>/report.md` contains final summary, CI run links, actual test output references, known issues, and run instructions.
 
 ## Context files enforcement (mandatory)
 When dispatching a task to any agent, the Orchestrator MUST populate `context_files` with ALL relevant artifacts from the session. This is not optional - agents depend on these files for correct execution.

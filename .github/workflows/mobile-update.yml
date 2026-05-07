@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   ota-update:
-    name: EAS Update — OTA (preview branch)
+    name: EAS Update — OTA (production)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -48,7 +48,7 @@ jobs:
       - name: Setup EAS CLI
         run: npm install --global eas-cli@12
 
-      - name: EAS Update — push OTA bundle to preview branch
+      - name: EAS Update — push OTA bundle to production branch
         working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -60,6 +60,6 @@ jobs:
         run: |
           eas update \
             --platform android \
-            --branch preview \
+            --branch production \
             --message "ci: ${{ github.sha }}" \
             --non-interactive

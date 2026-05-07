@@ -1,7 +1,20 @@
-name: Mobile APK — Build & Distribute
+name: Mobile APK — Build & Publish
 
-# AC-106: triggered on manual dispatch or version tag push from main
+# Triggered automatically after Deploy succeeds on main, ensuring the backend
+# is live before distributing a new APK. Also supports manual dispatch and
+# version-tag pushes for out-of-band releases.
+#
+# APK is uploaded as a GitHub Actions artifact for manual download.
+# Firebase App Distribution has been removed for the pilot (5 couples).
+#
+# Required secret: EXPO_TOKEN
+#   expo.dev → Settings → Access Tokens → Create token
+
 on:
+  workflow_run:
+    workflows: ["Deploy"]
+    branches: [main]
+    types: [completed]
   workflow_dispatch:
   push:
     tags:
@@ -12,10 +25,15 @@ permissions:
   contents: read
 
 jobs:
-  build-and-distribute:
-    name: EAS Build → Firebase App Distribution
+  build-apk:
+    name: EAS Build — Production APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
+
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout
@@ -36,9 +54,9 @@ jobs:
         run: npm install --global eas-cli@12
 
       # EXPO_TOKEN authenticates the EAS CLI against the Expo account.
-      # EXPO_PUBLIC_API_BASE_URL is set in eas.json preview.env and baked into
-      # the APK at EAS cloud build time — not injected from the runner env.
-      - name: EAS Build — Android APK (preview)
+      # EXPO_PUBLIC_API_BASE_URL is baked into the APK via eas.json
+      # production.env at EAS cloud build time — not injected from the runner.
+      - name: EAS Build — Android APK (production)
         id: eas-build
         working-directory: mobile
         env:
@@ -46,7 +64,7 @@ jobs:
         run: |
           BUILD_OUTPUT=$(eas build \
             --platform android \
-            --profile preview \
+            --profile production \
             --non-interactive \
             --json)
           BUILD_ID=$(echo "${BUILD_OUTPUT}" | jq -r '.[0].id // .id // empty')
@@ -75,27 +93,12 @@ jobs:
 
           echo "apk_url=${APK_URL}" >> "$GITHUB_OUTPUT"
 
-      - name: Download APK artifact
-        run: curl -fsSL -o app-preview.apk "${{ steps.get-apk.outputs.apk_url }}"
+      - name: Download APK
+        run: curl -fsSL -o app-production.apk "${{ steps.get-apk.outputs.apk_url }}"
 
-      - name: Install Firebase CLI
-        run: npm install --global firebase-tools@13
-
-      # Upload to Firebase App Distribution.
-      # If FIREBASE_TESTER_GROUP is unset or empty the step emits a workflow
-      # warning but continues — it does NOT fail the build.
-      - name: Upload to Firebase App Distribution
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-          FIREBASE_TESTER_GROUP: ${{ secrets.FIREBASE_TESTER_GROUP }}
-        run: |
-          if [ -n "${FIREBASE_TESTER_GROUP}" ]; then
-            firebase appdistribution:distribute app-preview.apk \
-              --app "${FIREBASE_APP_ID}" \
-              --groups "${FIREBASE_TESTER_GROUP}"
-          else
-            echo "::warning::FIREBASE_TESTER_GROUP secret is empty or unset — APK will be uploaded without assigning a tester group."
-            firebase appdistribution:distribute app-preview.apk \
-              --app "${FIREBASE_APP_ID}"
-          fi
+      - name: Upload APK as GitHub Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: couplesync-production-apk
+          path: app-production.apk
+          retention-days: 30

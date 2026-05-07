@@ -176,10 +176,22 @@ Examples of ad-hoc ASK_USER triggers:
 
 ### INTEGRATE
 Agent: Integrator (full mode) or Orchestrator directly (lean mode)
-Purpose: green build, conflicts, full pipeline
-Gate: CI/build green OR if no CI, local commands from acceptance_checks pass
+Purpose: deliver working changes into the shared branch, verify full pipeline green end-to-end
 
-In **lean mode**, Orchestrator runs acceptance_checks commands directly instead of dispatching Integrator. If checks fail, enter FIX_BUILD as normal.
+**Mandatory sequence (no user confirmation required at any step):**
+1. `git add -A && git commit -m "<descriptive message>"` — commit all session changes. Do NOT ask the user for permission.
+2. `git push origin <branch>` — push immediately. Do NOT ask the user for permission.
+3. Wait for CI to start: poll `github-actions MCP list_workflow_runs` (workflow: ci.yml) until the new run appears.
+4. Poll CI until `conclusion` is `success` or `failure` (max 30 min; check every 60s).
+5. If mobile files were changed: also wait for `mobile-update.yml` run triggered by the Deploy to complete with `conclusion: success`.
+6. If CI conclusion is `failure` → read job logs via `get_job_logs` → enter FIX_BUILD.
+7. Only when CI is green and all triggered downstream workflows succeed → gate passes.
+
+**Mobile validation** (when any file under `mobile/` was changed):
+- After CI+OTA green, verify the app works end-to-end using the mobile-validation MCP (`ensure_ready` → `validate_screen` → `assert_visible` for key screens) OR confirm the OTA update workflow pushed successfully to the production branch.
+- If mobile-validation MCP is unavailable, fall back to verifying OTA workflow succeeded + documenting manual validation steps in `report.md`.
+
+Gate: CI/build green AND all triggered workflows green. In lean mode, Orchestrator runs these steps directly instead of dispatching Integrator.
 
 ### RELEASE
 Agents:
@@ -218,11 +230,17 @@ Exception: Security can be "OK no findings," but must be run.
 **Lean mode exception**: In lean mode, only Coder, Reviewer, and (conditionally) QA and Security are mandatory. SpecAgent is used for INTAKE_LEAN artifact creation (delegated by Orchestrator) but is not counted as a "mandatory core agent" for dispatch tracking. Architect, Planner, Designer, Integrator, Docs, and Researcher are skipped in lean mode. Orchestrator handles INTEGRATE checks directly and creates `report.md` directly (since Docs is skipped).
 
 ## Definition of Done (global)
-DONE only if:
+DONE only if ALL of the following are verified — not assumed:
 - All criteria from `.agents-work/<session>/acceptance.json` are met
+- **Unit tests ran and passed** — actual `dotnet test` output or equivalent shows 0 failures (QA must provide real runner output, never a summary assumption)
+- **Integration tests ran and passed** — same requirement
+- **E2E tests ran and passed** — same requirement (if applicable to the task)
+- **CI is verified green** — Orchestrator/Integrator MUST check via `github-actions MCP list_workflow_runs` and confirm `conclusion: success` for the commit SHA just pushed. "CI green" is not assumed; it is read from the MCP response.
+- **All triggered downstream workflows completed successfully** — Deploy, mobile-update, etc. checked individually via MCP
+- **Mobile validation passed** (when mobile files changed) — either via mobile-validation MCP or OTA workflow confirmed green
 - `.agents-work/<session>/status.json` is up-to-date and current_state=DONE
 - `.agents-work/<session>/status.json` has no unresolved `user_decisions` with `status: pending`
-- `.agents-work/<session>/report.md` contains: what was done, how to run, how to test, known issues
+- `.agents-work/<session>/report.md` contains: what was done, actual test results, CI run links, how to run locally, known issues
 
 ## Project-level instructions (copilot-instructions.md)
 If a file `.github/copilot-instructions.md` exists in the repository, the Orchestrator MUST instruct every subagent to read it as part of their dispatch. This file contains project-level conventions, coding standards, design system rules, and other context that all agents must follow.

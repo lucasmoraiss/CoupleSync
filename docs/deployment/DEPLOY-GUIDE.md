@@ -150,7 +150,8 @@ az webapp deploy --resource-group CoupleSync --name CoupleSyncApi --src-path ./d
 |---|---|---|---|
 | **CI** | `ci.yml` | Push/PR em `main` | Build + 391 testes + TypeScript check |
 | **Deploy** | `deploy.yml` | CI verde em `main` OU manual | Publica no App Service |
-| **Mobile APK** | `mobile-apk.yml` | Tag `v*` OU manual | EAS Build → Firebase App Distribution |
+| **Mobile OTA Update** | `mobile-update.yml` | Deploy verde em `main` OU manual | EAS Update → branch `production` (OTA sem rebuild) |
+| **Mobile APK Build** | `mobile-apk.yml` | Deploy verde em `main` OU manual | EAS Build → APK (profile `production`) → artifact |
 
 ### GitHub Secrets necessários
 
@@ -159,15 +160,13 @@ Configurar em: GitHub → repo → Settings → Secrets and variables → Action
 | Secret | Necessário para | Como obter |
 |---|---|---|
 | `AZURE_PUBLISH_PROFILE` | deploy.yml | Conteúdo XML do `publish-profile.xml` (já salvo localmente) |
-| `EXPO_TOKEN` | mobile-apk.yml | [expo.dev](https://expo.dev/) → Settings → Access Tokens → Create |
-| `FIREBASE_TOKEN` | mobile-apk.yml | `firebase login:ci` no terminal → copie o token |
-| `FIREBASE_APP_ID` | mobile-apk.yml | `1:247947489218:android:8eb748248b90016af4b05b` (do `google-services.json`) |
+| `EXPO_TOKEN` | mobile-apk.yml, mobile-update.yml | [expo.dev](https://expo.dev/) → Settings → Access Tokens → Create |
+| `EXPO_PUBLIC_API_BASE_URL` | mobile-update.yml (opcional) | URL da API, ex: `https://couplesyncapi.azurewebsites.net` (tem fallback) |
 
 ### Fluxo após configuração:
 
 ```
-git push main → CI (build + testes) → Deploy (App Service) → Health check
-git tag v1.0.0 → Mobile APK (EAS Build) → Firebase App Distribution
+git push main → CI (build + testes) → Deploy (App Service) → Mobile OTA Update (branch production) + Mobile APK Build (profile production, artifact)
 ```
 
 ---
@@ -192,22 +191,30 @@ dotnet ef migrations add NomeDaMigration --project ../CoupleSync.Infrastructure
 
 ## 8. Deploy do Mobile (APK)
 
-### Build
+### Build Automático (via CI/CD)
+
+O APK é gerado automaticamente pelo workflow `mobile-apk.yml` após cada deploy bem-sucedido do backend. Não é necessário nenhum passo manual:
+
+1. Faça push na `main` → CI passa → Deploy roda → `mobile-apk.yml` dispara automaticamente
+2. O EAS Build constrói o APK com o profile `production`
+3. O APK fica disponível como **artifact do GitHub Actions** (retenção de 90 dias)
+
+Para baixar: GitHub → Actions → **"Mobile APK — Build & Publish"** → clique no run → seção **Artifacts** → baixe `app-production`
+
+### Build Manual (sob demanda)
+
 ```bash
 cd mobile
 eas login          # primeira vez
-eas build --platform android --profile preview
-# Aguarde ~10 min, copie o link do APK
+eas build --platform android --profile production --non-interactive
+# Aguarde ~10 min, baixe o APK no link retornado pelo EAS
 ```
 
-### Distribuir
-```bash
-firebase appdistribution:distribute CAMINHO_APK \
-  --app 1:247947489218:android:8eb748248b90016af4b05b \
-  --release-notes "Pilot v1.0"
-```
+### Distribuir para Testers
 
-Ou envie o APK diretamente via WhatsApp/email para os testers.
+Baixe o APK dos artifacts do GitHub Actions e distribua via WhatsApp/email para os testers.
+
+> **Nota:** Firebase App Distribution foi removido para simplificar o piloto. O APK é distribuído manualmente para os 5 casais.
 
 ---
 
@@ -245,7 +252,7 @@ Protegido pelo `.gitignore`:
 
 ---
 
-## 12. Status Atual (19/04/2026)
+## 12. Status Atual (07/05/2026)
 
 | Item | Status |
 |---|---|
@@ -254,10 +261,10 @@ Protegido pelo `.gitignore`:
 | Registro de usuário funcional | ✅ |
 | Health + DB check | ✅ |
 | 10 env vars configuradas | ✅ |
-| CI workflow (ci.yml) | ✅ Existente |
-| CD backend (deploy.yml) | ⚠️ Precisa secret `AZURE_PUBLISH_PROFILE` |
-| Mobile APK build | ❌ Pendente |
-| CD mobile (mobile-apk.yml) | ⚠️ Precisa secrets Expo/Firebase |
+| CI workflow (ci.yml) | ✅ |
+| CD backend (deploy.yml) | ✅ Requer secret `AZURE_PUBLISH_PROFILE` |
+| Mobile OTA update (mobile-update.yml) | ✅ Dispara após Deploy, branch `production` |
+| Mobile APK build (mobile-apk.yml) | ✅ Dispara após Deploy, artifact no GitHub Actions |
 # CoupleSync — Guia Definitivo de Deployment e Operação
 
 > **Atualizado:** 18 de abril de 2026  
