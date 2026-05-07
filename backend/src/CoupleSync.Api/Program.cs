@@ -115,9 +115,13 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    // Auto-apply pending EF Core migrations on startup so the production DB stays
-    // in sync without requiring a separate migration step in the CI/deploy pipeline.
-    await db.Database.MigrateAsync();
+    // Auto-apply pending EF Core migrations on startup — production (PostgreSQL) only.
+    // Integration tests use SQLite with EnsureCreated(), so migrations are skipped there
+    // to avoid "table already exists" conflicts.
+    if (db.Database.ProviderName?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) != true)
+    {
+        await db.Database.MigrateAsync();
+    }
     var seeder = new CategoryRulesSeeder(db);
     await seeder.SeedAsync();
 }
