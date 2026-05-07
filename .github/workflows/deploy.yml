@@ -46,7 +46,7 @@ jobs:
 
       - name: Wait for health endpoint
         run: |
-          URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/health"
+          URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/health/ready"
           echo "Polling: ${URL}"
           for i in $(seq 1 20); do
             STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" "${URL}" || echo "000")

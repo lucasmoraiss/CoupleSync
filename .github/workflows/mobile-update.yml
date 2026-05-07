@@ -52,6 +52,11 @@ jobs:
         working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          # Must be set here so Metro inlines the correct production URL when
+          # bundling. eas.json build.preview.env only applies to `eas build`,
+          # NOT to `eas update`. Without this, process.env.EXPO_PUBLIC_API_BASE_URL
+          # is undefined and the app falls back to the emulator address (10.0.2.2:5000).
+          EXPO_PUBLIC_API_BASE_URL: ${{ secrets.EXPO_PUBLIC_API_BASE_URL || 'https://couplesyncapi.azurewebsites.net' }}
         run: |
           eas update \
             --platform android \

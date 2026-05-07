@@ -8,6 +8,7 @@ using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Couples;
 using CoupleSync.Application.Common.Options;
 using CoupleSync.Application.NotificationCapture;
+using Microsoft.EntityFrameworkCore;
 using CoupleSync.Application.Transactions.Commands;
 using CoupleSync.Application.Transactions.Queries;
 using CoupleSync.Application.Notification.Commands;
@@ -113,7 +114,11 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
-    var seeder = new CategoryRulesSeeder(scope.ServiceProvider.GetRequiredService<AppDbContext>());
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    // Auto-apply pending EF Core migrations on startup so the production DB stays
+    // in sync without requiring a separate migration step in the CI/deploy pipeline.
+    await db.Database.MigrateAsync();
+    var seeder = new CategoryRulesSeeder(db);
     await seeder.SeedAsync();
 }
 
