@@ -23,6 +23,21 @@
 				"GITHUB_OWNER": "${input:GITHUB_OWNER}",
 				"GITHUB_REPO": "${input:GITHUB_REPO}"
 			}
+		},
+		"mobile-validation": {
+			"type": "stdio",
+			"command": "node",
+			"args": [
+				"${workspaceFolder}/mcp-mobile-validation/dist/index.js"
+			],
+			"env": {
+				"ADB_PATH": "${input:ADB_PATH}",
+				"MAESTRO_PATH": "${input:MAESTRO_PATH}",
+				"SCREENSHOT_DIR": "${workspaceFolder}/.agents-work/screenshots",
+				"APP_PACKAGE": "com.couplesync.app",
+				"MAESTRO_FLOWS_DIR": "${workspaceFolder}/mobile/tests/e2e/flows",
+				"PROJECT_ROOT": "${workspaceFolder}"
+			}
 		}
 	},
 	"inputs": [
@@ -47,6 +62,16 @@
 			"id": "GITHUB_REPO",
 			"type": "promptString",
 			"description": "GitHub repository name (e.g. 'CoupleSync')"
+		},
+		{
+			"id": "ADB_PATH",
+			"type": "promptString",
+			"description": "Path to adb executable (leave empty for 'adb' in PATH, or e.g. 'C:/Users/lucas/AppData/Local/Android/Sdk/platform-tools/adb.exe')"
+		},
+		{
+			"id": "MAESTRO_PATH",
+			"type": "promptString",
+			"description": "Path to maestro executable (leave empty for 'maestro' in PATH)"
 		}
 	]
 }

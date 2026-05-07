@@ -74,6 +74,40 @@ Agents that need CI/CD information should use the `github-actions` MCP server to
 
 **When to use**: Checking CI status after code changes, debugging failing pipelines, triggering deployments, validating workflow configuration changes.
 
+### Mobile Validation (`mobile-validation` MCP)
+Agents that need to validate mobile UI implementations should use the `mobile-validation` MCP server tools:
+
+**Bootstrap (MUST call first):**
+- `ensure_ready` — self-healing prerequisite check. Automatically: finds ADB (or locates it in Android SDK), checks device/emulator (starts emulator if none connected), verifies app is installed (builds and installs if missing), checks Maestro availability. Call once per agent session before any other validation tool.
+
+**Inspection (read-only):**
+- `list_devices` — verify emulator/device is connected
+- `take_screenshot` — capture current screen as PNG
+- `get_ui_hierarchy` — dump accessibility tree (XML with all element properties)
+- `find_element` — search for element by text, ID, or accessibility label
+- `validate_screen` — combined screenshot + hierarchy in one call (preferred)
+- `assert_visible` — pass/fail assertion on element visibility
+- `wait_for_element` — poll for element after async operations
+- `get_app_state` — check if app is running/foreground
+- `get_screen_info` — device dimensions and density
+- `get_logcat` — read app logs (filter by ReactNativeJS for JS errors)
+
+**Interaction:**
+- `launch_app` — start/restart CoupleSync
+- `tap_element` — tap by coordinates or text/description
+- `input_text` — type into focused field
+- `swipe` — scroll or gesture
+- `press_key` — hardware keys (back, home, enter)
+
+**Maestro flows:**
+- `run_maestro_flow` — execute a predefined YAML flow
+- `run_maestro_command` — execute inline Maestro commands
+- `list_maestro_flows` — discover available validation flows
+
+**When to use**: After implementing UI changes, before marking mobile tasks as complete, during QA validation of screens, and for regression checks. Requires Android emulator running with dev build installed.
+
+**Validation flows location**: `mobile/tests/e2e/flows/`
+
 ## Artifact Discipline
 - Keep `.agents-work/<session>/` artifacts (spec.md, acceptance.json, tasks.yaml, status.json) consistent
 - Update status.json `last_update` whenever a state change is made

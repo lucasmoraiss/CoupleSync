@@ -1,0 +1,11 @@
+appId: com.couplesync.app
+---
+# Smoke test: verifies the app launches and reaches the login screen
+- launchApp
+- assertVisible: "CoupleSync"
+- assertVisible:
+    id: ".*email.*"
+    optional: true
+- assertVisible:
+    id: ".*password.*"
+    optional: true

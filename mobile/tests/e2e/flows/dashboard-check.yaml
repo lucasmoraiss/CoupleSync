@@ -1,0 +1,22 @@
+appId: com.couplesync.app
+---
+# Validates the main dashboard screen content after login
+# Prerequisite: user must be logged in
+
+- assertVisible: "Dashboard"
+
+# Check key dashboard elements
+- assertVisible:
+    text: ".*R\\$.*"
+    isRegex: true
+
+# Verify navigation tabs are present
+- assertVisible: "Transações"
+  optional: true
+- assertVisible: "Transactions"
+  optional: true
+
+- assertVisible: "Metas"
+  optional: true
+- assertVisible: "Goals"
+  optional: true

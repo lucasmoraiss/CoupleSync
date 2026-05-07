@@ -1,0 +1,34 @@
+appId: com.couplesync.app
+---
+# Validates navigation between all main tabs
+# Prerequisite: user must be logged in and on Dashboard
+
+- assertVisible: "Dashboard"
+
+# Navigate to Transactions
+- tapOn: "Transações"
+  optional: true
+- tapOn: "Transactions"
+  optional: true
+- assertVisible:
+    text: ".*[Tt]ransa.*"
+    isRegex: true
+    timeout: 5000
+
+# Navigate to Goals
+- tapOn: "Metas"
+  optional: true
+- tapOn: "Goals"
+  optional: true
+- assertVisible:
+    text: ".*[Mm]eta.*|.*[Gg]oal.*"
+    isRegex: true
+    timeout: 5000
+
+# Navigate back to Dashboard
+- tapOn: "Dashboard"
+  optional: true
+- tapOn: "Início"
+  optional: true
+- assertVisible: "Dashboard"
+  timeout: 5000

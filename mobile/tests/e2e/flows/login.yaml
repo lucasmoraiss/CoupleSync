@@ -1,0 +1,28 @@
+appId: com.couplesync.app
+---
+# Validates the login flow with test credentials
+- launchApp:
+    clearState: true
+
+# Wait for login screen
+- assertVisible: "CoupleSync"
+
+# Enter credentials
+- tapOn:
+    id: ".*email.*"
+- inputText: ${EMAIL}
+
+- tapOn:
+    id: ".*password.*"
+- inputText: ${PASSWORD}
+
+# Submit
+- tapOn: "Entrar"
+  optional: true
+- tapOn: "Login"
+  optional: true
+
+# Verify navigation to main screen
+- assertVisible:
+    text: "Dashboard"
+    timeout: 10000
