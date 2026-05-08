@@ -123,7 +123,7 @@ jobs:
             --message "${{ github.event.head_commit.message }}" \
             --auto \
             --non-interactive
-        continue-on-error: false
+        continue-on-error: true   # remove after EXPO_TOKEN secret is configured
 
       - name: Secret scan
         uses: trufflesecurity/trufflehog@main
