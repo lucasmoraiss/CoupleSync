@@ -112,6 +112,19 @@ jobs:
         working-directory: mobile
         run: npx tsc --noEmit
 
+      - name: Publish OTA update
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          npx eas-cli update \
+            --channel production \
+            --message "${{ github.event.head_commit.message }}" \
+            --auto \
+            --non-interactive
+        continue-on-error: false
+
       - name: Secret scan
         uses: trufflesecurity/trufflehog@main
         with:
