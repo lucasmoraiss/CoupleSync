@@ -11,6 +11,7 @@ import type {
   GetCoupleMeResponse,
   GoalDto,
   GetGoalsResponse,
+  GoalsProgressSummaryResponse,
   DashboardResponse,
   TransactionResponse,
   GetTransactionsResponse,
@@ -218,6 +219,7 @@ interface UpdateGoalRequest {
   title?: string;
   description?: string;
   targetAmount?: number;
+  currentAmount?: number;
   deadline?: string;
 }
 
@@ -234,8 +236,11 @@ export const goalsApiClient = {
   update: (id: string, data: UpdateGoalRequest): Promise<AxiosResponse<GoalDto>> =>
     axiosInstance.patch<GoalDto>(`/api/v1/goals/${id}`, data),
 
-  archive: (id: string): Promise<AxiosResponse<void>> =>
-    axiosInstance.delete<void>(`/api/v1/goals/${id}/archive`),
+  delete: (id: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.delete<void>(`/api/v1/goals/${id}`),
+
+  progressSummary: (): Promise<AxiosResponse<GoalsProgressSummaryResponse>> =>
+    axiosInstance.get<GoalsProgressSummaryResponse>('/api/v1/goals/progress-summary'),
 };
 
 // --- Cash Flow API ---

@@ -19,6 +19,7 @@ public sealed partial class IncomeSource : ICoupleScoped
         decimal amount,
         string currency,
         bool isShared,
+        bool isRecurring,
         DateTime createdAtUtc)
     {
         Id = id;
@@ -29,6 +30,7 @@ public sealed partial class IncomeSource : ICoupleScoped
         Amount = amount;
         Currency = currency;
         IsShared = isShared;
+        IsRecurring = isRecurring;
         CreatedAtUtc = createdAtUtc;
         UpdatedAtUtc = createdAtUtc;
     }
@@ -41,6 +43,7 @@ public sealed partial class IncomeSource : ICoupleScoped
     public decimal Amount { get; private set; }
     public string Currency { get; private set; } = "BRL";
     public bool IsShared { get; private set; }
+    public bool IsRecurring { get; private set; } = true;
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
@@ -54,7 +57,8 @@ public sealed partial class IncomeSource : ICoupleScoped
         decimal amount,
         string currency,
         bool isShared,
-        DateTime createdAtUtc)
+        DateTime createdAtUtc,
+        bool isRecurring = true)
     {
         if (string.IsNullOrWhiteSpace(month) || month.Length != 7 || !MonthFormatRegex().IsMatch(month))
             throw new ArgumentException("Month must be in YYYY-MM format (exactly 7 characters).", nameof(month));
@@ -71,10 +75,10 @@ public sealed partial class IncomeSource : ICoupleScoped
         if (createdAtUtc.Kind == DateTimeKind.Unspecified)
             createdAtUtc = DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc);
 
-        return new IncomeSource(Guid.NewGuid(), coupleId, userId, month, name.Trim(), amount, currency, isShared, createdAtUtc);
+        return new IncomeSource(Guid.NewGuid(), coupleId, userId, month, name.Trim(), amount, currency, isShared, isRecurring, createdAtUtc);
     }
 
-    public void Update(string? name, decimal? amount, bool? isShared, DateTime nowUtc)
+    public void Update(string? name, decimal? amount, bool? isShared, bool? isRecurring, DateTime nowUtc)
     {
         if (name is not null)
         {
@@ -93,6 +97,11 @@ public sealed partial class IncomeSource : ICoupleScoped
         if (isShared is not null)
         {
             IsShared = isShared.Value;
+        }
+
+        if (isRecurring is not null)
+        {
+            IsRecurring = isRecurring.Value;
         }
 
         UpdatedAtUtc = nowUtc;

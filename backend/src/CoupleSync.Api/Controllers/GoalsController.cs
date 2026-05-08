@@ -17,25 +17,31 @@ public sealed class GoalsController : ControllerBase
 {
     private readonly CreateGoalCommandHandler _createHandler;
     private readonly UpdateGoalCommandHandler _updateHandler;
+    private readonly DeleteGoalCommandHandler _deleteHandler;
     private readonly ArchiveGoalCommandHandler _archiveHandler;
     private readonly GetGoalsQueryHandler _getGoalsHandler;
     private readonly GetGoalByIdQueryHandler _getGoalByIdHandler;
     private readonly GetGoalProgressQueryHandler _getGoalProgressHandler;
+    private readonly GetGoalsProgressSummaryQueryHandler _getProgressSummaryHandler;
 
     public GoalsController(
         CreateGoalCommandHandler createHandler,
         UpdateGoalCommandHandler updateHandler,
+        DeleteGoalCommandHandler deleteHandler,
         ArchiveGoalCommandHandler archiveHandler,
         GetGoalsQueryHandler getGoalsHandler,
         GetGoalByIdQueryHandler getGoalByIdHandler,
-        GetGoalProgressQueryHandler getGoalProgressHandler)
+        GetGoalProgressQueryHandler getGoalProgressHandler,
+        GetGoalsProgressSummaryQueryHandler getProgressSummaryHandler)
     {
         _createHandler = createHandler;
         _updateHandler = updateHandler;
+        _deleteHandler = deleteHandler;
         _archiveHandler = archiveHandler;
         _getGoalsHandler = getGoalsHandler;
         _getGoalByIdHandler = getGoalByIdHandler;
         _getGoalProgressHandler = getGoalProgressHandler;
+        _getProgressSummaryHandler = getProgressSummaryHandler;
     }
 
     [HttpPost]
@@ -92,6 +98,22 @@ public sealed class GoalsController : ControllerBase
         return Ok(response);
     }
 
+    [HttpGet("progress-summary")]
+    [ProducesResponseType(typeof(GoalsProgressSummaryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<GoalsProgressSummaryResponse>> GetGoalsProgressSummary(
+        CancellationToken cancellationToken)
+    {
+        var coupleId = GetAuthenticatedCoupleId();
+
+        var result = await _getProgressSummaryHandler.HandleAsync(
+            new GetGoalsProgressSummaryQuery(coupleId),
+            cancellationToken);
+
+        return Ok(new GoalsProgressSummaryResponse(result.Goals));
+    }
+
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(GoalResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -132,10 +154,24 @@ public sealed class GoalsController : ControllerBase
         }
 
         var result = await _updateHandler.HandleAsync(
-            new UpdateGoalCommand(id, coupleId, request.Title, request.Description, request.TargetAmount, deadline),
+            new UpdateGoalCommand(id, coupleId, request.Title, request.Description, request.TargetAmount, request.CurrentAmount, deadline),
             cancellationToken);
 
         return Ok(MapToResponse(result));
+    }
+
+    [HttpDelete("{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteGoal(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var coupleId = GetAuthenticatedCoupleId();
+        await _deleteHandler.HandleAsync(new DeleteGoalCommand(id, coupleId), cancellationToken);
+        return NoContent();
     }
 
     [HttpDelete("{id:guid}/archive")]
@@ -148,11 +184,7 @@ public sealed class GoalsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var coupleId = GetAuthenticatedCoupleId();
-
-        var result = await _archiveHandler.HandleAsync(
-            new ArchiveGoalCommand(id, coupleId),
-            cancellationToken);
-
+        var result = await _archiveHandler.HandleAsync(new ArchiveGoalCommand(id, coupleId), cancellationToken);
         return Ok(MapToResponse(result));
     }
 
@@ -184,7 +216,7 @@ public sealed class GoalsController : ControllerBase
 
     private static GoalResponse MapToResponse(Application.Goals.Queries.GoalDto g)
         => new(g.Id, g.CreatedByUserId, g.Title, g.Description,
-               g.TargetAmount, g.Currency, g.Deadline, g.Status.ToString(),
+               g.TargetAmount, g.CurrentAmount, g.Currency, g.Deadline, g.Status.ToString(),
                g.CreatedAtUtc, g.UpdatedAtUtc);
 
     private Guid GetAuthenticatedCoupleId()

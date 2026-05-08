@@ -23,6 +23,7 @@ public sealed class IncomeSourceEntityTests
         Assert.Equal(5000m, source.Amount);
         Assert.Equal("BRL", source.Currency);
         Assert.False(source.IsShared);
+        Assert.True(source.IsRecurring);
         Assert.Equal(FixedNow, source.CreatedAtUtc);
         Assert.Equal(FixedNow, source.UpdatedAtUtc);
     }
@@ -33,6 +34,14 @@ public sealed class IncomeSourceEntityTests
         var source = IncomeSource.Create(Guid.NewGuid(), Guid.NewGuid(), "2026-05", "Aluguel", 1500m, "BRL", true, FixedNow);
 
         Assert.True(source.IsShared);
+    }
+
+    [Fact]
+    public void Create_ExtraIncome_SetsIsRecurringFalse()
+    {
+        var source = IncomeSource.Create(Guid.NewGuid(), Guid.NewGuid(), "2026-05", "Freelance", 1500m, "BRL", false, FixedNow, isRecurring: false);
+
+        Assert.False(source.IsRecurring);
     }
 
     [Fact]
@@ -105,7 +114,7 @@ public sealed class IncomeSourceEntityTests
         var source = IncomeSource.Create(Guid.NewGuid(), Guid.NewGuid(), "2026-05", "Old", 1000m, "BRL", false, FixedNow);
         var later = FixedNow.AddHours(1);
 
-        source.Update("New Name", null, null, later);
+        source.Update("New Name", null, null, null, later);
 
         Assert.Equal("New Name", source.Name);
         Assert.Equal(later, source.UpdatedAtUtc);
@@ -116,7 +125,7 @@ public sealed class IncomeSourceEntityTests
     {
         var source = IncomeSource.Create(Guid.NewGuid(), Guid.NewGuid(), "2026-05", "Salário", 1000m, "BRL", false, FixedNow);
 
-        source.Update(null, 8000m, null, FixedNow.AddMinutes(1));
+        source.Update(null, 8000m, null, null, FixedNow.AddMinutes(1));
 
         Assert.Equal(8000m, source.Amount);
     }
@@ -126,9 +135,19 @@ public sealed class IncomeSourceEntityTests
     {
         var source = IncomeSource.Create(Guid.NewGuid(), Guid.NewGuid(), "2026-05", "Salário", 1000m, "BRL", false, FixedNow);
 
-        source.Update(null, null, true, FixedNow.AddMinutes(1));
+        source.Update(null, null, true, null, FixedNow.AddMinutes(1));
 
         Assert.True(source.IsShared);
+    }
+
+    [Fact]
+    public void Update_IsRecurring_UpdatesFlag()
+    {
+        var source = IncomeSource.Create(Guid.NewGuid(), Guid.NewGuid(), "2026-05", "Salário", 1000m, "BRL", false, FixedNow);
+
+        source.Update(null, null, null, false, FixedNow.AddMinutes(1));
+
+        Assert.False(source.IsRecurring);
     }
 
     [Fact]
@@ -136,7 +155,7 @@ public sealed class IncomeSourceEntityTests
     {
         var source = IncomeSource.Create(Guid.NewGuid(), Guid.NewGuid(), "2026-05", "Salário", 1000m, "BRL", false, FixedNow);
 
-        Assert.Throws<ArgumentException>(() => source.Update(null, -1m, null, FixedNow.AddMinutes(1)));
+        Assert.Throws<ArgumentException>(() => source.Update(null, -1m, null, null, FixedNow.AddMinutes(1)));
     }
 
     [Fact]
@@ -144,7 +163,7 @@ public sealed class IncomeSourceEntityTests
     {
         var source = IncomeSource.Create(Guid.NewGuid(), Guid.NewGuid(), "2026-05", "Salário", 1000m, "BRL", false, FixedNow);
 
-        Assert.Throws<ArgumentException>(() => source.Update("", null, null, FixedNow.AddMinutes(1)));
+        Assert.Throws<ArgumentException>(() => source.Update("", null, null, null, FixedNow.AddMinutes(1)));
     }
 
     [Fact]

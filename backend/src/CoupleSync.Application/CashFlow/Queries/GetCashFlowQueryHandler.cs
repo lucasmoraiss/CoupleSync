@@ -33,7 +33,7 @@ public sealed class GetCashFlowQueryHandler
             projectedSpend = averageDailySpend * query.Horizon;
         }
 
-        var assumptions = $"Based on {data.TransactionCount} transactions over the last {query.Horizon} days";
+        var assumptions = $"Baseado em {data.TransactionCount} transações nos últimos {query.Horizon} dias";
 
         return new GetCashFlowResult(
             query.Horizon,

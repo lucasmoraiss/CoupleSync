@@ -2,7 +2,7 @@
 name: spec-agent
 description: "Use when: turning a vague goal into an unambiguous specification for CoupleSync features. Produces spec.md with scope, out-of-scope, acceptance criteria, edge cases, and assumptions. Understands CoupleSync domain: couples budgeting, transaction tracking, financial goals, .NET 8 backend + React Native mobile."
 tools: [read, search, edit, web]
-model: "Claude Sonnet 4.6"
+model: "Claude Opus 4.6"
 target: vscode
 ---
 

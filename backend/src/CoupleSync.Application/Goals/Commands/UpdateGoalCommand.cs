@@ -6,4 +6,5 @@ public sealed record UpdateGoalCommand(
     string? Title,
     string? Description,
     decimal? TargetAmount,
+    decimal? CurrentAmount,
     DateTime? Deadline);

@@ -42,6 +42,7 @@ public sealed class Goal : ICoupleScoped
     public string Title { get; private set; } = string.Empty;
     public string? Description { get; private set; }
     public decimal TargetAmount { get; private set; }
+    public decimal CurrentAmount { get; private set; } = 0;
     public string Currency { get; private set; } = "BRL";
     public DateTime Deadline { get; private set; }
     public GoalStatus Status { get; private set; }
@@ -79,13 +80,6 @@ public sealed class Goal : ICoupleScoped
         return new Goal(Guid.NewGuid(), coupleId, createdByUserId, title, description, targetAmount, currency, deadline, createdAtUtc);
     }
 
-    public void Archive(DateTime nowUtc)
-    {
-        if (Status == GoalStatus.Archived) return;
-        Status = GoalStatus.Archived;
-        UpdatedAtUtc = nowUtc;
-    }
-
     public void Update(string? title, string? description, decimal? targetAmount, DateTime? deadline, DateTime nowUtc)
     {
         if (title is not null)
@@ -119,6 +113,21 @@ public sealed class Goal : ICoupleScoped
             Deadline = d;
         }
 
+        UpdatedAtUtc = nowUtc;
+    }
+
+    public void UpdateCurrentAmount(decimal currentAmount, DateTime nowUtc)
+    {
+        if (currentAmount < 0)
+            throw new ArgumentException("CurrentAmount must be non-negative.", nameof(currentAmount));
+        CurrentAmount = currentAmount;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    public void Archive(DateTime nowUtc)
+    {
+        if (Status == GoalStatus.Archived) return;
+        Status = GoalStatus.Archived;
         UpdatedAtUtc = nowUtc;
     }
 }

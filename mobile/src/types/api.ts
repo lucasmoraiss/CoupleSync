@@ -43,11 +43,26 @@ export interface GoalDto {
   readonly title: string;
   readonly description: string | null;
   readonly targetAmount: number;
+  readonly currentAmount: number;
   readonly currency: string;
   readonly deadline: string;
   readonly status: string;
   readonly createdAtUtc: string;
   readonly updatedAtUtc: string;
+}
+
+export interface GoalProgressSummaryItem {
+  readonly id: string;
+  readonly title: string;
+  readonly targetAmount: number;
+  readonly currentAmount: number;
+  readonly progressPercent: number;
+  readonly isAchieved: boolean;
+  readonly deadline: string;
+}
+
+export interface GoalsProgressSummaryResponse {
+  readonly goals: readonly GoalProgressSummaryItem[];
 }
 
 export interface GetGoalsResponse {
@@ -75,6 +90,7 @@ export interface DashboardResponse {
 export interface TransactionResponse {
   readonly id: string;
   readonly userId: string;
+  readonly authorName: string;
   readonly bank: string;
   readonly amount: number;
   readonly currency: string;
@@ -187,6 +203,7 @@ export interface IncomeSourceResponse {
   readonly amount: number;
   readonly currency: string;
   readonly isShared: boolean;
+  readonly isRecurring: boolean;
   readonly createdAtUtc: string;
   readonly updatedAtUtc: string;
 }
@@ -213,12 +230,14 @@ export interface CreateIncomeSourceRequest {
   readonly amount: number;
   readonly currency: string;
   readonly isShared: boolean;
+  readonly isRecurring?: boolean;
 }
 
 export interface UpdateIncomeSourceRequest {
   readonly name?: string;
   readonly amount?: number;
   readonly isShared?: boolean;
+  readonly isRecurring?: boolean;
 }
 
 // --- OCR ---

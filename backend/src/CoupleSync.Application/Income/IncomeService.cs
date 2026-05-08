@@ -40,7 +40,7 @@ public sealed class IncomeService
 
         var now = _dateTimeProvider.UtcNow;
         var source = IncomeSource.Create(
-            coupleId, userId, month, input.Name, input.Amount, input.Currency, input.IsShared, now);
+            coupleId, userId, month, input.Name, input.Amount, input.Currency, input.IsShared, now, input.IsRecurring ?? true);
 
         try
         {
@@ -73,7 +73,7 @@ public sealed class IncomeService
             throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "You can only edit your own or shared income sources.");
 
         var now = _dateTimeProvider.UtcNow;
-        source.Update(input.Name, input.Amount, input.IsShared, now);
+        source.Update(input.Name, input.Amount, input.IsShared, input.IsRecurring, now);
         await _repository.SaveChangesAsync(ct);
 
         return MapToDto(source);
@@ -157,5 +157,5 @@ public sealed class IncomeService
 
     private static IncomeSourceDto MapToDto(IncomeSource source)
         => new(source.Id, source.UserId, source.Name, source.Amount, source.Currency,
-               source.IsShared, source.CreatedAtUtc, source.UpdatedAtUtc);
+               source.IsShared, source.IsRecurring, source.CreatedAtUtc, source.UpdatedAtUtc);
 }

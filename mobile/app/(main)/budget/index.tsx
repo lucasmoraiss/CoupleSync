@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Switch,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,6 +65,13 @@ function formatMonthDisplay(isoMonth: string): string {
   const year = parts[0];
   const monthIndex = Number(parts[1]) - 1;
   return `${MONTH_NAMES[monthIndex]} ${year}`;
+}
+
+function splitSourcesByRecurrence(sources: readonly IncomeSourceResponse[]) {
+  return {
+    recurring: sources.filter((source) => source.isRecurring),
+    extras: sources.filter((source) => !source.isRecurring),
+  };
 }
 
 // ─── Income Source Row (inline edit) ──────────────────────────────────────────
@@ -197,6 +205,8 @@ function IncomeGroupSection({
   onDelete: (id: string) => void;
   isSaving: boolean;
 }) {
+  const { recurring, extras } = splitSourcesByRecurrence(group.sources);
+
   if (group.sources.length === 0 && !editable) return null;
 
   return (
@@ -207,16 +217,37 @@ function IncomeGroupSection({
         {group.userName && <Text style={styles.groupUserName}>({group.userName})</Text>}
       </View>
 
-      {group.sources.map((source) => (
-        <IncomeSourceRow
-          key={source.id}
-          source={source}
-          editable={editable}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-          isSaving={isSaving}
-        />
-      ))}
+      {recurring.length > 0 && (
+        <>
+          <Text style={styles.subsectionTitle}>Rendas Recorrentes</Text>
+          {recurring.map((source) => (
+            <IncomeSourceRow
+              key={source.id}
+              source={source}
+              editable={editable}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              isSaving={isSaving}
+            />
+          ))}
+        </>
+      )}
+
+      {extras.length > 0 && (
+        <>
+          <Text style={styles.subsectionTitle}>Rendas Extras</Text>
+          {extras.map((source) => (
+            <IncomeSourceRow
+              key={source.id}
+              source={source}
+              editable={editable}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              isSaving={isSaving}
+            />
+          ))}
+        </>
+      )}
 
       {group.sources.length === 0 && (
         <Text style={styles.emptyText}>Nenhuma fonte de renda cadastrada</Text>
@@ -242,6 +273,7 @@ function AddIncomeForm({
   const [name, setName] = useState('');
   const [amountCents, setAmountCents] = useState(0);
   const [isShared, setIsShared] = useState(false);
+  const [isRecurring, setIsRecurring] = useState(true);
   const [expanded, setExpanded] = useState(false);
 
   const createMutation = useMutation({
@@ -252,12 +284,14 @@ function AddIncomeForm({
         amount: amountCents / 100,
         currency: 'BRL',
         isShared,
+        isRecurring,
       }),
     onSuccess: () => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setName('');
       setAmountCents(0);
       setIsShared(false);
+      setIsRecurring(true);
       setExpanded(false);
       onCreated();
     },
@@ -310,6 +344,18 @@ function AddIncomeForm({
         <Ionicons name={isShared ? 'checkbox' : 'square-outline'} size={20} color={ACCENT} />
         <Text style={styles.sharedToggleText}>Renda compartilhada (editável por ambos)</Text>
       </TouchableOpacity>
+      <View style={styles.recurringToggleRow}>
+        <View style={styles.recurringToggleTextWrap}>
+          <Text style={styles.recurringToggleTitle}>Renda recorrente</Text>
+          <Text style={styles.recurringToggleHint}>{isRecurring ? 'Aparece em Rendas Recorrentes' : 'Aparece em Rendas Extras'}</Text>
+        </View>
+        <Switch
+          value={isRecurring}
+          onValueChange={setIsRecurring}
+          trackColor={{ false: BORDER, true: ACCENT }}
+          thumbColor={isRecurring ? PRIMARY : '#f4f3f4'}
+        />
+      </View>
       <View style={styles.addFormActions}>
         <TouchableOpacity
           style={[styles.addSaveBtn, createMutation.isPending && styles.btnDisabled]}
@@ -325,7 +371,7 @@ function AddIncomeForm({
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.addCancelBtn}
-          onPress={() => { setExpanded(false); setName(''); setAmountCents(0); setIsShared(false); }}
+          onPress={() => { setExpanded(false); setName(''); setAmountCents(0); setIsShared(false); setIsRecurring(true); }}
           accessibilityLabel="Cancelar"
         >
           <Text style={styles.addCancelBtnText}>Cancelar</Text>
@@ -558,6 +604,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   groupUserName: { fontSize: 12, color: MUTED },
+  subsectionTitle: {
+    fontSize: 12,
+    color: MUTED,
+    fontWeight: '700',
+    marginBottom: 6,
+    marginTop: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   sourceRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -619,6 +674,16 @@ const styles = StyleSheet.create({
   addAmountInput: { flex: 1, fontSize: 18, color: TEXT, padding: 0 },
   sharedToggle: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   sharedToggleText: { fontSize: 13, color: MUTED },
+  recurringToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 12,
+  },
+  recurringToggleTextWrap: { flex: 1 },
+  recurringToggleTitle: { fontSize: 13, color: TEXT, fontWeight: '600' },
+  recurringToggleHint: { fontSize: 12, color: MUTED, marginTop: 2 },
   addFormActions: { flexDirection: 'row', gap: 10 },
   addSaveBtn: {
     flex: 1,

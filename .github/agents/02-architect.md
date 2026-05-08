@@ -2,7 +2,7 @@
 name: architect
 description: "Use when: designing architecture for CoupleSync features. Creates architecture.md and ADRs. Makes decisions about .NET 8 Clean Architecture layers (Domain/Application/Infrastructure/Api), EF Core data models, Expo Router navigation, API contracts, and PostgreSQL schema. Priority: delivery, simplicity, maintainability."
 tools: [read, search, edit, web]
-model: "Claude Sonnet 4.6"
+model: "Claude Opus 4.6"
 target: vscode
 ---
 

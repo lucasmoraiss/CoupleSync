@@ -2,7 +2,7 @@
 name: coder
 description: "Use when: implementing a specific task from tasks.yaml in the CoupleSync codebase. Writes .NET 8 C# (controllers, services, entities, migrations), React Native/Expo TypeScript (screens, components, stores), or infrastructure code. Follows Clean Architecture, couple-level data isolation, and FluentValidation patterns. Minimal diff, maximum confidence."
 tools: [read, edit, search, execute, todo]
-model: "Claude Sonnet 4.6"
+model: "Claude Opus 4.6"
 target: vscode
 ---
 

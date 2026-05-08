@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { PieChart, BarChart } from 'react-native-gifted-charts';
-import { reportsApiClient } from '@/services/apiClient';
+import { reportsApiClient, goalsApiClient } from '@/services/apiClient';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 
@@ -57,6 +57,15 @@ function ReportsScreenInner() {
   } = useQuery({
     queryKey: ['reports', 'monthly-trends', period],
     queryFn: () => reportsApiClient.monthlyTrends(period).then((r) => r.data),
+    retry: 1,
+  });
+
+  const {
+    data: goalsData,
+    isLoading: goalsLoading,
+  } = useQuery({
+    queryKey: ['goals', 'progress-summary'],
+    queryFn: () => goalsApiClient.progressSummary().then((r) => r.data),
     retry: 1,
   });
 
@@ -209,6 +218,36 @@ function ReportsScreenInner() {
                 <EmptyState />
               )}
             </View>
+
+            {/* Goals progress */}
+            {!goalsLoading && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Progresso das Metas</Text>
+                {(goalsData?.goals ?? []).length === 0 ? (
+                  <View style={styles.emptyBox}>
+                    <Text style={styles.emptyIcon}>🎯</Text>
+                    <Text style={styles.emptyTitle}>Nenhuma meta ativa</Text>
+                  </View>
+                ) : (
+                  <View style={{ gap: 16 }}>
+                    {goalsData!.goals.map((g) => (
+                      <View key={g.id}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={styles.legendLabel} numberOfLines={1}>{g.title}</Text>
+                          <Text style={styles.legendValue}>{g.progressPercent.toFixed(0)}%</Text>
+                        </View>
+                        <View style={styles.progressBarBg}>
+                          <View style={[styles.progressBarFill, { width: `${Math.min(100, g.progressPercent)}%` as any }]} />
+                        </View>
+                        <Text style={[styles.legendLabel, { marginTop: 2 }]}>
+                          {g.currentAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / {g.targetAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
           </>
         )}
       </ScrollView>
@@ -352,5 +391,15 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: colors.textMuted,
     textAlign: 'center',
+  },
+  progressBarBg: {
+    height: 6,
+    backgroundColor: colors.border,
+    borderRadius: 3,
+  },
+  progressBarFill: {
+    height: 6,
+    backgroundColor: colors.success,
+    borderRadius: 3,
   },
 });

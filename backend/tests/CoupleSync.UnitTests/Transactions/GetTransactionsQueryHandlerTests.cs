@@ -1,13 +1,25 @@
 using CoupleSync.Application.Transactions.Queries;
 using CoupleSync.Domain.Entities;
+using CoupleSync.Domain.ValueObjects;
+using CoupleSync.Infrastructure.Persistence;
 using CoupleSync.UnitTests.Support;
+using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.UnitTests.Transactions;
 
 public sealed class GetTransactionsQueryHandlerTests
 {
-    private static GetTransactionsQueryHandler BuildHandler(FakeTransactionRepository? repo = null)
-        => new(repo ?? new FakeTransactionRepository());
+    private static GetTransactionsQueryHandler BuildHandler(FakeTransactionRepository? repo = null, AppDbContext? dbContext = null)
+        => new(repo ?? new FakeTransactionRepository(), dbContext ?? BuildDbContext());
+
+    private static AppDbContext BuildDbContext()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        return new AppDbContext(options, coupleContext: null);
+    }
 
     private static Transaction BuildTransaction(
         Guid coupleId,
@@ -27,6 +39,27 @@ public sealed class GetTransactionsQueryHandlerTests
             category,
             Guid.NewGuid(),
             DateTime.UtcNow);
+    }
+
+    private static (Guid CoupleId, Dictionary<string, Guid> UserIds) SeedCoupleMembers(AppDbContext dbContext, params string[] names)
+    {
+        var couple = Couple.Create("ABC123", DateTime.UtcNow);
+        var userIds = new Dictionary<string, Guid>();
+
+        foreach (var name in names)
+        {
+            var user = User.Create(
+                EmailAddress.From($"{Guid.NewGuid():N}@test.com"),
+                name,
+                "hash",
+                DateTime.UtcNow);
+            couple.AddMember(user, DateTime.UtcNow);
+            userIds[name] = user.Id;
+        }
+
+        dbContext.Couples.Add(couple);
+        dbContext.SaveChanges();
+        return (couple.Id, userIds);
     }
 
     [Fact]
@@ -174,16 +207,18 @@ public sealed class GetTransactionsQueryHandlerTests
     public async Task HandleAsync_MapsTransactionFieldsCorrectly()
     {
         var repo = new FakeTransactionRepository();
-        var coupleId = Guid.NewGuid();
-        var userId = Guid.NewGuid();
+        using var dbContext = BuildDbContext();
         var timestamp = new DateTime(2026, 4, 14, 10, 0, 0, DateTimeKind.Utc);
+
+        var (coupleId, userIds) = SeedCoupleMembers(dbContext, "Lucas");
+        var userId = userIds["Lucas"];
 
         var transaction = Transaction.Create(
             coupleId, userId, "fp-test", "NUBANK", 250.50m, "BRL",
             timestamp, "Coffee", "Starbucks", "Alimentação", Guid.NewGuid(), DateTime.UtcNow);
 
         await repo.AddTransactionAsync(transaction, CancellationToken.None);
-        var handler = BuildHandler(repo);
+        var handler = BuildHandler(repo, dbContext);
 
         var result = await handler.HandleAsync(
             new GetTransactionsQuery(coupleId, 1, 20, null, null, null),
@@ -192,6 +227,7 @@ public sealed class GetTransactionsQueryHandlerTests
         var item = Assert.Single(result.Items);
         Assert.Equal(coupleId, item.CoupleId);
         Assert.Equal(userId, item.UserId);
+        Assert.Equal("Lucas", item.AuthorName);
         Assert.Equal("NUBANK", item.Bank);
         Assert.Equal(250.50m, item.Amount);
         Assert.Equal("BRL", item.Currency);
@@ -199,5 +235,24 @@ public sealed class GetTransactionsQueryHandlerTests
         Assert.Equal("Coffee", item.Description);
         Assert.Equal("Starbucks", item.Merchant);
         Assert.Equal("Alimentação", item.Category);
+    }
+
+    [Fact]
+    public async Task HandleAsync_WhenAuthorNotFound_ReturnsDesconhecido()
+    {
+        var repo = new FakeTransactionRepository();
+        using var dbContext = BuildDbContext();
+        var coupleId = Guid.NewGuid();
+
+        await repo.AddTransactionAsync(BuildTransaction(coupleId), CancellationToken.None);
+
+        var handler = BuildHandler(repo, dbContext);
+
+        var result = await handler.HandleAsync(
+            new GetTransactionsQuery(coupleId, 1, 20, null, null, null),
+            CancellationToken.None);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal("Desconhecido", item.AuthorName);
     }
 }

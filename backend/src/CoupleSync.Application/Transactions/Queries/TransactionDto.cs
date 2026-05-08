@@ -4,6 +4,7 @@ public sealed record TransactionDto(
     Guid Id,
     Guid CoupleId,
     Guid UserId,
+    string AuthorName,
     string Bank,
     decimal Amount,
     string Currency,

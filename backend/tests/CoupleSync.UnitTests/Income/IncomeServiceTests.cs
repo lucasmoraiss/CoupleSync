@@ -35,9 +35,9 @@ public sealed class IncomeServiceTests
 
     private static IncomeSource SeedSource(
         FakeIncomeSourceRepository repo, Guid coupleId, Guid userId,
-        string name = "Salário", decimal amount = 5000m, bool isShared = false, string month = FixedMonth)
+        string name = "Salário", decimal amount = 5000m, bool isShared = false, string month = FixedMonth, bool isRecurring = true)
     {
-        var source = IncomeSource.Create(coupleId, userId, month, name, amount, "BRL", isShared, FixedNow);
+        var source = IncomeSource.Create(coupleId, userId, month, name, amount, "BRL", isShared, FixedNow, isRecurring);
         repo.Sources.Add(source);
         return source;
     }
@@ -50,13 +50,14 @@ public sealed class IncomeServiceTests
         var (service, repo, coupleRepo) = Build();
         var (couple, user1, _) = SeedCouple(coupleRepo);
 
-        var input = new CreateIncomeSourceInput("Salário", 5000m, "BRL", false);
+        var input = new CreateIncomeSourceInput("Salário", 5000m, "BRL", false, null);
         var result = await service.CreateAsync(couple.Id, user1.Id, FixedMonth, input, CancellationToken.None);
 
         Assert.Equal("Salário", result.Name);
         Assert.Equal(5000m, result.Amount);
         Assert.Equal(user1.Id, result.UserId);
         Assert.False(result.IsShared);
+        Assert.True(result.IsRecurring);
         Assert.Single(repo.Sources);
     }
 
@@ -66,10 +67,22 @@ public sealed class IncomeServiceTests
         var (service, repo, coupleRepo) = Build();
         var (couple, user1, _) = SeedCouple(coupleRepo);
 
-        var input = new CreateIncomeSourceInput("Aluguel compartilhado", 1500m, "BRL", true);
+        var input = new CreateIncomeSourceInput("Aluguel compartilhado", 1500m, "BRL", true, null);
         var result = await service.CreateAsync(couple.Id, user1.Id, FixedMonth, input, CancellationToken.None);
 
         Assert.True(result.IsShared);
+    }
+
+    [Fact]
+    public async Task CreateAsync_ExtraIncome_SetsIsRecurringFalse()
+    {
+        var (service, _, coupleRepo) = Build();
+        var (couple, user1, _) = SeedCouple(coupleRepo);
+
+        var input = new CreateIncomeSourceInput("Freelance", 1500m, "BRL", false, false);
+        var result = await service.CreateAsync(couple.Id, user1.Id, FixedMonth, input, CancellationToken.None);
+
+        Assert.False(result.IsRecurring);
     }
 
     [Fact]
@@ -81,7 +94,7 @@ public sealed class IncomeServiceTests
         for (int i = 0; i < 20; i++)
             SeedSource(repo, couple.Id, user1.Id, $"Source{i}");
 
-        var input = new CreateIncomeSourceInput("OneMore", 100m, "BRL", false);
+        var input = new CreateIncomeSourceInput("OneMore", 100m, "BRL", false, null);
         var ex = await Assert.ThrowsAsync<UnprocessableEntityException>(() =>
             service.CreateAsync(couple.Id, user1.Id, FixedMonth, input, CancellationToken.None));
 
@@ -97,7 +110,7 @@ public sealed class IncomeServiceTests
         var (couple, user1, _) = SeedCouple(coupleRepo);
         var source = SeedSource(repo, couple.Id, user1.Id);
 
-        var input = new UpdateIncomeSourceInput("Novo Salário", null, null);
+        var input = new UpdateIncomeSourceInput("Novo Salário", null, null, null);
         var result = await service.UpdateAsync(couple.Id, user1.Id, source.Id, input, CancellationToken.None);
 
         Assert.Equal("Novo Salário", result.Name);
@@ -110,7 +123,7 @@ public sealed class IncomeServiceTests
         var (couple, user1, _) = SeedCouple(coupleRepo);
         var source = SeedSource(repo, couple.Id, user1.Id);
 
-        var input = new UpdateIncomeSourceInput(null, 8000m, null);
+        var input = new UpdateIncomeSourceInput(null, 8000m, null, null);
         var result = await service.UpdateAsync(couple.Id, user1.Id, source.Id, input, CancellationToken.None);
 
         Assert.Equal(8000m, result.Amount);
@@ -123,7 +136,7 @@ public sealed class IncomeServiceTests
         var (couple, user1, user2) = SeedCouple(coupleRepo);
         var source = SeedSource(repo, couple.Id, user1.Id, isShared: false);
 
-        var input = new UpdateIncomeSourceInput("Hack", null, null);
+        var input = new UpdateIncomeSourceInput("Hack", null, null, null);
         var ex = await Assert.ThrowsAsync<ForbiddenException>(() =>
             service.UpdateAsync(couple.Id, user2.Id, source.Id, input, CancellationToken.None));
 
@@ -137,7 +150,7 @@ public sealed class IncomeServiceTests
         var (couple, user1, user2) = SeedCouple(coupleRepo);
         var source = SeedSource(repo, couple.Id, user1.Id, name: "Shared", isShared: true);
 
-        var input = new UpdateIncomeSourceInput(null, 2000m, null);
+        var input = new UpdateIncomeSourceInput(null, 2000m, null, null);
         var result = await service.UpdateAsync(couple.Id, user2.Id, source.Id, input, CancellationToken.None);
 
         Assert.Equal(2000m, result.Amount);
@@ -149,11 +162,24 @@ public sealed class IncomeServiceTests
         var (service, _, coupleRepo) = Build();
         var (couple, user1, _) = SeedCouple(coupleRepo);
 
-        var input = new UpdateIncomeSourceInput("X", null, null);
+        var input = new UpdateIncomeSourceInput("X", null, null, null);
         var ex = await Assert.ThrowsAsync<NotFoundException>(() =>
             service.UpdateAsync(couple.Id, user1.Id, Guid.NewGuid(), input, CancellationToken.None));
 
         Assert.Equal("INCOME_SOURCE_NOT_FOUND", ex.Code);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WhenIsRecurringProvided_UpdatesFlag()
+    {
+        var (service, repo, coupleRepo) = Build();
+        var (couple, user1, _) = SeedCouple(coupleRepo);
+        var source = SeedSource(repo, couple.Id, user1.Id, isRecurring: true);
+
+        var input = new UpdateIncomeSourceInput(null, null, null, false);
+        var result = await service.UpdateAsync(couple.Id, user1.Id, source.Id, input, CancellationToken.None);
+
+        Assert.False(result.IsRecurring);
     }
 
     // ── DeleteAsync ────────────────────────────────────────────────────────
@@ -241,6 +267,7 @@ public sealed class IncomeServiceTests
         // Shared income
         Assert.Single(result.SharedIncome.Sources);
         Assert.Equal(1500m, result.SharedIncome.Total);
+        Assert.All(result.PersonalIncome.Sources, source => Assert.True(source.IsRecurring));
 
         // Total
         Assert.Equal(12500m, result.CoupleTotal);

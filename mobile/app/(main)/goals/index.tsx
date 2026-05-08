@@ -1,4 +1,4 @@
-// AC-005: Goals management screen — list, create, edit, archive
+// AC-005: Goals management screen — list, create, edit, delete
 import React, { useState, useCallback } from 'react';
 import axios from 'axios';
 import {
@@ -98,6 +98,7 @@ interface GoalFormState {
   title: string;
   description: string;
   amountCents: number; // stored as cents for input control
+  currentAmountCents: number; // current progress amount in cents
   deadlineInput: string; // DD/MM/YYYY
 }
 
@@ -105,6 +106,7 @@ const EMPTY_FORM: GoalFormState = {
   title: '',
   description: '',
   amountCents: 0,
+  currentAmountCents: 0,
   deadlineInput: '',
 };
 
@@ -113,6 +115,7 @@ function formFromGoal(goal: GoalDto): GoalFormState {
     title: goal.title,
     description: goal.description ?? '',
     amountCents: Math.round(goal.targetAmount * 100),
+    currentAmountCents: Math.round(goal.currentAmount * 100),
     deadlineInput: toInputDate(goal.deadline),
   };
 }
@@ -235,7 +238,26 @@ function GoalFormModal({
               editable={!isSaving}
               accessibilityLabel="Valor alvo da meta"
             />
-            {amountError && form.amountCents === 0 ? null : null /* shown only on submit attempt */}
+
+            {/* Current amount (progress) */}
+            {mode === 'edit' && (
+              <>
+                <Text style={styles.fieldLabel}>Valor atual (R$)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={form.currentAmountCents > 0 ? formatBRLInput(form.currentAmountCents) : ''}
+                  onChangeText={(raw) => {
+                    const digits = raw.replace(/[^\d]/g, '');
+                    setForm((f) => ({ ...f, currentAmountCents: digits ? Number(digits) : 0 }));
+                  }}
+                  placeholder="0,00"
+                  placeholderTextColor={MUTED}
+                  keyboardType="numeric"
+                  editable={!isSaving}
+                  accessibilityLabel="Valor atual da meta"
+                />
+              </>
+            )}
 
             {/* Deadline */}
             <Text style={styles.fieldLabel}>Prazo *</Text>
@@ -280,28 +302,31 @@ function GoalFormModal({
 interface GoalCardProps {
   goal: GoalDto;
   onEdit: (goal: GoalDto) => void;
-  onArchive: (goal: GoalDto) => void;
+  onDelete: (goal: GoalDto) => void;
 }
 
-function GoalCard({ goal, onEdit, onArchive }: GoalCardProps) {
-  const isArchived = goal.status === 'Archived';
+function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
   const isPast = isDeadlinePast(goal.deadline);
+  const progressPercent = goal.targetAmount > 0
+    ? Math.min(100, (goal.currentAmount / goal.targetAmount) * 100)
+    : 0;
+  const isAchieved = progressPercent >= 100;
 
   return (
     <View style={styles.card} accessibilityLabel={`Meta: ${goal.title}`}>
-      {/* Top row: title + status badge */}
+      {/* Top row: title + achieved badge */}
       <View style={styles.cardHeader}>
         <View style={styles.cardTitleWrap}>
-          <Ionicons name="flag-outline" size={18} color={isArchived ? MUTED : ACCENT} style={styles.cardIcon} />
-          <Text style={[styles.cardTitle, isArchived && styles.cardTitleArchived]} numberOfLines={1}>
+          <Ionicons name="flag-outline" size={18} color={ACCENT} style={styles.cardIcon} />
+          <Text style={styles.cardTitle} numberOfLines={1}>
             {goal.title}
           </Text>
         </View>
-        <View style={[styles.badge, isArchived ? styles.badgeArchived : styles.badgeActive]}>
-          <Text style={[styles.badgeText, isArchived ? styles.badgeTextArchived : styles.badgeTextActive]}>
-            {isArchived ? 'Arquivada' : 'Ativa'}
-          </Text>
-        </View>
+        {isAchieved && (
+          <View style={[styles.badge, styles.badgeAchieved]}>
+            <Text style={[styles.badgeText, styles.badgeTextAchieved]}>Meta atingida 🎯</Text>
+          </View>
+        )}
       </View>
 
       {/* Description */}
@@ -311,45 +336,44 @@ function GoalCard({ goal, onEdit, onArchive }: GoalCardProps) {
         </Text>
       ) : null}
 
+      {/* Progress bar */}
+      <View style={styles.progressBarBg}>
+        <View style={[styles.progressBarFill, { width: `${progressPercent}%` as any }]} />
+      </View>
+      <Text style={styles.progressText}>
+        {formatBRL(goal.currentAmount)} / {formatBRL(goal.targetAmount)} ({progressPercent.toFixed(0)}%)
+      </Text>
+
       {/* Amount + deadline */}
       <View style={styles.cardRow}>
         <View style={styles.cardInfoItem}>
-          <Ionicons name="wallet-outline" size={14} color={MUTED} />
-          <Text style={styles.cardInfoLabel}>Valor alvo</Text>
-          <Text style={styles.cardInfoValue}>{formatBRL(goal.targetAmount)}</Text>
-        </View>
-        <View style={styles.cardInfoItem}>
-          <Ionicons name="calendar-outline" size={14} color={isPast && !isArchived ? ERROR : MUTED} />
-          <Text style={[styles.cardInfoLabel, isPast && !isArchived && styles.textError]}>
-            Prazo
-          </Text>
-          <Text style={[styles.cardInfoValue, isPast && !isArchived && styles.textError]}>
+          <Ionicons name="calendar-outline" size={14} color={isPast ? ERROR : MUTED} />
+          <Text style={[styles.cardInfoLabel, isPast && styles.textError]}>Prazo</Text>
+          <Text style={[styles.cardInfoValue, isPast && styles.textError]}>
             {formatDeadline(goal.deadline)}
           </Text>
         </View>
       </View>
 
-      {/* Actions (only for active goals) */}
-      {!isArchived && (
-        <View style={styles.cardActions}>
-          <TouchableOpacity
-            style={styles.cardActionBtn}
-            onPress={() => onEdit(goal)}
-            accessibilityLabel={`Editar meta ${goal.title}`}
-          >
-            <Ionicons name="pencil-outline" size={16} color={ACCENT} />
-            <Text style={styles.cardActionText}>Editar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.cardActionBtn, styles.cardActionBtnDanger]}
-            onPress={() => onArchive(goal)}
-            accessibilityLabel={`Arquivar meta ${goal.title}`}
-          >
-            <Ionicons name="archive-outline" size={16} color={ERROR} />
-            <Text style={[styles.cardActionText, styles.textError]}>Arquivar</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* Actions */}
+      <View style={styles.cardActions}>
+        <TouchableOpacity
+          style={styles.cardActionBtn}
+          onPress={() => onEdit(goal)}
+          accessibilityLabel={`Editar meta ${goal.title}`}
+        >
+          <Ionicons name="pencil-outline" size={16} color={ACCENT} />
+          <Text style={styles.cardActionText}>Editar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.cardActionBtn, styles.cardActionBtnDanger]}
+          onPress={() => onDelete(goal)}
+          accessibilityLabel={`Excluir meta ${goal.title}`}
+        >
+          <Ionicons name="trash-outline" size={16} color={ERROR} />
+          <Text style={[styles.cardActionText, styles.textError]}>Excluir</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -358,7 +382,6 @@ function GoalCard({ goal, onEdit, onArchive }: GoalCardProps) {
 export default function GoalsScreen() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
   const [refreshing, setRefreshing] = useState(false);
 
   // Modal state
@@ -366,21 +389,15 @@ export default function GoalsScreen() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingGoal, setEditingGoal] = useState<GoalDto | null>(null);
 
-  // Fetch goals — separate queries for active vs archived tabs
-  const includeArchived = activeTab === 'archived';
-
   const { data, isLoading, isError, refetch } = useQuery<GetGoalsResponse>({
-    queryKey: ['goals', includeArchived],
+    queryKey: ['goals'],
     queryFn: async () => {
-      const res = await goalsApiClient.list(includeArchived);
+      const res = await goalsApiClient.list(false);
       return res.data;
     },
   });
 
-  // Filter client-side so active tab shows Active only, archived tab shows Archived only
-  const goals = (data?.items ?? []).filter((g) =>
-    includeArchived ? g.status === 'Archived' : g.status === 'Active'
-  );
+  const goals = (data?.items ?? []).filter((g) => g.status === 'Active');
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -420,6 +437,7 @@ export default function GoalsScreen() {
         title: form.title.trim(),
         description: form.description.trim() || undefined,
         targetAmount: form.amountCents / 100,
+        currentAmount: form.currentAmountCents / 100,
         deadline: isoDeadline,
       });
     },
@@ -436,15 +454,15 @@ export default function GoalsScreen() {
     },
   });
 
-  // Archive mutation
-  const { mutate: archiveGoal } = useMutation({
-    mutationFn: (id: string) => goalsApiClient.archive(id),
+  // Delete mutation
+  const { mutate: deleteGoal } = useMutation({
+    mutationFn: (id: string) => goalsApiClient.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['goals'] });
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível arquivar a meta. Tente novamente.');
+      toast.error('Não foi possível excluir a meta. Tente novamente.');
     },
   });
 
@@ -453,29 +471,29 @@ export default function GoalsScreen() {
     setEditModalVisible(true);
   }, []);
 
-  const handleArchive = useCallback(
+  const handleDelete = useCallback(
     (goal: GoalDto) => {
       Alert.alert(
-        'Arquivar meta',
-        `Tem certeza que deseja arquivar "${goal.title}"? Metas arquivadas não podem ser editadas.`,
+        'Excluir meta',
+        `Tem certeza que deseja excluir "${goal.title}"? Esta ação não pode ser desfeita.`,
         [
           { text: 'Cancelar', style: 'cancel' },
           {
-            text: 'Arquivar',
+            text: 'Excluir',
             style: 'destructive',
-            onPress: () => archiveGoal(goal.id),
+            onPress: () => deleteGoal(goal.id),
           },
         ]
       );
     },
-    [archiveGoal]
+    [deleteGoal]
   );
 
   const renderGoal = useCallback(
     ({ item }: { item: GoalDto }) => (
-      <GoalCard goal={item} onEdit={handleOpenEdit} onArchive={handleArchive} />
+      <GoalCard goal={item} onEdit={handleOpenEdit} onDelete={handleDelete} />
     ),
-    [handleOpenEdit, handleArchive]
+    [handleOpenEdit, handleDelete]
   );
 
   return (
@@ -486,36 +504,12 @@ export default function GoalsScreen() {
           <Text style={styles.title}>Metas</Text>
           <Text style={styles.subtitle}>Objetivos financeiros do casal</Text>
         </View>
-        {activeTab === 'active' && (
-          <TouchableOpacity
-            style={styles.addBtn}
-            onPress={() => setCreateModalVisible(true)}
-            accessibilityLabel="Criar nova meta"
-          >
-            <Ionicons name="add" size={24} color={TEXT} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Tabs */}
-      <View style={styles.tabs}>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'active' && styles.tabActive]}
-          onPress={() => setActiveTab('active')}
-          accessibilityLabel="Metas ativas"
+          style={styles.addBtn}
+          onPress={() => setCreateModalVisible(true)}
+          accessibilityLabel="Criar nova meta"
         >
-          <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>
-            Ativas
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'archived' && styles.tabActive]}
-          onPress={() => setActiveTab('archived')}
-          accessibilityLabel="Metas arquivadas"
-        >
-          <Text style={[styles.tabText, activeTab === 'archived' && styles.tabTextActive]}>
-            Arquivadas
-          </Text>
+          <Ionicons name="add" size={24} color={TEXT} />
         </TouchableOpacity>
       </View>
 
@@ -542,21 +536,13 @@ export default function GoalsScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={ACCENT} />
           }
           ListEmptyComponent={
-            activeTab === 'archived' ? (
-              <EmptyState
-                icon="archive-outline"
-                title="Nenhuma meta arquivada"
-                subtitle="Metas arquivadas aparecerão aqui"
-              />
-            ) : (
-              <EmptyState
-                icon="flag-outline"
-                title="Nenhuma meta ativa"
-                subtitle="Crie uma meta para acompanhar o progresso juntos"
-                ctaLabel="Nova meta"
-                onCtaPress={() => setCreateModalVisible(true)}
-              />
-            )
+            <EmptyState
+              icon="flag-outline"
+              title="Nenhuma meta ativa"
+              subtitle="Crie uma meta para acompanhar o progresso juntos"
+              ctaLabel="Nova meta"
+              onCtaPress={() => setCreateModalVisible(true)}
+            />
           }
         />
       )}
@@ -650,15 +636,21 @@ const styles = StyleSheet.create({
   cardTitleWrap: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 },
   cardIcon: { marginRight: 8 },
   cardTitle: { fontSize: 16, fontWeight: '600', color: TEXT, flex: 1 },
-  cardTitleArchived: { color: MUTED },
   cardDescription: { fontSize: 13, color: MUTED, marginBottom: 12, lineHeight: 18 },
+
+  // Progress bar
+  progressBarBg: { height: 6, backgroundColor: BORDER, borderRadius: 3, marginBottom: 4 },
+  progressBarFill: { height: 6, backgroundColor: SUCCESS, borderRadius: 3 },
+  progressText: { fontSize: 12, color: MUTED, marginBottom: 12 },
 
   // Status badge
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99 },
   badgeActive: { backgroundColor: 'rgba(99,102,241,0.15)' },
+  badgeAchieved: { backgroundColor: 'rgba(34,197,94,0.15)' },
   badgeArchived: { backgroundColor: 'rgba(148,163,184,0.15)' },
   badgeText: { fontSize: 11, fontWeight: '600' },
   badgeTextActive: { color: ACCENT },
+  badgeTextAchieved: { color: SUCCESS },
   badgeTextArchived: { color: MUTED },
 
   // Card info row

@@ -119,7 +119,7 @@ public sealed class GoalCommandHandlerTests
         var goal = SeedGoal(repo, coupleId);
 
         var result = await handler.HandleAsync(
-            new UpdateGoalCommand(goal.Id, coupleId, "New Title", null, null, null),
+            new UpdateGoalCommand(goal.Id, coupleId, "New Title", null, null, null, null),
             CancellationToken.None);
 
         Assert.Equal("New Title", result.Title);
@@ -136,7 +136,7 @@ public sealed class GoalCommandHandlerTests
         var originalAmount = goal.TargetAmount;
 
         var result = await handler.HandleAsync(
-            new UpdateGoalCommand(goal.Id, coupleId, null, "Updated desc", null, null),
+            new UpdateGoalCommand(goal.Id, coupleId, null, "Updated desc", null, null, null),
             CancellationToken.None);
 
         Assert.Equal(originalTitle, result.Title);
@@ -151,7 +151,7 @@ public sealed class GoalCommandHandlerTests
 
         await Assert.ThrowsAsync<NotFoundException>(() =>
             handler.HandleAsync(
-                new UpdateGoalCommand(Guid.NewGuid(), Guid.NewGuid(), "T", null, null, null),
+                new UpdateGoalCommand(Guid.NewGuid(), Guid.NewGuid(), "T", null, null, null, null),
                 CancellationToken.None));
     }
 
@@ -165,7 +165,7 @@ public sealed class GoalCommandHandlerTests
 
         await Assert.ThrowsAsync<NotFoundException>(() =>
             handler.HandleAsync(
-                new UpdateGoalCommand(goal.Id, coupleB, "Hacked", null, null, null),
+                new UpdateGoalCommand(goal.Id, coupleB, "Hacked", null, null, null, null),
                 CancellationToken.None));
     }
 
@@ -244,7 +244,7 @@ public sealed class GoalCommandHandlerTests
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             handler.HandleAsync(
-                new UpdateGoalCommand(goal.Id, coupleId, null, null, null, pastDeadline),
+                new UpdateGoalCommand(goal.Id, coupleId, null, null, null, null, pastDeadline),
                 CancellationToken.None));
     }
 
@@ -258,7 +258,8 @@ public sealed class GoalCommandHandlerTests
 
         await Assert.ThrowsAsync<ConflictException>(() =>
             handler.HandleAsync(
-                new UpdateGoalCommand(goal.Id, coupleId, "New Title", null, null, null),
+                new UpdateGoalCommand(goal.Id, coupleId, "New Title", null, null, null, null),
                 CancellationToken.None));
     }
 }
+

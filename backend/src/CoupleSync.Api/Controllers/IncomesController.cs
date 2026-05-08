@@ -38,7 +38,7 @@ public sealed class IncomesController : ControllerBase
         var coupleId = GetAuthenticatedCoupleId();
         var userId = GetAuthenticatedUserId();
 
-        var input = new CreateIncomeSourceInput(request.Name, request.Amount, request.Currency, request.IsShared);
+        var input = new CreateIncomeSourceInput(request.Name, request.Amount, request.Currency, request.IsShared, request.IsRecurring);
         var dto = await _incomeService.CreateAsync(coupleId, userId, request.Month, input, ct);
 
         return StatusCode(StatusCodes.Status201Created, MapSourceResponse(dto));
@@ -87,7 +87,7 @@ public sealed class IncomesController : ControllerBase
         var coupleId = GetAuthenticatedCoupleId();
         var userId = GetAuthenticatedUserId();
 
-        var input = new UpdateIncomeSourceInput(request.Name, request.Amount, request.IsShared);
+        var input = new UpdateIncomeSourceInput(request.Name, request.Amount, request.IsShared, request.IsRecurring);
         var dto = await _incomeService.UpdateAsync(coupleId, userId, id, input, ct);
 
         return Ok(MapSourceResponse(dto));
@@ -109,7 +109,7 @@ public sealed class IncomesController : ControllerBase
     }
 
     private static IncomeSourceResponse MapSourceResponse(IncomeSourceDto dto)
-        => new(dto.Id, dto.UserId, dto.Name, dto.Amount, dto.Currency, dto.IsShared, dto.CreatedAtUtc, dto.UpdatedAtUtc);
+        => new(dto.Id, dto.UserId, dto.Name, dto.Amount, dto.Currency, dto.IsShared, dto.IsRecurring, dto.CreatedAtUtc, dto.UpdatedAtUtc);
 
     private static MonthlyIncomeResponse MapMonthlyResponse(MonthlyIncomeDto dto)
     {

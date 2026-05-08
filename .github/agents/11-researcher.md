@@ -2,7 +2,7 @@
 name: researcher
 description: "Use when: investigating technologies, patterns, or best practices for CoupleSync. Analyzes .NET 8 / EF Core / PostgreSQL backend patterns, React Native / Expo mobile patterns, financial app UX research, Open Finance APIs, and dependency evaluation. Produces structured research reports with options and trade-offs. Does not make final decisions."
 tools: [read, search, web]
-model: "Claude Sonnet 4.6"
+model: "Claude Opus 4.6"
 target: vscode
 ---
 

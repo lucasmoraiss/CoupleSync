@@ -6,7 +6,7 @@ using ICoupleScoped = CoupleSync.Domain.Interfaces.ICoupleScoped;
 
 namespace CoupleSync.Infrastructure.Persistence;
 
-public sealed class AppDbContext : DbContext
+public sealed class AppDbContext : DbContext, IQueryDbContext
 {
     private readonly ICoupleContext? _coupleContext;
 
@@ -198,6 +198,7 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.Title).HasColumnName("title").HasMaxLength(128).IsRequired();
             entity.Property(x => x.Description).HasColumnName("description").HasMaxLength(512);
             entity.Property(x => x.TargetAmount).HasColumnName("target_amount").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.CurrentAmount).HasColumnName("current_amount").HasPrecision(18, 2).IsRequired().HasDefaultValue(0m);
             entity.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(3).IsRequired();
             entity.Property(x => x.Deadline).HasColumnName("deadline").IsRequired();
             entity.Property(x => x.Status)
@@ -312,6 +313,7 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.Amount).HasColumnName("amount").HasPrecision(18, 2).IsRequired();
             entity.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(3).IsRequired();
             entity.Property(x => x.IsShared).HasColumnName("is_shared").IsRequired();
+            entity.Property(x => x.IsRecurring).HasColumnName("is_recurring").IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
 

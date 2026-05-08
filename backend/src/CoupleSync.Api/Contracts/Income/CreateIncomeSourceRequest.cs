@@ -5,4 +5,5 @@ public sealed record CreateIncomeSourceRequest(
     string Name,
     decimal Amount,
     string Currency,
-    bool IsShared);
+    bool IsShared,
+    bool? IsRecurring);

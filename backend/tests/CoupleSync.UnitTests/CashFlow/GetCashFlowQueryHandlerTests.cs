@@ -31,8 +31,8 @@ public sealed class GetCashFlowQueryHandlerTests
         Assert.Equal(10m, result.AverageDailySpend);
         Assert.Equal(300m, result.ProjectedSpend);
         Assert.Equal(FixedNow, result.GeneratedAtUtc);
-        Assert.Contains("3 transactions", result.Assumptions);
-        Assert.Contains("30 days", result.Assumptions);
+        Assert.Contains("3 transações", result.Assumptions);
+        Assert.Contains("30 dias", result.Assumptions);
     }
 
     [Fact]
@@ -55,7 +55,8 @@ public sealed class GetCashFlowQueryHandlerTests
         // AverageDailySpend = 900 / 90 = 10
         Assert.Equal(10m, result.AverageDailySpend);
         Assert.Equal(900m, result.ProjectedSpend);
-        Assert.Contains("90 days", result.Assumptions);
+        Assert.Contains("3 transações", result.Assumptions);
+        Assert.Contains("90 dias", result.Assumptions);
     }
 
     [Fact]
@@ -72,7 +73,9 @@ public sealed class GetCashFlowQueryHandlerTests
         Assert.Equal(0m, result.AverageDailySpend);
         Assert.Equal(0m, result.ProjectedSpend);
         Assert.Empty(result.CategoryBreakdown);
-        Assert.Contains("0 transactions", result.Assumptions);
+        Assert.Contains("Baseado em", result.Assumptions);
+        Assert.Contains("0 transações", result.Assumptions);
+        Assert.Contains("30 dias", result.Assumptions);
     }
 
     [Fact]

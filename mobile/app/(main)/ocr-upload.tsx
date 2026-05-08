@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { ocrApiClient } from '@/services/apiClient';
 import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
@@ -26,6 +27,7 @@ const TEXT = colors.text;
 const MUTED = colors.textMuted;
 const BORDER = colors.border;
 const ERROR = colors.error;
+const PDF_READABILITY_ERROR = 'O PDF selecionado parece estar protegido por senha ou danificado. Exporte sem senha e tente novamente.';
 
 // ─── Polling config ───────────────────────────────────────────────────────────
 const POLL_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
@@ -108,9 +110,33 @@ export default function OcrUploadScreen() {
     }
   }, []);
 
+  const ensureFileReadable = useCallback(async (uri: string, mimeType: string) => {
+    if (!uri) {
+      throw new Error(PDF_READABILITY_ERROR);
+    }
+
+    const info = await FileSystem.getInfoAsync(uri);
+    if (!info.exists) {
+      throw new Error(PDF_READABILITY_ERROR);
+    }
+
+    if (mimeType === 'application/pdf') {
+      await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+    }
+  }, []);
+
   // ─── Upload flow ─────────────────────────────────────────────────────────────
   const uploadFile = useCallback(
     async (uri: string, mimeType: string, fileName: string) => {
+      try {
+        await ensureFileReadable(uri, mimeType);
+      } catch {
+        if (isMounted.current) {
+          setState({ phase: 'error', message: PDF_READABILITY_ERROR });
+        }
+        return;
+      }
+
       setState({ phase: 'uploading' });
 
       const formData = new FormData();
@@ -148,7 +174,7 @@ export default function OcrUploadScreen() {
         }
       }
     },
-    [pollStatus]
+    [ensureFileReadable, pollStatus]
   );
 
   // ─── Camera handler ───────────────────────────────────────────────────────────

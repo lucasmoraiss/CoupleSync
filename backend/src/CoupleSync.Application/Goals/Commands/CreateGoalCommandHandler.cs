@@ -38,6 +38,7 @@ public sealed class CreateGoalCommandHandler
             goal.Title,
             goal.Description,
             goal.TargetAmount,
+            goal.CurrentAmount,
             goal.Currency,
             goal.Deadline,
             goal.Status,

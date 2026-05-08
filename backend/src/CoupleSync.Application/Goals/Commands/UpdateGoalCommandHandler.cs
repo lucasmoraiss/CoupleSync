@@ -28,6 +28,9 @@ public sealed class UpdateGoalCommandHandler
         var now = _dateTimeProvider.UtcNow;
         goal.Update(command.Title, command.Description, command.TargetAmount, command.Deadline, now);
 
+        if (command.CurrentAmount.HasValue)
+            goal.UpdateCurrentAmount(command.CurrentAmount.Value, now);
+
         await _repository.SaveChangesAsync(cancellationToken);
 
         return new GoalDto(
@@ -36,6 +39,7 @@ public sealed class UpdateGoalCommandHandler
             goal.Title,
             goal.Description,
             goal.TargetAmount,
+            goal.CurrentAmount,
             goal.Currency,
             goal.Deadline,
             goal.Status,

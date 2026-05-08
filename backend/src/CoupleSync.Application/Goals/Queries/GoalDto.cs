@@ -8,6 +8,7 @@ public sealed record GoalDto(
     string Title,
     string? Description,
     decimal TargetAmount,
+    decimal CurrentAmount,
     string Currency,
     DateTime Deadline,
     GoalStatus Status,

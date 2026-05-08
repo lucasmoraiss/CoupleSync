@@ -21,7 +21,6 @@ import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { QuickIncomeModal } from '@/components/QuickIncomeModal';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -122,8 +121,6 @@ export default function DashboardScreen() {
     setRefreshing(false);
   };
 
-  const [incomeModalVisible, setIncomeModalVisible] = React.useState(false);
-
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -186,11 +183,11 @@ export default function DashboardScreen() {
         {!isLoading && (
           <TouchableOpacity
             style={styles.incomeChip}
-            onPress={() => setIncomeModalVisible(true)}
-            accessibilityLabel="Atualizar renda mensal"
+            onPress={() => router.push('/(main)/budget' as any)}
+            accessibilityLabel="Ver rendas"
           >
             <Ionicons name="wallet-outline" size={18} color={colors.primaryLight} />
-            <Text style={styles.incomeChipText}>Atualizar renda</Text>
+            <Text style={styles.incomeChipText}>Ver rendas</Text>
           </TouchableOpacity>
         )}
 
@@ -208,10 +205,6 @@ export default function DashboardScreen() {
         )}
       </ScrollView>
 
-      <QuickIncomeModal
-        visible={incomeModalVisible}
-        onClose={() => setIncomeModalVisible(false)}
-      />
     </SafeAreaView>
   );
 }

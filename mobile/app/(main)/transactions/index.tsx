@@ -35,6 +35,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
+import { useSessionStore } from '@/state/sessionStore';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -64,17 +65,35 @@ function formatRelativeDate(dateStr: string): string {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+function getDisplayAuthorName(item: TransactionResponse, currentUserId: string | null): string {
+  if (item.userId === currentUserId) {
+    return 'Você';
+  }
+
+  const trimmedName = item.authorName.trim();
+  if (!trimmedName) {
+    return 'Desconhecido';
+  }
+
+  return trimmedName.split(' ')[0] ?? trimmedName;
+}
+
 // ─── Transaction row ──────────────────────────────────────────────────────────
 function TransactionRow({
   item,
+  currentUserId,
   onPress,
   onLongPress,
+  onDelete,
 }: {
   item: TransactionResponse;
+  currentUserId: string | null;
   onPress: (item: TransactionResponse) => void;
   onLongPress: (item: TransactionResponse) => void;
+  onDelete: (item: TransactionResponse) => void;
 }) {
   const label = item.merchant ?? item.description ?? item.bank;
+  const authorLabel = getDisplayAuthorName(item, currentUserId);
   return (
     <TouchableOpacity
       style={styles.txRow}
@@ -91,11 +110,20 @@ function TransactionRow({
           {label}
         </Text>
         <Text style={styles.txCategory}>{getCategoryLabel(item.category)}</Text>
+        <Text style={styles.txAuthor}>{authorLabel}</Text>
       </View>
       <View style={styles.txRight}>
         <Text style={styles.txAmount}>{formatBRL(item.amount)}</Text>
         <Text style={styles.txDate}>{formatRelativeDate(item.eventTimestampUtc)}</Text>
       </View>
+      <TouchableOpacity
+        onPress={() => onDelete(item)}
+        style={styles.deleteBtn}
+        accessibilityLabel={`Excluir transação ${label}`}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Ionicons name="trash-outline" size={18} color={ERROR} />
+      </TouchableOpacity>
     </TouchableOpacity>
   );
 }
@@ -177,6 +205,7 @@ function CategoryPickerModal({
 export default function TransactionsScreen() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const currentUserId = useSessionStore((state) => state.userId);
   const [selectedTx, setSelectedTx] = useState<TransactionResponse | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -218,7 +247,7 @@ export default function TransactionsScreen() {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
       queryClient.invalidateQueries({ queryKey: ['budget'] });
-      toast.success('Transação excluída.');
+      toast.success('Transação excluída');
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
@@ -255,8 +284,8 @@ export default function TransactionsScreen() {
     (item: TransactionResponse) => {
       const label = item.merchant ?? item.description ?? item.bank;
       Alert.alert(
-        'Excluir transação?',
-        `"${label}" — ${formatBRL(item.amount)}\n\nEsta ação não pode ser desfeita.`,
+        'Excluir transação',
+        `Tem certeza que deseja excluir esta transação?\n\n${label} — ${formatBRL(item.amount)}`,
         [
           { text: 'Cancelar', style: 'cancel' },
           {
@@ -268,6 +297,13 @@ export default function TransactionsScreen() {
       );
     },
     [deleteTransaction]
+  );
+
+  const handleDeletePress = useCallback(
+    (item: TransactionResponse) => {
+      handleLongPress(item);
+    },
+    [handleLongPress]
   );
 
   return (
@@ -327,7 +363,13 @@ export default function TransactionsScreen() {
           data={data?.items ?? []}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <TransactionRow item={item} onPress={handleTxPress} onLongPress={handleLongPress} />
+            <TransactionRow
+              item={item}
+              currentUserId={currentUserId}
+              onPress={handleTxPress}
+              onLongPress={handleLongPress}
+              onDelete={handleDeletePress}
+            />
           )}
           ListEmptyComponent={
             <EmptyState
@@ -417,7 +459,15 @@ const styles = StyleSheet.create({
   txDetails: { flex: 1, marginRight: 8 },
   txTitle: { fontSize: 14, fontWeight: '600', color: TEXT },
   txCategory: { fontSize: 12, color: MUTED, marginTop: 2 },
+  txAuthor: { fontSize: 12, color: ACCENT, marginTop: 2, fontWeight: '500' },
   txRight: { alignItems: 'flex-end' },
+  deleteBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
   txAmount: { fontSize: 14, fontWeight: '700', color: TEXT },
   txDate: { fontSize: 11, color: MUTED, marginTop: 2 },
   errorWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },

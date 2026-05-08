@@ -7,6 +7,7 @@ public sealed record IncomeSourceResponse(
     decimal Amount,
     string Currency,
     bool IsShared,
+    bool IsRecurring,
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc);
 

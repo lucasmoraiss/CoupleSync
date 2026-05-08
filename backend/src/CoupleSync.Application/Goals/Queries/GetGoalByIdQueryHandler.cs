@@ -25,6 +25,7 @@ public sealed class GetGoalByIdQueryHandler
             goal.Title,
             goal.Description,
             goal.TargetAmount,
+            goal.CurrentAmount,
             goal.Currency,
             goal.Deadline,
             goal.Status,

@@ -3,6 +3,7 @@ namespace CoupleSync.Api.Contracts.Transactions;
 public sealed record TransactionResponse(
     Guid Id,
     Guid UserId,
+    string AuthorName,
     string Bank,
     decimal Amount,
     string Currency,

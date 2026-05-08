@@ -72,7 +72,7 @@ public sealed class TransactionsController : ControllerBase
             result.Page,
             result.PageSize,
             result.Items.Select(t => new TransactionResponse(
-                t.Id, t.UserId, t.Bank, t.Amount, t.Currency,
+                t.Id, t.UserId, t.AuthorName, t.Bank, t.Amount, t.Currency,
                 t.EventTimestampUtc, t.Description, t.Merchant, t.Category, t.CreatedAtUtc))
             .ToList());
 
@@ -96,8 +96,11 @@ public sealed class TransactionsController : ControllerBase
             new UpdateTransactionCategoryCommand(id, coupleId, request.Category),
             cancellationToken);
 
+        var currentUserId = GetAuthenticatedUserId();
+        var authorName = result.UserId == currentUserId ? GetAuthenticatedUserName() : "Desconhecido";
+
         return Ok(new TransactionResponse(
-            result.Id, result.UserId, result.Bank, result.Amount, result.Currency,
+            result.Id, result.UserId, authorName, result.Bank, result.Amount, result.Currency,
             result.EventTimestampUtc, result.Description, result.Merchant, result.Category, result.CreatedAtUtc));
     }
 
@@ -129,7 +132,7 @@ public sealed class TransactionsController : ControllerBase
             cancellationToken);
 
         var response = new TransactionResponse(
-            transaction.Id, transaction.UserId, transaction.Bank, transaction.Amount, transaction.Currency,
+            transaction.Id, transaction.UserId, GetAuthenticatedUserName(), transaction.Bank, transaction.Amount, transaction.Currency,
             transaction.EventTimestampUtc, transaction.Description, transaction.Merchant, transaction.Category,
             transaction.CreatedAtUtc);
 
@@ -189,5 +192,11 @@ public sealed class TransactionsController : ControllerBase
         if (!Guid.TryParse(claimValue, out var userId))
             throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired session.");
         return userId;
+    }
+
+    private string GetAuthenticatedUserName()
+    {
+        var userName = User.FindFirstValue("name");
+        return string.IsNullOrWhiteSpace(userName) ? "Desconhecido" : userName.Trim();
     }
 }
