@@ -43,6 +43,7 @@ public sealed class GetTransactionsQueryHandler
                 t.Description,
                 t.Merchant,
                 t.Category,
+                t.Source.ToString(),
                 t.CreatedAtUtc))
             .ToList();
 

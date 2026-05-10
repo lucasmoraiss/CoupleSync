@@ -19,7 +19,8 @@ public sealed class Transaction : ICoupleScoped
         string? merchant,
         string category,
         Guid ingestEventId,
-        DateTime createdAtUtc)
+        DateTime createdAtUtc,
+        TransactionSource source)
     {
         Id = id;
         CoupleId = coupleId;
@@ -34,6 +35,7 @@ public sealed class Transaction : ICoupleScoped
         Category = category;
         IngestEventId = ingestEventId;
         CreatedAtUtc = createdAtUtc;
+        Source = source;
     }
 
     public Guid Id { get; private set; }
@@ -49,6 +51,7 @@ public sealed class Transaction : ICoupleScoped
     public string Category { get; private set; } = string.Empty;
     public Guid IngestEventId { get; private set; }
     public Guid? GoalId { get; private set; }
+    public TransactionSource Source { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 
     public static Transaction Create(
@@ -63,12 +66,13 @@ public sealed class Transaction : ICoupleScoped
         string? merchant,
         string category,
         Guid ingestEventId,
-        DateTime createdAtUtc)
+        DateTime createdAtUtc,
+        TransactionSource source = TransactionSource.Manual)
     {
         return new Transaction(
             Guid.NewGuid(), coupleId, userId, fingerprint, bank,
             amount, currency, eventTimestampUtc, description, merchant,
-            category, ingestEventId, createdAtUtc);
+            category, ingestEventId, createdAtUtc, source);
     }
 
     public void UpdateCategory(string category)

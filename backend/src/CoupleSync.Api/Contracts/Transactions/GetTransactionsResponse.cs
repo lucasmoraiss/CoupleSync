@@ -11,6 +11,7 @@ public sealed record TransactionResponse(
     string? Description,
     string? Merchant,
     string Category,
+    string Source,
     DateTime CreatedAtUtc);
 
 public sealed record GetTransactionsResponse(

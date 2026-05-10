@@ -13,6 +13,12 @@ public sealed class FakeNotificationCaptureRepository : INotificationCaptureRepo
         return Task.CompletedTask;
     }
 
+    public Task AddIngestEventsRangeAsync(IEnumerable<TransactionEventIngest> ingestEvents, CancellationToken cancellationToken)
+    {
+        IngestEvents.AddRange(ingestEvents);
+        return Task.CompletedTask;
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return Task.CompletedTask;

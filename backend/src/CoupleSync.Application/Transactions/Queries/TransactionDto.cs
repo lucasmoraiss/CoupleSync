@@ -12,4 +12,5 @@ public sealed record TransactionDto(
     string? Description,
     string? Merchant,
     string Category,
+    string Source,
     DateTime CreatedAtUtc);

@@ -337,6 +337,12 @@ internal sealed class FakeTransactionRepository : ITransactionRepository
         return Task.CompletedTask;
     }
 
+    public Task AddTransactionsRangeAsync(IEnumerable<Transaction> transactions, CancellationToken ct)
+    {
+        AddedTransactions.AddRange(transactions);
+        return Task.CompletedTask;
+    }
+
     public Task<(int TotalCount, IReadOnlyList<Transaction> Items)> GetPagedAsync(
         Guid coupleId, int page, int pageSize, string? category,
         DateTime? startDate, DateTime? endDate, CancellationToken ct)

@@ -51,7 +51,15 @@ public sealed class InterBankParser : IBankStatementParser
         "Utilizado", "Disponível", "MORA / MULTA", "VALOR DO DOCUMENTO",
         "Precisa de uma força", "Confira as opções", "O IOF e juros",
         "DataMovimentaçãoBeneficiárioValor", "CARTÃO", "Próxima fatura",
-        "Nº DOCUMENTO", "AUTENTICAÇÃO", "LOCAL DE PAGAMENTO", "AGÊNCIA / CEDENTE"
+        "Nº DOCUMENTO", "AUTENTICAÇÃO", "LOCAL DE PAGAMENTO", "AGÊNCIA / CEDENTE",
+        // Expanded: credit card bill summary, total, and payment patterns
+        "Resumo da fatura", "Total desta fatura", "Total da fatura",
+        "Pagamento recebido", "Pgto débito automático", "Pagamento efetuado",
+        "Crédito de pagamento", "Vencimento", "Fatura fechada",
+        "Limite disponível", "Saldo anterior", "Resumo",
+        "Pagamento em", "Pgto em", "Crédito em",
+        "Total de compras", "Total de encargos",
+        "Pagamento via", "Pix recebido"
     };
 
     public bool CanParse(string extractedText) => IdentifierPattern.IsMatch(extractedText);

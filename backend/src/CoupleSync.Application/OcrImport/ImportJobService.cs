@@ -118,12 +118,12 @@ public sealed class ImportJobService
         if (candidates is null) return null;
 
         var selected = candidates.Where(c => selectedIndices.Contains(c.Index)).ToList();
+        var ingests = new List<TransactionEventIngest>();
         var created = new List<Transaction>();
         var now = _dateTimeProvider.UtcNow;
 
         foreach (var candidate in selected)
         {
-            // Use user-provided category override if present, otherwise fall back to AI suggestion or default
             var category = "Outros";
             if (categoryOverrides is not null && categoryOverrides.TryGetValue(candidate.Index, out var userCategory)
                 && !string.IsNullOrWhiteSpace(userCategory))
@@ -147,7 +147,7 @@ public sealed class ImportJobService
                 rawNotificationTextRedacted: null,
                 createdAtUtc: now);
 
-            await _ingestRepository.AddIngestEventAsync(ingest, ct);
+            ingests.Add(ingest);
 
             var txn = Transaction.Create(
                 coupleId: coupleId,
@@ -161,12 +161,15 @@ public sealed class ImportJobService
                 merchant: null,
                 category: category,
                 ingestEventId: ingest.Id,
-                createdAtUtc: now);
+                createdAtUtc: now,
+                source: TransactionSource.OcrImport);
 
-            await _transactionRepository.AddTransactionAsync(txn, ct);
             created.Add(txn);
         }
 
+        // Batch insert all ingests and transactions in a single round-trip
+        await _ingestRepository.AddIngestEventsRangeAsync(ingests, ct);
+        await _transactionRepository.AddTransactionsRangeAsync(created, ct);
         await _transactionRepository.SaveChangesAsync(ct);
 
         // Transition job to Confirmed to prevent duplicate confirm calls

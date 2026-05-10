@@ -13,4 +13,5 @@ public sealed record UpdateTransactionCategoryResult(
     string? Description,
     string? Merchant,
     string Category,
+    string Source,
     DateTime CreatedAtUtc);

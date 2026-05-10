@@ -92,7 +92,8 @@ public sealed class IngestNotificationEventCommandHandler
             merchantOrNull,
             category,
             ingestEvent.Id,
-            _dateTimeProvider.UtcNow);
+            _dateTimeProvider.UtcNow,
+            TransactionSource.Notification);
 
         await _transactionRepository.AddTransactionAsync(transaction, cancellationToken);
 

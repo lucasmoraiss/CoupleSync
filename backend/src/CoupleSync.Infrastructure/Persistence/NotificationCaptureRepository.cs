@@ -18,6 +18,11 @@ public sealed class NotificationCaptureRepository : INotificationCaptureReposito
         await _dbContext.TransactionEventIngests.AddAsync(ingestEvent, cancellationToken);
     }
 
+    public async Task AddIngestEventsRangeAsync(IEnumerable<TransactionEventIngest> ingestEvents, CancellationToken cancellationToken)
+    {
+        await _dbContext.TransactionEventIngests.AddRangeAsync(ingestEvents, cancellationToken);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return _dbContext.SaveChangesAsync(cancellationToken);

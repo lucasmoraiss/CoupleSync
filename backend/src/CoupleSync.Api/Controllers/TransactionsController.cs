@@ -73,7 +73,7 @@ public sealed class TransactionsController : ControllerBase
             result.PageSize,
             result.Items.Select(t => new TransactionResponse(
                 t.Id, t.UserId, t.AuthorName, t.Bank, t.Amount, t.Currency,
-                t.EventTimestampUtc, t.Description, t.Merchant, t.Category, t.CreatedAtUtc))
+                t.EventTimestampUtc, t.Description, t.Merchant, t.Category, t.Source, t.CreatedAtUtc))
             .ToList());
 
         return Ok(response);
@@ -101,7 +101,7 @@ public sealed class TransactionsController : ControllerBase
 
         return Ok(new TransactionResponse(
             result.Id, result.UserId, authorName, result.Bank, result.Amount, result.Currency,
-            result.EventTimestampUtc, result.Description, result.Merchant, result.Category, result.CreatedAtUtc));
+            result.EventTimestampUtc, result.Description, result.Merchant, result.Category, result.Source.ToString(), result.CreatedAtUtc));
     }
 
     /// <summary>
@@ -134,7 +134,7 @@ public sealed class TransactionsController : ControllerBase
         var response = new TransactionResponse(
             transaction.Id, transaction.UserId, GetAuthenticatedUserName(), transaction.Bank, transaction.Amount, transaction.Currency,
             transaction.EventTimestampUtc, transaction.Description, transaction.Merchant, transaction.Category,
-            transaction.CreatedAtUtc);
+            transaction.Source.ToString(), transaction.CreatedAtUtc);
 
         return StatusCode(StatusCodes.Status201Created, response);
     }

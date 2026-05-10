@@ -44,6 +44,7 @@ public sealed class ImportJob : ICoupleScoped
     public string? ErrorCode { get; private set; }
     public string? ErrorMessage { get; private set; }
     public DateTime? QuotaResetDate { get; private set; }
+    public int RetryCount { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
@@ -99,6 +100,21 @@ public sealed class ImportJob : ICoupleScoped
         Status = ImportJobStatus.Confirmed;
         UpdatedAtUtc = NormalizeUtc(nowUtc);
     }
+
+    /// <summary>
+    /// Resets the job to Pending for retry after a transient failure.
+    /// Increments the retry counter.
+    /// </summary>
+    public void ResetForRetry(DateTime nowUtc)
+    {
+        RetryCount++;
+        Status = ImportJobStatus.Pending;
+        ErrorCode = null;
+        ErrorMessage = null;
+        UpdatedAtUtc = NormalizeUtc(nowUtc);
+    }
+
+    public bool CanRetry(int maxRetries) => RetryCount < maxRetries;
 
     private static DateTime NormalizeUtc(DateTime dt) =>
         dt.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : dt;

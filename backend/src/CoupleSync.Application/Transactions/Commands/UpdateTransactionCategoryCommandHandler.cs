@@ -35,6 +35,7 @@ public sealed class UpdateTransactionCategoryCommandHandler
             transaction.Description,
             transaction.Merchant,
             transaction.Category,
+            transaction.Source.ToString(),
             transaction.CreatedAtUtc);
     }
 }

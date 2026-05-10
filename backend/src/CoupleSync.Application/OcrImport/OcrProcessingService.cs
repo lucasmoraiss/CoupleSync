@@ -42,11 +42,18 @@ public sealed class OcrProcessingService
     {
         var candidates = ParseCandidates(rawOcrJson);
 
+        // Filter out Credit-type transactions (bill payments, not purchases)
+        candidates.RemoveAll(c => c.Type == TransactionType.Credit);
+
         foreach (var c in candidates)
         {
             c.Description = SanitizeDescription(c.Description);
             c.Amount = Math.Abs(c.Amount);
         }
+
+        // Re-index after filtering
+        for (int i = 0; i < candidates.Count; i++)
+            candidates[i].Index = i;
 
         foreach (var c in candidates)
         {

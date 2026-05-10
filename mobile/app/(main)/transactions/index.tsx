@@ -78,6 +78,18 @@ function getDisplayAuthorName(item: TransactionResponse, currentUserId: string |
   return trimmedName.split(' ')[0] ?? trimmedName;
 }
 
+// ─── Source badge helper ──────────────────────────────────────────────────────
+const SOURCE_BADGE_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
+  Manual: { label: 'Manual', bg: '#E0E0E0', text: '#616161' },
+  OcrImport: { label: 'OCR', bg: '#BBDEFB', text: '#1565C0' },
+  Notification: { label: 'Notificação', bg: '#C8E6C9', text: '#2E7D32' },
+};
+
+function getSourceBadge(source: string | undefined) {
+  const config = SOURCE_BADGE_CONFIG[source ?? 'Manual'] ?? SOURCE_BADGE_CONFIG.Manual;
+  return config;
+}
+
 // ─── Transaction row ──────────────────────────────────────────────────────────
 function TransactionRow({
   item,
@@ -94,6 +106,7 @@ function TransactionRow({
 }) {
   const label = item.merchant ?? item.description ?? item.bank;
   const authorLabel = getDisplayAuthorName(item, currentUserId);
+  const sourceBadge = getSourceBadge(item.source);
   return (
     <TouchableOpacity
       style={styles.txRow}
@@ -109,7 +122,12 @@ function TransactionRow({
         <Text style={styles.txTitle} numberOfLines={1}>
           {label}
         </Text>
-        <Text style={styles.txCategory}>{getCategoryLabel(item.category)}</Text>
+        <View style={styles.txMetaRow}>
+          <Text style={styles.txCategory}>{getCategoryLabel(item.category)}</Text>
+          <View style={[styles.sourceBadge, { backgroundColor: sourceBadge.bg }]}>
+            <Text style={[styles.sourceBadgeText, { color: sourceBadge.text }]}>{sourceBadge.label}</Text>
+          </View>
+        </View>
         <Text style={styles.txAuthor}>{authorLabel}</Text>
       </View>
       <View style={styles.txRight}>
@@ -458,7 +476,14 @@ const styles = StyleSheet.create({
   },
   txDetails: { flex: 1, marginRight: 8 },
   txTitle: { fontSize: 14, fontWeight: '600', color: TEXT },
-  txCategory: { fontSize: 12, color: MUTED, marginTop: 2 },
+  txMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 6 },
+  txCategory: { fontSize: 12, color: MUTED },
+  sourceBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  sourceBadgeText: { fontSize: 10, fontWeight: '600' },
   txAuthor: { fontSize: 12, color: ACCENT, marginTop: 2, fontWeight: '500' },
   txRight: { alignItems: 'flex-end' },
   deleteBtn: {

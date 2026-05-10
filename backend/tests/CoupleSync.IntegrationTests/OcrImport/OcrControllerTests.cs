@@ -390,6 +390,8 @@ internal sealed class FakeOcrTransactionRepository : ITransactionRepository
         => Task.FromResult(false);
     public Task AddTransactionAsync(Transaction transaction, CancellationToken ct)
         => Task.CompletedTask;
+    public Task AddTransactionsRangeAsync(IEnumerable<Transaction> transactions, CancellationToken ct)
+        => Task.CompletedTask;
     public Task<(int TotalCount, IReadOnlyList<Transaction> Items)> GetPagedAsync(
         Guid coupleId, int page, int pageSize, string? category,
         DateTime? startDate, DateTime? endDate, CancellationToken ct)

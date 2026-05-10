@@ -98,6 +98,7 @@ export interface TransactionResponse {
   readonly description: string | null;
   readonly merchant: string | null;
   readonly category: string;
+  readonly source: string;
   readonly createdAtUtc: string;
 }
 

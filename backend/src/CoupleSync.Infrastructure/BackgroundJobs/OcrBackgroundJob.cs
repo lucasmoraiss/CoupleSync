@@ -11,6 +11,7 @@ namespace CoupleSync.Infrastructure.BackgroundJobs;
 public sealed class OcrBackgroundJob : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+    private const int MaxRetries = 3;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<OcrBackgroundJob> _logger;
@@ -86,6 +87,9 @@ public sealed class OcrBackgroundJob : BackgroundService
                 await repo.SaveChangesAsync(ct);
 
                 _logger.LogInformation("OCR job {IngestId} completed in {ElapsedMs}ms with {TransactionCount} candidates", job.Id, sw.ElapsedMilliseconds, candidates.Count);
+
+                // Delete the uploaded file only after successful processing
+                await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
             }
             catch (OcrQuotaExhaustedException ex)
             {
@@ -95,6 +99,7 @@ public sealed class OcrBackgroundJob : BackgroundService
 
                 job.MarkFailed("quota_exhausted", ex.Message, dateTimeProvider.UtcNow, ex.QuotaResetDate);
                 await repo.SaveChangesAsync(ct);
+                await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
 
                 // Stop processing remaining jobs — quota is exhausted for all
                 break;
@@ -104,19 +109,24 @@ public sealed class OcrBackgroundJob : BackgroundService
                 _logger.LogWarning(ex, "OCR job {JobId} failed with code {Code} after {ElapsedMs}ms", job.Id, ex.Code, sw.ElapsedMilliseconds);
                 job.MarkFailed(ex.Code, ex.Message, dateTimeProvider.UtcNow);
                 await repo.SaveChangesAsync(ct);
+                await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "OCR processing failed for job {JobId} after {ElapsedMs}ms", job.Id, sw.ElapsedMilliseconds);
-                job.MarkFailed("processing_error", "Internal processing error.", dateTimeProvider.UtcNow);
-                await repo.SaveChangesAsync(ct);
-            }
-            finally
-            {
-                // Delete the uploaded file regardless of outcome — the PDF is only needed
-                // during parsing. Results are persisted in ImportJob.OcrResultJson.
-                // This is a best-effort operation; failure to delete must not affect the job result.
-                await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
+                _logger.LogError(ex, "OCR processing failed for job {JobId} after {ElapsedMs}ms (attempt {Attempt}/{MaxRetries})",
+                    job.Id, sw.ElapsedMilliseconds, job.RetryCount + 1, MaxRetries);
+
+                if (job.CanRetry(MaxRetries))
+                {
+                    job.ResetForRetry(dateTimeProvider.UtcNow);
+                    await repo.SaveChangesAsync(ct);
+                }
+                else
+                {
+                    job.MarkFailed("processing_error", "Internal processing error after max retries.", dateTimeProvider.UtcNow);
+                    await repo.SaveChangesAsync(ct);
+                    await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
+                }
             }
         }
     }

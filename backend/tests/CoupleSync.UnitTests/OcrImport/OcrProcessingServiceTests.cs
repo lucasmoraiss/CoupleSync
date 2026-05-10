@@ -309,6 +309,9 @@ public sealed class OcrProcessingServiceTests
         public Task AddTransactionAsync(CoupleSync.Domain.Entities.Transaction transaction, CancellationToken ct) =>
             Task.CompletedTask;
 
+        public Task AddTransactionsRangeAsync(IEnumerable<CoupleSync.Domain.Entities.Transaction> transactions, CancellationToken ct) =>
+            Task.CompletedTask;
+
         public Task<(int TotalCount, IReadOnlyList<CoupleSync.Domain.Entities.Transaction> Items)> GetPagedAsync(
             Guid coupleId, int page, int pageSize, string? category,
             DateTime? startDate, DateTime? endDate, CancellationToken ct) =>

@@ -6,6 +6,7 @@ public interface ITransactionRepository
 {
     Task<bool> FingerprintExistsAsync(string fingerprint, Guid coupleId, CancellationToken ct);
     Task AddTransactionAsync(Transaction transaction, CancellationToken ct);
+    Task AddTransactionsRangeAsync(IEnumerable<Transaction> transactions, CancellationToken ct);
     Task<(int TotalCount, IReadOnlyList<Transaction> Items)> GetPagedAsync(
         Guid coupleId,
         int page,

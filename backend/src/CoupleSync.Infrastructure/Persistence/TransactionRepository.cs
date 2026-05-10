@@ -25,6 +25,11 @@ public sealed class TransactionRepository : ITransactionRepository
         await _dbContext.Transactions.AddAsync(transaction, ct);
     }
 
+    public async Task AddTransactionsRangeAsync(IEnumerable<Transaction> transactions, CancellationToken ct)
+    {
+        await _dbContext.Transactions.AddRangeAsync(transactions, ct);
+    }
+
     public async Task<(int TotalCount, IReadOnlyList<Transaction> Items)> GetPagedAsync(
         Guid coupleId,
         int page,

@@ -156,6 +156,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.Category).HasColumnName("category").HasMaxLength(64).IsRequired();
             entity.Property(x => x.IngestEventId).HasColumnName("ingest_event_id").IsRequired();
             entity.Property(x => x.GoalId).HasColumnName("goal_id");
+            entity.Property(x => x.Source).HasColumnName("source").HasDefaultValue(TransactionSource.Manual).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
 
             entity.HasIndex(x => new { x.CoupleId, x.Fingerprint }).IsUnique();
@@ -347,6 +348,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.ErrorCode).HasColumnName("error_code").HasMaxLength(64);
             entity.Property(x => x.ErrorMessage).HasColumnName("error_message").HasMaxLength(512);
             entity.Property(x => x.QuotaResetDate).HasColumnName("quota_reset_date");
+            entity.Property(x => x.RetryCount).HasColumnName("retry_count").HasDefaultValue(0).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
 
