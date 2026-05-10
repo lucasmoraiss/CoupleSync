@@ -68,6 +68,10 @@ axiosInstance.interceptors.request.use((config) => {
 axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
+    // Bail immediately for canceled/aborted requests — do not trigger session or toast side effects
+    if (axios.isCancel(error)) {
+      return Promise.reject(error);
+    }
     if (error?.response?.status === 401) {
       const url = error.config?.url ?? '';
       if (url.includes('/api/v1/auth')) {
@@ -303,9 +307,11 @@ export default axiosInstance;
 
 // --- OCR API ---
 export const ocrApiClient = {
-  upload: (file: FormData): Promise<AxiosResponse<OcrUploadResponse>> =>
+  upload: (file: FormData, signal?: AbortSignal): Promise<AxiosResponse<OcrUploadResponse>> =>
     axiosInstance.post<OcrUploadResponse>('/api/v1/ocr/upload', file, {
-      headers: { 'Content-Type': undefined },
+      signal,
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
     }),
 
   getStatus: (uploadId: string): Promise<AxiosResponse<OcrStatusResponse>> =>

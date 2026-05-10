@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import axios from 'axios';
 import { ocrApiClient } from '@/services/apiClient';
 import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
@@ -41,6 +42,9 @@ type ScreenState =
 export default function OcrUploadScreen() {
   const [state, setState] = useState<ScreenState>({ phase: 'idle' });
   const isMounted = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // Incremented on every new upload attempt; lets async callbacks discard stale results
+  const uploadGenerationRef = useRef(0);
 
   React.useEffect(() => {
     return () => {
@@ -137,6 +141,12 @@ export default function OcrUploadScreen() {
         return;
       }
 
+      // Abort any in-flight upload and capture the generation for this attempt
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const generation = ++uploadGenerationRef.current;
+
       setState({ phase: 'uploading' });
 
       const formData = new FormData();
@@ -147,31 +157,38 @@ export default function OcrUploadScreen() {
       } as any);
 
       try {
-        const res = await ocrApiClient.upload(formData);
+        const res = await ocrApiClient.upload(formData, controller.signal);
         const { uploadId } = res.data;
-        if (!isMounted.current) return;
+        // Discard result if a newer upload has already started
+        if (generation !== uploadGenerationRef.current || !isMounted.current) return;
+        abortControllerRef.current = null;
         setState({ phase: 'polling', uploadId });
         pollStatus(uploadId);
       } catch (err: any) {
-        if (isMounted.current) {
-          let message: string;
-          if (!err?.response) {
-            message = 'Sem conexão. Verifique sua internet e tente novamente.';
-          } else {
-            const data = err.response.data;
-            const isObj = typeof data === 'object' && data !== null;
-            if (isObj && typeof (data as any).message === 'string') {
-              message = (data as any).message;
-            } else if (isObj && typeof (data as any).error === 'string') {
-              message = (data as any).error;
-            } else if (err.response.statusText) {
-              message = err.response.statusText;
-            } else {
-              message = 'Falha ao enviar o arquivo. Tente novamente.';
-            }
-          }
-          setState({ phase: 'error', message });
+        // Discard error if a newer upload has already started or request was intentionally aborted
+        if (generation !== uploadGenerationRef.current || !isMounted.current) return;
+        abortControllerRef.current = null;
+        if (axios.isCancel(err) || err?.name === 'AbortError') {
+          setState({ phase: 'idle' });
+          return;
         }
+        let message: string;
+        if (!err?.response) {
+          message = 'Sem conexão. Verifique sua internet e tente novamente.';
+        } else {
+          const data = err.response.data;
+          const isObj = typeof data === 'object' && data !== null;
+          if (isObj && typeof (data as any).message === 'string') {
+            message = (data as any).message;
+          } else if (isObj && typeof (data as any).error === 'string') {
+            message = (data as any).error;
+          } else if (err.response.statusText) {
+            message = err.response.statusText;
+          } else {
+            message = 'Falha ao enviar o arquivo. Tente novamente.';
+          }
+        }
+        setState({ phase: 'error', message });
       }
     },
     [ensureFileReadable, pollStatus]
@@ -207,6 +224,13 @@ export default function OcrUploadScreen() {
   }, [uploadFile]);
 
   const handleRetry = useCallback(() => setState({ phase: 'idle' }), []);
+
+  const handleCancelUpload = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  }, []);
 
   // ─── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -264,7 +288,18 @@ export default function OcrUploadScreen() {
       )}
 
       {/* Uploading */}
-      {state.phase === 'uploading' && <LoadingState message="Enviando arquivo..." />}
+      {state.phase === 'uploading' && (
+        <View style={styles.body}>
+          <LoadingState message="Enviando arquivo..." />
+          <TouchableOpacity
+            style={styles.cancelBtn}
+            onPress={handleCancelUpload}
+            accessibilityLabel="Cancelar envio"
+          >
+            <Text style={styles.cancelBtnText}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Polling */}
       {state.phase === 'polling' && (
@@ -333,4 +368,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   retryText: { fontSize: 15, fontWeight: '600', color: TEXT },
+  cancelBtn: {
+    backgroundColor: ERROR,
+    borderRadius: 12,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    marginTop: 24,
+  },
+  cancelBtnText: { fontSize: 15, fontWeight: '600', color: 'white' },
 });
