@@ -2,6 +2,7 @@ using CoupleSync.Application.AiChat;
 using System.Text;
 using CoupleSync.Api.Health;
 using CoupleSync.Api.Middleware;
+using CoupleSync.Api.RateLimiting;
 using CoupleSync.Api.Security;
 using CoupleSync.Api.Serialization;
 using CoupleSync.Api.Validators;
@@ -103,6 +104,7 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddCoupleSyncRateLimiting(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHealthChecks()
@@ -124,6 +126,10 @@ using (var scope = app.Services.CreateScope())
     await seeder.SeedAsync();
 }
 
+// Must run first so that Connection.RemoteIpAddress is the real client behind the reverse proxy
+// (only applied for proxies listed in the ForwardedHeaders configuration section).
+app.UseForwardedHeaders();
+
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
 if (app.Environment.IsDevelopment())
@@ -131,6 +137,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseAuthentication();
+// After authentication (the couples/join policy is partitioned by user) and before authorization.
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();

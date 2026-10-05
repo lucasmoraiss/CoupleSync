@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using CoupleSync.Api.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using CoupleSync.Api.Contracts.Couple;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Couples;
@@ -40,6 +42,7 @@ public sealed class CouplesController : ControllerBase
     }
 
     [HttpPost("join")]
+    [EnableRateLimiting(RateLimitPolicies.CoupleJoin)]
     [ProducesResponseType(typeof(JoinCoupleResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
