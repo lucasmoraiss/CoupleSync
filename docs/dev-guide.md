@@ -1,313 +1,263 @@
-# CoupleSync — Dev Guide & Interface Test Plan
+# CoupleSync — Guia de desenvolvimento e roteiro de teste manual
 
-> Siga este guia para subir o ambiente de desenvolvimento do zero e validar todas as funcionalidades pelo app mobile (como um QA/usuário faria).
+Como subir o ambiente local do zero e conferir, pelo app, os fluxos principais.
 
 ---
 
 ## 1. Pré-requisitos
 
-| Ferramenta | Versão mínima | Verificar |
+| Ferramenta | Versão | Conferir |
 |---|---|---|
 | .NET SDK | 8.0 | `dotnet --version` |
-| PostgreSQL | 15+ | `psql --version` |
-| Node.js | 20 LTS | `node --version` |
-| npm | 10+ | `npm --version` |
-| Expo CLI | (via npx) | `npx expo --version` |
-| Android Studio + Emulator | API 31+ | AVD Manager |
-| Git | qualquer | `git --version` |
+| PostgreSQL | 16 (a versão usada no CI) | `psql --version` |
+| Node.js | 20 | `node --version` |
+| Android Studio + emulador | — | AVD Manager |
+| Git | — | `git --version` |
+
+O Expo é usado via `npx`; não é preciso instalar nada global.
 
 ---
 
-## 2. Backend — Subindo o servidor
+## 2. Back-end
 
 ### 2.1 Banco de dados
 
-Crie o banco e aplicar as 9 migrações:
+Crie um banco vazio:
 
 ```powershell
-# no psql ou pgAdmin: criar banco
 psql -U postgres -c "CREATE DATABASE couplesync;"
-
-# na raiz do repo:
-cd backend
-dotnet ef database update --project src/CoupleSync.Infrastructure --startup-project src/CoupleSync.Api
 ```
 
-Se o comando `dotnet-ef` não estiver instalado:
+Não é preciso aplicar migrações à mão: a API aplica as pendentes ao iniciar (hoje são 13) e carrega as regras de categorização.
+
+### 2.2 Configuração
+
+O `backend/src/CoupleSync.Api/appsettings.json` versionado traz a chave JWT e a conexão **vazias**. A API não sobe sem as duas. Defina por variável de ambiente:
+
 ```powershell
-dotnet tool install --global dotnet-ef
+# PowerShell 7 — gera uma chave de 64 caracteres
+$env:JWT__SECRET = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$env:DATABASE_URL = "Host=localhost;Port=5432;Database=couplesync;Username=postgres;Password=<sua-senha>"
 ```
 
-### 2.2 Variáveis de ambiente (Desenvolvimento)
-
-O arquivo `backend/src/CoupleSync.Api/appsettings.json` já tem os valores padrão para desenvolvimento local:
-
-```json
-"ConnectionStrings": {
-  "DefaultConnection": "Host=localhost;Port=5432;Database=couplesync;Username=postgres;Password=postgres"
-},
-"Jwt": {
-  "Secret": "REPLACE_WITH_ENV_JWT_SECRET_32CHARS_MIN"
-}
-```
-
-**⚠️ Antes de subir**, troque o `Secret` por uma string de no mínimo 32 caracteres. Pode usar `appsettings.Development.json` para isso (não commitado):
+Ou crie `backend/src/CoupleSync.Api/appsettings.Development.json` (ignorado pelo Git):
 
 ```json
 {
+  "ConnectionStrings": {
+    "DefaultConnection": "Host=localhost;Port=5432;Database=couplesync;Username=postgres;Password=<sua-senha>"
+  },
   "Jwt": {
-    "Secret": "dev-secret-local-pelo-menos-32-chars!!"
+    "Secret": "<chave-de-32-ou-mais-caracteres>"
   }
 }
 ```
 
-> FCM (`Fcm.ProjectId` e `Fcm.CredentialJson`) pode ficar vazio em dev — o worker loga um aviso e pula o envio, sem quebrar nada.
+A chave precisa ter pelo menos 32 caracteres. Push (`Fcm:*`) e IA (`AI_CHAT_ENABLED`, `GEMINI_API_KEY`) podem ficar sem configurar em desenvolvimento: o envio de push é pulado com um aviso no log e o assistente responde como desabilitado.
+
+A lista completa de variáveis está em [backend/README.md](../backend/README.md#variáveis-de-ambiente).
 
 ### 2.3 Iniciar a API
 
 ```powershell
-cd backend/src/CoupleSync.Api
-dotnet run --launch-profile http
+dotnet run --project backend/src/CoupleSync.Api --launch-profile http
 ```
 
-A API sobe em **http://localhost:5210**. Você verá:
+A API sobe em **http://localhost:5000** (escutando em todas as interfaces, o que permite o acesso do emulador e de aparelhos na mesma rede).
+
+### 2.4 Conferir
 
 ```
-info: Now listening on: http://localhost:5210
+GET http://localhost:5000/health/live   → 200
+GET http://localhost:5000/health/ready  → 200 (banco respondendo)
 ```
 
-### 2.4 Verificar saúde
+### 2.5 Testes
 
+```powershell
+$env:DATABASE_URL = "Host=localhost;Port=5432;Database=couplesync_test;Username=postgres;Password=postgres"
+dotnet test backend/CoupleSync.sln
 ```
-GET http://localhost:5210/health/live   → 200 Healthy
-GET http://localhost:5210/health/ready  → 200 Healthy
-```
+
+São 588 testes (411 de unidade, 176 de integração, 1 de ponta a ponta).
+
+### 2.6 Alternativa: Docker Compose
+
+Na raiz, copie `.env.example` para `.env`, defina `JWT__SECRET` e rode `docker compose up --build`. A API fica em `http://localhost:5000` e o PostgreSQL em `localhost:5432`.
 
 ---
 
-## 3. Mobile — Subindo o app
+## 3. App
 
-### 3.1 Instalar dependências
+### 3.1 Instalar
 
 ```powershell
 cd mobile
 npm install
 ```
 
-### 3.2 Configurar endpoint da API
+### 3.2 Apontar para a API
 
 Crie `mobile/.env`:
 
 ```
-EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:5210
+EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:5000
 ```
 
-> `10.0.2.2` é o alias do emulador Android para `localhost` da máquina host.
-> Se usar **dispositivo físico** na mesma rede Wi-Fi, troque pelo IP da sua máquina: `http://192.168.x.x:5210`
+`10.0.2.2` é o endereço pelo qual o emulador Android alcança o `localhost` da máquina. Em aparelho físico na mesma rede Wi-Fi, use o IP da máquina: `http://192.168.x.x:5000`. O valor é a raiz da API, sem `/api/v1`.
 
-### 3.3 Iniciar o app
+### 3.3 Iniciar
 
 ```powershell
-cd mobile
 npx expo start --android
 ```
 
-O Metro Bundler abre e instala o app no emulador. Na primeira vez pode demorar ~2 minutos.
-
-### 3.4 Estrutura de telas
-
-```
-(auth)/login.tsx           ← Tela de login (tela inicial sem token)
-(auth)/register.tsx        ← Tela de registro (nome, email, senha)
-(auth)/couple-setup.tsx    ← Criar casal ou entrar com código
-(main)/index.tsx           ← Dashboard
-(main)/goals/index.tsx     ← Metas
-(main)/cashflow/index.tsx  ← Fluxo de Caixa
-(main)/settings/index.tsx  ← Configurações (+ sair da conta)
-```
-
-> Auth guard: se não houver token, qualquer rota de `(main)` redireciona para login.
-
----
-
-## 4. Plano de Testes — Via Tela do App
-
-Abra o app no emulador/dispositivo e siga os passos. Para cada teste, anote **PASS / FAIL** e observações.
-
----
-
-### BLOCO A — Registro e Login (AC-001)
-
-#### A-1: Tela de login aparece PASS
-1. Abra o app (primeira vez, sem dados salvos)
-2. **Esperado:** Tela de login com fundo escuro, campos "Email" e "Senha", botão "Entrar", link "Criar conta"
-
-#### A-2: Registro do Usuário 1 (Ana) PASS
-1. Na tela de login, toque em **"Criar conta"**
-2. **Esperado:** Tela de registro com campos Nome, Email, Senha, Confirmar senha
-3. Preencha: `Ana` / `ana@teste.com` / `Senha123!` / `Senha123!`
-4. Toque em **"Criar conta"**
-5. **Esperado:** Navegação para tela de **Configuração do casal** (emoji 💑, botões "Criar casal" e "Entrar em um casal")
-
-#### A-3: Criar casal (Ana) PASS - Não é possível copiar o código, o sistema também não gerou um 
-1. Na tela de configuração do casal, toque em **"Criar casal"**
-2. **Esperado:** Tela com emoji 🎉, "Casal criado!", e um **código de 6 caracteres** (ex: `A3B7K9`)
-3. **Anote o código** — é o que o parceiro vai usar
-4. Toque em **"Ir para o Dashboard"**
-5. **Esperado:** Navegação para tela principal com abas (Dashboard, Metas, Fluxo, Config)
-
-#### A-4: Sair da conta (Ana)
-1. Na aba **"Config"**, toque em **"Sair da conta"**
-2. Confirme no diálogo
-3. **Esperado:** Volta para tela de login
-
-#### A-5: Registro do Usuário 2 (Bruno)
-1. Toque em **"Criar conta"**
-2. Preencha: `Bruno` / `bruno@teste.com` / `Senha123!` / `Senha123!`
-3. Toque em **"Criar conta"**
-4. **Esperado:** Tela de configuração do casal
-
-#### A-6: Entrar no casal (Bruno)
-1. Toque em **"Entrar em um casal"**
-2. **Esperado:** Tela com campo para digitar o código e botão "Entrar"
-3. Cole o código anotado no A-3
-4. Toque em **"Entrar"**
-5. **Esperado:** Navegação para o Dashboard — agora Bruno e Ana estão no mesmo casal
-
-#### A-7: Login com senha errada
-1. Saia da conta (Config → Sair da conta)
-2. Na tela de login, digite: `ana@teste.com` / `senhaerrada`
-3. Toque em **"Entrar"**
-4. **Esperado:** Alerta de erro (email ou senha incorretos), sem navegação
-
-#### A-8: Login correto
-1. Digite: `ana@teste.com` / `Senha123!`
-2. Toque em **"Entrar"**
-3. **Esperado:** Navegação direto para o Dashboard (pula tela de casal porque já está em um)
-
----
-
-### BLOCO B — Navegação e Telas Principais
-
-#### B-1: Dashboard
-1. Após login, confirme que a aba **Dashboard** está selecionada
-2. **Esperado:** Tela com "Olá! 👋", card de saldo total com "—", cards de receitas e despesas
-
-#### B-2: Metas
-1. Toque na aba **Metas**
-2. **Esperado:** Tela com título "Metas", estado vazio com emoji 🎯 e texto "Nenhuma meta ainda"
-
-#### B-3: Fluxo de Caixa
-1. Toque na aba **Fluxo**
-2. **Esperado:** Tela com título "Fluxo de Caixa", estado vazio com emoji 📊
-
-#### B-4: Configurações
-1. Toque na aba **Config**
-2. **Esperado:** Menu com "Notificações", "Código do casal", "Sair da conta" (em vermelho)
-
-#### B-5: Tab bar
-1. Verifique que a tab bar no fundo tem fundo escuro e a aba ativa está destacada em roxo/índigo
-2. **Esperado:** Navegação fluida entre todas as abas
-
----
-
-### BLOCO C — Proteção de Rotas
-
-#### C-1: Guard de autenticação
-1. Saia da conta
-2. Tente abrir o app novamente
-3. **Esperado:** Tela de login aparece (não o Dashboard)
-
-#### C-2: Persistência de sessão
-1. Faça login
-2. Feche completamente o app (swipe up no recents)
-3. Reabra o app
-4. **Esperado:** Dashboard aparece diretamente (token persiste via SecureStore)
-
----
-
-## 5. Coleta de Evidências
-
-| Teste | Status | Observações |
-|---|---|---|
-| A-1: Login aparece | ⬜ | |
-| A-2: Registro Ana | ⬜ | |
-| A-3: Criar casal | ⬜ | |
-| A-4: Sair da conta | ⬜ | |
-| A-5: Registro Bruno | ⬜ | |
-| A-6: Entrar no casal | ⬜ | |
-| A-7: Senha errada | ⬜ | |
-| A-8: Login correto | ⬜ | |
-| B-1: Dashboard | ⬜ | |
-| B-2: Metas | ⬜ | |
-| B-3: Fluxo de Caixa | ⬜ | |
-| B-4: Configurações | ⬜ | |
-| B-5: Tab bar | ⬜ | |
-| C-1: Guard auth | ⬜ | |
-| C-2: Persistência | ⬜ | |
-
----
-
-## 6. Dicas de debug
-
-### Backend
+A captura de notificações bancárias usa código nativo e não funciona no Expo Go. Para testá-la:
 
 ```powershell
-# Ver logs detalhados
-dotnet run --launch-profile http --verbosity detailed
+npx expo prebuild --platform android --clean
+npx expo run:android
+```
 
-# Conectar ao banco para inspecionar dados
+### 3.4 Testes e checagem de tipos
+
+```powershell
+npm test            # Jest: 102 testes de lógica pura
+npx tsc --noEmit    # checagem de tipos, a mesma do CI
+```
+
+`npm run lint` não funciona: não há configuração do ESLint no projeto.
+
+### 3.5 Telas
+
+```
+(auth)/login.tsx               Login
+(auth)/register.tsx            Cadastro
+(auth)/couple-setup.tsx        Criar casal ou entrar com código
+(main)/index.tsx               Dashboard
+(main)/transactions/index.tsx  Transações
+(main)/transactions/new.tsx    Nova transação
+(main)/ocr-upload.tsx          Importar extrato em PDF
+(main)/ocr-review.tsx          Revisão da importação
+(main)/goals/index.tsx         Metas
+(main)/cashflow/index.tsx      Fluxo de caixa
+(main)/budget/index.tsx        Fontes de renda (aba "Rendas")
+(main)/reports/index.tsx       Relatórios
+(main)/chat/index.tsx          Chat IA (aba visível só com EXPO_PUBLIC_AI_CHAT_ENABLED=true)
+(main)/settings/index.tsx      Configurações
+(main)/settings/alerts.tsx     Alertas
+```
+
+Sem sessão, qualquer rota de `(main)` redireciona para o login.
+
+---
+
+## 4. Roteiro de teste manual
+
+Use contas fictícias (os endereços `@example.com` abaixo não existem) e uma senha de 8 caracteres ou mais. Anote PASSOU ou FALHOU em cada item.
+
+### Bloco A — Cadastro, casal e login
+
+**A-1. Tela de login.** Abra o app sem sessão. Esperado: campos "E-mail" e "Senha", botão "Entrar" e o link "Não tem conta? Cadastre-se".
+
+**A-2. Cadastro da primeira pessoa.** Toque em "Cadastre-se", preencha Nome `Ana`, E-mail `ana@example.com`, Senha e Confirmar senha, e toque em "Criar conta". Esperado: tela "Vamos configurar", com "Criar casal" e "Entrar em um casal".
+
+**A-3. Criar casal.** Toque em "Criar casal". Esperado: tela "Casal criado!" com um código de convite de 6 caracteres e o botão "Copiar código". Anote o código (ele não é exibido de novo) e toque em "Ir para o Dashboard".
+
+**A-4. Sair.** Aba "Config" > "Sair da conta" > confirme. Esperado: volta ao login.
+
+**A-5. Cadastro da segunda pessoa.** Repita A-2 com `Bruno` e `bruno@example.com`.
+
+**A-6. Entrar no casal.** Toque em "Entrar em um casal", digite o código de A-3 e toque em "Entrar". Esperado: vai para o Dashboard.
+
+**A-7. Senha errada.** Saia, tente entrar com `ana@example.com` e uma senha incorreta. Esperado: alerta "E-mail ou senha incorretos.", sem navegação.
+
+**A-8. Login correto.** Entre com a senha certa. Esperado: vai direto ao Dashboard, sem passar pela tela do casal.
+
+**A-9. Limite de tentativas.** Erre a senha 6 vezes em menos de um minuto. Esperado: a sexta tentativa é recusada pela API com HTTP 429.
+
+### Bloco B — Abas
+
+**B-1. Abas visíveis.** Esperado: Dashboard, Transações, Metas, Fluxo, Rendas, Relatórios e Config. "Chat IA" só aparece com a variável de build ligada.
+
+**B-2. Dashboard.** Esperado: mês corrente, cartão "Total de gastos" e os atalhos "Ver rendas" e "Ver todas as transações".
+
+**B-3. Nova transação.** Em Transações, toque em "Nova", informe valor e categoria e toque em "Salvar". Esperado: a transação aparece na lista com o selo "Manual" e o total do Dashboard muda.
+
+**B-4. Trocar categoria e excluir.** Toque na transação e escolha outra categoria; depois toque na lixeira e confirme. Esperado: a categoria muda; após excluir, aparece "Transação excluída".
+
+**B-5. Metas.** Sem metas, a tela mostra "Nenhuma meta ativa". Crie uma meta e confira a barra de progresso.
+
+**B-6. Fluxo.** Alterne entre "30 dias" e "90 dias".
+
+**B-7. Rendas.** Toque em "Adicionar fonte de renda", salve e confira "Renda Total do Casal".
+
+**B-8. Relatórios.** Alterne entre 3m, 6m e 12m.
+
+**B-9. Config.** Esperado: "Notificações do sistema", "Alertas", "Código do casal" (inativo) e "Sair da conta".
+
+### Bloco C — Sessão
+
+**C-1. Proteção de rota.** Saia da conta e reabra o app. Esperado: tela de login.
+
+**C-2. Sessão persistente.** Entre, feche o app por completo e reabra. Esperado: Dashboard direto.
+
+**C-3. Renovação de sessão.** Com `JWT__ACCESSTOKENTTLMINUTES=1` na API, entre, aguarde dois minutos e navegue entre as abas. Esperado: os dados carregam sem pedir login de novo.
+
+### Bloco D — Extrato e notificações (build nativo)
+
+**D-1. Importar PDF.** Em Transações, toque no ícone de nuvem, escolha "Arquivo PDF" e selecione um extrato. Esperado: tela "Revisão de Importação"; após "Confirmar Importação", as transações aparecem com o selo "OCR".
+
+**D-2. Permissão de notificações.** Sem a permissão, Transações mostra a faixa "Captura de notificações desativada". Toque em "Ativar" e conceda o acesso ao CoupleSync na tela do Android. Esperado: depois de reiniciar o app, a faixa não aparece mais (a permissão é conferida quando a tela é montada).
+
+O roteiro em inglês `mobile/tests/e2e/manual-walkthrough.md` cobre cenários adicionais.
+
+---
+
+## 5. Depuração
+
+### Back-end
+
+```powershell
+# inspecionar o banco
 psql -U postgres -d couplesync
+```
 
-# Tabelas úteis
-SELECT * FROM transactions ORDER BY created_at DESC LIMIT 10;
-SELECT * FROM notification_events ORDER BY created_at DESC LIMIT 10;
+```sql
+\dt
+SELECT * FROM transactions LIMIT 10;
+SELECT * FROM import_jobs LIMIT 10;
+SELECT * FROM notification_events LIMIT 10;
 SELECT * FROM device_tokens;
-SELECT * FROM notification_settings;
 SELECT * FROM goals;
 ```
 
-### Mobile
+### App
 
 ```powershell
-# Limpar cache do Metro quando houver erros estranhos
+# limpar o cache do Metro
 npx expo start --android --clear
-
-# Ver logs do React Native
-npx expo start --android  # os logs aparecem no terminal do Metro
-
-# Inspecionar store do Zustand em runtime
-# Adicione temporariamente ao _layout.tsx:
-# console.log('session:', useSessionStore.getState())
 ```
+
+Os logs do app aparecem no terminal do Metro. Em desenvolvimento, o cliente HTTP imprime a URL da API em uso (`[apiClient] BASE_URL = ...`).
 
 ### PostgreSQL não conecta
-Verifique se o serviço está rodando:
+
 ```powershell
 Get-Service -Name postgresql*
-# ou no Linux/Mac:
-# pg_lscluster
 ```
 
-### Porta 5210 já em uso
+### Porta 5000 ocupada
+
 ```powershell
-netstat -ano | findstr :5210
+netstat -ano | findstr :5000
 taskkill /PID <PID> /F
 ```
 
 ---
 
-## 7. Próximos passos (após validação)
+## 6. Onde continuar
 
-Quando todos os testes A-C estiverem **PASS**, retomamos o fluxo autônomo com:
-
-- **T-023** — Expo Config Plugin + Kotlin `NotificationCaptureService` + parser de bancos
-- **T-024** — Checkpoint do foundation mobile
-- **T-UI-POLISH** — Refinamento UI/UX premium em todas as telas
-
-
-# Mobile Alpha Manual Test Plan
-- [ ] AC-001: Login and join-code onboarding pass on Android test device
-- [ ] AC-002: Permission enable/disable flow is visible and recoverable
-- [ ] AC-009: Offline capture and retry upload behavior is observable
-- [ ] AC-010: Key setup actions are reachable in three taps
+- Pendências e melhorias: [docs/BACKLOG.md](BACKLOG.md)
+- Implantação: [docs/deployment/DEPLOY-GUIDE.md](deployment/DEPLOY-GUIDE.md)
+- Decisões de arquitetura: [docs/adr/](adr/README.md)
