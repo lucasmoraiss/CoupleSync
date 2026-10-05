@@ -23,4 +23,5 @@ public sealed record MonthlyIncomeDto(
     IncomeGroupDto PersonalIncome,
     IncomeGroupDto? PartnerIncome,
     IncomeGroupDto SharedIncome,
-    decimal CoupleTotal);
+    decimal CoupleTotal,
+    IReadOnlyList<IncomeGroupDto> PartnersIncome);
