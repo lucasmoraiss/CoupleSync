@@ -7,7 +7,7 @@ Lista viva de itens identificados durante a estabilização pós-lançamento do 
 
 ## ✅ Concluído em 30/Abr/2026
 
-Os itens abaixo foram **resolvidos** na sessão `.agents-work/2026-04-30_backlog-execution/`:
+Os itens abaixo foram **resolvidos** em 30/Abr/2026:
 
 - ✅ **CRÍTICO — Ícones desaparecem no build EAS** → adicionado `expo-font` ao `app.json` plugins
 - ✅ **Dashboard "Total de gastos" não atualiza após OCR** → invalidação de queries `dashboard`/`reports`/`budget` no `confirmMutation.onSuccess`

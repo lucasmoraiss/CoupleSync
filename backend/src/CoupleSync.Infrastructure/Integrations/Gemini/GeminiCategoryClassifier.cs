@@ -64,7 +64,7 @@ public sealed class GeminiCategoryClassifier : ICategoryClassifier
     }
 
     /// <summary>
-    /// Builds the classification prompt per ADR-004.
+    /// Builds the classification prompt per ADR-0010.
     /// The transaction description is placed inside triple-double-quote delimiters
     /// in a dedicated section, clearly separated from the instruction text.
     /// Bare double-quote characters are stripped from description before interpolation

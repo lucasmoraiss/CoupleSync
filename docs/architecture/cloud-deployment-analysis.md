@@ -2,7 +2,7 @@
 
 > Decision date: April 2026  
 > Scope: Free-tier cloud stack for CoupleSync pilot (up to 10 users / 5 couples)  
-> Decision status: **Confirmed** (see ADR-001)
+> Decision status: **Confirmed** (see [ADR-0005](../adr/0005-stack-de-nuvem.md))
 
 ---
 
@@ -179,5 +179,5 @@ Gemini Flash 2.0 via Google AI Studio — free tier: 15 RPM, 1 million tokens/da
 
 ## 11. Architecture Decision Record Reference
 
-- ADR-001: Cloud stack selection → `adr/ADR-001-cloud-stack.md`
-- ADR-002: OCR provider selection → `adr/ADR-002-ocr-provider.md`
+- ADR-0005: Cloud stack selection → [`docs/adr/0005-stack-de-nuvem.md`](../adr/0005-stack-de-nuvem.md)
+- ADR-0006: OCR provider selection → [`docs/adr/0006-provedor-de-ocr.md`](../adr/0006-provedor-de-ocr.md)
