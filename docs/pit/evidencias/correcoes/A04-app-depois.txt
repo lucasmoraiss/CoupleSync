@@ -1,0 +1,26 @@
+
+> couplesync@1.0.0 test
+> jest --no-color confirmRequest
+
+PASS src/modules/ocr/__tests__/confirmRequest.test.ts
+  A04 — corpo da confirmação do extrato (candidateEdits)
+    √ linha sem alteração não gera edit (7 ms)
+    √ alteração só de valor envia apenas amount (1 ms)
+    √ alteração só de descrição envia apenas description (sem espaços nas pontas) (2 ms)
+    √ alteração de descrição e valor na mesma linha envia os dois campos (1 ms)
+    √ linha não selecionada é ignorada, mesmo editada (1 ms)
+    √ valor digitado em formato brasileiro (1.234,56) é convertido corretamente (36 ms)
+    √ valor original com imprecisão de ponto flutuante não é tratado como alterado (1 ms)
+    √ mantém categoryOverrides das linhas selecionadas (1 ms)
+  A04 — validação das linhas antes de enviar
+    √ sem alterações não há erros (1 ms)
+    √ descrição apagada gera erro na linha (1 ms)
+    √ descrição com mais de 512 caracteres gera erro na linha (1 ms)
+    √ valor zerado gera erro na linha (1 ms)
+    √ linha não selecionada não é validada
+
+Test Suites: 1 passed, 1 total
+Tests:       13 passed, 13 total
+Snapshots:   0 total
+Time:        2.186 s
+Ran all test suites matching /confirmRequest/i.

@@ -1,0 +1,24 @@
+
+> couplesync@1.0.0 test
+> jest --no-color src/services/__tests__/authRefresh.test.ts
+
+PASS src/services/__tests__/authRefresh.test.ts
+  A03 — renovação de sessão no 401
+    √ um 401 dispara um refresh e a requisição é repetida com o token novo (40 ms)
+    √ grava o novo par de tokens preservando userId e coupleId (9 ms)
+    √ três 401 simultâneos esperam exatamente um refresh (19 ms)
+    √ 401 atrasado de um token já renovado não dispara um segundo refresh (11 ms)
+    √ refresh recusado pelo servidor limpa a sessão uma vez, sem laço (166 ms)
+    √ refresh recusado com três requisições simultâneas avisa sessão expirada uma única vez (7 ms)
+    √ se a requisição repetida também devolve 401, encerra a sessão sem novo ciclo de refresh (4 ms)
+    √ 401 nas rotas /api/v1/auth/* não dispara refresh nem encerra a sessão (2 ms)
+    √ sem refresh token guardado, encerra a sessão sem chamar o refresh (4 ms)
+    √ falha de rede durante o refresh não apaga a sessão (6 ms)
+    √ quando o refresh não devolve refresh token, mantém o anterior (1 ms)
+    √ erros que não são 401 passam direto (2 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       12 passed, 12 total
+Snapshots:   0 total
+Time:        2.635 s
+Ran all test suites matching /src\\services\\__tests__\\authRefresh.test.ts/i.

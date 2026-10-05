@@ -1,0 +1,17 @@
+
+> couplesync@1.0.0 test
+> jest --no-color ingestRequestBank
+
+PASS src/modules/integrations/notification-capture/__tests__/ingestRequestBank.test.ts
+  nome do banco enviado é aceito pelo validador do backend
+    √ Nubank (12 ms)
+    √ Itaú (3 ms)
+    √ Inter (2 ms)
+    √ C6 Bank (2 ms)
+    √ Bradesco (1 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       5 passed, 5 total
+Snapshots:   0 total
+Time:        1.783 s, estimated 2 s
+Ran all test suites matching /ingestRequestBank/i.

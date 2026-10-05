@@ -1,0 +1,168 @@
+$ dotnet test backend/CoupleSync.sln --filter "FullyQualifiedName~ImportJobConfirmTests|FullyQualifiedName~OcrConfirmIntegrationTests"
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  CoupleSync.Domain -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Domain\bin\Debug\net8.0\CoupleSync.Domain.dll
+  CoupleSync.Application -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\bin\Debug\net8.0\CoupleSync.Application.dll
+  CoupleSync.Infrastructure -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Infrastructure\bin\Debug\net8.0\CoupleSync.Infrastructure.dll
+  CoupleSync.Api -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Api\bin\Debug\net8.0\CoupleSync.Api.dll
+  CoupleSync.E2ETests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll (.NETCoreApp,Version=v8.0)
+  CoupleSync.UnitTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll (.NETCoreApp,Version=v8.0)
+  CoupleSync.IntegrationTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+No test matches the given testcase filter `FullyQualifiedName~ImportJobConfirmTests|FullyQualifiedName~OcrConfirmIntegrationTests` in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+
+[xUnit.net 00:00:00.45]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_WhenAnotherRequestStoredTheSameLinesFirst_Throws409 [FAIL]
+[xUnit.net 00:00:00.48]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_ReimportedStatementWhereEverythingIsDuplicate_CreatesNothingAndClosesTheJob [FAIL]
+[xUnit.net 00:00:00.48]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_IndexThatDoesNotExist_Throws422_AndLeavesTheJobReady(badIndex: -1) [FAIL]
+[xUnit.net 00:00:00.49]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_IndexThatDoesNotExist_Throws422_AndLeavesTheJobReady(badIndex: 99) [FAIL]
+[xUnit.net 00:00:00.49]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_IndexThatDoesNotExist_Throws422_AndLeavesTheJobReady(badIndex: 2) [FAIL]
+[xUnit.net 00:00:00.49]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.ParseAndDeduplicate_FirstOccurrenceKeepsTheLegacyFingerprint [FAIL]
+[xUnit.net 00:00:00.50]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.ParseAndDeduplicate_IdenticalLinesOnTheSameDay_GetDistinctFingerprints [FAIL]
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_WhenAnotherRequestStoredTheSameLinesFirst_Throws409 [98 ms]
+  Error Message:
+   Assert.Throws() Failure: Exception type was not an exact match
+Expected: typeof(CoupleSync.Application.Common.Exceptions.ConflictException)
+Actual:   typeof(Microsoft.EntityFrameworkCore.DbUpdateException)
+---- Microsoft.EntityFrameworkCore.DbUpdateException : An error occurred while saving the entity changes.
+-------- System.InvalidOperationException : 23505: duplicate key value violates unique constraint "IX_transactions_couple_id_fingerprint"
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_WhenAnotherRequestStoredTheSameLinesFirst_Throws409() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 190
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at CoupleSync.UnitTests.OcrImport.UniqueIndexTransactionRepository.SaveChangesAsync(CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 291
+   at CoupleSync.Application.OcrImport.ImportJobService.ConfirmCandidatesAsync(Guid uploadId, Guid coupleId, Guid userId, IReadOnlyList`1 selectedIndices, IReadOnlyDictionary`2 categoryOverrides, CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\OcrImport\ImportJobService.cs:line 173
+----- Inner Stack Trace -----
+
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_ReimportedStatementWhereEverythingIsDuplicate_CreatesNothingAndClosesTheJob [1 ms]
+  Error Message:
+   Microsoft.EntityFrameworkCore.DbUpdateException : An error occurred while saving the entity changes.
+---- System.InvalidOperationException : 23505: duplicate key value violates unique constraint "IX_transactions_couple_id_fingerprint"
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.UniqueIndexTransactionRepository.SaveChangesAsync(CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 291
+   at CoupleSync.Application.OcrImport.ImportJobService.ConfirmCandidatesAsync(Guid uploadId, Guid coupleId, Guid userId, IReadOnlyList`1 selectedIndices, IReadOnlyDictionary`2 categoryOverrides, CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\OcrImport\ImportJobService.cs:line 173
+   at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_ReimportedStatementWhereEverythingIsDuplicate_CreatesNothingAndClosesTheJob() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 136
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_IndexThatDoesNotExist_Throws422_AndLeavesTheJobReady(badIndex: -1) [1 ms]
+  Error Message:
+   Assert.Throws() Failure: No exception was thrown
+Expected: typeof(CoupleSync.Application.Common.Exceptions.UnprocessableEntityException)
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_IndexThatDoesNotExist_Throws422_AndLeavesTheJobReady(Int32 badIndex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 159
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_IndexThatDoesNotExist_Throws422_AndLeavesTheJobReady(badIndex: 99) [< 1 ms]
+  Error Message:
+   Assert.Throws() Failure: No exception was thrown
+Expected: typeof(CoupleSync.Application.Common.Exceptions.UnprocessableEntityException)
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_IndexThatDoesNotExist_Throws422_AndLeavesTheJobReady(Int32 badIndex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 159
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_IndexThatDoesNotExist_Throws422_AndLeavesTheJobReady(badIndex: 2) [< 1 ms]
+  Error Message:
+   Assert.Throws() Failure: No exception was thrown
+Expected: typeof(CoupleSync.Application.Common.Exceptions.UnprocessableEntityException)
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_IndexThatDoesNotExist_Throws422_AndLeavesTheJobReady(Int32 badIndex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 159
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.ParseAndDeduplicate_FirstOccurrenceKeepsTheLegacyFingerprint [3 ms]
+  Error Message:
+   Assert.NotEqual() Failure: Strings are equal
+Expected: Not "c3879f25a671e9332a9111914d61c6041e54d41c747c898fa6"···
+Actual:       "c3879f25a671e9332a9111914d61c6041e54d41c747c898fa6"···
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.ParseAndDeduplicate_FirstOccurrenceKeepsTheLegacyFingerprint() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 61
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.ParseAndDeduplicate_IdenticalLinesOnTheSameDay_GetDistinctFingerprints [3 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 3
+Actual:   2
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.ParseAndDeduplicate_IdenticalLinesOnTheSameDay_GetDistinctFingerprints() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 35
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:00.53]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_LinesAlreadyImported_AreSkippedAndReported [FAIL]
+[xUnit.net 00:00:00.53]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_JobProcessedBeforeTheFix_WithRepeatedFingerprint_StillStoresBothLines [FAIL]
+[xUnit.net 00:00:00.53]     CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_StatementWithTwoIdenticalLines_StoresBoth [FAIL]
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_LinesAlreadyImported_AreSkippedAndReported [1 ms]
+  Error Message:
+   Microsoft.EntityFrameworkCore.DbUpdateException : An error occurred while saving the entity changes.
+---- System.InvalidOperationException : 23505: duplicate key value violates unique constraint "IX_transactions_couple_id_fingerprint"
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.UniqueIndexTransactionRepository.SaveChangesAsync(CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 291
+   at CoupleSync.Application.OcrImport.ImportJobService.ConfirmCandidatesAsync(Guid uploadId, Guid coupleId, Guid userId, IReadOnlyList`1 selectedIndices, IReadOnlyDictionary`2 categoryOverrides, CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\OcrImport\ImportJobService.cs:line 173
+   at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_LinesAlreadyImported_AreSkippedAndReported() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 116
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_JobProcessedBeforeTheFix_WithRepeatedFingerprint_StillStoresBothLines [1 ms]
+  Error Message:
+   Microsoft.EntityFrameworkCore.DbUpdateException : An error occurred while saving the entity changes.
+---- System.InvalidOperationException : 23505: duplicate key value violates unique constraint "IX_transactions_couple_id_fingerprint"
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.UniqueIndexTransactionRepository.SaveChangesAsync(CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 291
+   at CoupleSync.Application.OcrImport.ImportJobService.ConfirmCandidatesAsync(Guid uploadId, Guid coupleId, Guid userId, IReadOnlyList`1 selectedIndices, IReadOnlyDictionary`2 categoryOverrides, CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\OcrImport\ImportJobService.cs:line 173
+   at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_JobProcessedBeforeTheFix_WithRepeatedFingerprint_StillStoresBothLines() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 96
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_StatementWithTwoIdenticalLines_StoresBoth [2 ms]
+  Error Message:
+   Microsoft.EntityFrameworkCore.DbUpdateException : An error occurred while saving the entity changes.
+---- System.InvalidOperationException : 23505: duplicate key value violates unique constraint "IX_transactions_couple_id_fingerprint"
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.UniqueIndexTransactionRepository.SaveChangesAsync(CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 291
+   at CoupleSync.Application.OcrImport.ImportJobService.ConfirmCandidatesAsync(Guid uploadId, Guid coupleId, Guid userId, IReadOnlyList`1 selectedIndices, IReadOnlyDictionary`2 categoryOverrides, CancellationToken ct) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\OcrImport\ImportJobService.cs:line 173
+   at CoupleSync.UnitTests.OcrImport.ImportJobConfirmTests.Confirm_StatementWithTwoIdenticalLines_StoresBoth() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobConfirmTests.cs:line 75
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+
+
+Failed!  - Failed:    10, Passed:     2, Skipped:     0, Total:    12, Duration: 202 ms - CoupleSync.UnitTests.dll (net8.0)
+[xUnit.net 00:00:02.97]     CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_StatementWithTwoIdenticalLines_StoresBothTransactions [FAIL]
+  Failed CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_StatementWithTwoIdenticalLines_StoresBothTransactions [2 s]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: OK
+Actual:   InternalServerError
+  Stack Trace:
+     at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_StatementWithTwoIdenticalLines_StoresBothTransactions() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 36
+   at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_StatementWithTwoIdenticalLines_StoresBothTransactions() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 43
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:03.45]     CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_IndexThatDoesNotExist_Returns422_AndKeepsTheJobReady(badIndex: 99) [FAIL]
+[xUnit.net 00:00:03.84]     CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_IndexThatDoesNotExist_Returns422_AndKeepsTheJobReady(badIndex: -1) [FAIL]
+[xUnit.net 00:00:04.28]     CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_ReimportedStatement_SkipsDuplicatesAndClosesTheJob [FAIL]
+  Failed CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_IndexThatDoesNotExist_Returns422_AndKeepsTheJobReady(badIndex: 99) [476 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: UnprocessableEntity
+Actual:   OK
+  Stack Trace:
+     at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_IndexThatDoesNotExist_Returns422_AndKeepsTheJobReady(Int32 badIndex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 99
+   at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_IndexThatDoesNotExist_Returns422_AndKeepsTheJobReady(Int32 badIndex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 109
+--- End of stack trace from previous location ---
+  Failed CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_IndexThatDoesNotExist_Returns422_AndKeepsTheJobReady(badIndex: -1) [392 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: UnprocessableEntity
+Actual:   OK
+  Stack Trace:
+     at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_IndexThatDoesNotExist_Returns422_AndKeepsTheJobReady(Int32 badIndex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 99
+   at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_IndexThatDoesNotExist_Returns422_AndKeepsTheJobReady(Int32 badIndex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 109
+--- End of stack trace from previous location ---
+  Failed CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_ReimportedStatement_SkipsDuplicatesAndClosesTheJob [432 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: OK
+Actual:   InternalServerError
+  Stack Trace:
+     at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_ReimportedStatement_SkipsDuplicatesAndClosesTheJob() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 70
+   at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_ReimportedStatement_SkipsDuplicatesAndClosesTheJob() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 79
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     4, Passed:     0, Skipped:     0, Total:     4, Duration: 3 s - CoupleSync.IntegrationTests.dll (net8.0)

@@ -88,7 +88,7 @@ Fora da tabela, por não serem erros de funcionamento: remoção de um framework
 
 ## 8.5 Evidências
 
-Para cada correção há dois arquivos: a execução do teste antes (falhando) e depois (passando). Abaixo, o resumo de cada par e, para os erros que apareceram nas sessões, a resposta da API antes e depois.
+Para cada correção há dois arquivos: a execução do teste antes (falhando) e depois (passando). Eles estão em [`evidencias/correcoes`](evidencias/README.md), e os roteiros e relatórios das sessões em `evidencias/sessoes`. Abaixo, o resumo de cada par e, para os erros que apareceram nas sessões, a resposta da API antes e depois.
 
 ### Testes automatizados: antes e depois de cada correção
 

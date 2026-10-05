@@ -1,0 +1,42 @@
+$ grep -n "Secret" backend/src/CoupleSync.Api/appsettings.json   (valor truncado nos 6 primeiros caracteres)
+7:        "Secret": "397dac…",
+
+$ dotnet test backend/CoupleSync.sln --filter "FullyQualifiedName~JwtSecretStartupTests"
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  CoupleSync.Domain -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Domain\bin\Debug\net8.0\CoupleSync.Domain.dll
+  CoupleSync.Application -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\bin\Debug\net8.0\CoupleSync.Application.dll
+  CoupleSync.Infrastructure -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Infrastructure\bin\Debug\net8.0\CoupleSync.Infrastructure.dll
+  CoupleSync.Api -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Api\bin\Debug\net8.0\CoupleSync.Api.dll
+  CoupleSync.E2ETests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+  CoupleSync.UnitTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll (.NETCoreApp,Version=v8.0)
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+  CoupleSync.IntegrationTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll (.NETCoreApp,Version=v8.0)
+No test matches the given testcase filter `FullyQualifiedName~JwtSecretStartupTests` in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll
+No test matches the given testcase filter `FullyQualifiedName~JwtSecretStartupTests` in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+
+
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:03.08]     CoupleSync.IntegrationTests.Security.JwtSecretStartupTests.VersionedAppSettings_ShouldNotContainJwtSecret [FAIL]
+[xUnit.net 00:00:03.21]     CoupleSync.IntegrationTests.Security.JwtSecretStartupTests.Startup_WithoutJwtSecret_ShouldRefuseToStart [FAIL]
+  Failed CoupleSync.IntegrationTests.Security.JwtSecretStartupTests.VersionedAppSettings_ShouldNotContainJwtSecret [5 ms]
+  Error Message:
+   appsettings.json is versioned and must not contain a value for Jwt:Secret.
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Security.JwtSecretStartupTests.VersionedAppSettings_ShouldNotContainJwtSecret() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Security\JwtSecretStartupTests.cs:line 28
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.IntegrationTests.Security.JwtSecretStartupTests.Startup_WithoutJwtSecret_ShouldRefuseToStart [128 ms]
+  Error Message:
+   Assert.NotNull() Failure: Value is null
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Security.JwtSecretStartupTests.AssertInvalidJwtSecret(Exception ex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Security\JwtSecretStartupTests.cs:line 96
+   at CoupleSync.IntegrationTests.Security.JwtSecretStartupTests.Startup_WithoutJwtSecret_ShouldRefuseToStart() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Security\JwtSecretStartupTests.cs:line 40
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+
+Failed!  - Failed:     2, Passed:    10, Skipped:     0, Total:    12, Duration: 2 s - CoupleSync.IntegrationTests.dll (net8.0)

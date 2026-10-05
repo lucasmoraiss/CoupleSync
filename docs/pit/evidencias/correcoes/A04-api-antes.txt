@@ -1,0 +1,166 @@
+$ dotnet test backend/CoupleSync.sln --filter "FullyQualifiedName~ImportJobCandidateEditsTests|FullyQualifiedName~OcrConfirmIntegrationTests.Confirm_With"
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  CoupleSync.Domain -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Domain\bin\Debug\net8.0\CoupleSync.Domain.dll
+  CoupleSync.Application -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\bin\Debug\net8.0\CoupleSync.Application.dll
+  CoupleSync.Infrastructure -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Infrastructure\bin\Debug\net8.0\CoupleSync.Infrastructure.dll
+  CoupleSync.Api -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Api\bin\Debug\net8.0\CoupleSync.Api.dll
+  CoupleSync.E2ETests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+  CoupleSync.UnitTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll (.NETCoreApp,Version=v8.0)
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll (.NETCoreApp,Version=v8.0)
+  CoupleSync.IntegrationTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+No test matches the given testcase filter `FullyQualifiedName~ImportJobCandidateEditsTests|FullyQualifiedName~OcrConfirmIntegrationTests.Confirm_With` in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+
+[xUnit.net 00:00:00.31]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsDescriptionLongerThan512 [FAIL]
+[xUnit.net 00:00:00.33]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsEditForIndexThatIsNotSelected [FAIL]
+[xUnit.net 00:00:00.33]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "10.005") [FAIL]
+[xUnit.net 00:00:00.33]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "1000000000000") [FAIL]
+[xUnit.net 00:00:00.33]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "0.001") [FAIL]
+[xUnit.net 00:00:00.33]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "-5") [FAIL]
+[xUnit.net 00:00:00.33]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "0") [FAIL]
+[xUnit.net 00:00:00.40]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Confirm_EditForIndexNotSelected_Throws422_AndLeavesTheJobReady(editedIndex: 3) [FAIL]
+[xUnit.net 00:00:00.40]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Confirm_EditForIndexNotSelected_Throws422_AndLeavesTheJobReady(editedIndex: 99) [FAIL]
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsDescriptionLongerThan512 [29 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsDescriptionLongerThan512() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 116
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsEditForIndexThatIsNotSelected [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsEditForIndexThatIsNotSelected() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 106
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "10.005") [3 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(String amount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 125
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "1000000000000") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(String amount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 125
+   at InvokeStub_ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "0.001") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(String amount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 125
+   at InvokeStub_ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "-5") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(String amount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 125
+   at InvokeStub_ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(amount: "0") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(String amount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 125
+   at InvokeStub_ImportJobCandidateEditsTests.Validator_RejectsInvalidAmount(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Confirm_EditForIndexNotSelected_Throws422_AndLeavesTheJobReady(editedIndex: 3) [80 ms]
+  Error Message:
+   Assert.Throws() Failure: No exception was thrown
+Expected: typeof(CoupleSync.Application.Common.Exceptions.UnprocessableEntityException)
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Confirm_EditForIndexNotSelected_Throws422_AndLeavesTheJobReady(Int32 editedIndex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 79
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Confirm_EditForIndexNotSelected_Throws422_AndLeavesTheJobReady(editedIndex: 99) [< 1 ms]
+  Error Message:
+   Assert.Throws() Failure: No exception was thrown
+Expected: typeof(CoupleSync.Application.Common.Exceptions.UnprocessableEntityException)
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Confirm_EditForIndexNotSelected_Throws422_AndLeavesTheJobReady(Int32 editedIndex) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 79
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:00.43]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsRepeatedIndex [FAIL]
+[xUnit.net 00:00:00.43]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsBlankDescription(description: "   ") [FAIL]
+[xUnit.net 00:00:00.44]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsBlankDescription(description: "") [FAIL]
+[xUnit.net 00:00:00.44]     CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Confirm_WithEdits_StoresEditedDescriptionAndAmount [FAIL]
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsRepeatedIndex [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsRepeatedIndex() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 102
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsBlankDescription(description: "   ") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsBlankDescription(String description) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 112
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsBlankDescription(description: "") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Validator_RejectsBlankDescription(String description) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 112
+   at InvokeStub_ImportJobCandidateEditsTests.Validator_RejectsBlankDescription(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Confirm_WithEdits_StoresEditedDescriptionAndAmount [4 ms]
+  Error Message:
+   Assert.Equal() Failure: Strings differ
+           ↓ (pos 0)
+Expected: "Mercado do bairro"
+Actual:   "Item 1"
+           ↑ (pos 0)
+  Stack Trace:
+     at CoupleSync.UnitTests.OcrImport.ImportJobCandidateEditsTests.Confirm_WithEdits_StoresEditedDescriptionAndAmount() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\OcrImport\ImportJobCandidateEditsTests.cs:line 42
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:    13, Passed:     2, Skipped:     0, Total:    15, Duration: 171 ms - CoupleSync.UnitTests.dll (net8.0)
+[xUnit.net 00:00:02.80]     CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_WithCandidateEdits_StoresTheEditedDescriptionAndAmount [FAIL]
+  Failed CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_WithCandidateEdits_StoresTheEditedDescriptionAndAmount [2 s]
+  Error Message:
+   System.Collections.Generic.KeyNotFoundException : The given key 'Mercado do bairro' was not present in the dictionary.
+  Stack Trace:
+     at System.Collections.Generic.Dictionary`2.get_Item(TKey key)
+   at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_WithCandidateEdits_StoresTheEditedDescriptionAndAmount() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 141
+   at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_WithCandidateEdits_StoresTheEditedDescriptionAndAmount() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 152
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:03.26]     CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_WithInvalidCandidateEdits_Returns400_AndKeepsTheJobReady [FAIL]
+  Failed CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_WithInvalidCandidateEdits_Returns400_AndKeepsTheJobReady [455 ms]
+  Error Message:
+   blank description: expected 400, got 200
+  Stack Trace:
+     at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_WithInvalidCandidateEdits_Returns400_AndKeepsTheJobReady() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 183
+   at CoupleSync.IntegrationTests.OcrImport.OcrConfirmIntegrationTests.Confirm_WithInvalidCandidateEdits_Returns400_AndKeepsTheJobReady() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\OcrImport\OcrConfirmIntegrationTests.cs:line 189
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     2, Passed:     0, Skipped:     0, Total:     2, Duration: 3 s - CoupleSync.IntegrationTests.dll (net8.0)

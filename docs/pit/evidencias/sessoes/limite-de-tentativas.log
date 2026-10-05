@@ -1,0 +1,17 @@
+### Limite de tentativas com a configuração padrão (5 por minuto) — commit d79b8cd — 2026-10-05T21:37:27Z
+### 7 logins seguidos com senha errada
+tentativa 1 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP353D4KS7D:00000001"}
+tentativa 2 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP353D4KS7E:00000001"}
+tentativa 3 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP353D4KS7F:00000001"}
+tentativa 4 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP353D4KS7G:00000001"}
+tentativa 5 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP353D4KS7I:00000001"}
+tentativa 6 -> HTTP 429 Retry-After: 60 {"code":"RATE_LIMIT_EXCEEDED","message":"Too many attempts. Please wait a moment and try again.","traceId":"0HNP353D4KS7J:00000001"}
+tentativa 7 -> HTTP 429 Retry-After: 60 {"code":"RATE_LIMIT_EXCEEDED","message":"Too many attempts. Please wait a moment and try again.","traceId":"0HNP353D4KS7K:00000001"}
+### refresh não é limitado: 7 chamadas
+refresh 1 -> HTTP 401
+refresh 2 -> HTTP 401
+refresh 3 -> HTTP 401
+refresh 4 -> HTTP 401
+refresh 5 -> HTTP 401
+refresh 6 -> HTTP 401
+refresh 7 -> HTTP 401

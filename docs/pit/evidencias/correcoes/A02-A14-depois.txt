@@ -1,0 +1,22 @@
+$ dotnet test backend/CoupleSync.sln --filter "FullyQualifiedName~ImportJobConfirmTests|FullyQualifiedName~OcrConfirmIntegrationTests"
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  CoupleSync.Domain -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Domain\bin\Debug\net8.0\CoupleSync.Domain.dll
+  CoupleSync.Application -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\bin\Debug\net8.0\CoupleSync.Application.dll
+  CoupleSync.Infrastructure -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Infrastructure\bin\Debug\net8.0\CoupleSync.Infrastructure.dll
+  CoupleSync.Api -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Api\bin\Debug\net8.0\CoupleSync.Api.dll
+  CoupleSync.E2ETests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll (.NETCoreApp,Version=v8.0)
+  CoupleSync.UnitTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll
+  CoupleSync.IntegrationTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll (.NETCoreApp,Version=v8.0)
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+No test matches the given testcase filter `FullyQualifiedName~ImportJobConfirmTests|FullyQualifiedName~OcrConfirmIntegrationTests` in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+
+
+Passed!  - Failed:     0, Passed:    12, Skipped:     0, Total:    12, Duration: 202 ms - CoupleSync.UnitTests.dll (net8.0)
+
+Passed!  - Failed:     0, Passed:     4, Skipped:     0, Total:     4, Duration: 3 s - CoupleSync.IntegrationTests.dll (net8.0)

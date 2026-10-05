@@ -1,0 +1,57 @@
+$ dotnet test backend/CoupleSync.sln --filter "FullyQualifiedName~IncomeGroupWithSeveralMembersTests|FullyQualifiedName~IncomeGroupIntegrationTests"
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  CoupleSync.Domain -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Domain\bin\Debug\net8.0\CoupleSync.Domain.dll
+  CoupleSync.Application -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\bin\Debug\net8.0\CoupleSync.Application.dll
+  CoupleSync.Infrastructure -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Infrastructure\bin\Debug\net8.0\CoupleSync.Infrastructure.dll
+  CoupleSync.Api -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Api\bin\Debug\net8.0\CoupleSync.Api.dll
+  CoupleSync.E2ETests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+  CoupleSync.UnitTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll
+  CoupleSync.IntegrationTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll (.NETCoreApp,Version=v8.0)
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll (.NETCoreApp,Version=v8.0)
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+No test matches the given testcase filter `FullyQualifiedName~IncomeGroupWithSeveralMembersTests|FullyQualifiedName~IncomeGroupIntegrationTests` in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+
+[xUnit.net 00:00:00.43]     CoupleSync.UnitTests.Income.IncomeGroupWithSeveralMembersTests.PartnerIncome_ExistingField_AggregatesAllOtherMembers_SoThePartsAddUpToTheTotal [FAIL]
+[xUnit.net 00:00:00.45]     CoupleSync.UnitTests.Income.IncomeGroupWithSeveralMembersTests.CoupleTotal_IsTheSameForEveryMember_AndCountsEveryone [FAIL]
+[xUnit.net 00:00:00.45]     CoupleSync.UnitTests.Income.IncomeGroupWithSeveralMembersTests.PartnersIncome_ListsEveryOtherMember [FAIL]
+  Failed CoupleSync.UnitTests.Income.IncomeGroupWithSeveralMembersTests.PartnerIncome_ExistingField_AggregatesAllOtherMembers_SoThePartsAddUpToTheTotal [25 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 5000
+Actual:   3000
+  Stack Trace:
+     at CoupleSync.UnitTests.Income.IncomeGroupWithSeveralMembersTests.PartnerIncome_ExistingField_AggregatesAllOtherMembers_SoThePartsAddUpToTheTotal() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Income\IncomeGroupWithSeveralMembersTests.cs:line 90
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.Income.IncomeGroupWithSeveralMembersTests.CoupleTotal_IsTheSameForEveryMember_AndCountsEveryone [1 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 11000
+Actual:   9000
+  Stack Trace:
+     at CoupleSync.UnitTests.Income.IncomeGroupWithSeveralMembersTests.CoupleTotal_IsTheSameForEveryMember_AndCountsEveryone() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Income\IncomeGroupWithSeveralMembersTests.cs:line 53
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.Income.IncomeGroupWithSeveralMembersTests.PartnersIncome_ListsEveryOtherMember [5 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 2
+Actual:   1
+  Stack Trace:
+     at CoupleSync.UnitTests.Income.IncomeGroupWithSeveralMembersTests.PartnersIncome_ListsEveryOtherMember() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Income\IncomeGroupWithSeveralMembersTests.cs:line 68
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     3, Passed:     2, Skipped:     0, Total:     5, Duration: 68 ms - CoupleSync.UnitTests.dll (net8.0)
+[xUnit.net 00:00:03.11]     CoupleSync.IntegrationTests.Income.IncomeGroupIntegrationTests.CurrentIncome_GroupOfThree_EveryMemberSeesTheSameTotalAndAllPartners [FAIL]
+  Failed CoupleSync.IntegrationTests.Income.IncomeGroupIntegrationTests.CurrentIncome_GroupOfThree_EveryMemberSeesTheSameTotalAndAllPartners [2 s]
+  Error Message:
+   Ana: coupleTotal = 9000,0
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Income.IncomeGroupIntegrationTests.CurrentIncome_GroupOfThree_EveryMemberSeesTheSameTotalAndAllPartners() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Income\IncomeGroupIntegrationTests.cs:line 43
+   at CoupleSync.IntegrationTests.Income.IncomeGroupIntegrationTests.CurrentIncome_GroupOfThree_EveryMemberSeesTheSameTotalAndAllPartners() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Income\IncomeGroupIntegrationTests.cs:line 61
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     1, Passed:     0, Skipped:     0, Total:     1, Duration: 2 s - CoupleSync.IntegrationTests.dll (net8.0)

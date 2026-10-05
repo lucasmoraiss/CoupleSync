@@ -1,0 +1,183 @@
+
+> couplesync@1.0.0 test
+> jest --no-color confirmRequest
+
+FAIL src/modules/ocr/__tests__/confirmRequest.test.ts
+  A04 — corpo da confirmação do extrato (candidateEdits)
+    √ linha sem alteração não gera edit (6 ms)
+    × alteração só de valor envia apenas amount (4 ms)
+    × alteração só de descrição envia apenas description (sem espaços nas pontas) (2 ms)
+    × alteração de descrição e valor na mesma linha envia os dois campos (1 ms)
+    × linha não selecionada é ignorada, mesmo editada (2 ms)
+    × valor digitado em formato brasileiro (1.234,56) é convertido corretamente (32 ms)
+    √ valor original com imprecisão de ponto flutuante não é tratado como alterado (1 ms)
+    √ mantém categoryOverrides das linhas selecionadas (1 ms)
+  A04 — validação das linhas antes de enviar
+    √ sem alterações não há erros (1 ms)
+    × descrição apagada gera erro na linha (7 ms)
+    × descrição com mais de 512 caracteres gera erro na linha (1 ms)
+    × valor zerado gera erro na linha (1 ms)
+    √ linha não selecionada não é validada (1 ms)
+
+  ● A04 — corpo da confirmação do extrato (candidateEdits) › alteração só de valor envia apenas amount
+
+    expect(received).toEqual(expected) // deep equality
+
+    Expected: [{"amount": 25.9, "index": 1}]
+    Received: undefined
+
+      43 |     const request = buildOcrConfirmRequest(rowsWith({ 1: { amountCents: 2590 } }), CANDIDATES);
+      44 |
+    > 45 |     expect(request.candidateEdits).toEqual([{ index: 1, amount: 25.9 }]);
+         |                                    ^
+      46 |   });
+      47 |
+      48 |   it('alteração só de descrição envia apenas description (sem espaços nas pontas)', () => {
+
+      at Object.<anonymous> (src/modules/ocr/__tests__/confirmRequest.test.ts:45:36)
+
+  ● A04 — corpo da confirmação do extrato (candidateEdits) › alteração só de descrição envia apenas description (sem espaços nas pontas)
+
+    expect(received).toEqual(expected) // deep equality
+
+    Expected: [{"description": "Padaria da esquina", "index": 2}]
+    Received: undefined
+
+      49 |     const request = buildOcrConfirmRequest(rowsWith({ 2: { description: '  Padaria da esquina ' } }), CANDIDATES);
+      50 |
+    > 51 |     expect(request.candidateEdits).toEqual([{ index: 2, description: 'Padaria da esquina' }]);
+         |                                    ^
+      52 |   });
+      53 |
+      54 |   it('alteração de descrição e valor na mesma linha envia os dois campos', () => {
+
+      at Object.<anonymous> (src/modules/ocr/__tests__/confirmRequest.test.ts:51:36)
+
+  ● A04 — corpo da confirmação do extrato (candidateEdits) › alteração de descrição e valor na mesma linha envia os dois campos
+
+    expect(received).toEqual(expected) // deep equality
+
+    Expected: [{"amount": 150, "description": "Mercado", "index": 0}]
+    Received: undefined
+
+      58 |     );
+      59 |
+    > 60 |     expect(request.candidateEdits).toEqual([{ index: 0, description: 'Mercado', amount: 150 }]);
+         |                                    ^
+      61 |   });
+      62 |
+      63 |   it('linha não selecionada é ignorada, mesmo editada', () => {
+
+      at Object.<anonymous> (src/modules/ocr/__tests__/confirmRequest.test.ts:60:36)
+
+  ● A04 — corpo da confirmação do extrato (candidateEdits) › linha não selecionada é ignorada, mesmo editada
+
+    expect(received).toEqual(expected) // deep equality
+
+    Expected: [{"amount": 30, "index": 1}]
+    Received: undefined
+
+      68 |
+      69 |     expect(request.selectedIndices).toEqual([1, 2]);
+    > 70 |     expect(request.candidateEdits).toEqual([{ index: 1, amount: 30 }]);
+         |                                    ^
+      71 |   });
+      72 |
+      73 |   it('valor digitado em formato brasileiro (1.234,56) é convertido corretamente', () => {
+
+      at Object.<anonymous> (src/modules/ocr/__tests__/confirmRequest.test.ts:70:36)
+
+  ● A04 — corpo da confirmação do extrato (candidateEdits) › valor digitado em formato brasileiro (1.234,56) é convertido corretamente
+
+    expect(received).toEqual(expected) // deep equality
+
+    Expected: [{"amount": 1234.56, "index": 0}]
+    Received: undefined
+
+      77 |     const request = buildOcrConfirmRequest(rowsWith({ 0: { amountCents: parseBRLInput('1.234,56') } }), CANDIDATES);
+      78 |
+    > 79 |     expect(request.candidateEdits).toEqual([{ index: 0, amount: 1234.56 }]);
+         |                                    ^
+      80 |   });
+      81 |
+      82 |   it('valor original com imprecisão de ponto flutuante não é tratado como alterado', () => {
+
+      at Object.<anonymous> (src/modules/ocr/__tests__/confirmRequest.test.ts:79:36)
+
+  ● A04 — validação das linhas antes de enviar › descrição apagada gera erro na linha
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 5
+    + Received  + 1
+
+    - Object {
+    -   "1": Object {
+    -     "description": "Informe uma descrição.",
+    -   },
+    - }
+    + Object {}
+
+      103 |
+      104 |   it('descrição apagada gera erro na linha', () => {
+    > 105 |     expect(validateReviewRows(rowsWith({ 1: { description: '   ' } }), CANDIDATES)).toEqual({
+          |                                                                                     ^
+      106 |       1: { description: 'Informe uma descrição.' },
+      107 |     });
+      108 |   });
+
+      at Object.<anonymous> (src/modules/ocr/__tests__/confirmRequest.test.ts:105:85)
+
+  ● A04 — validação das linhas antes de enviar › descrição com mais de 512 caracteres gera erro na linha
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 5
+    + Received  + 1
+
+    - Object {
+    -   "0": Object {
+    -     "description": "A descrição deve ter no máximo 512 caracteres.",
+    -   },
+    - }
+    + Object {}
+
+      111 |     const errors = validateReviewRows(rowsWith({ 0: { description: 'a'.repeat(513) } }), CANDIDATES);
+      112 |
+    > 113 |     expect(errors).toEqual({ 0: { description: 'A descrição deve ter no máximo 512 caracteres.' } });
+          |                    ^
+      114 |     expect(validateReviewRows(rowsWith({ 0: { description: 'a'.repeat(512) } }), CANDIDATES)).toEqual({});
+      115 |   });
+      116 |
+
+      at Object.<anonymous> (src/modules/ocr/__tests__/confirmRequest.test.ts:113:20)
+
+  ● A04 — validação das linhas antes de enviar › valor zerado gera erro na linha
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 5
+    + Received  + 1
+
+    - Object {
+    -   "2": Object {
+    -     "amount": "Informe um valor maior que zero.",
+    -   },
+    - }
+    + Object {}
+
+      116 |
+      117 |   it('valor zerado gera erro na linha', () => {
+    > 118 |     expect(validateReviewRows(rowsWith({ 2: { amountCents: parseBRLInput('0,00') } }), CANDIDATES)).toEqual({
+          |                                                                                                     ^
+      119 |       2: { amount: 'Informe um valor maior que zero.' },
+      120 |     });
+      121 |   });
+
+      at Object.<anonymous> (src/modules/ocr/__tests__/confirmRequest.test.ts:118:101)
+
+Test Suites: 1 failed, 1 total
+Tests:       8 failed, 5 passed, 13 total
+Snapshots:   0 total
+Time:        1.434 s
+Ran all test suites matching /confirmRequest/i.

@@ -1,0 +1,51 @@
+
+> couplesync@1.0.0 test
+> jest --no-color ingestRequestBank
+
+FAIL src/modules/integrations/notification-capture/__tests__/ingestRequestBank.test.ts
+  nome do banco enviado é aceito pelo validador do backend
+    √ Nubank (13 ms)
+    × Itaú (7 ms)
+    √ Inter (1 ms)
+    × C6 Bank (1 ms)
+    √ Bradesco
+
+  ● nome do banco enviado é aceito pelo validador do backend › Itaú
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected value: "ITAÚ"
+    Received array: ["NUBANK", "ITAU", "INTER", "C6", "BRADESCO", "XP", "BTG", "SANTANDER", "CAIXA", "BB"]
+
+      21 |     const request = buildIngestRequest(decision.event);
+      22 |
+    > 23 |     expect(BACKEND_ALLOWED_BANKS).toContain(request.bank.trim().toUpperCase());
+         |                                   ^
+      24 |   });
+      25 | });
+      26 |
+
+      at src/modules/integrations/notification-capture/__tests__/ingestRequestBank.test.ts:23:35
+
+  ● nome do banco enviado é aceito pelo validador do backend › C6 Bank
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected value: "C6 BANK"
+    Received array: ["NUBANK", "ITAU", "INTER", "C6", "BRADESCO", "XP", "BTG", "SANTANDER", "CAIXA", "BB"]
+
+      21 |     const request = buildIngestRequest(decision.event);
+      22 |
+    > 23 |     expect(BACKEND_ALLOWED_BANKS).toContain(request.bank.trim().toUpperCase());
+         |                                   ^
+      24 |   });
+      25 | });
+      26 |
+
+      at src/modules/integrations/notification-capture/__tests__/ingestRequestBank.test.ts:23:35
+
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 3 passed, 5 total
+Snapshots:   0 total
+Time:        1.782 s
+Ran all test suites matching /ingestRequestBank/i.
