@@ -62,8 +62,15 @@ Detalhes do Neon em [docs/architecture/neon-setup-guide.md](../architecture/neon
 
 ### 3.1 Criar o serviço
 
-1. No Render, crie um **Web Service** ligado ao repositório do GitHub.
-2. Configure:
+**Pelo blueprint (recomendado).** A raiz do repositório tem um `render.yaml` que descreve o serviço. No Render, crie um **Blueprint** apontando para o repositório; o serviço web é criado com as configurações e variáveis abaixo já preenchidas. Ficam para você informar no painel:
+
+- `DATABASE_URL` (a conexão do Neon);
+- `GEMINI_API_KEY`, só se for ligar a IA;
+- as variáveis `Fcm__*`, só se for usar push (não estão no blueprint).
+
+O blueprint pede ao Render que gere o valor de `JWT__SECRET`.
+
+**Manualmente.** Crie um **Web Service** ligado ao repositório do GitHub e configure:
 
 | Campo | Valor |
 |---|---|
@@ -97,6 +104,8 @@ Configure em **Environment** no serviço do Render. Marque como secretas as que 
 | `Storage__BasePath` | `/app/uploads` | Pasta temporária dos PDFs enviados (criada pelo `Dockerfile`). |
 | `ForwardedHeaders__TrustAllProxies` | `true` | Veja a explicação abaixo. |
 | `PORT` | `8080` | Veja 3.2. |
+
+Todas as variáveis desta tabela já estão declaradas no `render.yaml`; `DATABASE_URL` vem sem valor e `JWT__SECRET` é gerada pelo Render.
 
 **Opcionais**
 
@@ -138,7 +147,7 @@ curl -X POST https://<seu-servico>.onrender.com/api/v1/auth/register \
 
 ### 3.6 Atualizações
 
-O deploy é feito pelo próprio Render, que reconstrói a imagem a partir do repositório: a cada push no branch configurado, se o deploy automático estiver ligado, ou manualmente pelo painel. Não há workflow de deploy do back-end para o Render no GitHub Actions.
+O deploy é feito pelo próprio Render, que reconstrói a imagem a partir do repositório. O `render.yaml` liga o deploy automático (`autoDeploy: true`), que dispara a cada push no branch configurado no serviço; também é possível disparar pelo painel. Não há workflow de deploy do back-end para o Render no GitHub Actions.
 
 ---
 
@@ -243,6 +252,6 @@ Também não devem ser versionados: a `DATABASE_URL` real, a chave JWT, o JSON d
 
 Entre abril de 2026 e a migração para o Render, a API rodou em um **Azure App Service para Linux, no plano gratuito F1**, publicada por zip (`dotnet publish` + publish profile) e iniciada com `dotnet CoupleSync.Api.dll`. O banco já era o Neon. Os PDFs enviados ficavam no disco local do App Service até o processamento.
 
-Essa implantação foi **desativada**. Nomes de recurso, grupo de recursos e plano foram retirados deste guia; se precisar recriar algo parecido, use `<nome-do-app-service>` e `<grupo-de-recursos>` no lugar. O workflow do GitHub Actions que publicava no App Service pertence a essa fase.
+Essa implantação foi **desativada**. Nomes de recurso, grupo de recursos e plano foram retirados deste guia; se precisar recriar algo parecido, use `<nome-do-app-service>` e `<grupo-de-recursos>` no lugar. O workflow do GitHub Actions que publicava no App Service (`deploy.yml`) foi removido do repositório.
 
 A escolha original de nuvem e a análise que a embasou estão em [ADR-0005](../adr/0005-stack-de-nuvem.md) e em [docs/architecture/cloud-deployment-analysis.md](../architecture/cloud-deployment-analysis.md). O ADR previa Azure Container Apps; o que entrou em operação foi o App Service.
