@@ -67,6 +67,9 @@ export default function OcrUploadScreen() {
 
         if (status === 'Ready') {
           if (isMounted.current) {
+            // This screen is a hidden tab and stays mounted: go back to the initial state
+            // so the next import does not open on a stale "Processando extrato..." spinner.
+            setState({ phase: 'idle' });
             router.replace(`/(main)/ocr-review?uploadId=${uploadId}` as any);
           }
           return;

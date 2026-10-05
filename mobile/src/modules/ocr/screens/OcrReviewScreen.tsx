@@ -77,7 +77,8 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     retry: 1,
   });
 
-  // Seed editable rows once on first load; guard prevents resetting user edits
+  // Seed editable rows once on first load; guard prevents resetting user edits.
+  // A new uploadId remounts this component (key in app/(main)/ocr-review.tsx), which resets it.
   useEffect(() => {
     if (data && !initializedRef.current) {
       initializedRef.current = true;
