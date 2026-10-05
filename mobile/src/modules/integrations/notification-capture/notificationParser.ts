@@ -25,8 +25,8 @@ export interface ParsedTransactionEvent {
   readonly matchedPatternId: string;
   /** ISO 8601 timestamp from the notification */
   readonly receivedAt: string;
-  /** Sanitised raw text, capped at 512 chars */
-  readonly rawText: string;
+  // The notification text itself is deliberately NOT part of the event: it is used only
+  // for matching, in memory, and never leaves this module.
 }
 
 export type IgnoreReason = 'unsupported-bank' | 'credit' | 'not-a-transaction' | 'no-match';
@@ -160,7 +160,6 @@ export function classifyNotification(
         merchant: merchant ? sanitise(merchant) : null,
         matchedPatternId: pattern.id,
         receivedAt,
-        rawText: combinedText,
       },
     };
   }

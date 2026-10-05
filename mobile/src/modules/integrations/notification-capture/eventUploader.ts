@@ -2,24 +2,9 @@
 // Uses the existing axiosInstance (auth interceptor already attached).
 import axiosInstance from '@/services/apiClient';
 import { classifyNotification } from './notificationParser';
+import { buildIngestRequest, type IngestNotificationEventRequest } from './ingestRequest';
 
-// ── Request shape expected by backend IngestNotificationEventRequest ──────────
-export interface IngestNotificationEventRequest {
-  /** Bank name resolved from package, e.g. "Nubank" */
-  readonly bank: string;
-  /** Transaction amount (must be > 0) */
-  readonly amount: number;
-  /** ISO 4217 currency code — 'BRL' | 'USD' | 'EUR' */
-  readonly currency: string;
-  /** ISO 8601 timestamp of when the event occurred */
-  readonly eventTimestamp: string;
-  /** Short transaction description, if available */
-  readonly description?: string;
-  /** Merchant or counter-party name, if extractable */
-  readonly merchant?: string;
-  /** Sanitised raw notification text, max 512 chars */
-  readonly rawNotificationText?: string;
-}
+export type { IngestNotificationEventRequest };
 
 // ── Internal raw event as forwarded from the Kotlin bridge ───────────────────
 export interface RawNotificationEvent {
@@ -110,16 +95,8 @@ export async function handleRawNotificationEvent(
   if (decision.action !== 'upload') {
     return false; // Not an expense — nothing leaves the device
   }
-  const parsed = decision.event;
 
-  const request: IngestNotificationEventRequest = {
-    bank: parsed.bank,
-    amount: parsed.amount,
-    currency: 'BRL', // V1: Brazilian banks only
-    eventTimestamp: parsed.receivedAt,
-    merchant: parsed.merchant ?? undefined,
-    rawNotificationText: parsed.rawText,
-  };
+  const request = buildIngestRequest(decision.event);
 
   try {
     await postEvent(request);

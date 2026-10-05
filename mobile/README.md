@@ -6,7 +6,7 @@ An Expo-based React Native Android app for couples' budgeting and financial plan
 
 - **Register/Login** with secure JWT-based authentication
 - **Couple onboarding** — one user creates a couple, the other joins via invite code
-- **Bank notification capture** — Android NotificationListenerService reads bank push notifications, parses them locally, and sends structured transaction data to the backend
+- **Bank notification capture** — Android NotificationListenerService reads bank push notifications, parses them locally, and sends only structured expense data to the backend (bank, amount, currency, date/time and merchant); the notification text never leaves the device
 - **Transaction dashboard** — view shared expenses, individual balances, and transaction history
 - **Savings goals** — create, track, and archive shared financial goals
 - **30 & 90-day cash flow projections** — forecast combined spending and balance trends
@@ -114,6 +114,7 @@ mobile/
 │   │   ├── integrations/notification-capture/
 │   │   │   ├── NotificationListenerBridge.ts   # React Native bridge
 │   │   │   ├── notificationParser.ts           # Bank pattern regex parser
+│   │   │   ├── ingestRequest.ts                # Builds the body sent to the backend
 │   │   │   ├── eventUploader.ts               # Queued upload to backend
 │   │   │   └── notification-patterns.json     # Bank-specific patterns
 │   │   ├── dashboard/                   # Dashboard aggregation
@@ -210,10 +211,27 @@ Upload the APK to Google Play Console.
 When you enable the Notification Listener permission:
 
 1. **Android NotificationListenerService** (Kotlin) receives bank push notifications
-2. **notificationParser.ts** extracts transaction details (amount, merchant, description) using regex patterns per bank
-3. **eventUploader.ts** queues the structured event and sends to `POST /api/v1/integrations/events`
-4. **Backend** validates, deduplicates, and creates a Transaction record
-5. **Dashboard** refreshes to show the new transaction
+2. **notificationParser.ts** decides, on the device, whether the notification is an expense, using the patterns of each bank:
+   - purchases, payments and Pix **sent** are recognised and have the amount and the merchant extracted;
+   - money coming in (Pix received, transfers received, refunds, deposits), declined purchases, advertising and any text that does not match a bank-specific expense pattern are **discarded** — nothing is uploaded for them.
+3. **ingestRequest.ts** builds the request body with structured data only (see below)
+4. **eventUploader.ts** sends it to `POST /api/v1/integrations/events`, retrying in memory if the upload fails
+5. **Backend** validates, deduplicates, and creates a Transaction record
+6. **Dashboard** refreshes to show the new transaction
+
+### What is sent to the server
+
+For each recognised expense the app sends exactly these fields:
+
+| Field | Example | Notes |
+|---|---|---|
+| `bank` | `"Nubank"` | resolved from the Android package name |
+| `amount` | `45.9` | parsed from the notification |
+| `currency` | `"BRL"` | always BRL |
+| `eventTimestamp` | `"2026-10-05T14:30:00.000Z"` | time the notification was posted |
+| `merchant` | `"PADARIA DO ZE"` | omitted when it cannot be extracted; for a Pix sent it is the recipient's name |
+
+The notification title and body are used only in memory for matching and are **not** sent or stored (the optional `rawNotificationText` and `description` fields of the backend contract are not used by the app).
 
 See `mobile/src/modules/integrations/notification-capture/notification-patterns.json` for supported banks.
 
