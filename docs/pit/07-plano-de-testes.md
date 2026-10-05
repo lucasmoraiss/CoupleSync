@@ -28,7 +28,7 @@ flowchart TB
     Q["Arquitetura<br/><i>05-arquitetura.md</i>"]
     C["Código"]
     TU["Teste unitário<br/><i>411 testes de API + 102 do aplicativo</i>"]
-    TI["Teste de integração<br/><i>176 testes pela camada HTTP</i>"]
+    TI["Teste de integração<br/><i>180 testes pela camada HTTP</i>"]
     TS["Teste de sistema<br/><i>fluxo completo + 5 sessões exploratórias</i>"]
     TA["Teste de aceitação<br/><i>roteiro no aparelho, por requisito</i>"]
 
@@ -83,12 +83,12 @@ Os testes da API não precisam de banco instalado nem de rede: o banco é substi
 
 ## 7.5 Inventário dos testes
 
-Situação em 05/10/2026, depois do ciclo de correções: **588 testes na API e 102 no aplicativo, todos aprovados.**
+Situação em 05/10/2026, depois do ciclo de correções: **592 testes na API e 102 no aplicativo, todos aprovados.**
 
 | Projeto | Testes | Duração |
 |---|---|---|
 | `CoupleSync.UnitTests` | 411 | 1 s |
-| `CoupleSync.IntegrationTests` | 176 | 50 s |
+| `CoupleSync.IntegrationTests` | 180 | 50 s |
 | `CoupleSync.E2ETests` (fluxo completo em processo) | 1 | 4 s |
 | Aplicativo (Jest, 5 suítes) | 102 | 2 s |
 
@@ -98,11 +98,11 @@ Medida com Coverlet, unindo os três projetos de teste e excluindo o código ger
 
 | Projeto | Linhas | Ramos |
 |---|---|---|
-| `CoupleSync.Api` | 89,9% | 62,7% |
+| `CoupleSync.Api` | 90,7% | 63,9% |
 | `CoupleSync.Application` | 88,8% | 82,5% |
 | `CoupleSync.Domain` | 90,2% | 68,7% |
 | `CoupleSync.Infrastructure` | 71,5% | 55,0% |
-| **Total** | **83,8%** | **68,4%** |
+| **Total** | **84,0%** | **68,6%** |
 
 Antes do ciclo de correções a cobertura era de 77,9% das linhas e 63,5% dos ramos, com 458 testes.
 
@@ -119,7 +119,7 @@ Cada linha liga um grupo de requisitos aos testes automatizados que o verificam.
 | RF04, RF05, RF06, RN03, RN04 | Criar grupo, entrar com código, terceiro membro, usuário que já tem grupo | `U/Couples`, `I/CoupleIntegrationSmokeTests.cs` |
 | RN01, RN02, RNF03 | Usuário sem grupo recebe 403; um grupo não lê nem altera dados de outro | `I/Authorization` e os testes de isolamento de cada módulo em `I/` |
 | RNF02 | A API recusa iniciar sem segredo, com segredo curto ou com o valor de exemplo | `I/Security/JwtSecretStartupTests.cs` |
-| RNF04 | O 6º login, o 6º cadastro e a 6ª entrada em grupo em um minuto recebem 429; a renovação de sessão não é limitada | `I/Security/RateLimitingIntegrationTests.cs` |
+| RNF04 | O 6º login, o 6º cadastro e a 6ª entrada em grupo em um minuto recebem 429, inclusive atrás de CDN, onde o endereço do proxy muda a cada requisição; a renovação de sessão não é limitada | `I/Security/RateLimitingIntegrationTests.cs` |
 | RF10, RF14, RF15, RF16, RN09 | Lançar, listar, filtrar, recategorizar e excluir despesas | `U/Transactions`, `I/Transactions` |
 | RF11, RF17, RN07 | Entrada de evento de notificação, classificação por regra, duplicidade | `U/NotificationCapture`, `U/Security`, `I/NotificationCapture` |
 | RF11, RN08 (aplicativo) | Para cada um dos cinco bancos: compra reconhecida; recebimento, fatura, limite e propaganda descartados | `mobile/src/modules/integrations/notification-capture/__tests__/notificationParser.test.ts` |

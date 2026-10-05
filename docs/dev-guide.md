@@ -79,7 +79,7 @@ $env:DATABASE_URL = "Host=localhost;Port=5432;Database=couplesync_test;Username=
 dotnet test backend/CoupleSync.sln
 ```
 
-São 588 testes (411 de unidade, 176 de integração, 1 de ponta a ponta).
+São 592 testes (411 de unidade, 180 de integração, 1 de ponta a ponta).
 
 ### 2.6 Alternativa: Docker Compose
 

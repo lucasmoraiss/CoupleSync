@@ -19,7 +19,7 @@ Itens resolvidos e conferidos no código nesta data:
 - ✅ **Renovação automática de sessão no app** → no primeiro 401 o cliente chama `POST /auth/refresh` uma vez e repete a requisição (`mobile/src/services/authRefresh.ts`).
 - ✅ **Testes de unidade no app** → `npm test` (Jest) cobre o parser de notificações, o corpo enviado ao servidor, a confirmação do extrato e a renovação de sessão (102 testes).
 
-**Verificação**: a suíte do back-end tem 588 testes (411 de unidade, 176 de integração, 1 de ponta a ponta), todos passando em 05/Out/2026.
+**Verificação**: a suíte do back-end tem 592 testes (411 de unidade, 180 de integração, 1 de ponta a ponta), todos passando em 05/Out/2026.
 
 ---
 

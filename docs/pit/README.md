@@ -31,7 +31,7 @@ Documentos de apoio, fora desta pasta: [registros de decisão de arquitetura](..
 | Front-end | Aplicativo Android em React Native com Expo (TypeScript) |
 | Hospedagem | Render (API em contêiner Docker) e Neon (banco) |
 | Modo de codificação | Tradicional |
-| Testes automatizados | 588 na API e 102 no aplicativo |
+| Testes automatizados | 592 na API e 102 no aplicativo |
 
 ## Histórico de revisão
 
@@ -39,7 +39,7 @@ Documentos de apoio, fora desta pasta: [registros de decisão de arquitetura](..
 |---|---|
 | abr/2026 | Planejamento inicial: documento de requisitos de produto e primeiros registros de decisão de arquitetura |
 | abr–mai/2026 | Desenvolvimento do piloto: autenticação, grupo, captura de notificações, metas, orçamento, importação de extrato, relatórios |
-| out/2026 | Revisão para a entrega. A documentação foi reescrita a partir do sistema real; os requisitos foram confrontados com o sistema em execução; a revisão de código e as sessões de teste geraram um ciclo de 15 correções, descrito no laudo de qualidade |
+| out/2026 | Revisão para a entrega. A documentação foi reescrita a partir do sistema real; os requisitos foram confrontados com o sistema em execução; a revisão de código e as sessões de teste geraram um ciclo de 17 correções, descrito no laudo de qualidade |
 
 ### O que mudou nesta revisão
 

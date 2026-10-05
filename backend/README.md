@@ -82,6 +82,7 @@ Estas são as chaves que o código lê. Nomes com `__` seguem a convenção do .
 | `ForwardedHeaders__TrustAllProxies` | Não | `false` | `true` faz a API aceitar `X-Forwarded-For` de qualquer origem. Use só quando o contêiner é alcançável apenas pelo proxy da plataforma. |
 | `ForwardedHeaders__KnownProxies__0`, `ForwardedHeaders__KnownNetworks__0` | Não | vazio | IPs e faixas CIDR de proxies confiáveis (índices `__0`, `__1`, ...). |
 | `ForwardedHeaders__ForwardLimit` | Não | `1` | Quantos saltos de `X-Forwarded-For` são considerados. |
+| `ForwardedHeaders__ClientIpHeader` | Não | vazio | Cabeçalho de valor único com o IP do cliente, preenchido pela CDN (ex.: `CF-Connecting-IP` atrás do Cloudflare). Quando definido, substitui o `X-Forwarded-For`. Necessário em plataformas cujo proxy acrescenta endereços ao `X-Forwarded-For`, como o Render. |
 | `USE_LOCAL_PDF_PARSER` | Não | `true` | `true` usa o parser local de PDF (PdfPig). `false` usa o Azure Document Intelligence. |
 | `Storage__BasePath` | Não | `./uploads` no diretório de trabalho | Pasta onde o arquivo enviado fica até ser processado. |
 | `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`, `AZURE_DOCUMENT_INTELLIGENCE_KEY` | Só com `USE_LOCAL_PDF_PARSER=false` | — | Credenciais do provedor de OCR alternativo. |
@@ -240,7 +241,7 @@ export DATABASE_URL="Host=localhost;Port=5432;Database=couplesync_test;Username=
 dotnet test backend/CoupleSync.sln
 ```
 
-São **588 testes**: 411 de unidade, 176 de integração e 1 de ponta a ponta. Os testes de integração e o de ponta a ponta sobem a API em memória e trocam o banco por SQLite; `DATABASE_URL` precisa estar definida porque a inicialização da API exige uma conexão configurada.
+São **592 testes**: 411 de unidade, 180 de integração e 1 de ponta a ponta. Os testes de integração e o de ponta a ponta sobem a API em memória e trocam o banco por SQLite; `DATABASE_URL` precisa estar definida porque a inicialização da API exige uma conexão configurada.
 
 Para rodar um projeto só:
 

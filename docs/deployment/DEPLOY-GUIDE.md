@@ -103,6 +103,7 @@ Configure em **Environment** no serviço do Render. Marque como secretas as que 
 | `USE_LOCAL_PDF_PARSER` | `true` | Usa o parser local de PDF. É o padrão do código. |
 | `Storage__BasePath` | `/app/uploads` | Pasta temporária dos PDFs enviados (criada pelo `Dockerfile`). |
 | `ForwardedHeaders__TrustAllProxies` | `true` | Veja a explicação abaixo. |
+| `ForwardedHeaders__ClientIpHeader` | `CF-Connecting-IP` | Veja a explicação abaixo. |
 | `PORT` | `8080` | Veja 3.2. |
 
 Todas as variáveis desta tabela já estão declaradas no `render.yaml`; `DATABASE_URL` vem sem valor e `JWT__SECRET` é gerada pelo Render.
@@ -122,6 +123,8 @@ Todas as variáveis desta tabela já estão declaradas no `render.yaml`; `DATABA
 | `Fcm__CredentialJson` | conteúdo do JSON da conta de serviço do Firebase | Envio de push. Sem as duas variáveis `Fcm__*`, os alertas não são enviados e o log registra `FCM is not configured`. |
 
 **Por que `ForwardedHeaders__TrustAllProxies=true`.** O limite de tentativas de login e cadastro (5 por minuto) é contado por IP do cliente. No Render, toda requisição chega ao contêiner pelo proxy da plataforma. Por padrão, o ASP.NET Core só aceita o cabeçalho `X-Forwarded-For` vindo do próprio `localhost`; sem essa variável, a API enxergaria o IP do proxy e **todos os usuários dividiriam o mesmo contador**, de modo que cinco logins quaisquer em um minuto bloqueariam os demais. Como o endereço do proxy do Render não é fixo, não dá para listá-lo em `KnownProxies`; `TrustAllProxies=true` faz a API aceitar o cabeçalho de qualquer origem. Isso é seguro apenas porque o contêiner não é alcançável por fora do proxy. Em um ambiente onde a API fique exposta diretamente, use `ForwardedHeaders__KnownProxies__0` ou `ForwardedHeaders__KnownNetworks__0`. A lógica está em `backend/src/CoupleSync.Api/RateLimiting/RateLimitingSetup.cs`.
+
+**Por que `ForwardedHeaders__ClientIpHeader=CF-Connecting-IP`.** O Render fica atrás do Cloudflare, e o proxy acrescenta endereços ao `X-Forwarded-For`: o último deles é a borda do Cloudflare, que muda a cada requisição. Só com `TrustAllProxies`, cada tentativa de login cairia em um contador diferente e o limite nunca dispararia (foi o que aconteceu na primeira publicação). O Cloudflare envia o endereço real do cliente no cabeçalho `CF-Connecting-IP`, e é por ele que a API passa a contar. Para conferir: seis logins seguidos com senha errada devem terminar em `429`.
 
 ### 3.4 Comportamento do plano gratuito
 
@@ -228,6 +231,8 @@ Segredos usados pelos workflows do app:
 | O Render não detecta o serviço no ar | Porta divergente | Defina `PORT=8080`. |
 | Primeira requisição demora ou expira | Serviço suspenso no plano gratuito | Repita após cerca de um minuto. |
 | Vários usuários recebem 429 no login ao mesmo tempo | API contando o IP do proxy | Defina `ForwardedHeaders__TrustAllProxies=true`. |
+| O limite de tentativas nunca dispara (o 6º login errado recebe 401) | API contando um endereço de proxy que muda a cada requisição | Defina `ForwardedHeaders__ClientIpHeader=CF-Connecting-IP`. |
+| Não sei qual versão está publicada | — | `GET /health` devolve o commit em `version`. |
 | O app não conecta | URL errada no build | Confira `EXPO_PUBLIC_API_BASE_URL` em `mobile/eas.json` e gere o APK de novo. |
 | Alertas não chegam por push | `Fcm__*` ausentes ou inválidas | Revise as credenciais do Firebase. |
 | O assistente responde 404 `AI_CHAT_DISABLED` | IA desligada | Defina `AI_CHAT_ENABLED=true` e `GEMINI_API_KEY`. |

@@ -6,10 +6,10 @@
 |---|---|
 | **Sistema** | CoupleSync — API (.NET 8) e aplicativo Android (React Native) |
 | **Versão avaliada** | commit `98e3f64` (início do ciclo) |
-| **Versão após as correções** | commit `ba83f0c` (código) |
+| **Versão após as correções** | commit `c3c58a2` (código), publicada em <https://couplesync-api.onrender.com> |
 | **Período** | 5 de outubro de 2026 |
 | **Responsável** | Lucas Henrique Morais Salomão |
-| **Ambiente** | API e PostgreSQL 16 em contêineres Docker locais; testes automatizados com .NET SDK e Node.js na máquina de desenvolvimento |
+| **Ambiente** | API e PostgreSQL 16 em contêineres Docker locais; testes automatizados com .NET SDK e Node.js na máquina de desenvolvimento; verificação final na API publicada (Render e Neon) |
 
 ## 8.2 Método
 
@@ -33,6 +33,8 @@ A avaliação combinou verificação e validação, nesta ordem.
 
 **5. Reexecução (validação).** As cinco sessões foram executadas novamente, com os mesmos roteiros, contra a API corrigida.
 
+**6. Verificação em produção.** Depois de publicada, a API foi conferida no ambiente real: saúde, conexão com o banco, autenticação e limite de tentativas. Essa etapa encontrou um erro que nenhum teste local revelava (A17).
+
 A revisão de código e a execução dos roteiros foram feitas com apoio de ferramentas de IA para programação, sob condução do autor. Os arquivos de teste da importação de extrato são PDFs sintéticos, com dados inventados.
 
 **Limite do método.** O aplicativo não foi executado em aparelho nesta avaliação. As correções do aplicativo foram verificadas por testes unitários da lógica, pela verificação de tipos e pela leitura do código; o roteiro para conferi-las no aparelho está no anexo.
@@ -41,11 +43,11 @@ A revisão de código e a execução dos roteiros foram feitas com apoio de ferr
 
 | Indicador | Antes | Depois |
 |---|---|---|
-| Testes automatizados da API | 458 (456 com conteúdo) | 588 |
+| Testes automatizados da API | 458 (456 com conteúdo) | 592 |
 | Testes automatizados do aplicativo | 0 | 102 |
 | Testes reprovados | 0 | 0 |
-| Cobertura de linhas da API, sem migrations | 77,9% | 83,8% |
-| Cobertura de ramos da API, sem migrations | 63,5% | 68,4% |
+| Cobertura de linhas da API, sem migrations | 77,9% | 84,0% |
+| Cobertura de ramos da API, sem migrations | 63,5% | 68,6% |
 | Respostas de erro interno (500) nas cinco sessões | 34 | 0 |
 | Segredos no repositório | 1 | 0 |
 
@@ -55,9 +57,9 @@ A revisão de código e a execução dos roteiros foram feitas com apoio de ferr
 |---|---|---|
 | Crítica | 1 | 0 |
 | Alta | 10 | 7 |
-| Média | 5 | 13 |
+| Média | 6 | 13 |
 | Baixa | 0 | 1 |
-| **Total** | **16** | **21** |
+| **Total** | **17** | **21** |
 
 Critério de severidade: **crítica**, falha de segurança explorável ou perda de dados; **alta**, função principal quebrada ou resultado errado apresentado como certo; **média**, função secundária, mensagem enganosa ou proteção ausente; **baixa**, cosmético ou de baixo impacto.
 
@@ -83,6 +85,7 @@ O que a avaliação encontrou de sólido: isolamento entre grupos correto em tod
 | A14 | Confirmar uma importação com um índice inexistente a dava por concluída com zero despesas, e os lançamentos ficavam inacessíveis | Média | Revisão de código; sessão 5 | Índice inexistente devolve 422 e a importação continua disponível | `57c1b94` |
 | A15 | Um arquivo de teste continha trechos de uma fatura real do autor | Média | Revisão de código | Substituídos por dados inventados | `a8f42da` |
 | A16 | Toda notificação do Itaú e do C6 era recusada pelo servidor: o aplicativo enviava "Itaú" e "C6 Bank", e a API só aceitava "ITAU" e "C6" | Alta | Encontrado durante a correção do A09 | O aplicativo envia o nome que a API aceita | `27873ee` |
+| A17 | Em produção, o limite de tentativas do A05 não disparava: atrás do Cloudflare, a API contava as tentativas pelo endereço do proxy, que muda a cada requisição | Média | Verificação em produção | A API identifica o cliente pelo cabeçalho que a CDN preenche com o endereço real, aceito só quando a origem é um proxy confiável | `c3c58a2` |
 
 Fora da tabela, por não serem erros de funcionamento: remoção de um framework de terceiros do repositório e reunião dos registros de decisão (`98e3f64`); remoção do fluxo de implantação que apontava para um serviço desativado (`ea9df05`); remoção de arquivos de modelo sem uso (`ba83f0c`); correção da documentação que descrevia funções inexistentes.
 
@@ -108,6 +111,7 @@ Para cada correção há dois arquivos: a execução do teste antes (falhando) e
 | A12 | 3 reprovados, 2 aprovados | 5 aprovados |
 | A13 | 4 reprovados, 2 aprovados | 6 aprovados |
 | A16 | 2 reprovados, 3 aprovados | 5 aprovados |
+| A17 | 3 reprovados, 1 aprovado | 4 aprovados |
 
 Os testes que já passavam antes são os casos de controle de cada conjunto (por exemplo, no A06, as compras que já eram reconhecidas). A10 e A15 não têm teste próprio: o primeiro é mudança só de tela e o segundo é troca de dados de teste.
 
@@ -162,6 +166,23 @@ tentativa 5 -> HTTP 401  {"code":"INVALID_CREDENTIALS", ...}
 tentativa 6 -> HTTP 429  Retry-After: 60  {"code":"RATE_LIMIT_EXCEEDED", ...}
 tentativa 7 -> HTTP 429  Retry-After: 60  {"code":"RATE_LIMIT_EXCEEDED", ...}
 ```
+
+### A17 — limite de tentativas na API publicada
+
+O A05 funcionava no ambiente local e não em produção. Sete logins seguidos com senha errada em `https://couplesync-api.onrender.com`:
+
+```text
+Antes (commit aad8f84):   401 401 401 401 401 401 401
+
+Depois (commit c3c58a2):
+tentativa 1 -> HTTP 401 {"code":"INVALID_CREDENTIALS", ...}
+...
+tentativa 5 -> HTTP 401 {"code":"INVALID_CREDENTIALS", ...}
+tentativa 6 -> HTTP 429 retry-after: 60 {"code":"RATE_LIMIT_EXCEEDED", ...}
+tentativa 7 -> HTTP 429 retry-after: 60 {"code":"RATE_LIMIT_EXCEEDED", ...}
+```
+
+O teste automatizado que reproduz o cenário mantém o mesmo cliente e muda o endereço do proxy a cada requisição.
 
 ### A07 — entrada inválida (sessões 2, 3 e 5)
 
@@ -232,7 +253,7 @@ Depois:  422 INVALID_SELECTION; importação continua disponível
 ```text
 Passed!  - Failed: 0, Passed: 411, Skipped: 0, Total: 411 - CoupleSync.UnitTests.dll
 Passed!  - Failed: 0, Passed:   1, Skipped: 0, Total:   1 - CoupleSync.E2ETests.dll
-Passed!  - Failed: 0, Passed: 176, Skipped: 0, Total: 176 - CoupleSync.IntegrationTests.dll
+Passed!  - Failed: 0, Passed: 180, Skipped: 0, Total: 180 - CoupleSync.IntegrationTests.dll
 
 Aplicativo:  Test Suites: 5 passed, 5 total    Tests: 102 passed, 102 total
              tsc --noEmit: sem erros
@@ -280,7 +301,7 @@ Erros e limitações encontrados e não corrigidos neste ciclo, por prioridade o
 
 ### Limitações de ambiente e de privacidade
 
-- **Hospedagem gratuita.** A API suspende após 15 minutos sem uso; a primeira requisição seguinte leva cerca de um minuto. O disco é apagado a cada implantação, o que não afeta o sistema porque o PDF do extrato é excluído após a leitura.
+- **Hospedagem gratuita.** A API suspende após 15 minutos sem uso; a primeira requisição seguinte leva cerca de um minuto. Um monitor externo chama a API a cada 5 minutos para mantê-la ativa; é um contorno que o provedor não garante. O disco é apagado a cada implantação, o que não afeta o sistema porque o PDF do extrato é excluído após a leitura.
 - **Privacidade.** O aplicativo não tem tela de consentimento, política de privacidade, interruptor da captura de notificações nem exportação e exclusão de dados. São exigências da LGPD e da Google Play para distribuição a público real; o projeto é um piloto com dados de teste.
 - **Dados já armazenados.** O aplicativo deixou de enviar o texto das notificações, mas textos enviados por versões anteriores permanecem no banco até serem apagados.
 - **Chave antiga.** A chave removida no A01 continua no histórico do repositório. Ambientes novos usam um segredo gerado pela hospedagem.
@@ -288,9 +309,9 @@ Erros e limitações encontrados e não corrigidos neste ciclo, por prioridade o
 
 ## 8.7 Parecer
 
-O sistema atende ao que se propõe para um piloto: formar um grupo, registrar despesas por três caminhos, acompanhar rendas e metas, e manter os dados de cada grupo isolados. A base é sólida no que é mais difícil de consertar depois: isolamento entre grupos, tratamento de valores monetários, autenticação e uma suíte de testes que cobre 83,8% das linhas da API.
+O sistema atende ao que se propõe para um piloto: formar um grupo, registrar despesas por três caminhos, acompanhar rendas e metas, e manter os dados de cada grupo isolados. A base é sólida no que é mais difícil de consertar depois: isolamento entre grupos, tratamento de valores monetários, autenticação e uma suíte de testes que cobre 84,0% das linhas da API.
 
-A avaliação encontrou 37 problemas. Dezesseis foram corrigidos, entre eles o único crítico (uma chave no repositório) e dez de severidade alta, todos com teste automatizado que falhava antes e passa depois. As cinco sessões de teste, repetidas contra a versão corrigida, não produziram nenhum erro interno, contra 34 na versão avaliada.
+A avaliação encontrou 38 problemas. Dezessete foram corrigidos, entre eles o único crítico (uma chave no repositório) e dez de severidade alta, todos com teste automatizado que falhava antes e passa depois. Um deles só apareceu com o sistema publicado, o que mostra o valor de verificar no ambiente real e não só no de desenvolvimento. As cinco sessões de teste, repetidas contra a versão corrigida, não produziram nenhum erro interno, contra 34 na versão avaliada.
 
 Restam 21 pendências. As que mais limitam o uso real são a impossibilidade de sair de um grupo ou trocar o código de convite, a leitura de extratos restrita a um banco, e a ausência dos itens de privacidade exigidos para distribuição pública. Nenhuma delas impede a demonstração do sistema, e todas estão documentadas.
 

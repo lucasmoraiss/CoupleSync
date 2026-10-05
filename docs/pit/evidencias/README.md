@@ -21,6 +21,7 @@ Para cada erro corrigido há um par de arquivos com a saída do teste automatiza
 | `A12-*` | Alertas sem preferências gravadas |
 | `A13-*` | Total de rendas em grupo de três |
 | `A16-*` | Nome de banco recusado pela API |
+| `A17-*` | Limite de tentativas atrás de CDN; `A17-producao.log` é a verificação na API publicada |
 
 ## `sessoes/` — sessões de teste exploratório
 
