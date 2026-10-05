@@ -3,6 +3,10 @@ using CoupleSync.Infrastructure.Integrations.LocalPdfParser.Parsers;
 
 namespace CoupleSync.UnitTests.OcrImport;
 
+/// <summary>
+/// All statement excerpts below are fictitious (invented merchants, amounts and card number);
+/// only the layout mirrors a real Inter statement. Never paste data from a real bill here.
+/// </summary>
 [Trait("Category", "InterParser")]
 public sealed class InterBankParserTests
 {
@@ -101,16 +105,16 @@ public sealed class InterBankParserTests
     public void Parse_Fatura_DateThenDescThenDebitAmount()
     {
         const string text = InterHeader +
-            "05 de abr. 2026\n" +
-            "Uber UBER TRIP HELP.U\n" +
-            "R$ 34,14\n";
+            "07 de jan. 2025\n" +
+            "TRANSPORTE APP CORRIDA\n" +
+            "R$ 21,30\n";
 
         var result = _sut.Parse(text);
 
         Assert.Single(result);
-        Assert.Equal(new DateTime(2026, 4, 5), result[0].Date);
-        Assert.Contains("Uber UBER TRIP HELP.U", result[0].Description);
-        Assert.Equal(34.14m, result[0].Amount);
+        Assert.Equal(new DateTime(2025, 1, 7), result[0].Date);
+        Assert.Contains("TRANSPORTE APP CORRIDA", result[0].Description);
+        Assert.Equal(21.30m, result[0].Amount);
         Assert.Equal(TransactionType.Debit, result[0].Type);
     }
 
@@ -118,16 +122,16 @@ public sealed class InterBankParserTests
     public void Parse_Fatura_DateThenDescThenCreditAmount()
     {
         const string text = InterHeader +
-            "02 de abr. 2026\n" +
+            "09 de jan. 2025\n" +
             "PAGAMENTO ON LINE\n" +
-            "+ R$ 2.588,34\n";
+            "+ R$ 1.500,00\n";
 
         var result = _sut.Parse(text);
 
         Assert.Single(result);
-        Assert.Equal(new DateTime(2026, 4, 2), result[0].Date);
+        Assert.Equal(new DateTime(2025, 1, 9), result[0].Date);
         Assert.Contains("PAGAMENTO ON LINE", result[0].Description);
-        Assert.Equal(2588.34m, result[0].Amount);
+        Assert.Equal(1500.00m, result[0].Amount);
         Assert.Equal(TransactionType.Credit, result[0].Type);
     }
 
@@ -189,7 +193,7 @@ public sealed class InterBankParserTests
     {
         const string text = InterHeader +
             "Fatura Cartão de Crédito\n" +
-            "CARTÃO 5364****8991\n" +
+            "CARTÃO 1234****5678\n" +
             "01 de mar. 2026\n" +
             "NETFLIX.COM\n" +
             "R$ 55,90\n" +
