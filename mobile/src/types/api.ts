@@ -272,9 +272,17 @@ export interface OcrCategoryOverride {
   readonly category: string;
 }
 
+/** Edição feita pelo usuário na revisão; só os campos alterados são enviados. */
+export interface OcrCandidateEdit {
+  readonly index: number;
+  readonly description?: string;
+  readonly amount?: number;
+}
+
 export interface OcrConfirmRequest {
   readonly selectedIndices: readonly number[];
   readonly categoryOverrides?: readonly OcrCategoryOverride[];
+  readonly candidateEdits?: readonly OcrCandidateEdit[];
 }
 
 export interface OcrConfirmResponse {
