@@ -137,6 +137,6 @@ public sealed class OcrController : ControllerBase
         if (created is null)
             return NotFound(new { code = "OCR_JOB_NOT_FOUND", message = "Import job not found." });
 
-        return Ok(new ConfirmResponse(created.Count));
+        return Ok(new ConfirmResponse(created.Created.Count, created.DuplicatesSkipped));
     }
 }

@@ -3,6 +3,7 @@ using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.OcrImport;
@@ -103,7 +104,7 @@ public sealed class ImportJobService
     /// Creates <see cref="Transaction"/> records for the selected OCR candidate indices.
     /// Returns null if the job does not belong to coupleId (caller should return 404).
     /// </summary>
-    public async Task<IReadOnlyList<Transaction>?> ConfirmCandidatesAsync(
+    public async Task<ConfirmCandidatesResult?> ConfirmCandidatesAsync(
         Guid uploadId,
         Guid coupleId,
         Guid userId,
@@ -117,13 +118,35 @@ public sealed class ImportJobService
         var candidates = await GetCandidatesAsync(uploadId, coupleId, ct);
         if (candidates is null) return null;
 
-        var selected = candidates.Where(c => selectedIndices.Contains(c.Index)).ToList();
+        // Every selected index must exist. Rejecting here (before touching the job) keeps the
+        // candidates reachable instead of silently confirming an empty import.
+        var byIndex = candidates.ToDictionary(c => c.Index);
+        var requested = selectedIndices.Distinct().ToList();
+        var unknown = requested.Where(i => !byIndex.ContainsKey(i)).ToList();
+        if (unknown.Count > 0)
+            throw new UnprocessableEntityException(
+                "INVALID_SELECTION",
+                $"Selected index does not exist in this import: {string.Join(", ", unknown)}.");
+
+        var fingerprints = ResolveFingerprints(coupleId, candidates);
+        var selected = requested.OrderBy(i => i).Select(i => byIndex[i]).ToList();
+
         var ingests = new List<TransactionEventIngest>();
         var created = new List<Transaction>();
+        var duplicatesSkipped = 0;
         var now = _dateTimeProvider.UtcNow;
 
         foreach (var candidate in selected)
         {
+            var fingerprint = fingerprints[candidate.Index];
+
+            // Already imported (same statement confirmed before): skip the line, keep the batch.
+            if (await _transactionRepository.FingerprintExistsAsync(fingerprint, coupleId, ct))
+            {
+                duplicatesSkipped++;
+                continue;
+            }
+
             var category = "Outros";
             if (categoryOverrides is not null && categoryOverrides.TryGetValue(candidate.Index, out var userCategory)
                 && !string.IsNullOrWhiteSpace(userCategory))
@@ -152,7 +175,7 @@ public sealed class ImportJobService
             var txn = Transaction.Create(
                 coupleId: coupleId,
                 userId: userId,
-                fingerprint: candidate.Fingerprint,
+                fingerprint: fingerprint,
                 bank: "OCR Import",
                 amount: candidate.Amount,
                 currency: candidate.Currency,
@@ -167,15 +190,30 @@ public sealed class ImportJobService
             created.Add(txn);
         }
 
-        // Batch insert all ingests and transactions in a single round-trip
-        await _ingestRepository.AddIngestEventsRangeAsync(ingests, ct);
-        await _transactionRepository.AddTransactionsRangeAsync(created, ct);
-        await _transactionRepository.SaveChangesAsync(ct);
-
-        // Transition job to Confirmed to prevent duplicate confirm calls
+        // The job goes to Confirmed in the same unit of work as the inserts (repositories share the
+        // scoped DbContext), so a failed insert never leaves a half-confirmed import behind.
         var job = await _repository.GetByIdAsync(uploadId, coupleId, ct);
-        job!.MarkConfirmed(_dateTimeProvider.UtcNow);
-        await _repository.SaveChangesAsync(ct);
+
+        try
+        {
+            if (created.Count > 0)
+            {
+                await _ingestRepository.AddIngestEventsRangeAsync(ingests, ct);
+                await _transactionRepository.AddTransactionsRangeAsync(created, ct);
+            }
+
+            job!.MarkConfirmed(now);
+            await _transactionRepository.SaveChangesAsync(ct);
+            await _repository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            // Two confirmations raced past the duplicate check; the unique index on
+            // (couple_id, fingerprint) let only one of them through.
+            throw new ConflictException(
+                "OCR_CONFIRM_CONFLICT",
+                "These transactions were imported by another request. Refresh and try again.");
+        }
 
         // Fire-and-not-propagate: alert policy evaluation after successful transaction persist.
         try
@@ -203,6 +241,40 @@ public sealed class ImportJobService
             _logger.LogWarning(ex, "Alert policy evaluation failed for couple {CoupleId}", coupleId);
         }
 
-        return created;
+        return new ConfirmCandidatesResult(created, duplicatesSkipped);
+    }
+
+    /// <summary>
+    /// Fingerprint to store for each candidate. Jobs processed before repeated lines received an
+    /// occurrence ordinal may carry the same fingerprint more than once; the repetitions are
+    /// re-derived here (in statement order) exactly as <see cref="OcrProcessingService"/> does now.
+    /// </summary>
+    private static Dictionary<int, string> ResolveFingerprints(Guid coupleId, IReadOnlyList<OcrCandidate> candidates)
+    {
+        var result = new Dictionary<int, string>();
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var candidate in candidates.OrderBy(c => c.Index))
+        {
+            var occurrence = seen.GetValueOrDefault(candidate.Fingerprint) + 1;
+            seen[candidate.Fingerprint] = occurrence;
+
+            result[candidate.Index] = occurrence == 1
+                ? candidate.Fingerprint
+                : OcrProcessingService.ComputeFingerprint(
+                    coupleId, candidate.Date, candidate.Amount, candidate.Description, occurrence);
+        }
+
+        return result;
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+    {
+        var message = ex.InnerException?.Message ?? ex.Message;
+        return message.Contains("23505", StringComparison.Ordinal)
+            || message.Contains("unique", StringComparison.OrdinalIgnoreCase);
     }
 }
+
+/// <summary>Outcome of confirming an import: what was stored and how many lines were skipped as already imported.</summary>
+public sealed record ConfirmCandidatesResult(IReadOnlyList<Transaction> Created, int DuplicatesSkipped);

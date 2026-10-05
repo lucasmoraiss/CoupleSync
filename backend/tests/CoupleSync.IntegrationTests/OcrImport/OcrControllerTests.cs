@@ -380,40 +380,6 @@ internal sealed class OcrIntegrationFakeOcrProvider : IOcrProvider
         => Task.FromResult("""{"analyzeResult":{"documents":[]}}""");
 }
 
-/// <summary>
-/// Fake transaction repository that captures transactions in memory without hitting the DB.
-/// Used to avoid FK constraint violations (OCR service uses Guid.Empty as ingestEventId).
-/// </summary>
-internal sealed class FakeOcrTransactionRepository : ITransactionRepository
-{
-    public Task<bool> FingerprintExistsAsync(string fingerprint, Guid coupleId, CancellationToken ct)
-        => Task.FromResult(false);
-    public Task AddTransactionAsync(Transaction transaction, CancellationToken ct)
-        => Task.CompletedTask;
-    public Task AddTransactionsRangeAsync(IEnumerable<Transaction> transactions, CancellationToken ct)
-        => Task.CompletedTask;
-    public Task<(int TotalCount, IReadOnlyList<Transaction> Items)> GetPagedAsync(
-        Guid coupleId, int page, int pageSize, string? category,
-        DateTime? startDate, DateTime? endDate, CancellationToken ct)
-        => Task.FromResult<(int, IReadOnlyList<Transaction>)>((0, []));
-    public Task<Transaction?> GetByIdAsync(Guid id, Guid coupleId, CancellationToken ct)
-        => Task.FromResult<Transaction?>(null);
-    public Task<Transaction?> GetByIdRawAsync(Guid id, CancellationToken ct)
-        => Task.FromResult<Transaction?>(null);
-    public Task DeleteAsync(Transaction transaction, CancellationToken ct)
-        => Task.CompletedTask;
-    public Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<Transaction>>([]);
-    public Task<IReadOnlyList<Transaction>> GetRecentByCoupleAsync(Guid coupleId, DateTime since, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<Transaction>>([]);
-    public Task UpdateAsync(Transaction transaction, CancellationToken ct = default)
-        => Task.CompletedTask;
-    public Task<Dictionary<string, decimal>> GetActualSpentByCategoryAsync(
-        Guid coupleId, DateTime startUtc, DateTime endUtc, CancellationToken ct)
-        => Task.FromResult(new Dictionary<string, decimal>());
-    public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
-}
-
 // ── WebApplicationFactory ──────────────────────────────────────────────────
 
 internal sealed class OcrWebApplicationFactory : WebApplicationFactory<Program>
@@ -483,10 +449,6 @@ internal sealed class OcrWebApplicationFactory : WebApplicationFactory<Program>
                 d.ImplementationType == typeof(OcrBackgroundJob));
             if (ocrBgJobDescriptor != null)
                 services.Remove(ocrBgJobDescriptor);
-            // Replace real transaction repository with fake to avoid FK constraint violations.
-            // OCR import creates transactions with ingestEventId=Guid.Empty which lacks a DB record.
-            services.RemoveAll<ITransactionRepository>();
-            services.AddScoped<ITransactionRepository, FakeOcrTransactionRepository>();
             using var scope = services.BuildServiceProvider().CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Database.EnsureCreated();
