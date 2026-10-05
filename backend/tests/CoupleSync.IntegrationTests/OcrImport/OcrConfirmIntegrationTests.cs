@@ -109,7 +109,90 @@ public sealed class OcrConfirmIntegrationTests
         Assert.Equal(2, (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("transactionsCreated").GetInt32());
     }
 
+    // ── A04: candidateEdits ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Confirm_WithCandidateEdits_StoresTheEditedDescriptionAndAmount()
+    {
+        await using var factory = new OcrWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await AuthenticateWithCoupleAsync(client);
+
+        OcrCandidate[] statement =
+        [
+            Candidate(0, "MERC*0001 SAO PAULO", 80m, "fp-mercado"),
+            Candidate(1, "FARM 22", 35m, "fp-farmacia"),
+            Candidate(2, "PADARIA", 18.5m, "fp-padaria")
+        ];
+        var uploadId = await UploadAndMarkReadyAsync(factory, client, statement);
+
+        // Exactly the body the mobile app sends (camelCase, only the changed fields).
+        var response = await PostJsonAsync(client, $"/api/v1/ocr/{uploadId}/confirm",
+            """{"selectedIndices":[0,1,2],"categoryOverrides":[{"index":0,"category":"Alimentação"}],"candidateEdits":[{"index":0,"description":"Mercado do bairro","amount":150},{"index":1,"amount":25.9}]}""");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(3, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("transactionsCreated").GetInt32());
+
+        var list = await client.GetFromJsonAsync<JsonElement>("/api/v1/transactions");
+        var items = list.GetProperty("items").EnumerateArray()
+            .ToDictionary(i => i.GetProperty("description").GetString()!, i => i);
+
+        Assert.Equal(3, items.Count);
+        Assert.Equal(150m, items["Mercado do bairro"].GetProperty("amount").GetDecimal());
+        Assert.Equal("Alimentação", items["Mercado do bairro"].GetProperty("category").GetString());
+        Assert.Equal(25.9m, items["FARM 22"].GetProperty("amount").GetDecimal());
+        Assert.Equal(18.5m, items["PADARIA"].GetProperty("amount").GetDecimal());
+
+        // Re-importing the same file is still recognised, even for the edited lines.
+        var secondUpload = await UploadAndMarkReadyAsync(factory, client, statement);
+        var second = await client.PostAsJsonAsync($"/api/v1/ocr/{secondUpload}/confirm", new { selectedIndices = new[] { 0, 1, 2 } });
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        var secondBody = await second.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(0, secondBody.GetProperty("transactionsCreated").GetInt32());
+        Assert.Equal(3, secondBody.GetProperty("duplicatesSkipped").GetInt32());
+    }
+
+    [Fact]
+    public async Task Confirm_WithInvalidCandidateEdits_Returns400_AndKeepsTheJobReady()
+    {
+        await using var factory = new OcrWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await AuthenticateWithCoupleAsync(client);
+
+        var uploadId = await UploadAndMarkReadyAsync(factory, client,
+        [
+            Candidate(0, "Mercado", 80m, "fp-mercado"),
+            Candidate(1, "Farmácia", 35m, "fp-farmacia")
+        ]);
+
+        var invalidBodies = new Dictionary<string, string>
+        {
+            ["blank description"] = """{"selectedIndices":[0],"candidateEdits":[{"index":0,"description":"   "}]}""",
+            ["description 513"] = $$"""{"selectedIndices":[0],"candidateEdits":[{"index":0,"description":"{{new string('d', 513)}}"}]}""",
+            ["amount zero"] = """{"selectedIndices":[0],"candidateEdits":[{"index":0,"amount":0}]}""",
+            ["amount negative"] = """{"selectedIndices":[0],"candidateEdits":[{"index":0,"amount":-10}]}""",
+            ["amount 3 decimals"] = """{"selectedIndices":[0],"candidateEdits":[{"index":0,"amount":10.005}]}""",
+            ["amount above ceiling"] = """{"selectedIndices":[0],"candidateEdits":[{"index":0,"amount":1e20}]}""",
+            ["repeated index"] = """{"selectedIndices":[0],"candidateEdits":[{"index":0,"amount":10},{"index":0,"description":"X"}]}""",
+            ["index not selected"] = """{"selectedIndices":[0],"candidateEdits":[{"index":1,"amount":10}]}"""
+        };
+
+        foreach (var (name, json) in invalidBodies)
+        {
+            var response = await PostJsonAsync(client, $"/api/v1/ocr/{uploadId}/confirm", json);
+            Assert.True(HttpStatusCode.BadRequest == response.StatusCode, $"{name}: expected 400, got {(int)response.StatusCode}");
+        }
+
+        var status = await client.GetFromJsonAsync<JsonElement>($"/api/v1/ocr/{uploadId}/status");
+        Assert.Equal("Ready", status.GetProperty("status").GetString());
+        var list = await client.GetFromJsonAsync<JsonElement>("/api/v1/transactions");
+        Assert.Equal(0, list.GetProperty("totalCount").GetInt32());
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
+
+    private static Task<HttpResponseMessage> PostJsonAsync(HttpClient client, string url, string json)
+        => client.PostAsync(url, new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
 
     internal static OcrCandidate Candidate(int index, string description, decimal amount, string fingerprint)
         => new()

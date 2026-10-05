@@ -131,8 +131,11 @@ public sealed class OcrController : ControllerBase
         var overrides = request.CategoryOverrides?
             .ToDictionary(o => o.Index, o => o.Category);
 
+        var edits = request.CandidateEdits?
+            .ToDictionary(e => e.Index, e => new CandidateEdit(e.Description, e.Amount));
+
         var created = await _importJobService.ConfirmCandidatesAsync(
-            uploadId, coupleId, userId, request.SelectedIndices, overrides, ct);
+            uploadId, coupleId, userId, request.SelectedIndices, overrides, ct, edits);
 
         if (created is null)
             return NotFound(new { code = "OCR_JOB_NOT_FOUND", message = "Import job not found." });

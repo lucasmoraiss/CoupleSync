@@ -110,7 +110,8 @@ public sealed class ImportJobService
         Guid userId,
         IReadOnlyList<int> selectedIndices,
         IReadOnlyDictionary<int, string>? categoryOverrides,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyDictionary<int, CandidateEdit>? candidateEdits = null)
     {
         if (selectedIndices is null || selectedIndices.Count == 0)
             throw new UnprocessableEntityException("INVALID_SELECTION", "At least one candidate index must be selected.");
@@ -128,6 +129,16 @@ public sealed class ImportJobService
                 "INVALID_SELECTION",
                 $"Selected index does not exist in this import: {string.Join(", ", unknown)}.");
 
+        // Edits may only target lines that are part of this confirmation.
+        if (candidateEdits is not null)
+        {
+            var strayEdits = candidateEdits.Keys.Where(i => !requested.Contains(i)).ToList();
+            if (strayEdits.Count > 0)
+                throw new UnprocessableEntityException(
+                    "INVALID_SELECTION",
+                    $"Edited index is not part of the selection: {string.Join(", ", strayEdits)}.");
+        }
+
         var fingerprints = ResolveFingerprints(coupleId, candidates);
         var selected = requested.OrderBy(i => i).Select(i => byIndex[i]).ToList();
 
@@ -140,6 +151,8 @@ public sealed class ImportJobService
         {
             var fingerprint = fingerprints[candidate.Index];
 
+            // The fingerprint always comes from the line as read from the statement, never from the
+            // user's edits, so re-importing the same file still recognises it as a duplicate.
             // Already imported (same statement confirmed before): skip the line, keep the batch.
             if (await _transactionRepository.FingerprintExistsAsync(fingerprint, coupleId, ct))
             {
@@ -158,14 +171,23 @@ public sealed class ImportJobService
                 category = candidate.SuggestedCategory;
             }
 
+            // Corrections typed on the review screen win over what was read from the statement.
+            var amount = candidate.Amount;
+            var description = candidate.Description;
+            if (candidateEdits is not null && candidateEdits.TryGetValue(candidate.Index, out var edit))
+            {
+                if (edit.Amount.HasValue) amount = edit.Amount.Value;
+                if (!string.IsNullOrWhiteSpace(edit.Description)) description = edit.Description.Trim();
+            }
+
             var ingest = TransactionEventIngest.Create(
                 coupleId: coupleId,
                 userId: userId,
                 bank: OcrBank,
-                amount: candidate.Amount,
+                amount: amount,
                 currency: candidate.Currency,
                 eventTimestamp: candidate.Date,
-                description: candidate.Description,
+                description: description,
                 merchant: null,
                 rawNotificationTextRedacted: null,
                 createdAtUtc: now);
@@ -177,10 +199,10 @@ public sealed class ImportJobService
                 userId: userId,
                 fingerprint: fingerprint,
                 bank: "OCR Import",
-                amount: candidate.Amount,
+                amount: amount,
                 currency: candidate.Currency,
                 eventTimestampUtc: candidate.Date,
-                description: candidate.Description,
+                description: description,
                 merchant: null,
                 category: category,
                 ingestEventId: ingest.Id,
@@ -275,6 +297,9 @@ public sealed class ImportJobService
             || message.Contains("unique", StringComparison.OrdinalIgnoreCase);
     }
 }
+
+/// <summary>User correction for one selected candidate; null fields keep the value read from the statement.</summary>
+public sealed record CandidateEdit(string? Description, decimal? Amount);
 
 /// <summary>Outcome of confirming an import: what was stored and how many lines were skipped as already imported.</summary>
 public sealed record ConfirmCandidatesResult(IReadOnlyList<Transaction> Created, int DuplicatesSkipped);
