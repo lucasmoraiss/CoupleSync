@@ -1,314 +1,212 @@
-# CoupleSync Mobile App
+# CoupleSync — app Android
 
-An Expo-based React Native Android app for couples' budgeting and financial planning. Captures spending data from bank push notifications, tracks shared expenses, sets savings goals, and forecasts cash flow together.
+Aplicativo React Native (Expo SDK 52, Expo Router) do CoupleSync, para Android. Registra os gastos de um grupo ("casal") a partir de notificações bancárias, lançamentos manuais e extratos em PDF, e mostra painel, rendas, metas, fluxo de caixa e relatórios.
 
-## Features
+## O que o app faz
 
-- **Register/Login** with secure JWT-based authentication
-- **Couple onboarding** — one user creates a couple, the other joins via invite code
-- **Bank notification capture** — Android NotificationListenerService reads bank push notifications, parses them locally, and sends only structured expense data to the backend (bank, amount, currency, date/time and merchant); the notification text never leaves the device
-- **Transaction dashboard** — view shared expenses, individual balances, and transaction history
-- **Savings goals** — create, track, and archive shared financial goals
-- **30 & 90-day cash flow projections** — forecast combined spending and balance trends
-- **Push alerts** — receive notifications for low balance, large transactions, and upcoming bills
-- **Offline resilience** — queued uploads and retry logic for network interruptions
+- **Cadastro e login**, com a sessão guardada no armazenamento seguro do aparelho e renovada automaticamente pelo refresh token.
+- **Grupo**: uma pessoa cria o grupo e recebe um código de convite de 6 caracteres; as demais entram com o código.
+- **Captura de notificações bancárias**: um `NotificationListenerService` lê as notificações dos apps de banco suportados, o app interpreta o texto no próprio aparelho e envia ao servidor só os dados estruturados da despesa.
+- **Transações**: lista das mais recentes, lançamento manual, troca de categoria e exclusão.
+- **Importação de extrato em PDF**, com tela de revisão antes de gravar.
+- **Rendas, metas, fluxo de caixa (30 e 90 dias) e relatórios**.
+- **Preferências de alerta** e, quando habilitado no build, a aba do **assistente de IA**.
 
-## Requirements
+## Requisitos
 
-- **Node.js 18+** and npm
-- **Expo CLI:** `npm install -g expo-cli`
-- **Android device or emulator** (Android 10+)
-- **.NET backend** deployed and reachable at your `EXPO_PUBLIC_API_BASE_URL` (see Configuration below)
-- **Firebase project** with `google-services.json` placed in `mobile/` (see Deployment Runbook)
+- Node.js 20 (a versão usada no CI) e npm
+- Android Studio com emulador, ou aparelho Android
+- A API do CoupleSync acessível (veja [backend/README.md](../backend/README.md))
 
-## Quick Start
+## Como rodar
 
-### 1. Clone and Install
+### 1. Instalar
 
 ```bash
-git clone https://github.com/lucasmoraiss/CoupleSync.git
-cd CoupleSync/mobile
-
+cd mobile
 npm install
-# or
-expo install
 ```
 
-### 2. Configure API Endpoint
+### 2. Apontar para a API
 
-Set the backend API URL as an environment variable before running or building:
+Crie `mobile/.env` a partir de `.env.example`:
 
-```bash
-# Linux/macOS
-export EXPO_PUBLIC_API_BASE_URL="http://localhost:5000/api/v1"
-
-# Windows PowerShell
-$env:EXPO_PUBLIC_API_BASE_URL = "http://localhost:5000/api/v1"
+```
+EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:5000
 ```
 
-For production, replace `localhost:5000` with your deployed backend URL (e.g., `https://couplesync-backend.azurewebsites.net/api/v1`).
+O valor é a **raiz** da API, sem `/api/v1` (o cliente HTTP acrescenta o caminho). `10.0.2.2` é o endereço pelo qual o emulador Android alcança o `localhost` da máquina; em aparelho físico na mesma rede, use o IP da máquina. Para a API hospedada, use `https://<seu-servico>.onrender.com`.
 
-### 3. Start Development Server
+Se a variável não for definida, o app usa `http://10.0.2.2:5000`.
+
+### 3. Iniciar
 
 ```bash
 npx expo start --android
-
-# Or start and immediately launch on connected device/emulator
+# para limpar o cache do Metro:
 npx expo start --android --clear
-
-# Press 'a' to open on emulator or attached device
 ```
 
-The Expo dev server will start on `http://localhost:8081`. Scan the QR code with Expo Go app or use a direct connection.
-
-### 4. Test the App
-
-1. **Onboarding:**
-   - Tap **Register** on the splash screen
-   - Enter email, name, and password
-   - Create a couple or join via code
-
-2. **Dashboard:**
-   - View shared net worth, transaction history, and partner breakdown
-   - Should load in < 2.5s
-
-3. **Notification Listener Permission:**
-   - Go to **Settings** tab
-   - Tap **Enable Notification Listener**
-   - Approve Android permission
-   - **Do not test with real bank notifications yet** (see Bank Integration section)
-
-4. **Goals & Projections:**
-   - **Goals tab** — create a savings goal
-   - **Cash Flow tab** — view 30 and 90-day projections
-
-### 5. Run Tests (if available)
+A captura de notificações depende de código nativo próprio (Kotlin) e **não funciona no Expo Go**. Para testá-la, gere o projeto nativo e instale um build:
 
 ```bash
-npm test
-# or
-npx jest
+npx expo prebuild --platform android --clean
+npx expo run:android
 ```
 
-## Project Structure
+## Comandos
+
+| Comando | O que faz |
+|---|---|
+| `npm start` | `expo start` |
+| `npm run android` | `expo start --android` |
+| `npm run prebuild` | `expo prebuild` (gera `android/`) |
+| `npm test` | Testes de unidade com Jest (`ts-jest`, ambiente Node) |
+| `npx tsc --noEmit` | Checagem de tipos (é o que o CI executa) |
+
+O script `npm run lint` está declarado no `package.json`, mas **não funciona**: o projeto não tem arquivo de configuração do ESLint.
+
+### Testes
+
+`npm test` roda 102 testes em 5 arquivos, todos de lógica pura: interpretação de notificações, montagem do corpo enviado ao servidor, montagem da confirmação do extrato e renovação de sessão. Telas e componentes não têm teste automatizado. Há um roteiro de teste manual em `tests/e2e/manual-walkthrough.md`.
+
+## Variáveis de ambiente
+
+Variáveis `EXPO_PUBLIC_*` são embutidas no pacote JavaScript no momento do build.
+
+| Variável | Obrigatória | Padrão | Observação |
+|---|---|---|---|
+| `EXPO_PUBLIC_API_BASE_URL` | Não | `http://10.0.2.2:5000` | Raiz da API, sem `/api/v1`. Nos builds do EAS vem do bloco `env` do perfil em `eas.json`. |
+| `EXPO_PUBLIC_AI_CHAT_ENABLED` | Não | desligado | `true` exibe a aba "Chat IA". A API também precisa estar com a IA habilitada. |
+
+## Estrutura
 
 ```
 mobile/
-├── app/                                  # Expo Router file-based routing
-│   ├── _layout.tsx                       # Root layout and navigation setup
-│   ├── (auth)/                           # Auth stack (login, register)
+├── app/                              # Rotas (Expo Router)
+│   ├── _layout.tsx                   # Layout raiz: sessão, fontes, React Query, toasts
+│   ├── (auth)/
 │   │   ├── login.tsx
 │   │   ├── register.tsx
-│   │   └── couple-setup.tsx
-│   └── (main)/                           # Main tab navigation
-│       ├── index.tsx                     # Dashboard tab
-│       ├── cashflow/index.tsx            # Cash flow projections
-│       ├── goals/index.tsx               # Goals CRUD
-│       ├── transactions/index.tsx        # Transaction history
-│       ├── settings/                     # Settings screens
-│       └── _layout.tsx                   # Tab navigation
+│   │   └── couple-setup.tsx          # Criar grupo ou entrar com código
+│   └── (main)/
+│       ├── _layout.tsx               # Abas e proteção de rota
+│       ├── index.tsx                 # Dashboard
+│       ├── transactions/index.tsx    # Lista de transações
+│       ├── transactions/new.tsx      # Nova transação
+│       ├── ocr-upload.tsx            # Importar extrato em PDF
+│       ├── ocr-review.tsx            # Revisão da importação
+│       ├── goals/index.tsx           # Metas
+│       ├── cashflow/index.tsx        # Fluxo de caixa
+│       ├── budget/index.tsx          # Fontes de renda (aba "Rendas")
+│       ├── reports/index.tsx         # Relatórios
+│       ├── chat/index.tsx            # Chat IA (aba oculta por padrão)
+│       └── settings/                 # Configurações e alertas
 ├── src/
+│   ├── components/                   # Estados de tela, ErrorBoundary, Toast
 │   ├── modules/
-│   │   ├── auth/                         # Auth logic and hooks
-│   │   ├── couple/                       # Couple creation and joining
+│   │   ├── chat/                     # Tela, hook e chamada do assistente
 │   │   ├── integrations/notification-capture/
-│   │   │   ├── NotificationListenerBridge.ts   # React Native bridge
-│   │   │   ├── notificationParser.ts           # Bank pattern regex parser
-│   │   │   ├── ingestRequest.ts                # Builds the body sent to the backend
-│   │   │   ├── eventUploader.ts               # Queued upload to backend
-│   │   │   └── notification-patterns.json     # Bank-specific patterns
-│   │   ├── dashboard/                   # Dashboard aggregation
-│   │   ├── goals/                       # Goal CRUD operations
-│   │   └── cashflow/                    # Projection data fetching
+│   │   │   ├── NotificationListenerBridge.ts   # Ponte com o serviço nativo
+│   │   │   ├── notificationParser.ts           # Classifica e extrai valor/estabelecimento
+│   │   │   ├── notification-patterns.json      # Padrões por banco
+│   │   │   ├── ingestRequest.ts                # Monta o corpo enviado ao servidor
+│   │   │   └── eventUploader.ts                # Envio com novas tentativas
+│   │   ├── ocr/                      # Tela de revisão e montagem da confirmação
+│   │   └── transactions/categories.ts
 │   ├── services/
-│   │   ├── apiClient.ts                 # Typed HTTP client (axios/fetch)
-│   │   └── pushTokenService.ts          # FCM device token registration
-│   ├── state/
-│   │   └── sessionStore.ts              # Zustand store for auth/user state
-│   ├── types/
-│   │   └── api.ts                       # TypeScript interfaces for backend contracts
-│   └── components/
-│       └── ui/                          # Reusable UI components
-├── plugins/
-│   └── withNotificationListener.ts      # Expo Config Plugin: injects NotificationListenerService into AndroidManifest
-├── android/                             # Native Android code (generated by expo prebuild)
-│   └── app/src/main/java/com/couplesync/app/
-│       ├── NotificationCaptureService.kt       # NotificationListenerService implementation
-│       ├── NotificationBridgeModule.kt         # React Native bridge module
-│       └── NotificationBridgePackage.kt        # Module registration
-├── app.json                             # Expo app configuration (references withNotificationListener plugin)
-├── package.json                         # Dependencies
-└── tsconfig.json                        # TypeScript configuration
+│   │   ├── apiClient.ts              # Cliente HTTP (axios) tipado
+│   │   ├── authRefresh.ts            # Renovação de sessão no 401
+│   │   └── pushTokenService.ts       # Registro do token de push
+│   ├── state/                        # Stores Zustand (sessão, período do painel)
+│   ├── theme/
+│   └── types/api.ts                  # Contratos da API
+├── android-native/                   # Código Kotlin versionado (serviço e ponte de notificações)
+├── plugins/withNotificationListener.js   # Config plugin: manifesto + cópia do Kotlin no prebuild
+├── tests/e2e/                        # Roteiro manual e fluxos em YAML
+├── app.json
+├── eas.json
+├── jest.config.js
+└── package.json
 ```
 
-## Environment Variables
+A pasta `android/` é gerada pelo `expo prebuild` e não é versionada.
 
-| Variable | Required | Example | Notes |
-|----------|----------|---------|-------|
-| `EXPO_PUBLIC_API_BASE_URL` | Yes | `http://localhost:5000/api/v1` | Backend API endpoint. MUST be set before starting dev server or building APK. Public variables must be prefixed with `EXPO_PUBLIC_` to be baked into the APK. |
-| `EXPO_PUBLIC_ENV` | No | `development` | For future feature flags or debug logging. |
+## Captura de notificações bancárias
 
-## Google Services Configuration
+Com o acesso às notificações concedido nas configurações do Android:
 
-**IMPORTANT:** The `mobile/google-services.json` file must be present at build time but **must NOT be committed to git** for security reasons.
+1. O **`NotificationCaptureService`** (Kotlin) recebe as notificações e repassa ao JavaScript apenas as dos pacotes de banco suportados.
+2. O **`notificationParser.ts`** decide, no aparelho, se a notificação é uma despesa, usando os padrões de cada banco:
+   - compras, pagamentos e Pix **enviados** são reconhecidos, e o valor e o estabelecimento são extraídos;
+   - dinheiro que entra (Pix recebido, transferência recebida, estorno, depósito), compras negadas, propaganda e qualquer texto que não case com um padrão de despesa do banco são **descartados** — nada é enviado.
+3. O **`ingestRequest.ts`** monta o corpo da requisição só com dados estruturados (veja abaixo).
+4. O **`eventUploader.ts`** envia para `POST /api/v1/integrations/events` e, se falhar, tenta de novo algumas vezes, com a fila mantida em memória.
+5. A **API** valida, descarta duplicatas e cria a transação.
 
-### Setup (One-Time)
+Bancos com padrões cadastrados: **Nubank, Itaú, Inter, C6 Bank e Bradesco**. A lista está em `src/modules/integrations/notification-capture/notification-patterns.json`.
 
-1. Complete the Firebase project setup in the [Deployment Runbook](../docs/deployment/pilot-runbook.md#firebase-project-setup)
-2. Download `google-services.json` from Firebase Console
-3. Place it at `mobile/google-services.json`
-4. Verify `.gitignore` includes: `google-services.json`
+As notificações só são interpretadas e enviadas com o JavaScript do app carregado. Enquanto ele não está pronto, o serviço nativo guarda em memória até 50 notificações e as entrega quando o app abre; se o processo for encerrado pelo sistema antes disso, o que estava nessa fila se perde.
 
-### For Contributors
+### O que é enviado ao servidor
 
-If you have a clean clone without `google-services.json`:
+Para cada despesa reconhecida, o app envia exatamente estes campos:
 
-```bash
-# Ask a team member for the file or regenerate it from Firebase Console
-# It should be placed at mobile/google-services.json before building
-```
-
-## Building for Distribution
-
-### Option 1: Cloud Build with EAS (Recommended)
-
-```bash
-# Install EAS CLI
-npm install -g eas-cli
-
-# Login to EAS account (if not already)
-eas login
-
-# Build for internal testing
-eas build --platform android --profile preview
-
-# Or build for release
-eas build --platform android --profile production
-```
-
-The APK download link will be provided. Upload it to Google Play Console's **Internal Testing** track.
-
-### Option 2: Local Build with Gradle
-
-```bash
-# Generate Android project with all plugins
-npx expo prebuild --platform android --clean
-
-# Navigate to Android project
-cd android
-
-# Build release APK
-./gradlew assembleRelease
-
-# APK output
-ls app/build/outputs/apk/release/app-release.apk
-```
-
-Upload the APK to Google Play Console.
-
-## Behind the Scenes: Bank Notification Capture
-
-When you enable the Notification Listener permission:
-
-1. **Android NotificationListenerService** (Kotlin) receives bank push notifications
-2. **notificationParser.ts** decides, on the device, whether the notification is an expense, using the patterns of each bank:
-   - purchases, payments and Pix **sent** are recognised and have the amount and the merchant extracted;
-   - money coming in (Pix received, transfers received, refunds, deposits), declined purchases, advertising and any text that does not match a bank-specific expense pattern are **discarded** — nothing is uploaded for them.
-3. **ingestRequest.ts** builds the request body with structured data only (see below)
-4. **eventUploader.ts** sends it to `POST /api/v1/integrations/events`, retrying in memory if the upload fails
-5. **Backend** validates, deduplicates, and creates a Transaction record
-6. **Dashboard** refreshes to show the new transaction
-
-### What is sent to the server
-
-For each recognised expense the app sends exactly these fields:
-
-| Field | Example | Notes |
+| Campo | Exemplo | Observação |
 |---|---|---|
-| `bank` | `"Nubank"` | resolved from the Android package name; one of `Nubank`, `Itau`, `Inter`, `C6`, `Bradesco` (names accepted by the backend) |
-| `amount` | `45.9` | parsed from the notification |
-| `currency` | `"BRL"` | always BRL |
-| `eventTimestamp` | `"2026-10-05T14:30:00.000Z"` | time the notification was posted |
-| `merchant` | `"PADARIA DO ZE"` | omitted when it cannot be extracted; for a Pix sent it is the recipient's name |
+| `bank` | `"Nubank"` | obtido do nome do pacote Android; um de `Nubank`, `Itau`, `Inter`, `C6`, `Bradesco` (nomes aceitos pela API) |
+| `amount` | `45.9` | extraído da notificação |
+| `currency` | `"BRL"` | sempre BRL |
+| `eventTimestamp` | `"2026-10-05T14:30:00.000Z"` | momento em que a notificação foi publicada |
+| `merchant` | `"PADARIA DO ZE"` | omitido quando não é possível extrair; em Pix enviado, é o nome do destinatário |
 
-The notification title and body are used only in memory for matching and are **not** sent or stored (the optional `rawNotificationText` and `description` fields of the backend contract are not used by the app).
+O título e o corpo da notificação são usados só em memória, para o reconhecimento, e **não** são enviados nem armazenados (os campos opcionais `rawNotificationText` e `description` do contrato da API não são usados pelo app).
 
-See `mobile/src/modules/integrations/notification-capture/notification-patterns.json` for supported banks.
+## Push (alertas)
 
-## Troubleshooting
+Ao entrar, o app pede permissão de notificação, obtém o token de push do aparelho com `expo-notifications` e o registra em `POST /api/v1/devices/token`. Falhas nesse passo são ignoradas: o app funciona sem push.
 
-### App Won't Build — Missing google-services.json
+O `app.json` versionado não referencia um `google-services.json`, e esse arquivo é ignorado pelo Git. Para o push funcionar em um build, o projeto Firebase precisa ser configurado nesse build e a API precisa das credenciais `Fcm__*`.
 
+## Gerar o APK
+
+### EAS Build
+
+```bash
+npm install -g eas-cli
+eas login
+eas build --platform android --profile preview
 ```
-error: firebase-config-file not found
+
+Os perfis `preview` e `production` de `eas.json` geram APK e definem `EXPO_PUBLIC_API_BASE_URL`. **Antes de gerar, confira esse valor**: ele deve ser a URL da API em uso (`https://<seu-servico>.onrender.com`).
+
+### Build local
+
+```bash
+npx expo prebuild --platform android --clean
+cd android
+./gradlew assembleDebug
+# saída: android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-**Solution:**
-1. Download `google-services.json` from Firebase Console (Project Settings → Your Apps → Android)
-2. Place at `mobile/google-services.json`
-3. Run `npx expo prebuild --platform android --clean` again
+Mais detalhes em [docs/architecture/apk-generation-guide.md](../docs/architecture/apk-generation-guide.md).
 
-### API Connection Fails
+## Problemas comuns
 
-**Symptom:** Login/register screens show "Network error" or "Cannot reach server"
+**Login ou cadastro mostram "Servidor indisponível" ou "Sem conexão".**
+Confira se a API responde (`curl http://localhost:5000/health/ready`) e se `EXPO_PUBLIC_API_BASE_URL` aponta para ela. No emulador, use `10.0.2.2` em vez de `localhost`. Depois de mudar o `.env`, reinicie o Metro com `--clear`.
 
-**Solution:**
-1. Verify backend is running and accessible:
-   ```bash
-   curl http://localhost:5000/api/v1/auth/login  # Should return 400 (OK, just no data)
-   ```
-2. Verify `EXPO_PUBLIC_API_BASE_URL` is set correctly and exported before running app:
-   ```bash
-   echo $EXPO_PUBLIC_API_BASE_URL  # Should print your backend URL
-   ```
-3. If using localhost, ensure emulator/device can reach your dev machine (often need `10.0.2.2` instead of `localhost` on Android emulator)
+**A API hospedada demora na primeira requisição.**
+No plano gratuito do Render o serviço é suspenso após um período sem tráfego e leva cerca de um minuto para voltar. O cliente HTTP do app desiste após 30 segundos; tente de novo.
 
-### Notification Listener Permission Denied
+**A faixa "Captura de notificações desativada" aparece na tela de transações.**
+Toque em "Ativar" (ou em Config > "Notificações do sistema") e conceda o acesso ao CoupleSync na tela do Android. Em Expo Go a captura não está disponível.
 
-**Symptom:** Settings screen shows permission as disabled even after granting
+**Notificações de banco não viram transação.**
+Só compras, pagamentos e Pix enviados dos bancos listados são reconhecidos, e o texto precisa casar com um dos padrões de `notification-patterns.json`. Mensagens em formato diferente são descartadas.
 
-**Solution:**
-1. Verify `app.json` includes the `./plugins/withNotificationListener` plugin
-2. Run `npx expo prebuild --platform android --clean` to regenerate AndroidManifest
-3. On device, go **Settings** → **Apps & notifications** → **CoupleSync** → **Permissions** → **Notifications** → enable
-4. Restart the app
+## Documentação relacionada
 
-### Transactions Not Uploading
-
-**Symptom:** Notification listener is enabled, but captured transactions don't appear in backend
-
-**Solution:**
-1. Verify backend is reachable (see API Connection Fails above)
-2. Check `eventUploader.ts` logs — if queued uploads repeatedly fail, inspect:
-   - Network connectivity (`adb logcat | grep CoupleSync`)
-   - Backend `/api/v1/integrations/events` endpoint response
-   - JWT token validity (refresh if expired)
-
-## Performance Targets
-
-- **Dashboard load:** < 2.5 seconds (mid-tier Android, stable network)
-- **Transaction upload:** < 60 seconds from notification receipt to backend persistence
-- **Goal/projection loads:** < 1 second
-- **App startup:** < 2 seconds on device with app already installed
-
-## Contributing
-
-1. Create a feature branch: `git checkout -b feature/your-feature`
-2. Follow the project structure and TypeScript conventions
-3. Test on a real Android device (emulator may differ)
-4. Commit with a clear message: `git commit -am "feat: add your feature"`
-5. Push and create a Pull Request
-
-## Full Deployment Guide
-
-For complete step-by-step instructions to deploy the mobile app to testers via Google Play Internal Testing, including:
-- Firebase project setup
-- Backend deployment
-- APK building and distribution
-- Validation checklist
-
-See [docs/deployment/pilot-runbook.md](../docs/deployment/pilot-runbook.md).
-
-## License
-
-CoupleSync is proprietary software. See LICENSE file for details.
+- [Guia de uso](../docs/guia-de-uso.md)
+- [Guia de implantação](../docs/deployment/DEPLOY-GUIDE.md)
+- [Decisões de arquitetura](../docs/adr/README.md)
