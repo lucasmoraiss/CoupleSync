@@ -1,8 +1,8 @@
 name: Mobile APK — Build & Publish
 
-# Triggered automatically after Deploy succeeds on main, ensuring the backend
-# is live before distributing a new APK. Also supports manual dispatch and
-# version-tag pushes for out-of-band releases.
+# Runs on manual dispatch and on version-tag pushes (v*). The backend is deployed
+# by the hosting platform (Render) straight from the repository, so there is no
+# deploy workflow to wait for.
 #
 # APK is uploaded as a GitHub Actions artifact for manual download.
 # Firebase App Distribution has been removed for the pilot (5 couples).
@@ -11,10 +11,6 @@ name: Mobile APK — Build & Publish
 #   expo.dev → Settings → Access Tokens → Create token
 
 on:
-  workflow_run:
-    workflows: ["Deploy"]
-    branches: [main]
-    types: [completed]
   workflow_dispatch:
   push:
     tags:
@@ -29,11 +25,6 @@ jobs:
     name: EAS Build — Production APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
-
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'push' ||
-      github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout
