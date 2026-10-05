@@ -11,7 +11,8 @@ namespace CoupleSync.Infrastructure.BackgroundJobs;
 public sealed class OcrBackgroundJob : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
-    private const int MaxRetries = 3;
+    /// <summary>Total number of processing attempts for transient failures (first try included).</summary>
+    private const int MaxAttempts = 3;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<OcrBackgroundJob> _logger;
@@ -54,7 +55,8 @@ public sealed class OcrBackgroundJob : BackgroundService
         _logger.LogInformation("OcrBackgroundJob stopped.");
     }
 
-    private async Task ProcessPendingJobsAsync(CancellationToken ct)
+    /// <summary>Runs one polling pass over the pending jobs. Public so the pass can be unit-tested.</summary>
+    public async Task ProcessPendingJobsAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IImportJobRepository>();
@@ -104,8 +106,10 @@ public sealed class OcrBackgroundJob : BackgroundService
                 // Stop processing remaining jobs — quota is exhausted for all
                 break;
             }
-            catch (OcrException ex)
+            catch (AppException ex)
             {
+                // Business failures (OcrException, BankFormatUnknownException, ...) are deterministic:
+                // the same file fails the same way every time, so retrying only delays the answer.
                 _logger.LogWarning(ex, "OCR job {JobId} failed with code {Code} after {ElapsedMs}ms", job.Id, ex.Code, sw.ElapsedMilliseconds);
                 job.MarkFailed(ex.Code, ex.Message, dateTimeProvider.UtcNow);
                 await repo.SaveChangesAsync(ct);
@@ -113,10 +117,12 @@ public sealed class OcrBackgroundJob : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "OCR processing failed for job {JobId} after {ElapsedMs}ms (attempt {Attempt}/{MaxRetries})",
-                    job.Id, sw.ElapsedMilliseconds, job.RetryCount + 1, MaxRetries);
+                var attempt = job.RetryCount + 1;
 
-                if (job.CanRetry(MaxRetries))
+                _logger.LogError(ex, "OCR processing failed for job {JobId} after {ElapsedMs}ms (attempt {Attempt}/{MaxAttempts})",
+                    job.Id, sw.ElapsedMilliseconds, attempt, MaxAttempts);
+
+                if (attempt < MaxAttempts)
                 {
                     job.ResetForRetry(dateTimeProvider.UtcNow);
                     await repo.SaveChangesAsync(ct);
