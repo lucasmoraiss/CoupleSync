@@ -1,5 +1,14 @@
 # Cloud Deployment Analysis — CoupleSync V1.5
 
+> **Nota de situação (05/out/2026).** Este documento é uma análise **histórica**, de abril de 2026, e foi mantido como estava. O "Confirmed" e os itens marcados "CHOSEN" abaixo registram a decisão daquele momento, não o que está em operação:
+>
+> - **Computação:** o Azure Container Apps não chegou a ser usado. A API rodou em um Azure App Service (plano gratuito), que foi **desativado**. A hospedagem vigente é o **Render** (serviço web gratuito, a partir de `backend/Dockerfile`).
+> - **Banco de dados:** o Neon (PostgreSQL) foi adotado e continua em uso.
+> - **Armazenamento de arquivos:** o Firebase Storage não foi integrado. O PDF enviado fica no disco local do contêiner (`LocalFileStorageAdapter`) só até ser processado e é apagado em seguida.
+> - **OCR:** o padrão passou a ser o parser local de PDF ([ADR-0007](../adr/0007-parser-local-de-pdf.md)); o adaptador do Azure Document Intelligence existe no código como alternativa (`USE_LOCAL_PDF_PARSER=false`).
+>
+> Limites de planos gratuitos, preços e contagens citados abaixo são os da data da análise e não foram reconferidos. Para a implantação atual, veja [docs/deployment/DEPLOY-GUIDE.md](../deployment/DEPLOY-GUIDE.md); para a situação de cada decisão, o [índice de ADRs](../adr/README.md).
+
 > Decision date: April 2026  
 > Scope: Free-tier cloud stack for CoupleSync pilot (up to 10 users / 5 couples)  
 > Decision status: **Confirmed** (see [ADR-0005](../adr/0005-stack-de-nuvem.md))
