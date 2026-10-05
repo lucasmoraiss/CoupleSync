@@ -7,7 +7,7 @@
 import type { ParsedTransactionEvent } from './notificationParser';
 
 export interface IngestNotificationEventRequest {
-  /** Bank name resolved from package, e.g. "Nubank" */
+  /** Bank name as accepted by the backend (AllowedBanks), e.g. "Nubank", "Itau", "C6" */
   readonly bank: string;
   /** Transaction amount (must be > 0) */
   readonly amount: number;
@@ -25,7 +25,7 @@ export interface IngestNotificationEventRequest {
  */
 export function buildIngestRequest(parsed: ParsedTransactionEvent): IngestNotificationEventRequest {
   return {
-    bank: parsed.bank,
+    bank: parsed.bankApiName,
     amount: parsed.amount,
     currency: 'BRL', // V1: Brazilian banks only
     eventTimestamp: parsed.receivedAt,

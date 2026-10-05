@@ -225,7 +225,7 @@ For each recognised expense the app sends exactly these fields:
 
 | Field | Example | Notes |
 |---|---|---|
-| `bank` | `"Nubank"` | resolved from the Android package name |
+| `bank` | `"Nubank"` | resolved from the Android package name; one of `Nubank`, `Itau`, `Inter`, `C6`, `Bradesco` (names accepted by the backend) |
 | `amount` | `45.9` | parsed from the notification |
 | `currency` | `"BRL"` | always BRL |
 | `eventTimestamp` | `"2026-10-05T14:30:00.000Z"` | time the notification was posted |

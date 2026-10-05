@@ -39,7 +39,7 @@ describe('A09 — corpo enviado ao servidor não leva o texto da notificação',
     const event = parse('com.nu.production', title, body);
 
     expect(Object.keys(event).sort()).toEqual(
-      ['amount', 'bank', 'matchedPatternId', 'merchant', 'packageName', 'receivedAt'].sort(),
+      ['amount', 'bank', 'bankApiName', 'matchedPatternId', 'merchant', 'packageName', 'receivedAt'].sort(),
     );
     expect(JSON.stringify(event)).not.toContain('Maria Aparecida');
   });

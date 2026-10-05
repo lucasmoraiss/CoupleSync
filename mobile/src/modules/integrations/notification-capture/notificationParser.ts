@@ -13,8 +13,10 @@
 import patterns from './notification-patterns.json';
 
 export interface ParsedTransactionEvent {
-  /** Resolved bank name, e.g. "Nubank" */
+  /** Resolved bank display name, e.g. "Itaú" */
   readonly bank: string;
+  /** Bank name as accepted by the backend validator (AllowedBanks), e.g. "Itau", "C6" */
+  readonly bankApiName: string;
   /** Android package name of the source app */
   readonly packageName: string;
   /** Extracted amount in numeric form (e.g. 123.45) */
@@ -44,6 +46,8 @@ interface BankPattern {
 
 interface BankEntry {
   name: string;
+  /** Only when the display name is not in the backend's AllowedBanks list (case-insensitive). */
+  apiName?: string;
   packageNames: string[];
   patterns: BankPattern[];
 }
@@ -67,6 +71,7 @@ function compile(source: string): RegExp {
 
 interface CompiledBank {
   readonly name: string;
+  readonly apiName: string;
   readonly patterns: ReadonlyArray<BankPattern & { readonly compiled: RegExp }>;
 }
 
@@ -78,6 +83,7 @@ const packageToBankMap = new Map<string, CompiledBank>();
 for (const bank of patterns.banks as BankEntry[]) {
   const compiledBank: CompiledBank = {
     name: bank.name,
+    apiName: bank.apiName ?? bank.name,
     patterns: bank.patterns.map((p) => ({ ...p, compiled: compile(p.regex) })),
   };
   for (const pkg of bank.packageNames) {
@@ -155,6 +161,7 @@ export function classifyNotification(
       action: 'upload',
       event: {
         bank: bank.name,
+        bankApiName: bank.apiName,
         packageName,
         amount,
         merchant: merchant ? sanitise(merchant) : null,

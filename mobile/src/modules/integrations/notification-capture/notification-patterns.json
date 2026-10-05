@@ -38,6 +38,7 @@
     },
     {
       "name": "Itaú",
+      "apiName": "Itau",
       "packageNames": ["com.itau", "br.com.italiquido", "com.itau.empresas"],
       "patterns": [
         {
@@ -86,6 +87,7 @@
     },
     {
       "name": "C6 Bank",
+      "apiName": "C6",
       "packageNames": ["com.c6bank.app"],
       "patterns": [
         {
