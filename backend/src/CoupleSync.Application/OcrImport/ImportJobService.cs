@@ -242,19 +242,19 @@ public sealed class ImportJobService
         {
             var nowUtc = _dateTimeProvider.UtcNow;
             var since = nowUtc.AddDays(-30);
-            var settings = await _notificationSettingsRepository.GetByUserIdAsync(userId, coupleId, ct);
-            if (settings is not null)
+            // No row in notification_settings means the user never changed anything: the defaults
+            // (every alert enabled) apply, exactly as GET /notifications/settings reports them.
+            var settings = await _notificationSettingsRepository.GetByUserIdAsync(userId, coupleId, ct)
+                ?? NotificationSettings.Create(userId, coupleId, nowUtc);
+            var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(coupleId, since, ct);
+            foreach (var txn in created)
             {
-                var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(coupleId, since, ct);
-                foreach (var txn in created)
+                var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
+                    coupleId, userId, txn, recentTransactions, settings, nowUtc, ct);
+                if (alertEvents.Count > 0)
                 {
-                    var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
-                        coupleId, userId, txn, recentTransactions, settings, nowUtc, ct);
-                    if (alertEvents.Count > 0)
-                    {
-                        await _notificationEventRepository.AddRangeAsync(alertEvents, ct);
-                        await _notificationEventRepository.SaveChangesAsync(ct);
-                    }
+                    await _notificationEventRepository.AddRangeAsync(alertEvents, ct);
+                    await _notificationEventRepository.SaveChangesAsync(ct);
                 }
             }
         }

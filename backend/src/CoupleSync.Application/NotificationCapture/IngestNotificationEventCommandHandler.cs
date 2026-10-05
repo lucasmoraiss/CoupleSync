@@ -114,24 +114,24 @@ public sealed class IngestNotificationEventCommandHandler
         {
             var nowUtc = _dateTimeProvider.UtcNow;
             var since = nowUtc.AddDays(-30);
-            var settings = await _notificationSettingsRepository.GetByUserIdAsync(command.UserId, command.CoupleId, cancellationToken);
-            if (settings is not null)
-            {
-                var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(command.CoupleId, since, cancellationToken);
-                var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
-                    command.CoupleId,
-                    command.UserId,
-                    transaction,
-                    recentTransactions,
-                    settings,
-                    nowUtc,
-                    cancellationToken);
+            // No row in notification_settings means the user never changed anything: the defaults
+            // (every alert enabled) apply, exactly as GET /notifications/settings reports them.
+            var settings = await _notificationSettingsRepository.GetByUserIdAsync(command.UserId, command.CoupleId, cancellationToken)
+                ?? NotificationSettings.Create(command.UserId, command.CoupleId, nowUtc);
+            var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(command.CoupleId, since, cancellationToken);
+            var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
+                command.CoupleId,
+                command.UserId,
+                transaction,
+                recentTransactions,
+                settings,
+                nowUtc,
+                cancellationToken);
 
-                if (alertEvents.Count > 0)
-                {
-                    await _notificationEventRepository.AddRangeAsync(alertEvents, cancellationToken);
-                    await _notificationEventRepository.SaveChangesAsync(cancellationToken);
-                }
+            if (alertEvents.Count > 0)
+            {
+                await _notificationEventRepository.AddRangeAsync(alertEvents, cancellationToken);
+                await _notificationEventRepository.SaveChangesAsync(cancellationToken);
             }
         }
         catch
