@@ -21,6 +21,8 @@ interface SessionActions {
   setCoupleId: (coupleId: string) => Promise<void>;
   /** Update the persisted access token and couple id atomically (used after create/join couple). */
   setAccessTokenAndCouple: (accessToken: string, coupleId: string) => Promise<void>;
+  /** Replace the token pair after a refresh, keeping userId and coupleId. No-op if there is no session. */
+  setTokens: (accessToken: string, refreshToken: string) => Promise<void>;
   clearSession: () => Promise<void>;
   hydrateFromStore: () => Promise<void>;
 }
@@ -61,6 +63,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       coupleId: payload.coupleId,
     }));
     set({ accessToken, coupleId });
+  },
+
+  setTokens: async (accessToken: string, refreshToken: string) => {
+    const state = get();
+    // Session was cleared (logout) while the refresh was in flight — do not resurrect it
+    if (!state.userId) return;
+    await SecureStore.setItemAsync(SECURE_STORE_KEY, JSON.stringify({
+      accessToken,
+      refreshToken,
+      userId: state.userId,
+      coupleId: state.coupleId,
+    }));
+    set({ accessToken, refreshToken });
   },
 
   clearSession: async () => {
