@@ -87,6 +87,13 @@ public static class RateLimitingSetup
         options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
         options.ForwardLimit = section.GetValue<int?>("ForwardLimit") ?? 1;
 
+        // Behind a CDN the hosting proxy appends to X-Forwarded-For, so its last entry is an edge
+        // address that changes between requests. When the CDN provides a single-valued header with
+        // the real client address (e.g. CF-Connecting-IP on Cloudflare), read the client from it.
+        var clientIpHeader = section["ClientIpHeader"];
+        if (!string.IsNullOrWhiteSpace(clientIpHeader))
+            options.ForwardedForHeaderName = clientIpHeader.Trim();
+
         foreach (var proxy in section.GetSection("KnownProxies").Get<string[]>() ?? [])
         {
             if (string.IsNullOrWhiteSpace(proxy)) continue;

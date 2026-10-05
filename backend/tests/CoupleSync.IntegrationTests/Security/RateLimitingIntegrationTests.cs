@@ -171,7 +171,95 @@ public sealed class RateLimitingIntegrationTests
         Assert.Equal(HttpStatusCode.TooManyRequests, spoofed.StatusCode);
     }
 
+    [Fact]
+    public async Task Login_BehindCdn_IsLimitedPerClientIpHeader_EvenWhenForwardedForChanges()
+    {
+        // PaaS behind a CDN (e.g. Render behind Cloudflare): the proxy appends to X-Forwarded-For,
+        // so its last entry is an edge address that changes between requests. The CDN also sets a
+        // single-valued header with the real client address; that is the one to partition on.
+        await using var factory = new RateLimitWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["ForwardedHeaders:TrustAllProxies"] = "true",
+            ["ForwardedHeaders:ClientIpHeader"] = "CF-Connecting-IP"
+        });
+        using var client = factory.CreateClient();
+
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            var response = await LoginWithHeadersAsync(client, "a@example.com",
+                ("CF-Connecting-IP", "203.0.113.10"),
+                ("X-Forwarded-For", $"203.0.113.10, 172.70.0.{attempt}"));
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        var sameClient = await LoginWithHeadersAsync(client, "a@example.com",
+            ("CF-Connecting-IP", "203.0.113.10"),
+            ("X-Forwarded-For", "203.0.113.10, 172.70.0.99"));
+        var otherClient = await LoginWithHeadersAsync(client, "b@example.com",
+            ("CF-Connecting-IP", "203.0.113.20"),
+            ("X-Forwarded-For", "203.0.113.20, 172.70.0.99"));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, sameClient.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, otherClient.StatusCode);
+    }
+
+    [Fact]
+    public async Task Login_ClientIpHeader_IsIgnoredWhenTheSourceIsNotATrustedProxy()
+    {
+        // Header configured but no proxy trusted: a caller must not pick its own bucket.
+        await using var factory = new RateLimitWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["ForwardedHeaders:ClientIpHeader"] = "CF-Connecting-IP"
+        });
+        using var client = factory.CreateClient();
+
+        for (var attempt = 1; attempt <= 5; attempt++)
+            await LoginWithHeadersAsync(client, "a@example.com", ("CF-Connecting-IP", $"198.51.100.{attempt}"));
+
+        var spoofed = await LoginWithHeadersAsync(client, "a@example.com", ("CF-Connecting-IP", "198.51.100.99"));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, spoofed.StatusCode);
+    }
+
+    [Fact]
+    public async Task Health_ReportsTheDeployedVersion_WhenConfigured()
+    {
+        await using var factory = new RateLimitWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["APP_VERSION"] = "abc1234def5678"
+        });
+        using var client = factory.CreateClient();
+
+        var payload = await client.GetFromJsonAsync<JsonElement>("/health");
+
+        Assert.Equal("healthy", payload.GetProperty("status").GetString());
+        Assert.Equal("abc1234", payload.GetProperty("version").GetString());
+    }
+
+    [Fact]
+    public async Task Health_ReportsUnknownVersion_WhenNotConfigured()
+    {
+        await using var factory = new RateLimitWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var payload = await client.GetFromJsonAsync<JsonElement>("/health");
+
+        Assert.Equal("unknown", payload.GetProperty("version").GetString());
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
+
+    private static Task<HttpResponseMessage> LoginWithHeadersAsync(HttpClient client, string email, params (string Name, string Value)[] headers)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/login")
+        {
+            Content = JsonContent.Create(new { Email = email, Password = "WrongPass123!" })
+        };
+        foreach (var (name, value) in headers)
+            request.Headers.TryAddWithoutValidation(name, value);
+        return client.SendAsync(request);
+    }
+
 
     private static Task<HttpResponseMessage> LoginAsync(HttpClient client, string email, string password, string? forwardedFor = null)
     {

@@ -35,11 +35,11 @@ services:
       # trataria todos os clientes como um só.
       - key: ForwardedHeaders__TrustAllProxies
         value: "true"
-      # No Render a requisição chega com "X-Forwarded-For: <cliente>, <borda do Cloudflare>".
-      # O cliente é o segundo endereço a partir da direita; com o padrão (1) a API enxergaria
-      # o endereço do Cloudflare, que muda a cada requisição, e o limite nunca dispararia.
-      - key: ForwardedHeaders__ForwardLimit
-        value: "2"
+      # O Render fica atrás do Cloudflare e acrescenta endereços ao X-Forwarded-For; o último
+      # deles muda a cada requisição. O endereço real do cliente vem em CF-Connecting-IP,
+      # preenchido pelo Cloudflare, e é por ele que o limite de tentativas é contado.
+      - key: ForwardedHeaders__ClientIpHeader
+        value: CF-Connecting-IP
 
       # Leitura de extratos em PDF feita no próprio servidor, sem serviço externo.
       - key: USE_LOCAL_PDF_PARSER
