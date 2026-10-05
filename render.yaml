@@ -6,6 +6,8 @@ services:
     name: couplesync-api
     runtime: docker
     plan: free
+    # Região gratuita mais próxima do banco (Neon em São Paulo).
+    region: virginia
     rootDir: backend
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health/live
