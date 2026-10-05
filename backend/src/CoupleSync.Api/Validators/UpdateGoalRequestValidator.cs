@@ -1,5 +1,6 @@
 using CoupleSync.Api.Contracts.Goals;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -28,7 +29,15 @@ public sealed class UpdateGoalRequestValidator : AbstractValidator<UpdateGoalReq
 
         RuleFor(x => x.TargetAmount)
             .GreaterThan(0)
+            .LessThanOrEqualTo(MoneyRules.MaxAmount)
+            .Must(amount => MoneyRules.HasAtMostTwoDecimals(amount!.Value))
+            .WithMessage("TargetAmount must have at most two decimal places.")
             .When(x => x.TargetAmount is not null);
+
+        RuleFor(x => x.CurrentAmount)
+            .GreaterThanOrEqualTo(0)
+            .LessThanOrEqualTo(MoneyRules.MaxAmount)
+            .When(x => x.CurrentAmount is not null);
 
         RuleFor(x => x.Deadline)
             .GreaterThan(_ => _dateTimeProvider.UtcNow)

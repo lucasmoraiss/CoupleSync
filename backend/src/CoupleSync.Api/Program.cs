@@ -3,6 +3,7 @@ using System.Text;
 using CoupleSync.Api.Health;
 using CoupleSync.Api.Middleware;
 using CoupleSync.Api.Security;
+using CoupleSync.Api.Serialization;
 using CoupleSync.Api.Validators;
 using CoupleSync.Application.Auth;
 using CoupleSync.Application.Common.Interfaces;
@@ -78,7 +79,8 @@ builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<ChatContextService>();
 builder.Services.AddScoped<GeminiChatService>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter()));
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 
