@@ -2,6 +2,7 @@ using CoupleSync.Application.AiChat;
 using System.Text;
 using CoupleSync.Api.Health;
 using CoupleSync.Api.Middleware;
+using CoupleSync.Api.Security;
 using CoupleSync.Api.Validators;
 using CoupleSync.Application.Auth;
 using CoupleSync.Application.Common.Interfaces;
@@ -34,18 +35,11 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
-const string JwtSecretPlaceholder = "REPLACE_WITH_ENV_JWT_SECRET_32CHARS_MIN";
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
-if (string.IsNullOrWhiteSpace(jwtOptions.Secret)
-    || jwtOptions.Secret.Length < 32
-    || string.Equals(jwtOptions.Secret, JwtSecretPlaceholder, StringComparison.Ordinal))
-{
-    throw new InvalidOperationException(
-        "Invalid JWT secret configuration. Configure Jwt:Secret (or JWT__SECRET) with a non-placeholder value and at least 32 characters.");
-}
+JwtSecretGuard.EnsureValid(jwtOptions.Secret);
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
