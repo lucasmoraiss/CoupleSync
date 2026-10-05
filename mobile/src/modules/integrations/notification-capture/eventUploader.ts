@@ -1,7 +1,7 @@
 // AC-009: Event uploader — queued POST to /api/v1/integrations/events with exponential backoff.
 // Uses the existing axiosInstance (auth interceptor already attached).
 import axiosInstance from '@/services/apiClient';
-import { parseNotification } from './notificationParser';
+import { classifyNotification } from './notificationParser';
 
 // ── Request shape expected by backend IngestNotificationEventRequest ──────────
 export interface IngestNotificationEventRequest {
@@ -93,21 +93,24 @@ async function flushQueue(): Promise<void> {
 /**
  * Parse a raw notification event and attempt to upload it.
  * If the upload fails, the event is queued for retry with exponential backoff.
- * Returns false if the notification did not match a supported bank pattern.
+ * Returns false when nothing is uploaded: unknown bank, credit (Pix recebido, estorno…),
+ * declined purchase, advertising, or no bank-specific expense pattern matched.
+ * The backend records expenses only, so credits must never be sent.
  */
 export async function handleRawNotificationEvent(
   event: RawNotificationEvent,
 ): Promise<boolean> {
-  const parsed = parseNotification(
+  const decision = classifyNotification(
     event.packageName,
     event.title,
     event.body,
     event.timestampMs,
   );
 
-  if (!parsed) {
-    return false; // Unknown bank or no pattern match — nothing to upload
+  if (decision.action !== 'upload') {
+    return false; // Not an expense — nothing leaves the device
   }
+  const parsed = decision.event;
 
   const request: IngestNotificationEventRequest = {
     bank: parsed.bank,
