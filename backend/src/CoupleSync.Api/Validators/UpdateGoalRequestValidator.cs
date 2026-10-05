@@ -14,7 +14,8 @@ public sealed class UpdateGoalRequestValidator : AbstractValidator<UpdateGoalReq
         _dateTimeProvider = dateTimeProvider;
 
         RuleFor(x => x)
-            .Must(x => x.Title is not null || x.Description is not null || x.TargetAmount is not null || x.Deadline is not null)
+            .Must(x => x.Title is not null || x.Description is not null || x.TargetAmount is not null
+                || x.CurrentAmount is not null || x.Deadline is not null)
             .WithName("Request")
             .WithMessage("At least one field must be provided for update.");
 
@@ -39,9 +40,10 @@ public sealed class UpdateGoalRequestValidator : AbstractValidator<UpdateGoalReq
             .LessThanOrEqualTo(MoneyRules.MaxAmount)
             .When(x => x.CurrentAmount is not null);
 
+        // Same rule as CreateGoalRequestValidator: today or later, and only when a deadline is sent.
         RuleFor(x => x.Deadline)
-            .GreaterThan(_ => _dateTimeProvider.UtcNow)
+            .Must(d => d!.Value.Date >= _dateTimeProvider.UtcNow.Date)
             .When(x => x.Deadline.HasValue)
-            .WithMessage("Deadline must be a future date.");
+            .WithMessage("O prazo deve ser hoje ou uma data futura.");
     }
 }
