@@ -228,13 +228,42 @@ public sealed class ConcurrencyTests
             (await users[i % users.Count].Client.PostAsJsonAsync("/api/v1/devices/token", new { token = "shared-device", platform = "android" })).StatusCode);
         Assert.All(shared, status => Assert.Equal(HttpStatusCode.NoContent, status));
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM device_tokens WHERE token = 'shared-device'"));
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM device_tokens"));
 
-        // Each user refreshing its own token (a new FCM token each time) at once: still one row per user.
+        // Each user refreshing its own token (a new FCM token each time) at once: exactly one row per user, none lost.
         var own = await FireAsync(users.Count * 3, async i =>
             (await users[i % users.Count].Client.PostAsJsonAsync("/api/v1/devices/token", new { token = $"own-{i}", platform = "android" })).StatusCode);
         Assert.All(own, status => Assert.Equal(HttpStatusCode.NoContent, status));
-        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM (SELECT user_id FROM device_tokens GROUP BY user_id HAVING count(*) > 1) d"));
-        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM (SELECT token FROM device_tokens GROUP BY token HAVING count(*) > 1) d"));
+        Assert.Equal(users.Count, await database.ScalarAsync<long>("SELECT count(*) FROM device_tokens"));
+        Assert.Equal(users.Count, await database.ScalarAsync<long>("SELECT count(DISTINCT user_id) FROM device_tokens"));
+        Assert.Equal(users.Count, await database.ScalarAsync<long>("SELECT count(DISTINCT token) FROM device_tokens"));
+    }
+
+    // ---- e-mail code: attempts and consumption (the other ExecuteUpdate/ExecuteDelete statements) ----------------
+
+    [PostgresFact]
+    public async Task EmailCodes_WrongAttemptsAreCounted_AndACodeIsConsumedOnlyOnce()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await MigrationTests.MigrateAsync(database);
+        var user = await SeedUserAsync(database, withExistingCode: false);
+        var sender = new CollectingSender();
+        var clock = new FixedClock(Now.AddMinutes(1));
+        await using var db = MigrationTests.Context(database);
+        var flow = NewFlow(db, sender, clock);
+        await flow.IssueAsync(user, EmailCodePurpose.PasswordReset, CancellationToken.None);
+        var typed = System.Text.RegularExpressions.Regex.Match(sender.Sent.Single().TextContent, @"\b\d{6}\b").Value;
+        var wrong = typed == "000000" ? "111111" : "000000";
+
+        await Assert.ThrowsAsync<CoupleSync.Application.Common.Exceptions.BadRequestException>(
+            () => flow.VerifyAsync(user, EmailCodePurpose.PasswordReset, wrong, CancellationToken.None));
+        Assert.Equal(1, await database.ScalarAsync<int>("SELECT attempts FROM email_codes"));
+
+        var verified = await flow.VerifyAsync(user, EmailCodePurpose.PasswordReset, typed, CancellationToken.None);
+        await flow.ConsumeAsync(verified, CancellationToken.None);
+        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM email_codes"));
+        await Assert.ThrowsAsync<CoupleSync.Application.Common.Exceptions.BadRequestException>(
+            () => flow.ConsumeAsync(verified, CancellationToken.None));
     }
 
     // ---- (d) transactions page ordering with identical timestamps -----------------------------------------------

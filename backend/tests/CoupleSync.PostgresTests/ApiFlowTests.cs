@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using CoupleSync.Application.OcrImport;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -29,22 +30,46 @@ public sealed class ApiFlowTests
         var me = await ana.Client.GetFromJsonAsync<JsonElement>("/api/v1/auth/me");
         Assert.Equal("Ana", me.GetProperty("name").GetString());
 
-        // transactions: last month's (reports only count complete months) and this month's
-        var lastMonth = DateTime.UtcNow.AddMonths(-1);
-        var lastMonthDay = new DateTime(lastMonth.Year, lastMonth.Month, 15, 15, 0, 0, DateTimeKind.Utc);
-        var created = await ana.Client.PostAsJsonAsync("/api/v1/transactions", new
+        // transactions in last month (reports and the dashboard below read complete Brasília months)
+        var thisMonth = BrazilTime.MonthOf(DateTime.UtcNow);
+        var lastMonth = BrazilTime.AddMonths(thisMonth, -1);
+        var lastMonthDay = BrazilTime.MonthRangeUtc(lastMonth).StartUtc.AddDays(14).AddHours(15);
+        async Task<Guid> AddAsync(TestUser who, decimal amount, string category, string description)
         {
-            amount = 120.50m, currency = "BRL", eventTimestampUtc = lastMonthDay, description = "Mercado", category = "ALIMENTACAO"
-        });
-        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        var transactionId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
-        Assert.Equal(HttpStatusCode.Created, (await bruno.Client.PostAsJsonAsync("/api/v1/transactions", new
-        {
-            amount = 80m, currency = "BRL", eventTimestampUtc = lastMonthDay, description = "Cinema", category = "LAZER"
-        })).StatusCode);
+            var response = await who.Client.PostAsJsonAsync("/api/v1/transactions", new
+            {
+                amount, currency = "BRL", eventTimestampUtc = lastMonthDay, description, category
+            });
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        }
+
+        var transactionId = await AddAsync(ana, 120.50m, "ALIMENTACAO", "Mercado");
+        await AddAsync(ana, 30m, "LAZER", "Streaming");
+        var brunoFood = await AddAsync(bruno, 80m, "ALIMENTACAO", "Padaria do Bruno");
+        await AddAsync(bruno, 20m, "LAZER", "Cinema");
+
+        // A row stored the way old versions wrote it (accent and case): the PostgreSQL GROUP BY branches must
+        // still fold it into ALIMENTACAO.
+        await database.ExecuteAsync("UPDATE transactions SET category = 'Alimentação ' WHERE id = @id", ("id", brunoFood));
+
+        // dashboard (PostgreSQL GROUP BY branch of DashboardRepository): totals by category and by partner
+        var firstDay = lastMonth + "-01";
+        var lastDay = new DateTime(int.Parse(lastMonth[..4]), int.Parse(lastMonth[5..]), 1).AddMonths(1).AddDays(-1).ToString("yyyy-MM-dd");
+        var dashboard = await bruno.Client.GetFromJsonAsync<JsonElement>($"/api/v1/dashboard?startDate={firstDay}&endDate={lastDay}");
+        Assert.Equal(250.50m, dashboard.GetProperty("totalExpenses").GetDecimal());
+        Assert.Equal(4, dashboard.GetProperty("transactionCount").GetInt32());
+        var dashboardByCategory = dashboard.GetProperty("expensesByCategory").EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value.GetDecimal());
+        Assert.Equal(new Dictionary<string, decimal> { ["ALIMENTACAO"] = 200.50m, ["LAZER"] = 50m }, dashboardByCategory);
+        var byPartner = dashboard.GetProperty("partnerBreakdown").EnumerateArray()
+            .ToDictionary(p => p.GetProperty("userId").GetGuid(), p => p.GetProperty("totalAmount").GetDecimal());
+        Assert.Equal(new Dictionary<Guid, decimal> { [ana.UserId] = 150.50m, [bruno.UserId] = 100m }, byPartner);
+        var empty = await bruno.Client.GetFromJsonAsync<JsonElement>($"/api/v1/dashboard?startDate=2001-01-01&endDate=2001-01-31");
+        Assert.Equal(0, empty.GetProperty("transactionCount").GetInt32());
 
         // budget
-        var month = DateTime.UtcNow.ToString("yyyy-MM");
+        var month = thisMonth;
         var plan = await ana.Client.PostAsJsonAsync("/api/v1/budgets", new { month, grossIncome = 6000m, currency = "BRL" });
         Assert.Equal(HttpStatusCode.OK, plan.StatusCode);
         var planId = (await plan.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -91,18 +116,20 @@ public sealed class ApiFlowTests
         var spending = await bruno.Client.GetFromJsonAsync<JsonElement>("/api/v1/reports/spending-by-category?months=3");
         var byCategory = spending.GetProperty("categories").EnumerateArray()
             .ToDictionary(c => c.GetProperty("name").GetString()!, c => c.GetProperty("total").GetDecimal());
-        Assert.Equal(120.50m, byCategory.Single(c => c.Key.Contains("Aliment", StringComparison.OrdinalIgnoreCase)).Value);
+        Assert.Equal(2, byCategory.Count);
+        Assert.Equal(200.50m, byCategory.Single(c => c.Key.Contains("Aliment", StringComparison.OrdinalIgnoreCase)).Value);
+        Assert.Equal(50m, byCategory.Single(c => c.Key.Contains("Lazer", StringComparison.OrdinalIgnoreCase)).Value);
         var trends = await bruno.Client.GetFromJsonAsync<JsonElement>("/api/v1/reports/monthly-trends?months=3");
         Assert.Equal(3, trends.GetProperty("months").GetArrayLength());
 
         // listing, deletion
         var list = await bruno.Client.GetFromJsonAsync<JsonElement>("/api/v1/transactions");
-        Assert.Equal(4, list.GetProperty("totalCount").GetInt32());
+        Assert.Equal(6, list.GetProperty("totalCount").GetInt32());
         Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"/api/v1/transactions/{transactionId}")).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"/api/v1/goals/{goalId}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await ana.Client.GetAsync($"/api/v1/goals/{goalId}")).StatusCode);
         var after = await bruno.Client.GetFromJsonAsync<JsonElement>("/api/v1/transactions");
-        Assert.Equal(3, after.GetProperty("totalCount").GetInt32());
+        Assert.Equal(5, after.GetProperty("totalCount").GetInt32());
     }
 
     [PostgresFact]

@@ -110,15 +110,17 @@ internal sealed class PostgresApiFactory : WebApplicationFactory<Program>
     public async Task<TestUser> RegisterAsync(string name, bool createGroup = true, string? joinCode = null)
     {
         var client = CreateClient();
+        var email = $"pg-{Guid.NewGuid():N}@example.com";
         var register = await client.PostAsJsonAsync("/api/v1/auth/register", new
         {
-            Email = $"pg-{Guid.NewGuid():N}@example.com",
+            Email = email,
             Name = name,
             Password = "SecurePass123!"
         });
         register.EnsureSuccessStatusCode();
         var registered = await register.Content.ReadFromJsonAsync<JsonElement>();
         var userId = registered.GetProperty("user").GetProperty("id").GetGuid();
+        var refreshToken = registered.GetProperty("refreshToken").GetString()!;
         Use(client, registered.GetProperty("accessToken").GetString()!);
 
         Guid? coupleId = null;
@@ -141,14 +143,14 @@ internal sealed class PostgresApiFactory : WebApplicationFactory<Program>
             code = couple.GetProperty("joinCode").GetString();
         }
 
-        return new TestUser(client, userId, coupleId, code);
+        return new TestUser(client, userId, coupleId, code, email, refreshToken);
     }
 
     private static void Use(HttpClient client, string token) =>
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 }
 
-internal sealed record TestUser(HttpClient Client, Guid UserId, Guid? CoupleId, string? JoinCode);
+internal sealed record TestUser(HttpClient Client, Guid UserId, Guid? CoupleId, string? JoinCode, string Email, string RefreshToken);
 
 internal sealed class FakeStorageAdapter : IStorageAdapter
 {

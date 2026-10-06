@@ -17,8 +17,11 @@ public sealed class MigrationTests
 
     public MigrationTests(PostgresServer server) => _server = server;
 
-    internal static AppDbContext Context(TestDatabase database) =>
-        new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(database.ConnectionString).Options);
+    internal static AppDbContext Context(TestDatabase database)
+    {
+        database.Server.Guard(database.ConnectionString);
+        return new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(database.ConnectionString).Options);
+    }
 
     internal static async Task MigrateAsync(TestDatabase database, string? target = null)
     {
@@ -52,6 +55,36 @@ public sealed class MigrationTests
 
         await using var db = Context(database);
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+    }
+
+    [PostgresFact]
+    public async Task TheForeignKeyMigration_FailsFastOnALockHeldElsewhere_RollsBackWhole_AndAppliesOnceTheLockIsGone()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await MigrateAsync(database, "20261006210924_AddImportJobAiCategorizationConsent");
+
+        await using (var blocker = await database.OpenAsync())
+        {
+            await using var transaction = await blocker.BeginTransactionAsync();
+            await using (var lockCommand = new Npgsql.NpgsqlCommand("LOCK TABLE transactions IN ROW EXCLUSIVE MODE", blocker, transaction))
+            {
+                await lockCommand.ExecuteNonQueryAsync();
+            }
+
+            var started = DateTime.UtcNow;
+            var failure = await Assert.ThrowsAnyAsync<Exception>(() => MigrateAsync(database));
+            var postgres = failure as Npgsql.PostgresException ?? failure.InnerException as Npgsql.PostgresException;
+            Assert.NotNull(postgres);
+            Assert.Equal("55P03", postgres!.SqlState); // lock_not_available
+            Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(30));
+            await transaction.RollbackAsync();
+        }
+
+        // Nothing of the migration stayed behind (it rolled back whole)...
+        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM pg_constraint WHERE conname LIKE 'FK_transactions_%users%'"));
+        // ...and with the lock gone it applies.
+        await MigrateAsync(database);
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM pg_constraint WHERE conname = 'FK_transactions_users_user_id'"));
     }
 
     [PostgresFact]

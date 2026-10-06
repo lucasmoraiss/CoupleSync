@@ -3,6 +3,9 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using CoupleSync.Domain.ValueObjects;
+using CoupleSync.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CoupleSync.IntegrationTests.Transactions;
 
@@ -171,8 +174,8 @@ public sealed class EndpointCoverageHttpTests
         var bruno = await RegisterAsync(factory, "Bruno", joinCode: ana.JoinCode);
         var stranger = await RegisterAsync(factory, "Outro grupo");
 
-        var lastMonth = DateTime.UtcNow.AddMonths(-1);
-        var day = new DateTime(lastMonth.Year, lastMonth.Month, 15, 15, 0, 0, DateTimeKind.Utc);
+        // Brasília months, like production: mid-day on the 15th of the previous month cannot cross a boundary.
+        var day = BrazilTime.MonthRangeUtc(BrazilTime.AddMonths(ThisMonth, -1)).StartUtc.AddDays(14).AddHours(15);
         async Task AddAsync(HttpClient client, decimal amount, string category) =>
             Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/v1/transactions", new
             {
@@ -294,6 +297,10 @@ public sealed class EndpointCoverageHttpTests
         await AssertErrorAsync(await ana.Client.DeleteAsync($"/api/v1/goals/{goalId}"), HttpStatusCode.NotFound, "GOAL_NOT_FOUND");
         var transactions = await ana.Client.GetFromJsonAsync<JsonElement>("/api/v1/transactions");
         Assert.Equal(1, transactions.GetProperty("totalCount").GetInt32()); // the user's transaction is never deleted with the goal
-        Assert.Equal(JsonValueKind.Null, transactions.GetProperty("items")[0].TryGetProperty("goalId", out var linked) ? linked.ValueKind : JsonValueKind.Null);
+        // The API does not expose goalId, so check the stored row: still there, no longer linked to the deleted goal.
+        using var scope = factory.Services.CreateScope();
+        var stored = await scope.ServiceProvider.GetRequiredService<AppDbContext>().Transactions
+            .IgnoreQueryFilters().AsNoTracking().SingleAsync(t => t.Id == transactionId);
+        Assert.Null(stored.GoalId);
     }
 }

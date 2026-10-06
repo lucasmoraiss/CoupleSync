@@ -167,15 +167,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.HasIndex(x => new { x.CoupleId, x.EventTimestamp });
             entity.HasIndex(x => new { x.CoupleId, x.CreatedAtUtc });
 
-
             entity.HasOne<Couple>()
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
-                .OnDelete(DeleteBehavior.Restrict);        });
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         modelBuilder.Entity<Transaction>(entity =>
         {
@@ -202,19 +203,21 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.HasIndex(x => new { x.CoupleId, x.EventTimestampUtc });
             entity.HasIndex(x => new { x.CoupleId, x.Category });
 
-
             entity.HasOne<Couple>()
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne<TransactionEventIngest>()
                 .WithMany()
                 .HasForeignKey(x => x.IngestEventId)
                 .OnDelete(DeleteBehavior.Restrict);
+
 
             entity.HasOne<Goal>()
                 .WithMany()
@@ -265,6 +268,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(x => x.CreatedByUserId)
@@ -292,6 +296,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
@@ -317,6 +322,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
+
 
             entity.HasOne<User>()
                 .WithMany()
@@ -344,6 +350,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
+
 
             entity.HasOne<User>()
                 .WithMany()
@@ -415,6 +422,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
@@ -458,6 +466,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
+
 
             entity.HasOne<User>()
                 .WithMany()

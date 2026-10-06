@@ -10,6 +10,10 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Adding a key needs a strong lock on both tables. If a long transaction of the previous instance holds
+            // one, fail fast (the migration rolls back whole) instead of queueing and blocking every writer behind us.
+            migrationBuilder.Sql(ForeignKeyMigrationSql.SetShortLockTimeout);
+
             migrationBuilder.CreateIndex(
                 name: "IX_transactions_user_id",
                 table: "transactions",

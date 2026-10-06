@@ -11,13 +11,17 @@ public sealed class RegisterDeviceTokenCommandHandler
 
     private readonly IDeviceTokenRepository _repository;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
+    /// <param name="delay">Pause between retries; injectable so tests do not really sleep (default: Task.Delay).</param>
     public RegisterDeviceTokenCommandHandler(
         IDeviceTokenRepository repository,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _repository = repository;
         _dateTimeProvider = dateTimeProvider;
+        _delay = delay ?? Task.Delay;
     }
 
     public async Task HandleAsync(RegisterDeviceTokenCommand command, CancellationToken cancellationToken)
@@ -27,7 +31,11 @@ public sealed class RegisterDeviceTokenCommandHandler
         {
             try
             {
+                // On PostgreSQL the registration is serialised by token and by user (advisory locks), so the retry
+                // below is only the fallback for other providers and for the rare cross-user row conflict.
+                await using var registration = await _repository.BeginRegistrationAsync(command.UserId, command.Token, cancellationToken);
                 await UpsertAndSaveAsync(command, now, cancellationToken);
+                await registration.CommitAsync(cancellationToken);
                 return;
             }
             catch (DbUpdateException ex) when (ex is DbUpdateConcurrencyException || ex.IsUniqueViolation())
@@ -46,7 +54,7 @@ public sealed class RegisterDeviceTokenCommandHandler
                 }
 
                 // A short random pause breaks the lockstep of requests that keep colliding on the same rows.
-                await Task.Delay(Random.Shared.Next(5, 25 * attempt), cancellationToken);
+                await _delay(TimeSpan.FromMilliseconds(Random.Shared.Next(5, 25 * attempt)), cancellationToken);
             }
         }
     }

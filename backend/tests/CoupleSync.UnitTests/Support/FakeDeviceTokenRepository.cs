@@ -47,6 +47,31 @@ public sealed class FakeDeviceTokenRepository : IDeviceTokenRepository
 
     public int DiscardCalls { get; private set; }
 
+    public int BeginCalls { get; private set; }
+
+    public int CommitCalls { get; private set; }
+
+    public Task<IDeviceTokenRegistration> BeginRegistrationAsync(Guid userId, string token, CancellationToken ct)
+    {
+        BeginCalls++;
+        return Task.FromResult<IDeviceTokenRegistration>(new Registration(this));
+    }
+
+    private sealed class Registration : IDeviceTokenRegistration
+    {
+        private readonly FakeDeviceTokenRepository _owner;
+
+        public Registration(FakeDeviceTokenRepository owner) => _owner = owner;
+
+        public Task CommitAsync(CancellationToken ct)
+        {
+            _owner.CommitCalls++;
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     public Task SaveChangesAsync(CancellationToken ct)
     {
         SaveCalls++;

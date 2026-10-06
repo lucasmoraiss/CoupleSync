@@ -34,6 +34,9 @@ public static class ForeignKeyMigrationSql
         ("import_jobs", "user_id", "users"),
     ];
 
+    /// <summary>Applies to the migration's own transaction only (SET LOCAL).</summary>
+    public const string SetShortLockTimeout = "SET LOCAL lock_timeout = '5s'";
+
     public static string ConstraintName(string table, string column, string principal) =>
         $"FK_{table}_{principal}_{column}";
 

@@ -122,11 +122,7 @@ public sealed class PostgresServer : IAsyncLifetime
             throw new InvalidOperationException(
                 $"Refusing to connect to {builder.Host}:{builder.Port}: the tests may only use their own container at {Host}:{Port}.");
         }
-
-        if (builder.Host!.Contains("neon.tech", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Refusing to connect to a cloud database.");
-        }
+        // Exact host and port of the container: that already excludes every other server, cloud databases included.
     }
 
     /// <summary>A new, empty database inside the container (each test gets its own).</summary>
