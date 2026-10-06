@@ -102,27 +102,53 @@ public sealed class AuthRepository : IAuthRepository
             .SingleOrDefaultAsync(x => x.UserId == userId && x.Purpose == purpose, cancellationToken);
     }
 
-    public Task<EmailCode?> FindEmailCodeForUpdateAsync(Guid userId, string purpose, CancellationToken cancellationToken)
+    public async Task<EmailCodeReissueResult> TryReissueEmailCodeAsync(
+        Guid userId,
+        string purpose,
+        string codeHash,
+        DateTime expiresAtUtc,
+        DateTime now,
+        int maxPerWindow,
+        TimeSpan window,
+        CancellationToken cancellationToken)
     {
-        return _dbContext.EmailCodes
-            .SingleOrDefaultAsync(x => x.UserId == userId && x.Purpose == purpose, cancellationToken);
-    }
+        var windowCutoff = now - window;
 
-    public async Task StoreEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
-    {
-        var entry = _dbContext.Entry(code);
-        if (entry.State == EntityState.Detached)
+        // One statement: the cap check and the increment are the same atomic UPDATE (row-locked on PostgreSQL), so
+        // concurrent requests cannot all pass the check at the same count. SET expressions read the pre-update row.
+        var affectedRows = await _dbContext.EmailCodes
+            .Where(x => x.UserId == userId
+                && x.Purpose == purpose
+                && (x.IssueWindowStartedAtUtc <= windowCutoff || x.IssueCount < maxPerWindow))
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.CodeHash, codeHash)
+                    .SetProperty(x => x.ExpiresAtUtc, expiresAtUtc)
+                    .SetProperty(x => x.CreatedAtUtc, now)
+                    .SetProperty(x => x.Attempts, 0)
+                    .SetProperty(x => x.IssueCount, x => x.IssueWindowStartedAtUtc <= windowCutoff ? 1 : x.IssueCount + 1)
+                    .SetProperty(x => x.IssueWindowStartedAtUtc, x => x.IssueWindowStartedAtUtc <= windowCutoff ? now : x.IssueWindowStartedAtUtc),
+                cancellationToken);
+
+        if (affectedRows > 0)
         {
-            _dbContext.EmailCodes.Add(code);
+            return EmailCodeReissueResult.Reissued;
         }
 
+        var exists = await _dbContext.EmailCodes.AnyAsync(x => x.UserId == userId && x.Purpose == purpose, cancellationToken);
+        return exists ? EmailCodeReissueResult.LimitReached : EmailCodeReissueResult.NoCode;
+    }
+
+    public async Task AddEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
+    {
+        _dbContext.EmailCodes.Add(code);
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException)
         {
-            entry.State = EntityState.Detached;
+            _dbContext.Entry(code).State = EntityState.Detached;
             throw;
         }
     }
@@ -136,10 +162,10 @@ public sealed class AuthRepository : IAuthRepository
         return affectedRows == 1;
     }
 
-    public async Task<bool> ConsumeEmailCodeAsync(Guid codeId, CancellationToken cancellationToken)
+    public async Task<bool> ConsumeEmailCodeAsync(Guid codeId, string verifiedCodeHash, CancellationToken cancellationToken)
     {
         var affectedRows = await _dbContext.EmailCodes
-            .Where(x => x.Id == codeId)
+            .Where(x => x.Id == codeId && x.CodeHash == verifiedCodeHash)
             .ExecuteDeleteAsync(cancellationToken);
 
         return affectedRows == 1;

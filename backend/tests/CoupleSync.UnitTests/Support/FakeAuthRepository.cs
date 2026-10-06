@@ -102,6 +102,9 @@ public sealed class FakeAuthRepository : IAuthRepository
     /// <summary>How many of the next code stores fail like a lost insert race (unique index on user + purpose).</summary>
     public int FailNextCodeStores { get; set; }
 
+    /// <summary>A store failure that is NOT an insert race (connection lost, timeout...).</summary>
+    public Exception? CodeStoreFailure { get; set; }
+
     public async Task ExecuteInTransactionAsync(Func<Task> action, CancellationToken cancellationToken)
     {
         var users = Users.Select(u => (User: u, u.PasswordHash, u.EmailVerified)).ToList();
@@ -142,24 +145,38 @@ public sealed class FakeAuthRepository : IAuthRepository
         return Task.FromResult(EmailCodes.SingleOrDefault(x => x.UserId == userId && x.Purpose == purpose));
     }
 
-    public Task<EmailCode?> FindEmailCodeForUpdateAsync(Guid userId, string purpose, CancellationToken cancellationToken)
+    public Task<EmailCodeReissueResult> TryReissueEmailCodeAsync(
+        Guid userId, string purpose, string codeHash, DateTime expiresAtUtc, DateTime now, int maxPerWindow, TimeSpan window, CancellationToken cancellationToken)
     {
-        return Task.FromResult(EmailCodes.SingleOrDefault(x => x.UserId == userId && x.Purpose == purpose));
+        var existing = EmailCodes.SingleOrDefault(x => x.UserId == userId && x.Purpose == purpose);
+        if (existing is null)
+        {
+            return Task.FromResult(EmailCodeReissueResult.NoCode);
+        }
+
+        if (existing.HasReachedIssueLimit(now, maxPerWindow, window))
+        {
+            return Task.FromResult(EmailCodeReissueResult.LimitReached);
+        }
+
+        existing.Reissue(codeHash, expiresAtUtc, now, window);
+        return Task.FromResult(EmailCodeReissueResult.Reissued);
     }
 
-    public Task StoreEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
+    public Task AddEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
     {
+        if (CodeStoreFailure is not null)
+        {
+            throw CodeStoreFailure;
+        }
+
         if (FailNextCodeStores > 0)
         {
             FailNextCodeStores--;
             throw new Microsoft.EntityFrameworkCore.DbUpdateException("duplicate key value violates unique constraint 23505");
         }
 
-        if (!EmailCodes.Contains(code))
-        {
-            EmailCodes.Add(code);
-        }
-
+        EmailCodes.Add(code);
         return Task.CompletedTask;
     }
 
@@ -175,9 +192,9 @@ public sealed class FakeAuthRepository : IAuthRepository
         return Task.FromResult(true);
     }
 
-    public Task<bool> ConsumeEmailCodeAsync(Guid codeId, CancellationToken cancellationToken)
+    public Task<bool> ConsumeEmailCodeAsync(Guid codeId, string verifiedCodeHash, CancellationToken cancellationToken)
     {
-        return Task.FromResult(EmailCodes.RemoveAll(x => x.Id == codeId) > 0);
+        return Task.FromResult(EmailCodes.RemoveAll(x => x.Id == codeId && x.CodeHash == verifiedCodeHash) > 0);
     }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)

@@ -43,7 +43,7 @@ public sealed class RequestPasswordResetCommandHandler
             return;
         }
 
-        await _flow.IssueAsync(user, EmailCodePurpose.PasswordReset, cancellationToken);
+        await _flow.TryIssueAsync(user, EmailCodePurpose.PasswordReset, cancellationToken);
     }
 }
 

@@ -68,11 +68,11 @@ public sealed class EmailCode
         return new EmailCode(userId, purpose, codeHash, expiresAtUtc, createdAtUtc);
     }
 
-    /// <summary>True when another code in the current window would exceed <paramref name="maxPerWindow"/>.</summary>
+    /// <summary>In-memory twin of the conditional UPDATE the repository runs in SQL (used by test doubles). True when another code in the current window would exceed <paramref name="maxPerWindow"/>.</summary>
     public bool HasReachedIssueLimit(DateTime now, int maxPerWindow, TimeSpan window) =>
         now - IssueWindowStartedAtUtc < window && IssueCount >= maxPerWindow;
 
-    /// <summary>Replaces the live code in place (the previous one stops working, attempts start over) and counts the issue.</summary>
+    /// <summary>In-memory twin of the SQL re-issue (used by test doubles): replaces the live code, resets attempts, counts the issue.</summary>
     public void Reissue(string codeHash, DateTime expiresAtUtc, DateTime now, TimeSpan window)
     {
         if (string.IsNullOrWhiteSpace(codeHash))

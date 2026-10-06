@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Infrastructure.Persistence;
@@ -51,7 +52,7 @@ public sealed class AuthRepositoryEmailCodeTests : IDisposable
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => repository.ExecuteInTransactionAsync(async () =>
             {
-                await repository.ConsumeEmailCodeAsync(code.Id, CancellationToken.None);
+                await repository.ConsumeEmailCodeAsync(code.Id, code.CodeHash, CancellationToken.None);
                 user.ChangePasswordHash("new-hash");
                 await repository.SaveChangesAsync(CancellationToken.None);
                 await repository.RevokeRefreshTokensByUserIdAsync(userId, CancellationToken.None);
@@ -78,7 +79,7 @@ public sealed class AuthRepositoryEmailCodeTests : IDisposable
 
             await repository.ExecuteInTransactionAsync(async () =>
             {
-                Assert.True(await repository.ConsumeEmailCodeAsync(code.Id, CancellationToken.None));
+                Assert.True(await repository.ConsumeEmailCodeAsync(code.Id, code.CodeHash, CancellationToken.None));
                 user.ChangePasswordHash("new-hash");
                 await repository.SaveChangesAsync(CancellationToken.None);
                 await repository.RevokeRefreshTokensByUserIdAsync(userId, CancellationToken.None);
@@ -92,7 +93,7 @@ public sealed class AuthRepositoryEmailCodeTests : IDisposable
     }
 
     [Fact]
-    public async Task TheIssueCount_IsPersisted_SoANewContextSeesTheSpentBudget()
+    public async Task TheIssueCount_IsPersisted_AndTheCapIsEnforcedByTheUpdateItself()
     {
         var userId = await SeedUserWithCodeAndSessionAsync();
         var window = TimeSpan.FromHours(1);
@@ -100,39 +101,65 @@ public sealed class AuthRepositoryEmailCodeTests : IDisposable
         for (var i = 0; i < 4; i++)
         {
             await using var db = NewContext();
-            var repository = new AuthRepository(db);
-            var code = (await repository.FindEmailCodeForUpdateAsync(userId, EmailCodePurpose.PasswordReset, CancellationToken.None))!;
-            code.Reissue($"hash-{i}", Now.AddMinutes(15), Now.AddMinutes(i + 1), window);
-            await repository.StoreEmailCodeAsync(code, CancellationToken.None);
+            var result = await new AuthRepository(db).TryReissueEmailCodeAsync(
+                userId, EmailCodePurpose.PasswordReset, $"hash-{i}", Now.AddMinutes(15), Now.AddMinutes(i + 1), 5, window, CancellationToken.None);
+            Assert.Equal(EmailCodeReissueResult.Reissued, result);
+        }
+
+        await using (var db = NewContext())
+        {
+            var limited = await new AuthRepository(db).TryReissueEmailCodeAsync(
+                userId, EmailCodePurpose.PasswordReset, "hash-too-many", Now.AddMinutes(15), Now.AddMinutes(10), 5, window, CancellationToken.None);
+            Assert.Equal(EmailCodeReissueResult.LimitReached, limited);
         }
 
         await using var fresh = NewContext();
         var stored = (await new AuthRepository(fresh).FindEmailCodeAsync(userId, EmailCodePurpose.PasswordReset, CancellationToken.None))!;
         Assert.Equal(5, stored.IssueCount);
-        Assert.Equal("hash-3", stored.CodeHash);
-        Assert.True(stored.HasReachedIssueLimit(Now.AddMinutes(10), 5, window));
-        Assert.False(stored.HasReachedIssueLimit(Now.AddHours(2), 5, window));
+        Assert.Equal("hash-3", stored.CodeHash); // the refused request changed nothing
+
+        await using (var db = NewContext())
+        {
+            var afterWindow = await new AuthRepository(db).TryReissueEmailCodeAsync(
+                userId, EmailCodePurpose.PasswordReset, "hash-new-window", Now.AddHours(3), Now.AddHours(2), 5, window, CancellationToken.None);
+            Assert.Equal(EmailCodeReissueResult.Reissued, afterWindow);
+        }
+
+        await using var last = NewContext();
+        var reset = await last.EmailCodes.AsNoTracking().SingleAsync();
+        Assert.Equal(1, reset.IssueCount);
+        Assert.Equal(Now.AddHours(2), reset.IssueWindowStartedAtUtc);
+        Assert.Equal(0, reset.Attempts);
     }
 
     [Fact]
-    public async Task StoringASecondCodeForTheSameUserAndPurpose_FailsAsDbUpdateException_AndTheRepositoryRecovers()
+    public async Task ReissueWithoutACode_ReportsNoCode_AndASecondInsertFailsAsDbUpdateException()
     {
         var userId = await SeedUserWithCodeAndSessionAsync();
 
         await using var db = NewContext();
         var repository = new AuthRepository(db);
+        Assert.Equal(EmailCodeReissueResult.NoCode, await repository.TryReissueEmailCodeAsync(
+            userId, EmailCodePurpose.EmailVerification, "h", Now.AddMinutes(15), Now, 5, TimeSpan.FromHours(1), CancellationToken.None));
+
         var duplicate = EmailCode.Create(userId, EmailCodePurpose.PasswordReset, "other", Now.AddMinutes(15), Now);
+        await Assert.ThrowsAsync<DbUpdateException>(() => repository.AddEmailCodeAsync(duplicate, CancellationToken.None));
 
-        await Assert.ThrowsAsync<DbUpdateException>(() => repository.StoreEmailCodeAsync(duplicate, CancellationToken.None));
+        // The failed entity was detached: the same context keeps working.
+        Assert.Equal(EmailCodeReissueResult.Reissued, await repository.TryReissueEmailCodeAsync(
+            userId, EmailCodePurpose.PasswordReset, "retry-hash", Now.AddMinutes(30), Now.AddMinutes(1), 5, TimeSpan.FromHours(1), CancellationToken.None));
+    }
 
-        // The failed entity was detached: the retry reads the winner and updates it in place.
-        var existing = (await repository.FindEmailCodeForUpdateAsync(userId, EmailCodePurpose.PasswordReset, CancellationToken.None))!;
-        existing.Reissue("retry-hash", Now.AddMinutes(30), Now.AddMinutes(1), TimeSpan.FromHours(1));
-        await repository.StoreEmailCodeAsync(existing, CancellationToken.None);
+    [Fact]
+    public async Task Consume_OnlyDeletesTheCodeThatWasVerified()
+    {
+        var userId = await SeedUserWithCodeAndSessionAsync();
+        await using var db = NewContext();
+        var repository = new AuthRepository(db);
+        var code = (await repository.FindEmailCodeAsync(userId, EmailCodePurpose.PasswordReset, CancellationToken.None))!;
 
-        await using var check = NewContext();
-        var stored = await check.EmailCodes.SingleAsync();
-        Assert.Equal("retry-hash", stored.CodeHash);
-        Assert.Equal(2, stored.IssueCount);
+        Assert.False(await repository.ConsumeEmailCodeAsync(code.Id, "some-other-hash", CancellationToken.None));
+        Assert.True(await repository.ConsumeEmailCodeAsync(code.Id, code.CodeHash, CancellationToken.None));
+        Assert.False(await repository.ConsumeEmailCodeAsync(code.Id, code.CodeHash, CancellationToken.None));
     }
 }

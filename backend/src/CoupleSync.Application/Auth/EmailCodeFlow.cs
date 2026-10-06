@@ -63,51 +63,71 @@ public sealed class EmailCodeFlow
 
     /// <summary>
     /// Creates a new code (invalidating the previous one) and e-mails it. The cap (<see cref="MaxCodesPerWindow"/> per
-    /// hour per user and purpose) is kept in the database next to the code, so a restart does not grant a fresh budget.
-    /// A provider failure is logged and swallowed: callers answer the same way whether or not the e-mail went out.
+    /// hour per user and purpose) is kept in the database next to the code and enforced by one atomic conditional UPDATE,
+    /// so it holds across restarts and across any number of concurrent requests; only a request whose write won is e-mailed.
+    /// A provider failure is logged and swallowed. Any other storage failure propagates (see <see cref="TryIssueAsync"/>).
     /// </summary>
     public async Task<CodeIssueOutcome> IssueAsync(User user, string purpose, CancellationToken cancellationToken)
     {
-        // Two requests can race on the unique (user, purpose) index: the loser re-reads and retries once.
+        // Two first-ever requests can race on the unique (user, purpose) index: the loser retries through the UPDATE path.
         for (var attempt = 1; attempt <= 2; attempt++)
         {
             var now = _dateTimeProvider.UtcNow;
             var code = _codes.Generate();
             var hash = _codes.Hash(user.Id, purpose, code);
+            var expires = now.AddMinutes(CodeValidMinutes);
 
-            var existing = await _authRepository.FindEmailCodeForUpdateAsync(user.Id, purpose, cancellationToken);
-            EmailCode entity;
-            if (existing is null)
-            {
-                entity = EmailCode.Create(user.Id, purpose, hash, now.AddMinutes(CodeValidMinutes), now);
-            }
-            else if (existing.HasReachedIssueLimit(now, MaxCodesPerWindow, IssueWindow))
+            var reissue = await _authRepository.TryReissueEmailCodeAsync(
+                user.Id, purpose, hash, expires, now, MaxCodesPerWindow, IssueWindow, cancellationToken);
+
+            if (reissue == EmailCodeReissueResult.LimitReached)
             {
                 _logger.LogInformation("Code request for user {UserId} ({Purpose}) skipped: request cap reached.", user.Id, purpose);
                 return CodeIssueOutcome.Throttled;
             }
-            else
-            {
-                existing.Reissue(hash, now.AddMinutes(CodeValidMinutes), now, IssueWindow);
-                entity = existing;
-            }
 
-            try
+            if (reissue == EmailCodeReissueResult.NoCode)
             {
-                await _authRepository.StoreEmailCodeAsync(entity, cancellationToken);
-            }
-            catch (DbUpdateException ex)
-            {
-                _logger.LogWarning(ex, "Could not store the {Purpose} code for user {UserId} (attempt {Attempt}).", purpose, user.Id, attempt);
-                continue;
+                try
+                {
+                    await _authRepository.AddEmailCodeAsync(EmailCode.Create(user.Id, purpose, hash, expires, now), cancellationToken);
+                }
+                catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+                {
+                    _logger.LogInformation("Lost the insert race for the {Purpose} code of user {UserId} (attempt {Attempt}).", purpose, user.Id, attempt);
+                    continue;
+                }
             }
 
             await SendAsync(user, purpose, code, cancellationToken);
             return CodeIssueOutcome.Sent;
         }
 
-        // Another request stored a code for this user at the same moment; that one was e-mailed.
+        // Another request inserted the first code at the same moment and its e-mail was queued by that request.
         return CodeIssueOutcome.Raced;
+    }
+
+    /// <summary>
+    /// For routes that must answer the same whatever happens (password reset request): any failure is logged, never thrown.
+    /// </summary>
+    public async Task TryIssueAsync(User user, string purpose, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await IssueAsync(user, purpose, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Issuing the {Purpose} code for user {UserId} failed.", purpose, user.Id);
+        }
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+    {
+        var message = ex.InnerException?.Message ?? ex.Message;
+        return message.Contains("23505", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("UNIQUE constraint", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task SendAsync(User user, string purpose, string code, CancellationToken cancellationToken)
@@ -169,7 +189,7 @@ public sealed class EmailCodeFlow
     /// </summary>
     public async Task ConsumeAsync(EmailCode code, CancellationToken cancellationToken)
     {
-        if (!await _authRepository.ConsumeEmailCodeAsync(code.Id, cancellationToken))
+        if (!await _authRepository.ConsumeEmailCodeAsync(code.Id, code.CodeHash, cancellationToken))
         {
             throw InvalidCode();
         }

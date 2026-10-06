@@ -62,6 +62,19 @@ public sealed class BrevoEmailClientTests
         Assert.DoesNotContain(ApiKey, handler.Body);
     }
 
+    [Fact]
+    public async Task Send_OmitsNullProperties_SoAnEmptyRecipientNameIsNotSentAsJsonNull()
+    {
+        var handler = new StubHandler();
+
+        await NewClient(handler).SendAsync(Message with { ToName = "" }, CancellationToken.None);
+
+        var to = JsonDocument.Parse(handler.Body!).RootElement.GetProperty("to")[0];
+        Assert.Equal("ana@example.com", to.GetProperty("email").GetString());
+        Assert.False(to.TryGetProperty("name", out _));
+        Assert.DoesNotContain("null", handler.Body);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.BadRequest)]
     [InlineData(HttpStatusCode.Unauthorized)]

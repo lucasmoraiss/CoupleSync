@@ -153,4 +153,31 @@ public sealed class EmailCodeHardeningTests
         await new ResendEmailVerificationCommandHandler(rig.Repository, rig.NewFlow())
             .HandleAsync(new ResendEmailVerificationCommand(rig.User.Id), CancellationToken.None);
     }
+
+    // a store failure that is not an insert race is an error, not a silent no-op
+
+    [Fact]
+    public async Task Resend_WhenStoringFailsForAnotherReason_IsAnError_NotASilentSuccess()
+    {
+        var rig = new Rig();
+        rig.Repository.CodeStoreFailure = new Microsoft.EntityFrameworkCore.DbUpdateException("connection reset by peer");
+
+        await Assert.ThrowsAsync<Microsoft.EntityFrameworkCore.DbUpdateException>(() =>
+            new ResendEmailVerificationCommandHandler(rig.Repository, rig.NewFlow())
+                .HandleAsync(new ResendEmailVerificationCommand(rig.User.Id), CancellationToken.None));
+
+        Assert.Empty(rig.Sender.Sent);
+    }
+
+    [Fact]
+    public async Task ForgotPassword_WhenStoringFails_StillAnswersUniformly()
+    {
+        var rig = new Rig();
+        rig.Repository.CodeStoreFailure = new Microsoft.EntityFrameworkCore.DbUpdateException("connection reset by peer");
+
+        await new RequestPasswordResetCommandHandler(rig.Repository, rig.NewFlow(), EmailTestKit.NewCodeService())
+            .HandleAsync(new RequestPasswordResetCommand("ana@example.com"), CancellationToken.None);
+
+        Assert.Empty(rig.Sender.Sent);
+    }
 }

@@ -2,6 +2,13 @@ using CoupleSync.Domain.Entities;
 
 namespace CoupleSync.Application.Common.Interfaces;
 
+public enum EmailCodeReissueResult
+{
+    Reissued,
+    LimitReached,
+    NoCode
+}
+
 public interface IAuthRepository
 {
     Task<bool> EmailExistsAsync(string email, CancellationToken cancellationToken);
@@ -34,15 +41,26 @@ public interface IAuthRepository
 
     Task<EmailCode?> FindEmailCodeAsync(Guid userId, string purpose, CancellationToken cancellationToken);
 
-    /// <summary>The live code of the user for the purpose, tracked so it can be re-issued in place; null when none.</summary>
-    Task<EmailCode?> FindEmailCodeForUpdateAsync(Guid userId, string purpose, CancellationToken cancellationToken);
+    /// <summary>
+    /// Re-issues the existing code of the user and purpose in ONE conditional statement (a single UPDATE ... WHERE the
+    /// window has expired OR issue_count &lt; max): the check and the increment cannot interleave with another request, so
+    /// across any number of concurrent calls at most <paramref name="maxPerWindow"/> succeed per window. Attempts start over.
+    /// </summary>
+    Task<EmailCodeReissueResult> TryReissueEmailCodeAsync(
+        Guid userId,
+        string purpose,
+        string codeHash,
+        DateTime expiresAtUtc,
+        DateTime now,
+        int maxPerWindow,
+        TimeSpan window,
+        CancellationToken cancellationToken);
 
     /// <summary>
-    /// Saves a new code, or the changes made to one returned by <see cref="FindEmailCodeForUpdateAsync"/>. Throws
-    /// <see cref="Microsoft.EntityFrameworkCore.DbUpdateException"/> when a concurrent request inserted the same
-    /// (user, purpose) first; the failed entity is detached so the caller can read again and retry.
+    /// Inserts the first code of a user and purpose. Throws <see cref="Microsoft.EntityFrameworkCore.DbUpdateException"/>
+    /// when a concurrent request inserted it first (unique index); the failed entity is detached so the caller can retry.
     /// </summary>
-    Task StoreEmailCodeAsync(EmailCode code, CancellationToken cancellationToken);
+    Task AddEmailCodeAsync(EmailCode code, CancellationToken cancellationToken);
 
     /// <summary>
     /// Spends one verification attempt on the code, atomically. False when the attempts are already used up
@@ -50,8 +68,11 @@ public interface IAuthRepository
     /// </summary>
     Task<bool> TryRegisterEmailCodeAttemptAsync(Guid codeId, int maxAttempts, CancellationToken cancellationToken);
 
-    /// <summary>Deletes the code. True for exactly one caller, so a code can be used only once even under concurrency.</summary>
-    Task<bool> ConsumeEmailCodeAsync(Guid codeId, CancellationToken cancellationToken);
+    /// <summary>
+    /// Deletes the code only if it still holds the hash that was verified (a code re-issued in the meantime keeps the row id
+    /// but not the hash). True for exactly one caller, so a code can be used only once even under concurrency.
+    /// </summary>
+    Task<bool> ConsumeEmailCodeAsync(Guid codeId, string verifiedCodeHash, CancellationToken cancellationToken);
 
     /// <summary>
     /// Runs the action in one database transaction: everything it saves, deletes or updates is committed together, or

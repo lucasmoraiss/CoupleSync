@@ -22,7 +22,7 @@ public sealed class BrevoEmailClient
 {
     public const string Endpoint = "https://api.brevo.com/v3/smtp/email";
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
     private readonly HttpClient _httpClient;
     private readonly EmailOptions _options;
