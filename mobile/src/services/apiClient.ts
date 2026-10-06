@@ -18,6 +18,8 @@ import type {
   JoinCoupleResponse,
   GetCoupleMeResponse,
   LeaveCoupleResponse,
+  MyGroupsResponse,
+  SwitchCoupleResponse,
   RegenerateJoinCodeResponse,
   GoalDto,
   GetGoalsResponse,
@@ -205,9 +207,17 @@ export const coupleApiClient = {
   getMyCouple: (): Promise<AxiosResponse<GetCoupleMeResponse>> =>
     axiosInstance.get<GetCoupleMeResponse>('/api/v1/couples/me'),
 
-  /** Sai do grupo; devolve um par de tokens sem grupo (o refresh token antigo deixa de valer). */
+  /** Sai do grupo ativo; devolve um novo par de tokens e qual grupo ficou ativo (outro grupo do usuário, ou nenhum). */
   leave: (): Promise<AxiosResponse<LeaveCoupleResponse>> =>
     axiosInstance.post<LeaveCoupleResponse>('/api/v1/couples/leave'),
+
+  /** Os grupos de quem está logado (só os dele) e qual está ativo. */
+  listMine: (): Promise<AxiosResponse<MyGroupsResponse>> =>
+    axiosInstance.get<MyGroupsResponse>('/api/v1/couples'),
+
+  /** Torna ativo outro grupo do usuário; devolve um novo par de tokens, já do grupo escolhido. */
+  switchTo: (coupleId: string): Promise<AxiosResponse<SwitchCoupleResponse>> =>
+    axiosInstance.post<SwitchCoupleResponse>('/api/v1/couples/switch', { coupleId }),
 
   /** Só o dono. O membro removido perde o acesso na hora. */
   removeMember: (memberUserId: string): Promise<AxiosResponse<void>> =>

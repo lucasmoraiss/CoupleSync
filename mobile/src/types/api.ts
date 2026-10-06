@@ -54,6 +54,35 @@ export interface GetCoupleMeResponse {
 export interface LeaveCoupleResponse {
   readonly accessToken: string;
   readonly refreshToken: string;
+  /** Grupo que ficou ativo depois da saída (outro grupo do usuário) ou null. Ausente em servidor antigo. */
+  readonly activeCoupleId?: string | null;
+}
+
+export interface MyGroupMemberResponse {
+  readonly userId: string;
+  readonly name: string;
+}
+
+/** Um dos grupos do usuário. Grupos não têm nome próprio: `name` descreve quem mais está nele. */
+export interface MyGroupResponse {
+  readonly coupleId: string;
+  readonly name: string;
+  readonly isOwner: boolean;
+  readonly isActive: boolean;
+  readonly joinedAtUtc: string;
+  readonly members: readonly MyGroupMemberResponse[];
+}
+
+export interface MyGroupsResponse {
+  readonly activeCoupleId: string | null;
+  readonly maxGroups: number;
+  readonly groups: readonly MyGroupResponse[];
+}
+
+export interface SwitchCoupleResponse {
+  readonly coupleId: string;
+  readonly accessToken: string;
+  readonly refreshToken: string;
 }
 
 export interface RegenerateJoinCodeResponse {

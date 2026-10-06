@@ -24,6 +24,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
+import { GroupSwitcher } from '@/components/GroupSwitcher';
 import { spokenBRL } from '@/utils/a11y';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -155,6 +156,8 @@ export default function DashboardScreen() {
             <Ionicons name="receipt-outline" size={22} color={colors.primaryLight} />
           </TouchableOpacity>
         </View>
+
+        <GroupSwitcher />
 
         <EmailVerificationBanner />
 

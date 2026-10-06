@@ -5,6 +5,7 @@ import { Tabs, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { useAnimatedStyle, withSpring, useSharedValue } from 'react-native-reanimated';
 import { useSessionStore } from '@/state/sessionStore';
+import { useGroupEpoch } from '@/state/groupEpoch';
 import { useCaptureConsentSync } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
 import { registerPushToken } from '@/services/pushTokenService';
 import { colors } from '@/theme';
@@ -29,6 +30,8 @@ function AnimatedTabIcon({ name, color, size, focused }: { name: IoniconsName; c
 
 export default function MainLayout() {
   const accessToken = useSessionStore((s) => s.accessToken);
+  // Muda a cada troca de grupo: todas as telas são remontadas e buscam os dados do grupo novo.
+  const groupEpoch = useGroupEpoch((s) => s.epoch);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -62,6 +65,7 @@ export default function MainLayout() {
 
   return (
     <Tabs
+      key={groupEpoch}
       screenOptions={{
         headerShown: false,
         tabBarStyle: {

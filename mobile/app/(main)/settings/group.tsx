@@ -18,6 +18,11 @@ import { coupleApiClient } from '@/services/apiClient';
 import { getApiErrorMessage, isNoGroupError } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
 import { clearGroupScopedQueries } from '@/services/queryClient';
+import { showToastGlobal } from '@/components/Toast/ToastProvider';
+import { GroupList } from '@/components/GroupSwitcher';
+import { applyGroupSession } from '@/modules/couple/groupSession';
+import { useMyGroups } from '@/modules/couple/useMyGroups';
+import { activeGroupOf, destinationAfterLeave, leaveFollowUpText } from '@/modules/couple/groups';
 import { describeJoinCodeValidity, isGroupOwner } from '@/modules/couple/group';
 import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
@@ -30,6 +35,7 @@ export default function GroupScreen() {
   const queryClient = useQueryClient();
   const userId = useSessionStore((s) => s.userId);
   const [copied, setCopied] = useState(false);
+  const { data: myGroups } = useMyGroups();
 
   const { data, error, isLoading, isError, refetch } = useQuery<GetCoupleMeResponse>({
     queryKey: QUERY_KEY,
@@ -69,10 +75,20 @@ export default function GroupScreen() {
 
   const leave = useMutation({
     mutationFn: () => coupleApiClient.leave().then((r) => r.data),
-    onSuccess: async (tokens) => {
-      await useSessionStore.getState().leaveCouple(tokens.accessToken, tokens.refreshToken);
-      queryClient.clear(); // nada do grupo antigo deve aparecer para quem sai
-      router.replace('/(auth)/couple-setup' as any);
+    onSuccess: async (result) => {
+      // Tokens novos e nada do grupo antigo no aparelho; se o usuário tem outro grupo, o servidor já o ativou.
+      await applyGroupSession({
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        coupleId: result.activeCoupleId ?? null,
+      });
+      if (destinationAfterLeave(result.activeCoupleId) === 'home') {
+        const next = myGroups?.groups.find((g) => g.coupleId === result.activeCoupleId);
+        showToastGlobal(next ? `Você saiu do grupo. Grupo ativo: ${next.name}` : 'Você saiu do grupo.', 'success');
+        router.replace('/' as any);
+      } else {
+        router.replace('/(auth)/couple-setup' as any);
+      }
     },
     onError: (err) => Alert.alert('Erro', getApiErrorMessage(err, 'Não foi possível sair do grupo.')),
   });
@@ -113,7 +129,8 @@ export default function GroupScreen() {
       : owner
         ? 'Você deixa de ver os dados do grupo. A administração passa ao membro mais antigo. As transações que você lançou continuam no grupo.'
         : 'Você deixa de ver os dados do grupo. As transações que você lançou continuam no grupo.';
-    Alert.alert('Sair do grupo', message, [
+    const followUp = data ? leaveFollowUpText(myGroups, data.coupleId) : '';
+    Alert.alert('Sair do grupo', message + followUp, [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Sair do grupo', style: 'destructive', onPress: () => leave.mutate() },
     ]);
@@ -137,6 +154,18 @@ export default function GroupScreen() {
           <Text style={styles.back}>← Voltar</Text>
         </TouchableOpacity>
         <Text style={styles.title} accessibilityRole="header">Grupo</Text>
+
+        {myGroups && myGroups.groups.length > 0 ? (
+          <>
+            <Text style={[styles.sectionTitle, styles.firstSection]} accessibilityRole="header">Seus grupos</Text>
+            <View style={styles.card}>
+              <GroupList />
+            </View>
+            <Text style={styles.sectionTitle} accessibilityRole="header">
+              {activeGroupOf(myGroups) ? `Grupo ativo: ${activeGroupOf(myGroups)!.name}` : 'Grupo ativo'}
+            </Text>
+          </>
+        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Código de convite</Text>
@@ -221,6 +250,7 @@ const styles = StyleSheet.create({
   back: { minHeight: 44, textAlignVertical: 'center', color: colors.primaryLight, fontSize: 14, fontWeight: '600', marginBottom: 12 },
   title: { fontSize: 26, fontWeight: '700', color: colors.text, marginBottom: 20 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginTop: 24, marginBottom: 8 },
+  firstSection: { marginTop: 0 },
   card: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 20 },
   cardLabel: { fontSize: 14, color: colors.textMuted, marginBottom: 8, textAlign: 'center' },
   code: { fontSize: 32, fontWeight: '800', color: colors.primaryLight, letterSpacing: 5, textAlign: 'center' },

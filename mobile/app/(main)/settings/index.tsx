@@ -7,10 +7,13 @@ import { openNotificationListenerSettings } from '@/modules/integrations/notific
 import { colors } from '@/theme';
 import { useConsentStore } from '@/modules/privacy/consentStore';
 import { formatConsentDate } from '@/modules/privacy/consent';
+import { useMyGroups } from '@/modules/couple/useMyGroups';
+import { captureDestinationText } from '@/modules/couple/groups';
 
 export default function SettingsScreen() {
   const capture = useConsentStore((state) => state.record.capture);
   const consentLoaded = useConsentStore((state) => state.loaded);
+  const { data: myGroups } = useMyGroups();
 
   // Ligar sem aceite anterior abre a tela de consentimento; com aceite anterior religa na hora.
   // Desligar vale na hora: o uploader para de enviar assim que o estado muda.
@@ -53,6 +56,7 @@ export default function SettingsScreen() {
                 ? `Aceita em ${formatConsentDate(capture.acceptedAt)}. ${capture.enabled ? 'Ligada.' : 'Desligada: nada é enviado.'}`
                 : 'Desligada. Ao ligar, você lê o que é lido e enviado e decide.'}
             </Text>
+            <Text style={styles.menuDesc}>{captureDestinationText(myGroups)}</Text>
           </View>
           <Switch
             value={capture.enabled && capture.acceptedAt !== null}

@@ -3,6 +3,8 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import { colors } from '@/theme';
+import { useMyGroups } from '@/modules/couple/useMyGroups';
+import { captureDestinationText } from '@/modules/couple/groups';
 import { TextSections } from '@/components/TextSections';
 import { CAPTURE_CONSENT_SECTIONS, CAPTURE_CONSENT_TITLE } from '@/modules/privacy/privacyContent';
 import { useConsentStore } from '@/modules/privacy/consentStore';
@@ -18,6 +20,7 @@ function leave() {
 }
 
 export default function CaptureConsentScreen() {
+  const { data: myGroups } = useMyGroups();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -55,6 +58,7 @@ export default function CaptureConsentScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title} accessibilityRole="header">{CAPTURE_CONSENT_TITLE}</Text>
         <Text style={styles.subtitle}>Leia antes de ligar. Nada é enviado nem guardado sem o seu aceite.</Text>
+        <Text style={styles.subtitle}>{captureDestinationText(myGroups)}</Text>
         <TextSections sections={CAPTURE_CONSENT_SECTIONS} />
       </ScrollView>
 

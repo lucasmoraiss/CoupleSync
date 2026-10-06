@@ -39,6 +39,12 @@ interface SessionActions {
   clearCouple: () => Promise<void>;
   /** Replace the token pair after a refresh, keeping userId and coupleId. No-op if there is no session. */
   setTokens: (accessToken: string, refreshToken: string) => Promise<void>;
+  /**
+   * The active group changed (switched, left into another group, created or joined another one): store the
+   * tokens of the new group. Counts as a new session for requests in flight: one sent on behalf of the previous
+   * group is never repeated with the new group's token. A missing refresh token keeps the stored one.
+   */
+  setActiveGroup: (accessToken: string, coupleId: string | null, refreshToken?: string | null) => Promise<void>;
   /** After leaving the group: store the group-less token pair and forget the group. */
   leaveCouple: (accessToken: string, refreshToken: string) => Promise<void>;
   clearSession: () => Promise<void>;
@@ -146,6 +152,23 @@ export const useSessionStore = create<SessionStore>((set, get) => {
       // Se o logout chegou durante a gravação, os tokens de quem saiu não voltam (nem ficam no armazenamento).
       if (!(await stillSameSession(epoch))) return;
       set({ accessToken, refreshToken });
+    },
+
+    setActiveGroup: async (accessToken: string, coupleId: string | null, newRefreshToken?: string | null) => {
+      const state = get();
+      if (!state.userId) return;
+      const epoch = sessionEpoch;
+      const refreshToken = newRefreshToken || state.refreshToken;
+      await SecureStore.setItemAsync(SECURE_STORE_KEY, JSON.stringify({
+        accessToken,
+        refreshToken,
+        userId: state.userId,
+        coupleId,
+      }));
+      if (!(await stillSameSession(epoch))) return;
+      // Época e tokens mudam juntos: daqui em diante toda requisição já sai com o token do grupo novo.
+      sessionEpoch += 1;
+      set({ accessToken, refreshToken, coupleId });
     },
 
     leaveCouple: async (accessToken: string, refreshToken: string) => {

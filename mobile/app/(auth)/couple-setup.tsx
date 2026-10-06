@@ -10,10 +10,13 @@ import {
   ScrollView,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { coupleApiClient } from '@/services/apiClient';
 import { getApiErrorMessage } from '@/services/apiError';
-import { useSessionStore } from '@/state/sessionStore';
+import { applyGroupSession } from '@/modules/couple/groupSession';
+import { useMyGroups } from '@/modules/couple/useMyGroups';
+import { canAddGroup, groupCountText } from '@/modules/couple/groups';
+import { GroupList } from '@/components/GroupSwitcher';
 import { colors } from '@/theme';
 
 export default function CoupleSetupScreen() {
@@ -21,13 +24,20 @@ export default function CoupleSetupScreen() {
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [createdCode, setCreatedCode] = useState<string | null>(null);
+  // ?add=1: o usuário já tem grupo e veio criar ou entrar em mais um (há para onde voltar).
+  const { add } = useLocalSearchParams<{ add?: string }>();
+  // Quem chega aqui pode já participar de grupos (foi removido do grupo ativo, ou quer mais um): eles aparecem
+  // para escolha, e o limite de grupos vale antes de oferecer criar ou entrar.
+  const { data: myGroups } = useMyGroups();
+  const hasGroups = (myGroups?.groups.length ?? 0) > 0;
+  const mayAdd = canAddGroup(myGroups);
 
   const handleCreate = async () => {
     setLoading(true);
     try {
       const { data } = await coupleApiClient.create();
-      // Persist new JWT (backend returns a fresh token containing couple_id claim).
-      await useSessionStore.getState().setAccessTokenAndCouple(data.accessToken, data.coupleId, data.refreshToken);
+      // O grupo novo passa a ser o ativo: guarda o token dele e esquece o que era do grupo anterior, se havia.
+      await applyGroupSession({ accessToken: data.accessToken, refreshToken: data.refreshToken, coupleId: data.coupleId });
       setCreatedCode(data.joinCode);
       setMode('create');
     } catch (err: any) {
@@ -46,8 +56,8 @@ export default function CoupleSetupScreen() {
     setLoading(true);
     try {
       const { data } = await coupleApiClient.join({ joinCode: joinCode.trim().toUpperCase() });
-      // Persist new JWT so the next requests send couple_id in the claim.
-      await useSessionStore.getState().setAccessTokenAndCouple(data.accessToken, data.coupleId, data.refreshToken);
+      // O grupo em que entrou passa a ser o ativo: guarda o token dele e esquece o que era do grupo anterior.
+      await applyGroupSession({ accessToken: data.accessToken, refreshToken: data.refreshToken, coupleId: data.coupleId });
       router.replace('/' as any);
     } catch (err: any) {
       Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao entrar no casal. Tente novamente.'));
@@ -186,7 +196,17 @@ export default function CoupleSetupScreen() {
           </Text>
         </View>
 
-        <View style={styles.options}>
+        {hasGroups ? (
+          <View style={styles.groupsCard}>
+            <Text style={styles.groupsTitle} accessibilityRole="header">Seus grupos</Text>
+            <Text style={styles.groupsHint}>Toque em um grupo para usar o app nele.</Text>
+            <GroupList showAddButton={false} />
+          </View>
+        ) : null}
+
+        {!mayAdd && myGroups ? <Text style={styles.limitText}>{groupCountText(myGroups)}</Text> : null}
+
+        <View style={[styles.options, !mayAdd && styles.hidden]}>
           <TouchableOpacity
             style={[styles.optionCard, loading && styles.buttonDisabled]}
             onPress={handleCreate}
@@ -223,6 +243,18 @@ export default function CoupleSetupScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {add ? (
+          <TouchableOpacity
+            style={styles.linkButton}
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/' as any))}
+            disabled={loading}
+            accessibilityLabel="Voltar sem criar nem entrar em outro grupo"
+            accessibilityRole="button"
+          >
+            <Text style={styles.linkText}>← Voltar</Text>
+          </TouchableOpacity>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -262,6 +294,34 @@ const styles = StyleSheet.create({
   },
   options: {
     gap: 16,
+  },
+  hidden: {
+    display: 'none',
+  },
+  groupsCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 24,
+  },
+  groupsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  groupsHint: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  limitText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 16,
   },
   optionCard: {
     backgroundColor: colors.surface,
