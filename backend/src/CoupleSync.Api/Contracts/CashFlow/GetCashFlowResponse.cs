@@ -10,4 +10,11 @@ public sealed record GetCashFlowResponse(
     decimal ProjectedSpend,
     IReadOnlyDictionary<string, decimal> CategoryBreakdown,
     string Assumptions,
-    DateTime GeneratedAtUtc);
+    DateTime GeneratedAtUtc,
+    string Month,
+    decimal MonthIncome,
+    decimal MonthSpentToDate,
+    decimal ForecastDailyAverage,
+    int RemainingDays,
+    decimal ForecastRemainingSpend,
+    decimal ProjectedMonthEndBalance);

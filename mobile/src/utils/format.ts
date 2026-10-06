@@ -12,8 +12,9 @@ export interface MemberName {
 
 /**
  * Rótulo "mês de ano" de uma data ISO vinda do servidor, lido em UTC.
- * O servidor delimita os períodos em UTC; converter para o fuso do aparelho deslocaria
- * o início do mês para o dia anterior em fusos a oeste de Greenwich.
+ * O servidor delimita o mês no horário de Brasília e devolve o início como instante UTC
+ * (1º do mês às 03:00Z); ler o mês em UTC dá o mês certo, enquanto converter para o fuso do
+ * aparelho deslocaria o início para o mês anterior em fusos a oeste de Greenwich.
  */
 export function monthLabelFromIso(iso: string): string {
   const match = /^(\d{4})-(\d{2})/.exec(iso ?? '');

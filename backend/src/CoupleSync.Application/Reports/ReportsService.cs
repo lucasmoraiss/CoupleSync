@@ -1,4 +1,6 @@
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Application.Income;
+using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Application.Reports;
 
@@ -13,11 +15,16 @@ public sealed class ReportsService
     ];
 
     private readonly IReportsRepository _repository;
+    private readonly IIncomeSourceRepository _incomeRepository;
     private readonly IDateTimeProvider _dateTimeProvider;
 
-    public ReportsService(IReportsRepository repository, IDateTimeProvider dateTimeProvider)
+    public ReportsService(
+        IReportsRepository repository,
+        IIncomeSourceRepository incomeRepository,
+        IDateTimeProvider dateTimeProvider)
     {
         _repository = repository;
+        _incomeRepository = incomeRepository;
         _dateTimeProvider = dateTimeProvider;
     }
 
@@ -30,8 +37,9 @@ public sealed class ReportsService
             throw new ArgumentOutOfRangeException(nameof(months), "O número de meses deve estar entre 1 e 60.");
 
         var now = _dateTimeProvider.UtcNow;
-        var from = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc)
-            .AddMonths(-months + 1);
+        var currentMonth = BrazilTime.MonthOf(now);
+        var firstMonth = BrazilTime.AddMonths(currentMonth, -months + 1);
+        var from = BrazilTime.MonthRangeUtc(firstMonth).StartUtc;
 
         var rows = await _repository.GetSpendingByCategoryAsync(coupleId, from, now, ct);
 
@@ -58,23 +66,24 @@ public sealed class ReportsService
             throw new ArgumentOutOfRangeException(nameof(months), "O número de meses deve estar entre 1 e 60.");
 
         var now = _dateTimeProvider.UtcNow;
-        var from = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc)
-            .AddMonths(-months + 1);
+        var currentMonth = BrazilTime.MonthOf(now);
+        var firstMonth = BrazilTime.AddMonths(currentMonth, -months + 1);
+        var from = BrazilTime.MonthRangeUtc(firstMonth).StartUtc;
 
         var rows = await _repository.GetMonthlySpendingAsync(coupleId, from, now, ct);
-        var lookup = rows.ToDictionary(r => (r.Year, r.Month), r => r.Total);
+        var lookup = rows.ToDictionary(r => $"{r.Year:D4}-{r.Month:D2}", r => r.Total);
+
+        // Real income of the group: registered sources of every member, recurring ones carried forward.
+        var candidates = await _incomeRepository.GetCandidatesForMonthsAsync(coupleId, firstMonth, currentMonth, ct);
 
         // Build a full calendar of N months so gaps show as 0.
         var items = new List<MonthlyTrendItem>(months);
         for (var i = 0; i < months; i++)
         {
-            var d = from.AddMonths(i);
-            var expense = lookup.TryGetValue((d.Year, d.Month), out var v) ? v : 0m;
-            items.Add(new MonthlyTrendItem(
-                $"{d.Year:D4}-{d.Month:D2}",
-                Income: 0m,   // V1 — income not tracked at transaction level
-                Expense: expense,
-                Net: -expense));
+            var month = BrazilTime.AddMonths(firstMonth, i);
+            var expense = lookup.TryGetValue(month, out var v) ? v : 0m;
+            var income = IncomeSchedule.TotalInReais(IncomeSchedule.EffectiveIn(candidates, month));
+            items.Add(new MonthlyTrendItem(month, income, expense, income - expense));
         }
 
         return new MonthlyTrendsResult(items);

@@ -49,7 +49,14 @@ public sealed class CashFlowController : ControllerBase
             result.ProjectedSpend,
             result.CategoryBreakdown,
             result.Assumptions,
-            result.GeneratedAtUtc));
+            result.GeneratedAtUtc,
+            result.Month,
+            result.MonthIncome,
+            result.MonthSpentToDate,
+            result.ForecastDailyAverage,
+            result.RemainingDays,
+            result.ForecastRemainingSpend,
+            result.ProjectedMonthEndBalance));
     }
 
     private Guid GetAuthenticatedCoupleId()

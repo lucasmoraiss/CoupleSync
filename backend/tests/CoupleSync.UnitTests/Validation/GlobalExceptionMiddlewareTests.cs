@@ -66,6 +66,7 @@ public sealed class GlobalExceptionMiddlewareTests
         // The Application layer rejects an out-of-range month count with an ArgumentOutOfRangeException (the repository is never reached).
         var service = new ReportsService(
             null!,
+            null!,
             new FixedDateTimeProvider(new DateTime(2026, 10, 5, 12, 0, 0, DateTimeKind.Utc)));
 
         var (status, body) = await InvokeAsync(async _ =>

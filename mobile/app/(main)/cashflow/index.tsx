@@ -38,7 +38,7 @@ export default function CashFlowScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Fluxo de Caixa</Text>
-        <Text style={styles.subtitle}>Projeção de despesas</Text>
+        <Text style={styles.subtitle}>Projeção do mês</Text>
       </View>
 
       {/* Horizon toggle */}
@@ -80,6 +80,24 @@ export default function CashFlowScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
+          {/* Projeção: saldo previsto ao fim do mês corrente */}
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>Saldo previsto no fim do mês</Text>
+            <Text
+              style={[
+                styles.cardValue,
+                data.projectedMonthEndBalance >= 0 ? styles.balancePositive : styles.balanceNegative,
+              ]}
+            >
+              {formatBRL(data.projectedMonthEndBalance)}
+            </Text>
+            <Text style={styles.periodText}>
+              Renda do mês {formatBRL(data.monthIncome)} − gasto até hoje {formatBRL(data.monthSpentToDate)} −
+              gasto previsto {formatBRL(data.forecastRemainingSpend)} ({data.remainingDays}{' '}
+              {data.remainingDays === 1 ? 'dia restante' : 'dias restantes'})
+            </Text>
+          </View>
+
           {/* Main summary card */}
           <View style={styles.card}>
             <Text style={styles.cardLabel}>Gasto histórico ({horizon} dias)</Text>
@@ -99,7 +117,7 @@ export default function CashFlowScreen() {
               </Text>
             </View>
             <View style={[styles.card, styles.cardHalf]}>
-              <Text style={styles.cardLabel}>Projeção {horizon}d</Text>
+              <Text style={styles.cardLabel}>Gasto previsto no mês</Text>
               <Text style={[styles.cardValue, styles.cardValueSm, styles.projectedValue]}>
                 {formatBRL(data.projectedSpend)}
               </Text>
@@ -170,6 +188,8 @@ const styles = StyleSheet.create({
   cardValue: { fontSize: 26, fontWeight: '700', color: colors.text },
   cardValueSm: { fontSize: 20 },
   projectedValue: { color: colors.errorLight },
+  balancePositive: { color: colors.success },
+  balanceNegative: { color: colors.errorLight },
   periodText: { fontSize: 12, color: colors.textDisabled, marginTop: 6 },
   section: { backgroundColor: colors.surface, borderRadius: 16, padding: 20, marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginBottom: 14 },

@@ -67,24 +67,15 @@ public sealed class ReportsRepository : IReportsRepository
                 && t.EventTimestampUtc >= fromUtc
                 && t.EventTimestampUtc <= toUtc);
 
-        var isSqlite = _dbContext.Database.ProviderName
-            ?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) == true;
-
-        if (isSqlite)
-        {
-            var local = await baseQuery
-                .Select(t => new { t.EventTimestampUtc, t.Amount })
-                .ToListAsync(ct);
-
-            return local
-                .GroupBy(r => (r.EventTimestampUtc.Year, r.EventTimestampUtc.Month))
-                .Select(g => new MonthlySpendingRow(g.Key.Year, g.Key.Month, g.Sum(r => r.Amount)))
-                .ToList();
-        }
-
-        return await baseQuery
-            .GroupBy(t => new { t.EventTimestampUtc.Year, t.EventTimestampUtc.Month })
-            .Select(g => new MonthlySpendingRow(g.Key.Year, g.Key.Month, g.Sum(t => t.Amount)))
+        // The month is a Brasília month, which no provider can derive from the UTC column in SQL.
+        var local = await baseQuery
+            .Select(t => new { t.EventTimestampUtc, t.Amount })
             .ToListAsync(ct);
+
+        return local
+            .Select(r => (Local: BrazilTime.ToLocal(r.EventTimestampUtc), r.Amount))
+            .GroupBy(r => (r.Local.Year, r.Local.Month))
+            .Select(g => new MonthlySpendingRow(g.Key.Year, g.Key.Month, g.Sum(r => r.Amount)))
+            .ToList();
     }
 }

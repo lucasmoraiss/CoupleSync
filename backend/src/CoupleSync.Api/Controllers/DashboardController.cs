@@ -30,11 +30,7 @@ public sealed class DashboardController : ControllerBase
         [FromQuery] DateTime? endDate = null,
         CancellationToken cancellationToken = default)
     {
-        if (startDate.HasValue && startDate.Value.Kind == DateTimeKind.Unspecified)
-            startDate = DateTime.SpecifyKind(startDate.Value, DateTimeKind.Utc);
-        if (endDate.HasValue && endDate.Value.Kind == DateTimeKind.Unspecified)
-            endDate = DateTime.SpecifyKind(endDate.Value, DateTimeKind.Utc);
-
+        // Dates without a time zone ("2026-10-01") are Brasília calendar days; the handler converts them.
         if (startDate.HasValue && endDate.HasValue && startDate > endDate)
             throw new BadRequestException("INVALID_DATE_RANGE", "A data inicial não pode ser posterior à data final.");
 

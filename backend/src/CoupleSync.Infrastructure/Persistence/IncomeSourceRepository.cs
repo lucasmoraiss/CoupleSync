@@ -13,11 +13,21 @@ public sealed class IncomeSourceRepository : IIncomeSourceRepository
         _dbContext = dbContext;
     }
 
-    public async Task<IReadOnlyList<IncomeSource>> GetByMonthAsync(Guid coupleId, string month, CancellationToken ct)
-        => await _dbContext.IncomeSources
-            .Where(s => s.CoupleId == coupleId && s.Month == month)
+    public async Task<IReadOnlyList<IncomeSource>> GetCandidatesForMonthsAsync(
+        Guid coupleId, string fromMonth, string toMonth, CancellationToken ct)
+    {
+        // A group has a handful of sources per month, so the month comparison is done in memory
+        // ("yyyy-MM" text; string ordering in SQL depends on the database collation).
+        var sources = await _dbContext.IncomeSources
+            .Where(s => s.CoupleId == coupleId)
             .OrderBy(s => s.CreatedAtUtc)
             .ToListAsync(ct);
+
+        return sources
+            .Where(s => string.CompareOrdinal(s.Month, toMonth) <= 0
+                && (s.IsRecurring || string.CompareOrdinal(s.Month, fromMonth) >= 0))
+            .ToList();
+    }
 
     public Task<IncomeSource?> GetByIdAsync(Guid id, Guid coupleId, CancellationToken ct)
         => _dbContext.IncomeSources

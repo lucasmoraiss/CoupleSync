@@ -153,7 +153,7 @@ public sealed class BudgetService
         CancellationToken cancellationToken)
     {
         var now = _dateTimeProvider.UtcNow;
-        var currentMonth = $"{now.Year:D4}-{now.Month:D2}";
+        var currentMonth = BrazilTime.MonthOf(now);
         return await GetPlanAsync(coupleId, currentMonth, cancellationToken);
     }
 
@@ -168,7 +168,7 @@ public sealed class BudgetService
         CancellationToken cancellationToken)
     {
         var now = _dateTimeProvider.UtcNow;
-        var currentMonth = $"{now.Year:D4}-{now.Month:D2}";
+        var currentMonth = BrazilTime.MonthOf(now);
 
         var existing = await _repository.GetByMonthAsync(coupleId, currentMonth, cancellationToken);
 
@@ -215,13 +215,7 @@ public sealed class BudgetService
            - allocations.Where(a => CurrencyRules.IsBrl(a.Currency)).Sum(a => a.AllocatedAmount);
 
     private static (DateTime StartUtc, DateTime EndUtc) ParseMonthWindow(string month)
-    {
-        var parts = month.Split('-');
-        var year = int.Parse(parts[0]);
-        var monthNum = int.Parse(parts[1]);
-        var start = new DateTime(year, monthNum, 1, 0, 0, 0, DateTimeKind.Utc);
-        return (start, start.AddMonths(1));
-    }
+        => BrazilTime.MonthRangeUtc(month);
 
     private static BudgetPlanDto MapToDto(BudgetPlan plan, Dictionary<string, decimal>? actualSpentMap = null)
     {

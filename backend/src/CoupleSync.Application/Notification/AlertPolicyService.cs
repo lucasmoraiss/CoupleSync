@@ -98,7 +98,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
         DateTime nowUtc,
         CancellationToken ct)
     {
-        var currentMonth = $"{nowUtc.Year:D4}-{nowUtc.Month:D2}";
+        var currentMonth = BrazilTime.MonthOf(nowUtc);
         var plan = await _budgetRepository!.GetByMonthAsync(coupleId, currentMonth, ct);
 
         if (plan is null)
@@ -117,8 +117,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
         if (alreadySent)
             return null;
 
-        var monthStart = new DateTime(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-        var monthEnd = monthStart.AddMonths(1);
+        var (monthStart, monthEnd) = BrazilTime.MonthRangeUtc(currentMonth);
         var actualSpentMap = await _transactionRepository!.GetActualSpentByCategoryAsync(
             coupleId, monthStart, monthEnd, ct);
 
@@ -140,7 +139,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
         DateTime nowUtc,
         CancellationToken ct)
     {
-        var currentMonth = $"{nowUtc.Year:D4}-{nowUtc.Month:D2}";
+        var currentMonth = BrazilTime.MonthOf(nowUtc);
         var plan = await _budgetRepository!.GetByMonthAsync(coupleId, currentMonth, ct);
 
         if (plan is null)
@@ -159,8 +158,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
         if (alreadySent)
             return null;
 
-        var monthStart = new DateTime(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-        var monthEnd = monthStart.AddMonths(1);
+        var (monthStart, monthEnd) = BrazilTime.MonthRangeUtc(currentMonth);
         var actualSpentMap = await _transactionRepository!.GetActualSpentByCategoryAsync(
             coupleId, monthStart, monthEnd, ct);
 

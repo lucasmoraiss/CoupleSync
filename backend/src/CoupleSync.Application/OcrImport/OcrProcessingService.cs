@@ -106,8 +106,7 @@ public sealed class OcrProcessingService
 
     private async Task<IReadOnlyList<string>> GetAvailableCategoriesAsync(Guid coupleId, CancellationToken ct)
     {
-        var now = DateTime.UtcNow;
-        var currentMonth = $"{now.Year:D4}-{now.Month:D2}";
+        var currentMonth = BrazilTime.MonthOf(DateTime.UtcNow);
         var plan = await _budgetRepository.GetByMonthAsync(coupleId, currentMonth, ct);
 
         if (plan?.Allocations.Count > 0)

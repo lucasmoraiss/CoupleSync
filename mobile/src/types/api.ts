@@ -121,6 +121,17 @@ export interface GetCashFlowResponse {
   readonly categoryBreakdown: Record<string, number>;
   readonly assumptions: string;
   readonly generatedAtUtc: string;
+  /** Mês corrente no fuso do Brasil ("AAAA-MM"). */
+  readonly month: string;
+  /** Renda do mês: fontes de renda do grupo, com as recorrentes já aplicadas. */
+  readonly monthIncome: number;
+  readonly monthSpentToDate: number;
+  /** Média diária usada na previsão (do mês atual; com menos de 3 dias, a do mês anterior). */
+  readonly forecastDailyAverage: number;
+  readonly remainingDays: number;
+  readonly forecastRemainingSpend: number;
+  /** Saldo previsto ao fim do mês = renda − gasto até hoje − gasto previsto dos dias restantes. */
+  readonly projectedMonthEndBalance: number;
 }
 
 export interface NotificationSettingsResponse {

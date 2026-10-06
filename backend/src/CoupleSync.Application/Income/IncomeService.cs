@@ -102,7 +102,8 @@ public sealed class IncomeService
         string month,
         CancellationToken ct)
     {
-        var sources = await _repository.GetByMonthAsync(coupleId, month, ct);
+        var candidates = await _repository.GetCandidatesForMonthsAsync(coupleId, month, month, ct);
+        var sources = IncomeSchedule.EffectiveIn(candidates, month);
         var couple = await _coupleRepository.FindByIdWithMembersAsync(coupleId, ct);
 
         var currentUserName = couple?.Members.FirstOrDefault(m => m.Id == userId)?.Name ?? "Você";
@@ -174,7 +175,7 @@ public sealed class IncomeService
         CancellationToken ct)
     {
         var now = _dateTimeProvider.UtcNow;
-        var currentMonth = $"{now.Year:D4}-{now.Month:D2}";
+        var currentMonth = BrazilTime.MonthOf(now);
         return await GetMonthlyIncomeAsync(coupleId, userId, currentMonth, ct);
     }
 

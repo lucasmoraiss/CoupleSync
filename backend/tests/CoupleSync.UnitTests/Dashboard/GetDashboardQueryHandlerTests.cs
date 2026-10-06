@@ -60,8 +60,9 @@ public sealed class GetDashboardQueryHandlerTests
             new GetDashboardQuery(coupleId, null, null),
             CancellationToken.None);
 
-        Assert.Equal(new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc), result.PeriodStart);
-        Assert.Equal(new DateTime(2026, 4, 30, 23, 59, 59, DateTimeKind.Utc), result.PeriodEnd);
+        // The month runs on Brasília time (UTC-3): April 1st 00:00 there is 03:00 UTC.
+        Assert.Equal(new DateTime(2026, 4, 1, 3, 0, 0, DateTimeKind.Utc), result.PeriodStart);
+        Assert.Equal(new DateTime(2026, 5, 1, 2, 59, 59, 999, DateTimeKind.Utc), result.PeriodEnd);
     }
 
     [Fact]

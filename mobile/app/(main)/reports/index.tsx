@@ -95,6 +95,10 @@ function ReportsScreenInner() {
         topLabelComponent: () => null,
       })) ?? [];
 
+  const periodIncome = trendsData?.months?.reduce((sum, m) => sum + (m.income ?? 0), 0) ?? 0;
+  const periodExpense = trendsData?.months?.reduce((sum, m) => sum + (m.expense ?? 0), 0) ?? 0;
+  const periodBalance = periodIncome - periodExpense;
+
   const hasSpendingData = pieData.length > 0 && pieData.some((d) => d.value > 0);
   const hasTrendsData = barData.length > 0 && barData.some((d) => d.value > 0);
 
@@ -150,6 +154,30 @@ function ReportsScreenInner() {
         {/* Spending by category — Pie chart */}
         {!isLoading && !hasError && (
           <>
+            {/* Renda, despesas e saldo do período */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Resumo do período</Text>
+              <View style={styles.legendItem}>
+                <Text style={styles.legendLabel}>Renda</Text>
+                <Text style={styles.legendValue}>{formatBRL(periodIncome)}</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <Text style={styles.legendLabel}>Despesas</Text>
+                <Text style={styles.legendValue}>{formatBRL(periodExpense)}</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <Text style={styles.legendLabel}>Saldo</Text>
+                <Text
+                  style={[
+                    styles.legendValue,
+                    { color: periodBalance >= 0 ? colors.success : colors.errorLight },
+                  ]}
+                >
+                  {formatBRL(periodBalance)}
+                </Text>
+              </View>
+            </View>
+
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Gastos por categoria</Text>
 

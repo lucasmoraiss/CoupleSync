@@ -84,7 +84,7 @@ public sealed class IncomeGroupIntegrationTests
     {
         var response = await client.PostAsJsonAsync("/api/v1/incomes", new
         {
-            month = DateTime.UtcNow.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+            month = CoupleSync.Domain.ValueObjects.BrazilTime.MonthOf(DateTime.UtcNow),
             name,
             amount,
             currency = "BRL",

@@ -24,6 +24,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
 import type { IncomeSourceResponse, IncomeGroupResponse } from '@/types/api';
+import { brazilMonth } from '@/utils/month';
 import { amountCentsError, centsFromDigits } from '@/utils/amount';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -51,10 +52,7 @@ function formatBRLInput(cents: number): string {
 }
 
 function currentMonthISO(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+  return brazilMonth();
 }
 
 const MONTH_NAMES = [
