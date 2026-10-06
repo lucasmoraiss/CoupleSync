@@ -133,7 +133,7 @@ public sealed class AuthRepositoryEmailCodeTests : IDisposable
     }
 
     [Fact]
-    public async Task ReissueWithoutACode_ReportsNoCode_AndASecondInsertFailsAsDbUpdateException()
+    public async Task ReissueWithoutACode_ReportsNoCode_AndASecondInsertFailsAsUniqueViolation_LeavingTheEntityDetached()
     {
         var userId = await SeedUserWithCodeAndSessionAsync();
 
@@ -145,7 +145,10 @@ public sealed class AuthRepositoryEmailCodeTests : IDisposable
         var duplicate = EmailCode.Create(userId, EmailCodePurpose.PasswordReset, "other", Now.AddMinutes(15), Now);
         await Assert.ThrowsAsync<CoupleSync.Application.Common.Exceptions.UniqueViolationException>(() => repository.AddEmailCodeAsync(duplicate, CancellationToken.None));
 
-        // The failed entity was detached: the same context keeps working.
+        // The failed entity was detached: it is no longer tracked and the same context can save again.
+        Assert.Equal(EntityState.Detached, db.Entry(duplicate).State);
+        await repository.SaveChangesAsync(CancellationToken.None);
+
         Assert.Equal(EmailCodeReissueResult.Reissued, await repository.TryReissueEmailCodeAsync(
             userId, EmailCodePurpose.PasswordReset, "retry-hash", Now.AddMinutes(30), Now.AddMinutes(1), 5, TimeSpan.FromHours(1), CancellationToken.None));
     }

@@ -147,7 +147,7 @@ public sealed class AuthRepository : IAuthRepository
         {
             await DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DataStoreException)
         {
             _dbContext.Entry(code).State = EntityState.Detached;
             throw;

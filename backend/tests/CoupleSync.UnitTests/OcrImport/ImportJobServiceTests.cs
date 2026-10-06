@@ -404,8 +404,6 @@ internal sealed class FakeTransactionRepository : ITransactionRepository
         => Task.FromResult(new Dictionary<string, decimal>());
 
     public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
-
-    public Task ReloadAsync(ImportJob job, CancellationToken ct) => Task.CompletedTask;
 }
 
 //  Local classifier stubs removed — classification now lives in OcrProcessingService.
