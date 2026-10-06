@@ -92,6 +92,23 @@ jobs:
           name: e2e-test-results
           path: backend/tests/CoupleSync.E2ETests/TestResults/*.trx
 
+      # Starts its own PostgreSQL container (Testcontainers; ubuntu runners have Docker) and ignores DATABASE_URL.
+      # COUPLESYNC_REQUIRE_POSTGRES_TESTS=1 turns a missing Docker into a failure instead of a skip.
+      - name: Test — PostgreSQL (Testcontainers)
+        env:
+          COUPLESYNC_REQUIRE_POSTGRES_TESTS: "1"
+        run: >
+          dotnet test backend/tests/CoupleSync.PostgresTests/CoupleSync.PostgresTests.csproj
+          --no-build --configuration Release
+          --logger "trx;LogFileName=postgres-results.trx"
+
+      - name: Upload PostgreSQL test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-test-results
+          path: backend/tests/CoupleSync.PostgresTests/TestResults/*.trx
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

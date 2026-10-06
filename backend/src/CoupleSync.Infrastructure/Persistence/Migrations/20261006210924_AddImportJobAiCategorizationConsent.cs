@@ -11,7 +11,7 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<bool>(
-                name: "AiCategorizationConsent",
+                name: "ai_categorization_consent",
                 table: "import_jobs",
                 type: "boolean",
                 nullable: false,
@@ -22,7 +22,7 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "AiCategorizationConsent",
+                name: "ai_categorization_consent",
                 table: "import_jobs");
         }
     }

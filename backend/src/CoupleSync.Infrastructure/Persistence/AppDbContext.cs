@@ -166,7 +166,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.HasIndex(x => x.CoupleId);
             entity.HasIndex(x => new { x.CoupleId, x.EventTimestamp });
             entity.HasIndex(x => new { x.CoupleId, x.CreatedAtUtc });
-        });
+
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);        });
 
         modelBuilder.Entity<Transaction>(entity =>
         {
@@ -193,6 +202,15 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.HasIndex(x => new { x.CoupleId, x.EventTimestampUtc });
             entity.HasIndex(x => new { x.CoupleId, x.Category });
 
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<TransactionEventIngest>()
                 .WithMany()
                 .HasForeignKey(x => x.IngestEventId)
@@ -241,6 +259,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
             entity.HasIndex(x => x.CoupleId);
             entity.HasIndex(x => new { x.CoupleId, x.Status });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<DeviceToken>(entity =>
@@ -258,6 +286,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.HasIndex(x => new { x.UserId, x.Platform }).IsUnique();
             entity.HasIndex(x => x.Token).IsUnique();
             entity.HasIndex(x => x.CoupleId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<NotificationSettings>(entity =>
@@ -274,6 +312,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
             entity.HasIndex(x => x.UserId).IsUnique();
             entity.HasIndex(x => x.CoupleId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<NotificationEvent>(entity =>
@@ -291,6 +339,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.DeliveredAtUtc).HasColumnName("delivered_at_utc");
 
             entity.HasIndex(x => new { x.CoupleId, x.Status });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<BudgetPlan>(entity =>
@@ -356,6 +414,11 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ImportJob>(entity =>
@@ -383,12 +446,23 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             // Status and the line states are concurrency tokens: a write made on a stale copy of the job (the worker
             // finishing a job that recovery already failed, two confirmations of different lines) is rejected.
             entity.Property(x => x.LineStatesJson).HasColumnName("line_states_json").HasColumnType("text").IsConcurrencyToken();
+            entity.Property(x => x.AiCategorizationConsent).HasColumnName("ai_categorization_consent").IsRequired();
             entity.Property(x => x.SourceFileName).HasColumnName("source_file_name").HasMaxLength(ImportJob.MaxFileNameLength);
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
 
             entity.HasIndex(x => x.CoupleId);
             entity.HasIndex(x => new { x.CoupleId, x.Status });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         ApplyCoupleQueryFilters(modelBuilder);

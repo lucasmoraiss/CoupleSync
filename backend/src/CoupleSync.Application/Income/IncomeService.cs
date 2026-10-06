@@ -1,4 +1,5 @@
 using CoupleSync.Application.Common.Exceptions;
+using CoupleSync.Application.Common;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Income.Commands;
 using CoupleSync.Application.Income.Queries;
@@ -48,9 +49,7 @@ public sealed class IncomeService
             await _repository.AddAsync(source, ct);
             await _repository.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex) when (
-            ex.InnerException?.Message.Contains("23505") == true
-            || ex.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true)
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
         {
             throw new ConflictException(
                 "INCOME_SOURCE_DUPLICATE",

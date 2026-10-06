@@ -360,7 +360,8 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                         .HasColumnName("id");
 
                     b.Property<bool>("AiCategorizationConsent")
-                        .HasColumnType("boolean");
+                        .HasColumnType("boolean")
+                        .HasColumnName("ai_categorization_consent");
 
                     b.Property<Guid>("CoupleId")
                         .HasColumnType("uuid")

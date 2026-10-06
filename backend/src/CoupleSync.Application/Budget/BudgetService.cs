@@ -1,6 +1,7 @@
 using CoupleSync.Application.Budget.Commands;
 using CoupleSync.Application.Budget.Queries;
 using CoupleSync.Application.Common.Exceptions;
+using CoupleSync.Application.Common;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
@@ -62,8 +63,7 @@ public sealed class BudgetService
                 "BUDGET_PLAN_CONFLICT",
                 "O orçamento foi alterado ao mesmo tempo por outra requisição. Tente novamente.");
         }
-        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("23505") == true
-                                           || ex.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true)
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
         {
             throw new ConflictException(
                 "BUDGET_PLAN_CONFLICT",
@@ -189,9 +189,7 @@ public sealed class BudgetService
             await _repository.SaveChangesAsync(cancellationToken);
             return MapToDto(plan);
         }
-        catch (DbUpdateException ex)
-            when (ex.InnerException?.Message.Contains("23505") == true
-               || ex.InnerException?.Message.Contains("unique constraint") == true)
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
         {
             throw new ConflictException(
                 "BUDGET_PLAN_DUPLICATE",

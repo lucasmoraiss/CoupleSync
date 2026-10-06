@@ -30,17 +30,43 @@ public sealed class RegisterDeviceTokenCommandHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_UniqueViolationTwice_PropagatesTheSecondFailure()
+    public async Task HandleAsync_UniqueViolationTwice_RetriesAgain_AndSucceedsWhenTheRaceEnds()
     {
         var repo = new FakeDeviceTokenRepository();
         repo.SaveFailures.Enqueue(UniqueViolation());
         repo.SaveFailures.Enqueue(UniqueViolation());
         var handler = new RegisterDeviceTokenCommandHandler(repo, FixedClock());
 
-        await Assert.ThrowsAsync<DbUpdateException>(() =>
-            handler.HandleAsync(new RegisterDeviceTokenCommand(UserId, CoupleId, "fcm-1"), CancellationToken.None));
+        await handler.HandleAsync(new RegisterDeviceTokenCommand(UserId, CoupleId, "fcm-1"), CancellationToken.None);
+
+        Assert.Equal(3, repo.SaveCalls);
+        Assert.Equal(2, repo.DiscardCalls);
+    }
+
+    [Fact]
+    public async Task HandleAsync_ARowAlreadyDeletedByAnotherRequest_IsRetried()
+    {
+        var repo = new FakeDeviceTokenRepository();
+        repo.SaveFailures.Enqueue(new DbUpdateConcurrencyException("0 rows affected", new Exception("expected 1")));
+        var handler = new RegisterDeviceTokenCommandHandler(repo, FixedClock());
+
+        await handler.HandleAsync(new RegisterDeviceTokenCommand(UserId, CoupleId, "fcm-1"), CancellationToken.None);
 
         Assert.Equal(2, repo.SaveCalls);
+    }
+
+    [Fact]
+    public async Task HandleAsync_AlwaysLosingTheRace_EndsInAConflict_NotAServerError()
+    {
+        var repo = new FakeDeviceTokenRepository();
+        for (var i = 0; i < 20; i++) repo.SaveFailures.Enqueue(UniqueViolation());
+        var handler = new RegisterDeviceTokenCommandHandler(repo, FixedClock());
+
+        var ex = await Assert.ThrowsAsync<CoupleSync.Application.Common.Exceptions.ConflictException>(() =>
+            handler.HandleAsync(new RegisterDeviceTokenCommand(UserId, CoupleId, "fcm-1"), CancellationToken.None));
+
+        Assert.Equal("DEVICE_TOKEN_CONFLICT", ex.Code);
+        Assert.Equal(8, repo.SaveCalls);
     }
 
     [Fact]

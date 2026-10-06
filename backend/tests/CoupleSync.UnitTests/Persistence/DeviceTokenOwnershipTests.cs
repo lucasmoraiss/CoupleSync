@@ -21,6 +21,12 @@ public sealed class DeviceTokenOwnershipTests : IDisposable
     {
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
+        // These tests are about token ownership with made-up ids; the user/group keys are covered on PostgreSQL.
+        using (var pragma = _connection.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA foreign_keys = OFF";
+            pragma.ExecuteNonQuery();
+        }
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options;
         _db = new AppDbContext(options, coupleContext: null);
         _db.Database.EnsureCreated();
