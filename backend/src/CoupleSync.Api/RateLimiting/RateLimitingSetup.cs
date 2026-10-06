@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Net;
 using System.Security.Claims;
-using System.Text.Json;
 using System.Threading.RateLimiting;
+using CoupleSync.Api.Errors;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
@@ -39,8 +39,6 @@ public sealed class FixedWindowSettings
 public static class RateLimitingSetup
 {
     public const string ForwardedHeadersSectionName = "ForwardedHeaders";
-
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static IServiceCollection AddCoupleSyncRateLimiting(this IServiceCollection services, IConfiguration configuration)
     {
@@ -154,16 +152,10 @@ public static class RateLimitingSetup
             : 60;
 
         response.StatusCode = StatusCodes.Status429TooManyRequests;
-        response.ContentType = "application/json";
         response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
 
-        var payload = new
-        {
-            code = "RATE_LIMIT_EXCEEDED",
-            message = "Too many attempts. Please wait a moment and try again.",
-            traceId = context.HttpContext.TraceIdentifier
-        };
-
-        await response.WriteAsync(JsonSerializer.Serialize(payload, JsonOptions), cancellationToken);
+        var (code, message) = ApiErrors.DescribeStatus(StatusCodes.Status429TooManyRequests);
+        await ApiErrors.WriteAsync(context.HttpContext, StatusCodes.Status429TooManyRequests, code, message,
+            cancellationToken: cancellationToken);
     }
 }

@@ -194,7 +194,7 @@ public sealed class TransactionsController : ControllerBase
     {
         var claimValue = User.FindFirstValue("user_id");
         if (!Guid.TryParse(claimValue, out var userId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired session.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return userId;
     }
 

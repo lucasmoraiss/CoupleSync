@@ -1,6 +1,7 @@
 // AC-121, AC-129, AC-130: OCR upload screen — PDF file picker + status polling.
 // Only PDF is offered: the server's default parser handles digital PDF statements only and
 // rejects images (IMAGE_NOT_SUPPORTED), so camera and image selection are not exposed.
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
@@ -175,22 +176,7 @@ export default function OcrUploadScreen() {
           setState({ phase: 'idle' });
           return;
         }
-        let message: string;
-        if (!err?.response) {
-          message = 'Sem conexão. Verifique sua internet e tente novamente.';
-        } else {
-          const data = err.response.data;
-          const isObj = typeof data === 'object' && data !== null;
-          if (isObj && typeof (data as any).message === 'string') {
-            message = (data as any).message;
-          } else if (isObj && typeof (data as any).error === 'string') {
-            message = (data as any).error;
-          } else if (err.response.statusText) {
-            message = err.response.statusText;
-          } else {
-            message = 'Falha ao enviar o arquivo. Tente novamente.';
-          }
-        }
+        const message = getApiErrorMessage(err, 'Falha ao enviar o arquivo. Tente novamente.');
         setState({ phase: 'error', message });
       }
     },

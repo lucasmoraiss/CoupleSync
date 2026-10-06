@@ -10,7 +10,7 @@ public sealed class ReplaceAllocationsRequestValidator : AbstractValidator<Repla
     {
         RuleFor(x => x.Allocations)
             .NotNull()
-            .WithMessage("Allocations list is required.");
+            .WithMessage("A lista de categorias é obrigatória.");
 
         RuleForEach(x => x.Allocations)
             .ChildRules(allocation =>

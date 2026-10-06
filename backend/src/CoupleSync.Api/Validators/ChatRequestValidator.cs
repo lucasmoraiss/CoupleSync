@@ -15,14 +15,14 @@ public sealed class ChatRequestValidator : AbstractValidator<ChatRequest>
 
         RuleFor(x => x.History)
             .Must(h => h is null || h.Count <= 20)
-            .WithMessage("History must contain at most 20 items.");
+            .WithMessage("O histórico deve ter no máximo 20 mensagens.");
 
         RuleForEach(x => x.History)
             .ChildRules(item =>
             {
                 item.RuleFor(h => h.Role)
                     .Must(r => ValidRoles.Contains(r, StringComparer.OrdinalIgnoreCase))
-                    .WithMessage("History item role must be 'user' or 'model'.");
+                    .WithMessage("O autor de cada mensagem do histórico deve ser 'user' ou 'model'.");
 
                 item.RuleFor(h => h.Content)
                     .NotEmpty()

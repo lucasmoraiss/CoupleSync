@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { authApiClient } from '@/services/apiClient';
+import { getApiErrorMessage } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors } from '@/theme';
 
@@ -61,21 +62,8 @@ export default function RegisterScreen() {
       // TODO(future): Email confirmation — send verification email on registration and require confirmation before full access
       router.replace('/couple-setup' as any);
     } catch (err: any) {
-      const status = err?.response?.status;
-      const data = err?.response?.data;
-      let msg = 'Erro ao criar conta. Tente novamente.';
-      if (status === 409) {
-        msg = 'Já existe uma conta com esse e-mail.';
-      } else if (status === 400 && data?.errors) {
-        // FluentValidation returns { errors: { FieldName: ["..."] } }
-        const fieldErrors: string[] = [];
-        if (data.errors.Password) fieldErrors.push('Senha: mínimo 8 caracteres.');
-        if (data.errors.Email) fieldErrors.push('E-mail inválido.');
-        if (data.errors.Name) fieldErrors.push('Nome é obrigatório.');
-        msg = fieldErrors.length > 0 ? fieldErrors.join('\n') : 'Dados inválidos.';
-      } else if (status === 400) {
-        msg = data?.message || data?.title || 'Dados inválidos.';
-      }
+      // 409 (e-mail já usado) e 400 (validação, uma mensagem por campo) vêm prontos da API.
+      const msg = getApiErrorMessage(err, 'Erro ao criar conta. Tente novamente.');
       if (__DEV__) console.log('[Register] Error:', { code: err?.code, status: err?.response?.status, message: err?.response?.data?.message ?? err?.message });
       Alert.alert('Erro', msg);
     } finally {

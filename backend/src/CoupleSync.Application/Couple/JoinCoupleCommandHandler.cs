@@ -33,12 +33,12 @@ public sealed class JoinCoupleCommandHandler
 
         if (user is null || !user.IsActive)
         {
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired session.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
         if (user.CoupleId.HasValue)
         {
-            throw new ConflictException("USER_ALREADY_IN_COUPLE", "User is already in a couple.");
+            throw new ConflictException("USER_ALREADY_IN_COUPLE", "Você já faz parte de um casal.");
         }
 
         var normalizedJoinCode = command.JoinCode.Trim().ToUpperInvariant();
@@ -46,7 +46,7 @@ public sealed class JoinCoupleCommandHandler
 
         if (couple is null)
         {
-            throw new NotFoundException("COUPLE_NOT_FOUND", "Couple was not found.");
+            throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");
         }
 
         var now = _dateTimeProvider.UtcNow;

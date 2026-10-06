@@ -17,7 +17,7 @@ public sealed class GetGoalByIdQueryHandler
         var goal = await _repository.GetByIdAsync(query.Id, query.CoupleId, cancellationToken);
 
         if (goal is null)
-            throw new NotFoundException("GOAL_NOT_FOUND", "Goal not found.");
+            throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
         return new GoalDto(
             goal.Id,

@@ -16,7 +16,7 @@ public sealed class GetCashFlowQueryHandler
     public async Task<GetCashFlowResult> HandleAsync(GetCashFlowQuery query, CancellationToken cancellationToken)
     {
         if (query.Horizon != 30 && query.Horizon != 90)
-            throw new ArgumentException($"Horizon must be 30 or 90, got {query.Horizon}.", nameof(query));
+            throw new ArgumentException("O horizonte deve ser 30 ou 90 dias.", nameof(query));
 
         var nowUtc = _dateTimeProvider.UtcNow;
         var fromUtc = nowUtc.AddDays(-query.Horizon);

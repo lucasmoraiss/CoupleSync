@@ -1,4 +1,5 @@
 // AC-004: Dashboard screen — real API data via TanStack Query
+import { getApiErrorMessage } from '@/services/apiError';
 import React from 'react';
 import {
   View,
@@ -104,7 +105,7 @@ export default function DashboardScreen() {
   const userId = useSessionStore((s) => s.userId);
   const { startDate, endDate } = useDashboardStore();
 
-  const { data, isLoading, isError, refetch } = useQuery<DashboardResponse>({
+  const { data, isLoading, isError, error: loadError, refetch } = useQuery<DashboardResponse>({
     queryKey: ['dashboard', startDate, endDate],
     queryFn: async () => {
       const res = await dashboardApiClient.get({ startDate, endDate });
@@ -159,7 +160,7 @@ export default function DashboardScreen() {
         {/* Error state */}
         {isError && !isLoading && (
           <ErrorState
-            message="Não foi possível carregar os dados"
+            message={getApiErrorMessage(loadError, 'Não foi possível carregar os dados.')}
             onRetry={refetch}
           />
         )}

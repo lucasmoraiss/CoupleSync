@@ -94,8 +94,8 @@ public sealed class ImportJobService
                     ? "OCR_JOB_ALREADY_CONFIRMED"
                     : "OCR_JOB_NOT_READY",
                 job.Status == Domain.Entities.ImportJobStatus.Confirmed
-                    ? "This import has already been confirmed."
-                    : "OCR processing is not complete yet.");
+                    ? "Esta importação já foi confirmada."
+                    : "A leitura do extrato ainda não terminou.");
 
         return JsonSerializer.Deserialize<List<OcrCandidate>>(job.OcrResultJson!) ?? new List<OcrCandidate>();
     }
@@ -114,7 +114,7 @@ public sealed class ImportJobService
         IReadOnlyDictionary<int, CandidateEdit>? candidateEdits = null)
     {
         if (selectedIndices is null || selectedIndices.Count == 0)
-            throw new UnprocessableEntityException("INVALID_SELECTION", "At least one candidate index must be selected.");
+            throw new UnprocessableEntityException("INVALID_SELECTION", "Selecione pelo menos uma transação.");
 
         var candidates = await GetCandidatesAsync(uploadId, coupleId, ct);
         if (candidates is null) return null;
@@ -127,7 +127,7 @@ public sealed class ImportJobService
         if (unknown.Count > 0)
             throw new UnprocessableEntityException(
                 "INVALID_SELECTION",
-                $"Selected index does not exist in this import: {string.Join(", ", unknown)}.");
+                $"Transação selecionada não existe nesta importação: {string.Join(", ", unknown)}.");
 
         // Edits may only target lines that are part of this confirmation.
         if (candidateEdits is not null)
@@ -136,7 +136,7 @@ public sealed class ImportJobService
             if (strayEdits.Count > 0)
                 throw new UnprocessableEntityException(
                     "INVALID_SELECTION",
-                    $"Edited index is not part of the selection: {string.Join(", ", strayEdits)}.");
+                    $"Transação editada não está entre as selecionadas: {string.Join(", ", strayEdits)}.");
         }
 
         var fingerprints = ResolveFingerprints(coupleId, candidates);
@@ -234,7 +234,7 @@ public sealed class ImportJobService
             // (couple_id, fingerprint) let only one of them through.
             throw new ConflictException(
                 "OCR_CONFIRM_CONFLICT",
-                "These transactions were imported by another request. Refresh and try again.");
+                "Essas transações já foram importadas por outra requisição. Atualize e tente novamente.");
         }
 
         // Fire-and-not-propagate: alert policy evaluation after successful transaction persist.

@@ -10,16 +10,16 @@ public sealed class UpdateIncomeRequestValidator : AbstractValidator<UpdateIncom
     {
         RuleFor(x => x.GrossIncome)
             .GreaterThan(0)
-            .WithMessage("GrossIncome must be greater than zero.")
+            .WithMessage("A renda bruta deve ser maior que zero.")
             .LessThanOrEqualTo(MoneyRules.MaxAmount)
-            .WithMessage("GrossIncome exceeds maximum allowed value.");
+            .WithMessage("A renda bruta excede o máximo permitido.");
 
         When(x => x.Currency is not null, () =>
         {
             RuleFor(x => x.Currency!)
                 .NotEmpty()
                 .Length(3)
-                .WithMessage("Currency must be a 3-letter ISO 4217 code.");
+                .WithMessage("A moeda deve ser um código de 3 letras (ex.: BRL).");
         });
     }
 }

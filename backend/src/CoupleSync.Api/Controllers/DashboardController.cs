@@ -36,7 +36,7 @@ public sealed class DashboardController : ControllerBase
             endDate = DateTime.SpecifyKind(endDate.Value, DateTimeKind.Utc);
 
         if (startDate.HasValue && endDate.HasValue && startDate > endDate)
-            return BadRequest("startDate must not be after endDate");
+            throw new BadRequestException("INVALID_DATE_RANGE", "A data inicial não pode ser posterior à data final.");
 
         var coupleId = GetAuthenticatedCoupleId();
 

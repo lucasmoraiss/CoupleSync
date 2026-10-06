@@ -29,7 +29,7 @@ public sealed class UpdateGoalRequestValidatorTests
         var result = new UpdateGoalRequestValidator(Clock).Validate(new UpdateGoalRequest(null, null, null, null, null));
 
         Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, e => e.ErrorMessage == "At least one field must be provided for update.");
+        Assert.Contains(result.Errors, e => e.ErrorMessage == "Informe pelo menos um campo para atualizar.");
     }
 
     [Fact]

@@ -18,19 +18,19 @@ public sealed class GetCoupleMeQueryHandler
 
         if (user is null || !user.IsActive)
         {
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired session.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
         if (!user.CoupleId.HasValue)
         {
-            throw new NotFoundException("COUPLE_NOT_FOUND", "Couple was not found.");
+            throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");
         }
 
         var couple = await _coupleRepository.FindByIdWithMembersAsync(user.CoupleId.Value, cancellationToken);
 
         if (couple is null)
         {
-            throw new NotFoundException("COUPLE_NOT_FOUND", "Couple was not found.");
+            throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");
         }
 
         var members = couple.Members

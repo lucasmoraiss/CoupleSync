@@ -15,7 +15,7 @@ public readonly record struct EmailAddress
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ArgumentException("Email is required.", nameof(value));
+            throw new ArgumentException("O e-mail é obrigatório.", nameof(value));
         }
 
         var normalized = value.Trim().ToLowerInvariant();
@@ -26,7 +26,7 @@ public readonly record struct EmailAddress
         }
         catch (FormatException)
         {
-            throw new ArgumentException("Email format is invalid.", nameof(value));
+            throw new ArgumentException("O formato do e-mail é inválido.", nameof(value));
         }
 
         return new EmailAddress(normalized);

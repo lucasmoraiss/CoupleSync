@@ -264,8 +264,8 @@ public sealed class InputValidationIntegrationTests
         var onlyFutureStart = await client.GetAsync($"/api/v1/dashboard?startDate={futureStart}");
         Assert.Equal(HttpStatusCode.BadRequest, onlyFutureStart.StatusCode);
         var error = await onlyFutureStart.Content.ReadFromJsonAsync<ErrorDto>();
-        Assert.Equal("VALIDATION_ERROR", error!.Code);
-        Assert.Contains("startDate must not be after endDate", error.Message);
+        Assert.Equal("INVALID_DATE_RANGE", error!.Code);
+        Assert.Contains("data inicial", error.Message);
 
         var onlyPastEnd = await client.GetAsync($"/api/v1/dashboard?endDate={pastEnd}");
         Assert.Equal(HttpStatusCode.BadRequest, onlyPastEnd.StatusCode);

@@ -61,16 +61,16 @@ public sealed partial class IncomeSource : ICoupleScoped
         bool isRecurring = true)
     {
         if (string.IsNullOrWhiteSpace(month) || month.Length != 7 || !MonthFormatRegex().IsMatch(month))
-            throw new ArgumentException("Month must be in YYYY-MM format (exactly 7 characters).", nameof(month));
+            throw new ArgumentException("O mês deve estar no formato AAAA-MM.", nameof(month));
 
         if (string.IsNullOrWhiteSpace(name) || name.Length > 64)
-            throw new ArgumentException("Name must be a non-empty string of at most 64 characters.", nameof(name));
+            throw new ArgumentException("O nome é obrigatório e deve ter no máximo 64 caracteres.", nameof(name));
 
         if (amount < 0)
-            throw new ArgumentException("Amount must be zero or greater.", nameof(amount));
+            throw new ArgumentException("O valor não pode ser negativo.", nameof(amount));
 
         if (string.IsNullOrWhiteSpace(currency) || currency.Length < 2 || currency.Length > 3)
-            throw new ArgumentException("Currency must be 2-3 characters.", nameof(currency));
+            throw new ArgumentException("A moeda deve ter de 2 a 3 caracteres.", nameof(currency));
 
         if (createdAtUtc.Kind == DateTimeKind.Unspecified)
             createdAtUtc = DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc);
@@ -83,14 +83,14 @@ public sealed partial class IncomeSource : ICoupleScoped
         if (name is not null)
         {
             if (string.IsNullOrWhiteSpace(name) || name.Length > 64)
-                throw new ArgumentException("Name must be a non-empty string of at most 64 characters.", nameof(name));
+                throw new ArgumentException("O nome é obrigatório e deve ter no máximo 64 caracteres.", nameof(name));
             Name = name.Trim();
         }
 
         if (amount is not null)
         {
             if (amount.Value < 0)
-                throw new ArgumentException("Amount must be zero or greater.", nameof(amount));
+                throw new ArgumentException("O valor não pode ser negativo.", nameof(amount));
             Amount = amount.Value;
         }
 

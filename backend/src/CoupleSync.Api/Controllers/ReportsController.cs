@@ -32,7 +32,7 @@ public sealed class ReportsController : ControllerBase
         CancellationToken ct = default)
     {
         if (months is < 1 or > 60)
-            return BadRequest("months must be between 1 and 60.");
+            throw new BadRequestException("INVALID_MONTHS", "O número de meses deve estar entre 1 e 60.");
 
         var coupleId = GetAuthenticatedCoupleId();
         var result = await _service.GetSpendingByCategoryAsync(coupleId, months, ct);
@@ -56,7 +56,7 @@ public sealed class ReportsController : ControllerBase
         CancellationToken ct = default)
     {
         if (months is < 1 or > 60)
-            return BadRequest("months must be between 1 and 60.");
+            throw new BadRequestException("INVALID_MONTHS", "O número de meses deve estar entre 1 e 60.");
 
         var coupleId = GetAuthenticatedCoupleId();
         var result = await _service.GetMonthlyTrendsAsync(coupleId, months, ct);

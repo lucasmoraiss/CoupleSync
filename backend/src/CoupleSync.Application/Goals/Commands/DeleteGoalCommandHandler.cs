@@ -20,7 +20,7 @@ public sealed class DeleteGoalCommandHandler
         var goal = await _repository.GetByIdAsync(command.Id, command.CoupleId, cancellationToken);
 
         if (goal is null)
-            throw new NotFoundException("GOAL_NOT_FOUND", "Goal not found.");
+            throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
         // Nullify GoalId on all transactions linked to this goal (bulk update, no tracking)
         await _dbContext.Transactions

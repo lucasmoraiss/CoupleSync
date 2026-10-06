@@ -42,11 +42,11 @@ public sealed class CreateManualTransactionCommandHandler
 
     public async Task<Transaction> HandleAsync(CreateManualTransactionCommand cmd, CancellationToken ct)
     {
-        if (cmd.CoupleId == Guid.Empty) throw new AppException("INVALID_INPUT", "CoupleId is required.", 400);
-        if (cmd.UserId == Guid.Empty) throw new AppException("INVALID_INPUT", "UserId is required.", 400);
-        if (cmd.Amount <= 0) throw new AppException("INVALID_INPUT", "Amount must be greater than zero.", 400);
-        if (string.IsNullOrWhiteSpace(cmd.Currency)) throw new AppException("INVALID_INPUT", "Currency is required.", 400);
-        if (string.IsNullOrWhiteSpace(cmd.Category)) throw new AppException("INVALID_INPUT", "Category is required.", 400);
+        if (cmd.CoupleId == Guid.Empty) throw new AppException("INVALID_INPUT", "O casal é obrigatório.", 400);
+        if (cmd.UserId == Guid.Empty) throw new AppException("INVALID_INPUT", "O usuário é obrigatório.", 400);
+        if (cmd.Amount <= 0) throw new AppException("INVALID_INPUT", "O valor deve ser maior que zero.", 400);
+        if (string.IsNullOrWhiteSpace(cmd.Currency)) throw new AppException("INVALID_INPUT", "A moeda é obrigatória.", 400);
+        if (string.IsNullOrWhiteSpace(cmd.Category)) throw new AppException("INVALID_INPUT", "A categoria é obrigatória.", 400);
 
         var now = _clock.UtcNow;
         var eventTs = cmd.EventTimestampUtc == default ? now : cmd.EventTimestampUtc;

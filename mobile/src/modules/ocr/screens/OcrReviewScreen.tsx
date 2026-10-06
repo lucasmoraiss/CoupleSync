@@ -1,4 +1,5 @@
 // AC-124, AC-126, AC-127: OCR review screen — candidates with checkboxes, edit fields, confirm
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
@@ -70,7 +71,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
   const [showErrors, setShowErrors] = useState(false);
   const initializedRef = useRef(false);
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['ocr-results', uploadId],
     queryFn: () => ocrApiClient.getResults(uploadId).then((r) => r.data),
     staleTime: Infinity,
@@ -110,7 +111,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível importar as transações. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível importar as transações. Tente novamente.'));
     },
   });
 
@@ -175,7 +176,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     return (
       <SafeAreaView style={styles.container}>
         <ErrorState
-          message="Erro ao carregar resultados."
+          message={getApiErrorMessage(loadError, 'Erro ao carregar resultados.')}
           onRetry={() => refetch()}
         />
       </SafeAreaView>

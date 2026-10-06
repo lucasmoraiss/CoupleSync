@@ -16,14 +16,14 @@ public sealed class ConfirmRequestValidator : AbstractValidator<ConfirmRequest>
             .Must(overrides => overrides!.All(o => o is not null)
                 && overrides!.Select(o => o.Index).Distinct().Count() == overrides!.Count)
             .When(x => x.CategoryOverrides is not null)
-            .WithMessage("CategoryOverrides must not repeat an index.");
+            .WithMessage("Não repita a mesma transação nas categorias alteradas.");
 
         RuleForEach(x => x.CategoryOverrides)
             .ChildRules(o =>
             {
                 o.RuleFor(x => x.Category)
                     .Must(c => !string.IsNullOrWhiteSpace(c))
-                    .WithMessage("Category is required.")
+                    .WithMessage("A categoria é obrigatória.")
                     .MaximumLength(64);
             })
             .When(x => x.CategoryOverrides is not null && x.CategoryOverrides.All(o => o is not null));
@@ -32,12 +32,12 @@ public sealed class ConfirmRequestValidator : AbstractValidator<ConfirmRequest>
         RuleFor(x => x.CandidateEdits)
             .Cascade(CascadeMode.Stop)
             .Must(edits => edits!.All(e => e is not null))
-            .WithMessage("CandidateEdits must not contain null items.")
+            .WithMessage("A lista de transações editadas não pode ter itens vazios.")
             .Must(edits => edits!.Select(e => e.Index).Distinct().Count() == edits!.Count)
-            .WithMessage("CandidateEdits must not repeat an index.")
+            .WithMessage("Não repita a mesma transação nas edições.")
             .Must((request, edits) => request.SelectedIndices is null
                 || edits!.All(e => request.SelectedIndices.Contains(e.Index)))
-            .WithMessage("CandidateEdits may only reference selected indices.")
+            .WithMessage("Só é possível editar transações que estejam selecionadas.")
             .When(x => x.CandidateEdits is not null);
 
         RuleForEach(x => x.CandidateEdits)
@@ -45,7 +45,7 @@ public sealed class ConfirmRequestValidator : AbstractValidator<ConfirmRequest>
             {
                 edit.RuleFor(e => e.Description)
                     .Must(d => !string.IsNullOrWhiteSpace(d))
-                    .WithMessage("Description must not be empty.")
+                    .WithMessage("A descrição não pode ficar vazia.")
                     .MaximumLength(512)
                     .When(e => e.Description is not null);
 
@@ -53,7 +53,7 @@ public sealed class ConfirmRequestValidator : AbstractValidator<ConfirmRequest>
                     .GreaterThan(0)
                     .LessThanOrEqualTo(MoneyRules.MaxAmount)
                     .Must(a => MoneyRules.HasAtMostTwoDecimals(a!.Value))
-                    .WithMessage("Amount must have at most two decimal places.")
+                    .WithMessage("O valor deve ter no máximo duas casas decimais.")
                     .When(e => e.Amount is not null);
             })
             .When(x => x.CandidateEdits is not null && x.CandidateEdits.All(e => e is not null));

@@ -1,4 +1,5 @@
 // AC-006: CashFlow screen — 30-day and 90-day horizon projections
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState } from 'react';
 import {
   View,
@@ -27,7 +28,7 @@ const formatDatePtBR = (iso: string): string =>
 export default function CashFlowScreen() {
   const [horizon, setHorizon] = useState<Horizon>(30);
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['cashflow', horizon],
     queryFn: () => cashFlowApiClient.get(horizon).then((r) => r.data),
     staleTime: 60_000,
@@ -61,7 +62,7 @@ export default function CashFlowScreen() {
 
       {isError && (
         <ErrorState
-          message="Não foi possível carregar os dados."
+          message={getApiErrorMessage(loadError, 'Não foi possível carregar os dados.')}
           onRetry={() => refetch()}
         />
       )}

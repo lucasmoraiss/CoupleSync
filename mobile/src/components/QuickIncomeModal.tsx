@@ -1,3 +1,4 @@
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState } from 'react';
 import {
   Modal,
@@ -34,8 +35,8 @@ export function QuickIncomeModal({ visible, currentIncome, onClose }: QuickIncom
       queryClient.invalidateQueries({ queryKey: ['budget'] });
       onClose();
     },
-    onError: () => {
-      toast.error('Não foi possível atualizar a renda. Tente novamente.');
+    onError: (error) => {
+      toast.error(getApiErrorMessage(error, 'Não foi possível atualizar a renda. Tente novamente.'));
     },
   });
 

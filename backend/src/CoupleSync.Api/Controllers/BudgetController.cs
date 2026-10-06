@@ -60,7 +60,7 @@ public sealed class BudgetController : ControllerBase
         var dto = await _budgetService.GetCurrentPlanAsync(coupleId, cancellationToken);
 
         if (dto is null)
-            return NotFound(new { code = "BUDGET_PLAN_NOT_FOUND", message = "No budget plan for the current month." });
+            throw new NotFoundException("BUDGET_PLAN_NOT_FOUND", "Nenhum orçamento para o mês atual.");
 
         return Ok(MapToResponse(dto));
     }
@@ -80,7 +80,7 @@ public sealed class BudgetController : ControllerBase
         var dto = await _budgetService.GetPlanAsync(coupleId, month, cancellationToken);
 
         if (dto is null)
-            return NotFound(new { code = "BUDGET_PLAN_NOT_FOUND", message = $"No budget plan for month '{month}'." });
+            throw new NotFoundException("BUDGET_PLAN_NOT_FOUND", $"Nenhum orçamento para o mês '{month}'.");
 
         return Ok(MapToResponse(dto));
     }

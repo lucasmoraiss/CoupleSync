@@ -12,6 +12,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { coupleApiClient } from '@/services/apiClient';
+import { getApiErrorMessage } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors } from '@/theme';
 
@@ -30,10 +31,7 @@ export default function CoupleSetupScreen() {
       setCreatedCode(data.joinCode);
       setMode('create');
     } catch (err: any) {
-      const status = err?.response?.status;
-      let msg = 'Erro ao criar casal. Tente novamente.';
-      if (status === 409) msg = 'Você já faz parte de um casal.';
-      Alert.alert('Erro', msg);
+      Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao criar casal. Tente novamente.'));
     } finally {
       setLoading(false);
     }
@@ -52,11 +50,7 @@ export default function CoupleSetupScreen() {
       await useSessionStore.getState().setAccessTokenAndCouple(data.accessToken, data.coupleId);
       router.replace('/' as any);
     } catch (err: any) {
-      const status = err?.response?.status;
-      let msg = 'Erro ao entrar no casal. Tente novamente.';
-      if (status === 404) msg = 'Código de convite inválido ou expirado.';
-      else if (status === 409) msg = 'Você já faz parte de um casal.';
-      Alert.alert('Erro', msg);
+      Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao entrar no casal. Tente novamente.'));
     } finally {
       setLoading(false);
     }

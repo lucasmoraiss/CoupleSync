@@ -25,7 +25,7 @@ public sealed class CreateGoalRequestValidator : AbstractValidator<CreateGoalReq
             .GreaterThan(0)
             .LessThanOrEqualTo(MoneyRules.MaxAmount)
             .Must(MoneyRules.HasAtMostTwoDecimals)
-            .WithMessage("TargetAmount must have at most two decimal places.");
+            .WithMessage("O valor da meta deve ter no máximo duas casas decimais.");
 
         RuleFor(x => x.Currency)
             .Length(2, 3)

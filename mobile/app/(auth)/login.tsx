@@ -13,8 +13,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import axios from 'axios';
 import { authApiClient, coupleApiClient } from '@/services/apiClient';
+import { getApiErrorMessage } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors } from '@/theme';
 
@@ -57,23 +57,7 @@ export default function LoginScreen() {
         router.replace('/couple-setup' as any);
       }
     } catch (err: any) {
-      let msg: string;
-      if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
-        msg = 'Tempo esgotado. Tente novamente.';
-      } else if (axios.isAxiosError(err) && err.response) {
-        const status = err.response.status;
-        if (status === 401) {
-          msg = 'E-mail ou senha incorretos.';
-        } else if (status >= 500 && status < 600) {
-          msg = 'Servidor com problemas. Tente novamente mais tarde.';
-        } else {
-          msg = 'Erro inesperado. Tente novamente.';
-        }
-      } else if (err.request) {
-        msg = 'Servidor indisponível. Verifique a conexão com o servidor.';
-      } else {
-        msg = 'Sem conexão. Verifique sua internet.';
-      }
+      const msg = getApiErrorMessage(err, 'Erro inesperado. Tente novamente.');
       if (__DEV__) console.log('[Login] Error:', { code: err?.code, status: err?.response?.status, message: err?.response?.data?.message ?? err?.message });
       Alert.alert('Erro', msg);
     } finally {

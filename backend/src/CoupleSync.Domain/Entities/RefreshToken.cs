@@ -34,7 +34,7 @@ public sealed class RefreshToken
     {
         if (string.IsNullOrWhiteSpace(tokenHash))
         {
-            throw new ArgumentException("Token hash is required.", nameof(tokenHash));
+            throw new ArgumentException("O token é obrigatório.", nameof(tokenHash));
         }
 
         return new RefreshToken(userId, tokenHash, expiresAtUtc, createdAtUtc);
@@ -44,7 +44,7 @@ public sealed class RefreshToken
     {
         if (string.IsNullOrWhiteSpace(tokenHash))
         {
-            throw new ArgumentException("Token hash is required.", nameof(tokenHash));
+            throw new ArgumentException("O token é obrigatório.", nameof(tokenHash));
         }
 
         TokenHash = tokenHash;

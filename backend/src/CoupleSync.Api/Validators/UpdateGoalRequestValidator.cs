@@ -17,7 +17,7 @@ public sealed class UpdateGoalRequestValidator : AbstractValidator<UpdateGoalReq
             .Must(x => x.Title is not null || x.Description is not null || x.TargetAmount is not null
                 || x.CurrentAmount is not null || x.Deadline is not null)
             .WithName("Request")
-            .WithMessage("At least one field must be provided for update.");
+            .WithMessage("Informe pelo menos um campo para atualizar.");
 
         RuleFor(x => x.Title)
             .NotEmpty()
@@ -32,7 +32,7 @@ public sealed class UpdateGoalRequestValidator : AbstractValidator<UpdateGoalReq
             .GreaterThan(0)
             .LessThanOrEqualTo(MoneyRules.MaxAmount)
             .Must(amount => MoneyRules.HasAtMostTwoDecimals(amount!.Value))
-            .WithMessage("TargetAmount must have at most two decimal places.")
+            .WithMessage("O valor da meta deve ter no máximo duas casas decimais.")
             .When(x => x.TargetAmount is not null);
 
         RuleFor(x => x.CurrentAmount)

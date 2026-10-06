@@ -34,7 +34,7 @@ public sealed class DeviceToken : ICoupleScoped
     public static DeviceToken Create(Guid userId, Guid coupleId, string token, DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(token))
-            throw new ArgumentException("Token must not be null or empty.", nameof(token));
+            throw new ArgumentException("O token não pode ser vazio.", nameof(token));
 
         return new DeviceToken(Guid.NewGuid(), userId, coupleId, token, "android", nowUtc);
     }
@@ -42,7 +42,7 @@ public sealed class DeviceToken : ICoupleScoped
     public void UpdateLastSeen(string token, DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(token))
-            throw new ArgumentException("Token must not be null or empty.", nameof(token));
+            throw new ArgumentException("O token não pode ser vazio.", nameof(token));
 
         Token = token;
         LastSeenAtUtc = nowUtc;

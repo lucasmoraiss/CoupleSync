@@ -10,7 +10,7 @@ public sealed class UpdateIncomeSourceRequestValidator : AbstractValidator<Updat
     {
         RuleFor(x => x.Name)
             .Must(name => !string.IsNullOrWhiteSpace(name))
-            .WithMessage("Name must not be empty.")
+            .WithMessage("O nome não pode ficar vazio.")
             .MaximumLength(64)
             .When(x => x.Name is not null);
 

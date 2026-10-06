@@ -1,4 +1,5 @@
 // Income Sources screen — personal income categories + partner (read-only) + shared
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback } from 'react';
 import {
   View,
@@ -297,7 +298,7 @@ function AddIncomeForm({
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível criar a fonte de renda.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível criar a fonte de renda.'));
     },
   });
 
@@ -387,7 +388,7 @@ export default function IncomeSourcesScreen() {
   const { toast } = useToast();
   const [month] = useState(currentMonthISO());
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['incomes', 'current'],
     queryFn: () => incomeApiClient.getCurrent().then((r) => r.data),
     retry: false,
@@ -402,7 +403,7 @@ export default function IncomeSourcesScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível atualizar.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível atualizar.'));
     },
   });
 
@@ -414,7 +415,7 @@ export default function IncomeSourcesScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível remover.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível remover.'));
     },
   });
 
@@ -449,7 +450,7 @@ export default function IncomeSourcesScreen() {
   if (isError) {
     return (
       <SafeAreaView style={styles.container}>
-        <ErrorState onRetry={() => refetch()} />
+        <ErrorState message={getApiErrorMessage(loadError, 'Não foi possível carregar o orçamento.')} onRetry={() => refetch()} />
       </SafeAreaView>
     );
   }

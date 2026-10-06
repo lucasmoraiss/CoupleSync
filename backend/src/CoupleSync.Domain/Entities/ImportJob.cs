@@ -56,10 +56,10 @@ public sealed class ImportJob : ICoupleScoped
         DateTime createdAtUtc)
     {
         if (string.IsNullOrWhiteSpace(storagePath))
-            throw new ArgumentException("StoragePath is required.", nameof(storagePath));
+            throw new ArgumentException("O caminho do arquivo é obrigatório.", nameof(storagePath));
 
         if (string.IsNullOrWhiteSpace(fileMimeType))
-            throw new ArgumentException("FileMimeType is required.", nameof(fileMimeType));
+            throw new ArgumentException("O tipo do arquivo é obrigatório.", nameof(fileMimeType));
 
         if (createdAtUtc.Kind == DateTimeKind.Unspecified)
             createdAtUtc = DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc);
@@ -76,7 +76,7 @@ public sealed class ImportJob : ICoupleScoped
     public void MarkReady(string ocrResultJson, DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(ocrResultJson))
-            throw new ArgumentException("OcrResultJson is required when marking Ready.", nameof(ocrResultJson));
+            throw new ArgumentException("O resultado da leitura é obrigatório para concluir a importação.", nameof(ocrResultJson));
 
         OcrResultJson = ocrResultJson;
         Status = ImportJobStatus.Ready;
@@ -86,7 +86,7 @@ public sealed class ImportJob : ICoupleScoped
     public void MarkFailed(string errorCode, string errorMessage, DateTime nowUtc, DateTime? quotaResetDate = null)
     {
         if (string.IsNullOrWhiteSpace(errorCode))
-            throw new ArgumentException("ErrorCode is required when marking Failed.", nameof(errorCode));
+            throw new ArgumentException("O código do erro é obrigatório para marcar a importação como falha.", nameof(errorCode));
 
         ErrorCode = errorCode;
         ErrorMessage = errorMessage;

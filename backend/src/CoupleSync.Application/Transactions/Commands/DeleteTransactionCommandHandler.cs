@@ -17,10 +17,10 @@ public sealed class DeleteTransactionCommandHandler
         var transaction = await _repository.GetByIdRawAsync(command.TransactionId, cancellationToken);
 
         if (transaction is null)
-            throw new NotFoundException("TRANSACTION_NOT_FOUND", "Transaction not found.");
+            throw new NotFoundException("TRANSACTION_NOT_FOUND", "Transação não encontrada.");
 
         if (transaction.CoupleId != command.CoupleId)
-            throw new ForbiddenException("TRANSACTION_ACCESS_DENIED", "You do not have access to this transaction.");
+            throw new ForbiddenException("TRANSACTION_ACCESS_DENIED", "Você não tem acesso a esta transação.");
 
         await _repository.DeleteAsync(transaction, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);

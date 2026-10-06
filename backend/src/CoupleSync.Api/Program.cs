@@ -1,5 +1,6 @@
 using CoupleSync.Application.AiChat;
 using System.Text;
+using CoupleSync.Api.Errors;
 using CoupleSync.Api.Health;
 using CoupleSync.Api.Middleware;
 using CoupleSync.Api.RateLimiting;
@@ -80,8 +81,11 @@ builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<ChatContextService>();
 builder.Services.AddScoped<GeminiChatService>();
 
-builder.Services.AddControllers()
-    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter()));
+ValidationLocalization.Configure();
+builder.Services.AddControllers(ValidationLocalization.ConfigureModelBinding)
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter()))
+    // Binding/validation failures (400 of [ApiController]) use the same error format as everything else.
+    .ConfigureApiBehaviorOptions(options => options.InvalidModelStateResponseFactory = InvalidModelStateResponse.Create);
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 

@@ -36,14 +36,14 @@ public sealed class Couple
     {
         if (string.IsNullOrWhiteSpace(joinCode))
         {
-            throw new ArgumentException("Join code is required.", nameof(joinCode));
+            throw new ArgumentException("O código de convite é obrigatório.", nameof(joinCode));
         }
 
         var normalizedJoinCode = joinCode.Trim().ToUpperInvariant();
 
         if (normalizedJoinCode.Length != 6 || normalizedJoinCode.Any(x => !char.IsAsciiLetterOrDigit(x)))
         {
-            throw new ArgumentException("Join code must be a 6-character alphanumeric code.", nameof(joinCode));
+            throw new ArgumentException("O código de convite deve ter 6 caracteres alfanuméricos.", nameof(joinCode));
         }
 
         return new Couple(Guid.NewGuid(), normalizedJoinCode, createdAtUtc);
@@ -58,7 +58,7 @@ public sealed class Couple
 
         if (_members.Any(x => x.Id == user.Id))
         {
-            throw new InvalidOperationException("User is already in this couple.");
+            throw new InvalidOperationException("O usuário já faz parte deste casal.");
         }
 
         user.AssignCouple(Id, joinedAtUtc);

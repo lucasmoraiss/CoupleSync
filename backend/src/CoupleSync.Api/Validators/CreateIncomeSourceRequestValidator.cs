@@ -12,7 +12,7 @@ public sealed class CreateIncomeSourceRequestValidator : AbstractValidator<Creat
             .NotEmpty()
             .Length(7)
             .Matches(@"^\d{4}-(0[1-9]|1[0-2])$")
-            .WithMessage("Month must be in YYYY-MM format.");
+            .WithMessage("O mês deve estar no formato AAAA-MM.");
 
         RuleFor(x => x.Name)
             .NotEmpty()

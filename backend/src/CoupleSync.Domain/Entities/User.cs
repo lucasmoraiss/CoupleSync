@@ -40,12 +40,12 @@ public sealed class User
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new ArgumentException("Name is required.", nameof(name));
+            throw new ArgumentException("O nome é obrigatório.", nameof(name));
         }
 
         if (string.IsNullOrWhiteSpace(passwordHash))
         {
-            throw new ArgumentException("Password hash is required.", nameof(passwordHash));
+            throw new ArgumentException("A senha é obrigatória.", nameof(passwordHash));
         }
 
         return new User(Guid.NewGuid(), email.Value, name.Trim(), passwordHash, createdAtUtc);
@@ -55,7 +55,7 @@ public sealed class User
     {
         if (CoupleId.HasValue)
         {
-            throw new InvalidOperationException("User is already assigned to a couple.");
+            throw new InvalidOperationException("O usuário já faz parte de um casal.");
         }
 
         CoupleId = coupleId;

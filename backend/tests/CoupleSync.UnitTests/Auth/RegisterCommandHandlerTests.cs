@@ -69,6 +69,6 @@ public sealed class RegisterCommandHandlerTests
             handler.HandleAsync(new RegisterCommand("new-user@example.com", "New User", "SecurePass123"), CancellationToken.None));
 
         Assert.Equal("EMAIL_ALREADY_IN_USE", exception.Code);
-        Assert.Equal("Email already in use.", exception.Message);
+        Assert.Equal("Já existe uma conta com esse e-mail.", exception.Message);
     }
 }

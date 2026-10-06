@@ -31,7 +31,7 @@ public sealed class CashFlowController : ControllerBase
         CancellationToken cancellationToken)
     {
         if (horizon != 30 && horizon != 90)
-            return BadRequest(new { code = "INVALID_HORIZON", message = "Horizon must be 30 or 90." });
+            throw new BadRequestException("INVALID_HORIZON", "O horizonte deve ser 30 ou 90 dias.");
 
         var coupleId = GetAuthenticatedCoupleId();
 

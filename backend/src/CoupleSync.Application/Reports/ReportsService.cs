@@ -27,7 +27,7 @@ public sealed class ReportsService
         CancellationToken ct)
     {
         if (months is < 1 or > 60)
-            throw new ArgumentOutOfRangeException(nameof(months), "months must be between 1 and 60.");
+            throw new ArgumentOutOfRangeException(nameof(months), "O número de meses deve estar entre 1 e 60.");
 
         var now = _dateTimeProvider.UtcNow;
         var from = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc)
@@ -55,7 +55,7 @@ public sealed class ReportsService
         CancellationToken ct)
     {
         if (months is < 1 or > 60)
-            throw new ArgumentOutOfRangeException(nameof(months), "months must be between 1 and 60.");
+            throw new ArgumentOutOfRangeException(nameof(months), "O número de meses deve estar entre 1 e 60.");
 
         var now = _dateTimeProvider.UtcNow;
         var from = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc)

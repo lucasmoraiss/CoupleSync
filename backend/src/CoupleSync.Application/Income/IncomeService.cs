@@ -36,7 +36,7 @@ public sealed class IncomeService
         if (count >= MaxSourcesPerUserPerMonth)
             throw new UnprocessableEntityException(
                 "INCOME_SOURCE_LIMIT",
-                $"A user may have at most {MaxSourcesPerUserPerMonth} income sources per month.");
+                $"Cada pessoa pode ter no máximo {MaxSourcesPerUserPerMonth} fontes de renda por mês.");
 
         var now = _dateTimeProvider.UtcNow;
         var source = IncomeSource.Create(
@@ -53,7 +53,7 @@ public sealed class IncomeService
         {
             throw new ConflictException(
                 "INCOME_SOURCE_DUPLICATE",
-                "An income source with this name already exists for this month.");
+                "Já existe uma fonte de renda com esse nome neste mês.");
         }
 
         return MapToDto(source);
@@ -67,10 +67,10 @@ public sealed class IncomeService
         CancellationToken ct)
     {
         var source = await _repository.GetByIdAsync(sourceId, coupleId, ct)
-            ?? throw new NotFoundException("INCOME_SOURCE_NOT_FOUND", "Income source not found.");
+            ?? throw new NotFoundException("INCOME_SOURCE_NOT_FOUND", "Fonte de renda não encontrada.");
 
         if (!source.CanBeEditedBy(userId))
-            throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "You can only edit your own or shared income sources.");
+            throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "Você só pode editar suas próprias fontes de renda ou as compartilhadas.");
 
         var now = _dateTimeProvider.UtcNow;
         source.Update(input.Name, input.Amount, input.IsShared, input.IsRecurring, now);
@@ -86,10 +86,10 @@ public sealed class IncomeService
         CancellationToken ct)
     {
         var source = await _repository.GetByIdAsync(sourceId, coupleId, ct)
-            ?? throw new NotFoundException("INCOME_SOURCE_NOT_FOUND", "Income source not found.");
+            ?? throw new NotFoundException("INCOME_SOURCE_NOT_FOUND", "Fonte de renda não encontrada.");
 
         if (!source.CanBeEditedBy(userId))
-            throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "You can only delete your own or shared income sources.");
+            throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "Você só pode excluir suas próprias fontes de renda ou as compartilhadas.");
 
         await _repository.DeleteAsync(source, ct);
         await _repository.SaveChangesAsync(ct);

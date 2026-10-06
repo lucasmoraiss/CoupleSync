@@ -1,14 +1,16 @@
 using System.Reflection;
-using System.Text.Json;
+using CoupleSync.Api.Errors;
 using CoupleSync.Application.Common.Exceptions;
 using FluentValidation;
 
 namespace CoupleSync.Api.Middleware;
 
+/// <summary>
+/// Last line of the single error format: exceptions and body-less 4xx/5xx responses leave here as
+/// <see cref="ApiErrorResponse"/>. Detail of unexpected failures goes only to the log.
+/// </summary>
 public sealed class GlobalExceptionMiddleware
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     private static readonly Assembly DomainAssembly = typeof(CoupleSync.Domain.Entities.Transaction).Assembly;
     private static readonly Assembly ApplicationAssembly = typeof(AppException).Assembly;
 
@@ -26,27 +28,57 @@ public sealed class GlobalExceptionMiddleware
         try
         {
             await _next(context);
+            await CompleteBodylessErrorAsync(context);
         }
         catch (ValidationException ex)
         {
-            await WriteErrorAsync(context, StatusCodes.Status400BadRequest, "VALIDATION_ERROR", ex.Errors.FirstOrDefault()?.ErrorMessage ?? "Validation failed.");
+            var errors = ex.Errors
+                .GroupBy(e => e.PropertyName)
+                .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).Distinct().ToArray());
+            await WriteAsync(context, StatusCodes.Status400BadRequest, ApiErrorCodes.ValidationError,
+                ex.Errors.FirstOrDefault()?.ErrorMessage ?? "Dados inválidos. Verifique os campos e tente novamente.",
+                errors.Count == 0 ? null : errors);
         }
         catch (AppException ex)
         {
-            await WriteErrorAsync(context, ex.StatusCode, ex.Code, ex.Message);
+            await WriteAsync(context, ex.StatusCode, ex.Code, ex.Message, ex.Errors);
         }
         catch (ArgumentException ex) when (IsBusinessRuleViolation(ex))
         {
             // Safety net: invariants enforced by the domain entities / application services signal
             // invalid client input. Argument exceptions raised anywhere else (BCL, EF Core, drivers)
             // are genuine server errors and fall through to the 500 handler below.
-            await WriteErrorAsync(context, StatusCodes.Status400BadRequest, "VALIDATION_ERROR", StripParameterSuffix(ex));
+            await WriteAsync(context, StatusCodes.Status400BadRequest, ApiErrorCodes.ValidationError, StripParameterSuffix(ex));
+        }
+        catch (BadHttpRequestException ex)
+        {
+            // Kestrel/MVC protocol-level failures (body too large, truncated form...). The framework
+            // message is English and technical, so only the status is kept.
+            _logger.LogWarning(ex, "Bad HTTP request.");
+            var (code, message) = ApiErrors.DescribeStatus(ex.StatusCode);
+            await WriteAsync(context, ex.StatusCode, code, message);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception while processing request.");
-            await WriteErrorAsync(context, StatusCodes.Status500InternalServerError, "INTERNAL_SERVER_ERROR", "An unexpected error occurred.");
+            await WriteAsync(context, StatusCodes.Status500InternalServerError,
+                ApiErrorCodes.InternalServerError, ApiErrors.UnexpectedErrorMessage);
         }
+    }
+
+    /// <summary>
+    /// 401 (JWT), 403, 404 (unknown route), 405, 415... are produced by the framework with an empty body.
+    /// Give them the standard body too.
+    /// </summary>
+    private static async Task CompleteBodylessErrorAsync(HttpContext context)
+    {
+        var response = context.Response;
+        if (response.HasStarted || response.StatusCode < 400) return;
+        if (response.ContentLength is > 0 || !string.IsNullOrEmpty(response.ContentType)) return;
+
+        // Headers set by the framework (WWW-Authenticate...) are kept: only the body is missing.
+        var (code, message) = ApiErrors.DescribeStatus(response.StatusCode);
+        await ApiErrors.WriteAsync(context, response.StatusCode, code, message);
     }
 
     private static bool IsBusinessRuleViolation(ArgumentException ex)
@@ -63,14 +95,16 @@ public sealed class GlobalExceptionMiddleware
         return suffixStart > 0 ? message[..suffixStart] : message;
     }
 
-    private static async Task WriteErrorAsync(HttpContext context, int statusCode, string code, string message)
+    private static Task WriteAsync(
+        HttpContext context,
+        int statusCode,
+        string code,
+        string message,
+        IReadOnlyDictionary<string, string[]>? errors = null)
     {
-        context.Response.StatusCode = statusCode;
-        context.Response.ContentType = "application/json";
+        if (context.Response.HasStarted) return Task.CompletedTask;
 
-        var payload = new ErrorEnvelope(code, message, context.TraceIdentifier);
-        await context.Response.WriteAsync(JsonSerializer.Serialize(payload, JsonOptions));
+        context.Response.Clear();
+        return ApiErrors.WriteAsync(context, statusCode, code, message, errors);
     }
-
-    private sealed record ErrorEnvelope(string Code, string Message, string TraceId);
 }

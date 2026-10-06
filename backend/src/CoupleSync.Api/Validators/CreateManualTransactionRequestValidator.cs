@@ -14,14 +14,14 @@ public sealed class CreateManualTransactionRequestValidator : AbstractValidator<
     {
         RuleFor(x => x.Amount)
             .GreaterThanOrEqualTo(MoneyRules.MinPositiveAmount)
-            .WithMessage("Amount must be greater than zero.")
+            .WithMessage("O valor deve ser maior que zero.")
             .LessThanOrEqualTo(MoneyRules.MaxAmount)
-            .WithMessage("Amount exceeds maximum allowed value.");
+            .WithMessage("O valor excede o máximo permitido.");
 
         RuleFor(x => x.Currency)
             .Must(c => c!.Trim().Length == 3 && c.Trim().All(char.IsAsciiLetter))
             .When(x => !string.IsNullOrWhiteSpace(x.Currency))
-            .WithMessage("Currency must be a 3-letter ISO 4217 code.");
+            .WithMessage("A moeda deve ser um código de 3 letras (ex.: BRL).");
 
         RuleFor(x => x.Description)
             .MaximumLength(512)
@@ -33,7 +33,7 @@ public sealed class CreateManualTransactionRequestValidator : AbstractValidator<
 
         RuleFor(x => x.Category)
             .Must(c => !string.IsNullOrWhiteSpace(c))
-            .WithMessage("Category is required.")
+            .WithMessage("A categoria é obrigatória.")
             .MaximumLength(64);
     }
 }

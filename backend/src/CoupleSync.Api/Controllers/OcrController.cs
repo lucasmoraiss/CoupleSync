@@ -39,12 +39,10 @@ public sealed class OcrController : ControllerBase
     public async Task<ActionResult<UploadResponse>> Upload(IFormFile file, CancellationToken ct)
     {
         if (file is null || file.Length == 0)
-            return BadRequest(new { code = "FILE_REQUIRED", message = "A file must be provided." });
+            throw new BadRequestException("FILE_REQUIRED", "Envie um arquivo.");
 
         if (file.Length > MaxFileSizeBytes)
-            return StatusCode(
-                StatusCodes.Status413RequestEntityTooLarge,
-                new { code = "FILE_TOO_LARGE", message = "File must be 10 MB or less." });
+            throw new AppException("FILE_TOO_LARGE", "O arquivo deve ter no máximo 10 MB.", StatusCodes.Status413RequestEntityTooLarge);
 
         // Detect MIME type from magic bytes — do NOT trust Content-Type header.
         using var fileStream = file.OpenReadStream();
@@ -54,9 +52,7 @@ public sealed class OcrController : ControllerBase
 
         var detectedMime = FileTypeDetector.DetectMimeType(header.AsSpan(0, bytesRead));
         if (detectedMime is null)
-            return StatusCode(
-                StatusCodes.Status415UnsupportedMediaType,
-                new { code = "UNSUPPORTED_FILE_TYPE", message = "Accepted file types: JPEG, PNG, PDF." });
+            throw new AppException("UNSUPPORTED_FILE_TYPE", "Tipos de arquivo aceitos: JPEG, PNG e PDF.", StatusCodes.Status415UnsupportedMediaType);
 
         var coupleId = GetAuthenticatedCoupleId();
         var userId = GetAuthenticatedUserId();
@@ -92,7 +88,7 @@ public sealed class OcrController : ControllerBase
         var coupleId = GetAuthenticatedCoupleId();
         var job = await _importJobService.GetJobAsync(uploadId, coupleId, ct);
         if (job is null)
-            return NotFound(new { code = "OCR_JOB_NOT_FOUND", message = "Import job not found." });
+            throw new NotFoundException("OCR_JOB_NOT_FOUND", "Importação não encontrada.");
 
         return Ok(new OcrStatusResponse(job.Status.ToString(), job.ErrorCode, job.QuotaResetDate));
     }
@@ -107,7 +103,7 @@ public sealed class OcrController : ControllerBase
         var coupleId = GetAuthenticatedCoupleId();
         var candidates = await _importJobService.GetCandidatesAsync(uploadId, coupleId, ct);
         if (candidates is null)
-            return NotFound(new { code = "OCR_JOB_NOT_FOUND", message = "Import job not found." });
+            throw new NotFoundException("OCR_JOB_NOT_FOUND", "Importação não encontrada.");
 
         var response = new OcrResultsResponse(
             candidates.Select(c => new OcrCandidateResponse(
@@ -138,7 +134,7 @@ public sealed class OcrController : ControllerBase
             uploadId, coupleId, userId, request.SelectedIndices, overrides, ct, edits);
 
         if (created is null)
-            return NotFound(new { code = "OCR_JOB_NOT_FOUND", message = "Import job not found." });
+            throw new NotFoundException("OCR_JOB_NOT_FOUND", "Importação não encontrada.");
 
         return Ok(new ConfirmResponse(created.Created.Count, created.DuplicatesSkipped));
     }

@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useSessionStore } from '@/state/sessionStore';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { installAuthRefresh } from './authRefresh';
+import { getApiErrorCode } from './apiError';
 import type {
   AuthResponse,
   RefreshResponse,
@@ -64,10 +65,7 @@ axiosInstance.interceptors.response.use(
       return Promise.reject(error);
     }
     // AC-609: Surface COUPLE_REQUIRED with dedicated message
-    if (
-      error?.response?.status === 403 &&
-      error?.response?.data?.code === 'COUPLE_REQUIRED'
-    ) {
+    if (error?.response?.status === 403 && getApiErrorCode(error) === 'COUPLE_REQUIRED') {
       showToastGlobal(
         'Conecte-se com seu parceiro primeiro para usar este recurso',
         'warning',
@@ -110,7 +108,7 @@ export function isCoupleRequiredError(error: unknown): boolean {
   return (
     axios.isAxiosError(error) &&
     error.response?.status === 403 &&
-    error.response?.data?.code === 'COUPLE_REQUIRED'
+    getApiErrorCode(error) === 'COUPLE_REQUIRED'
   );
 }
 

@@ -20,10 +20,10 @@ public sealed class UpdateGoalCommandHandler
         var goal = await _repository.GetByIdAsync(command.Id, command.CoupleId, cancellationToken);
 
         if (goal is null)
-            throw new NotFoundException("GOAL_NOT_FOUND", "Goal not found.");
+            throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
         if (goal.Status == Domain.Entities.GoalStatus.Archived)
-            throw new ConflictException("GOAL_ARCHIVED", "Cannot update an archived goal.");
+            throw new ConflictException("GOAL_ARCHIVED", "Não é possível editar uma meta arquivada.");
 
         var now = _dateTimeProvider.UtcNow;
         goal.Update(command.Title, command.Description, command.TargetAmount, command.Deadline, now);

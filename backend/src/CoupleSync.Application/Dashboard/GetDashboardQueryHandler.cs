@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 
 namespace CoupleSync.Application.Dashboard;
@@ -26,7 +27,7 @@ public sealed class GetDashboardQueryHandler
             periodEnd = new DateTime(periodEnd.Year, periodEnd.Month, periodEnd.Day, 23, 59, 59, 999, DateTimeKind.Utc);
 
         if (periodStart > periodEnd)
-            throw new ArgumentException("INVALID_DATE_RANGE: startDate must not be after endDate.", nameof(query));
+            throw new BadRequestException("INVALID_DATE_RANGE", "A data inicial não pode ser posterior à data final.");
 
         var aggregates = await _repository.GetAggregatesAsync(query.CoupleId, periodStart, periodEnd, cancellationToken);
 

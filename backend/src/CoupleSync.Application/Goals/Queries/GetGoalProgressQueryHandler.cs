@@ -27,7 +27,7 @@ public sealed class GetGoalProgressQueryHandler
         var goal = await _goalRepository.GetByIdAsync(query.GoalId, query.CoupleId, ct);
 
         if (goal is null)
-            throw new NotFoundException("GOAL_NOT_FOUND", "Goal not found.");
+            throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
         var transactions = await _transactionRepository.GetByGoalIdAsync(query.GoalId, query.CoupleId, ct);
         var contributedAmount = transactions.Sum(t => t.Amount);

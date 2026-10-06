@@ -1,4 +1,5 @@
 // AC-003: Transactions list screen — FlatList + pull-to-refresh + inline category editor
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
@@ -235,7 +236,7 @@ export default function TransactionsScreen() {
     }
   }, []);
 
-  const { data, isLoading, isError, refetch } = useQuery<GetTransactionsResponse>({
+  const { data, isLoading, isError, error: loadError, refetch } = useQuery<GetTransactionsResponse>({
     queryKey: ['transactions', 1, 20],
     queryFn: async () => {
       const res = await transactionsApiClient.list({ page: 1, pageSize: 20 });
@@ -254,7 +255,7 @@ export default function TransactionsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível atualizar a categoria. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível atualizar a categoria. Tente novamente.'));
     },
   });
 
@@ -269,7 +270,7 @@ export default function TransactionsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível excluir a transação. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível excluir a transação. Tente novamente.'));
     },
   });
 
@@ -370,7 +371,7 @@ export default function TransactionsScreen() {
       {/* Error state */}
       {isError && !isLoading && (
         <ErrorState
-          message="Erro ao carregar transações"
+          message={getApiErrorMessage(loadError, 'Erro ao carregar transações.')}
           onRetry={handleRefresh}
         />
       )}

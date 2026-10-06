@@ -1,6 +1,6 @@
 // AC-005: Goals management screen — list, create, edit, delete
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback } from 'react';
-import axios from 'axios';
 import {
   View,
   Text,
@@ -389,7 +389,7 @@ export default function GoalsScreen() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingGoal, setEditingGoal] = useState<GoalDto | null>(null);
 
-  const { data, isLoading, isError, refetch } = useQuery<GetGoalsResponse>({
+  const { data, isLoading, isError, error: loadError, refetch } = useQuery<GetGoalsResponse>({
     queryKey: ['goals'],
     queryFn: async () => {
       const res = await goalsApiClient.list(false);
@@ -424,8 +424,7 @@ export default function GoalsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      const apiMsg = axios.isAxiosError(error) ? (error.response?.data as any)?.message : undefined;
-      toast.error(apiMsg ?? 'Não foi possível criar a meta. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível criar a meta. Tente novamente.'));
     },
   });
 
@@ -449,8 +448,7 @@ export default function GoalsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      const apiMsg = axios.isAxiosError(error) ? (error.response?.data as any)?.message : undefined;
-      toast.error(apiMsg ?? 'Não foi possível atualizar a meta. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível atualizar a meta. Tente novamente.'));
     },
   });
 
@@ -462,7 +460,7 @@ export default function GoalsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível excluir a meta. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível excluir a meta. Tente novamente.'));
     },
   });
 
@@ -519,7 +517,7 @@ export default function GoalsScreen() {
       {/* Error */}
       {isError && !isLoading && (
         <ErrorState
-          message="Não foi possível carregar as metas"
+          message={getApiErrorMessage(loadError, 'Não foi possível carregar as metas.')}
           onRetry={refetch}
         />
       )}

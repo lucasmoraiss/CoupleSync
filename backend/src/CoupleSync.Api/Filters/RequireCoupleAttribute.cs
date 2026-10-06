@@ -1,6 +1,6 @@
+using CoupleSync.Api.Errors;
 using CoupleSync.Application.Common.Interfaces;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,12 +13,11 @@ public sealed class RequireCoupleAttribute : Attribute, IAsyncAuthorizationFilte
     {
         if (context.HttpContext.User?.Identity?.IsAuthenticated != true)
         {
-            context.Result = new UnauthorizedObjectResult(new
-            {
-                code = "UNAUTHORIZED",
-                message = "Authentication required.",
-                traceId = context.HttpContext.TraceIdentifier
-            });
+            context.Result = ApiErrors.Result(
+                context.HttpContext,
+                StatusCodes.Status401Unauthorized,
+                ApiErrorCodes.Unauthorized,
+                "Autenticação necessária. Entre novamente.");
             return Task.CompletedTask;
         }
 
@@ -26,15 +25,11 @@ public sealed class RequireCoupleAttribute : Attribute, IAsyncAuthorizationFilte
 
         if (coupleContext.CoupleId is null)
         {
-            context.Result = new ObjectResult(new
-            {
-                code = "COUPLE_REQUIRED",
-                message = "You must be paired with a partner to access this resource.",
-                traceId = context.HttpContext.TraceIdentifier
-            })
-            {
-                StatusCode = StatusCodes.Status403Forbidden
-            };
+            context.Result = ApiErrors.Result(
+                context.HttpContext,
+                StatusCodes.Status403Forbidden,
+                ApiErrorCodes.CoupleRequired,
+                "Você precisa estar conectado ao seu parceiro para acessar este recurso.");
         }
 
         return Task.CompletedTask;

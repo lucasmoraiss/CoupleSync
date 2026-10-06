@@ -78,7 +78,7 @@ public sealed class Transaction : ICoupleScoped
     public void UpdateCategory(string category)
     {
         if (string.IsNullOrWhiteSpace(category) || category.Length > 64)
-            throw new ArgumentException("Category must be a non-empty string of at most 64 characters.", nameof(category));
+            throw new ArgumentException("A categoria é obrigatória e deve ter no máximo 64 caracteres.", nameof(category));
         Category = category;
     }
 

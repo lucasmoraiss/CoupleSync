@@ -1,5 +1,6 @@
 // Manual transaction entry screen — allows the user to add an expense by hand,
 // independent of OCR / push-notification parsing. Extends existing flows, does NOT replace.
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState } from 'react';
 import {
   View,
@@ -82,8 +83,7 @@ export default function NewTransactionScreen() {
 
       router.back();
     } catch (err: any) {
-      const apiMsg = err?.response?.data?.message;
-      Alert.alert('Erro', apiMsg ?? 'Não foi possível registrar a transação.');
+      Alert.alert('Erro', getApiErrorMessage(err, 'Não foi possível registrar a transação.'));
     } finally {
       setSubmitting(false);
     }

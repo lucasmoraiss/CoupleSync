@@ -59,14 +59,14 @@ public sealed class BudgetService
         {
             throw new ConflictException(
                 "BUDGET_PLAN_CONFLICT",
-                "Budget plan was modified concurrently. Please retry the request.");
+                "O orçamento foi alterado ao mesmo tempo por outra requisição. Tente novamente.");
         }
         catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("23505") == true
                                            || ex.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true)
         {
             throw new ConflictException(
                 "BUDGET_PLAN_CONFLICT",
-                "A budget plan for this month already exists. Please retry the request.");
+                "Já existe um orçamento para este mês. Tente novamente.");
         }
     }
 
@@ -83,17 +83,17 @@ public sealed class BudgetService
         if (allocations.Count > 20)
             throw new UnprocessableEntityException(
                 "BUDGET_ALLOCATION_LIMIT",
-                "A budget plan may have at most 20 allocations.");
+                "Um orçamento pode ter no máximo 20 categorias.");
 
         if (allocations.GroupBy(a => a.Category, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
             throw new UnprocessableEntityException(
                 "BUDGET_ALLOCATION_DUPLICATE_CATEGORY",
-                "Each category may appear at most once in a budget plan.");
+                "Cada categoria só pode aparecer uma vez no orçamento.");
 
         var plan = await _repository.GetByIdAsync(planId, coupleId, cancellationToken);
 
         if (plan is null)
-            throw new NotFoundException("BUDGET_PLAN_NOT_FOUND", "Budget plan not found.");
+            throw new NotFoundException("BUDGET_PLAN_NOT_FOUND", "Orçamento não encontrado.");
 
         var mismatch = allocations.FirstOrDefault(
             a => !string.Equals(a.Currency, plan.Currency, StringComparison.OrdinalIgnoreCase));
@@ -101,7 +101,7 @@ public sealed class BudgetService
         if (mismatch is not null)
             throw new UnprocessableEntityException(
                 "BUDGET_ALLOCATION_CURRENCY_MISMATCH",
-                $"Allocation currency '{mismatch.Currency}' does not match plan currency '{plan.Currency}'.");
+                $"A moeda da categoria '{mismatch.Currency}' não corresponde à moeda do orçamento '{plan.Currency}'.");
 
         var now = _dateTimeProvider.UtcNow;
         var inputs = allocations
@@ -117,7 +117,7 @@ public sealed class BudgetService
         {
             throw new ConflictException(
                 "BUDGET_PLAN_CONFLICT",
-                "Budget plan was modified concurrently. Please retry the request.");
+                "O orçamento foi alterado ao mesmo tempo por outra requisição. Tente novamente.");
         }
     }
 
@@ -185,13 +185,13 @@ public sealed class BudgetService
         {
             throw new ConflictException(
                 "BUDGET_PLAN_DUPLICATE",
-                "A budget plan for this period already exists.");
+                "Já existe um orçamento para este período.");
         }
         catch (DbUpdateConcurrencyException)
         {
             throw new ConflictException(
                 "BUDGET_PLAN_CONFLICT",
-                "Budget plan was modified concurrently. Please retry the request.");
+                "O orçamento foi alterado ao mesmo tempo por outra requisição. Tente novamente.");
         }
     }
 

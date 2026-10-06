@@ -31,12 +31,12 @@ public sealed class CreateCoupleCommandHandler
 
         if (user is null || !user.IsActive)
         {
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired session.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
         if (user.CoupleId.HasValue)
         {
-            throw new ConflictException("USER_ALREADY_IN_COUPLE", "User is already in a couple.");
+            throw new ConflictException("USER_ALREADY_IN_COUPLE", "Você já faz parte de um casal.");
         }
 
         var now = _dateTimeProvider.UtcNow;
@@ -66,6 +66,6 @@ public sealed class CreateCoupleCommandHandler
             }
         }
 
-        throw new AppException("COUPLE_CODE_GENERATION_FAILED", "Unable to generate a unique join code.", 500);
+        throw new AppException("COUPLE_CODE_GENERATION_FAILED", "Não foi possível gerar o código de convite. Tente novamente.", 500);
     }
 }

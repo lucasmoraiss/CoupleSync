@@ -66,11 +66,11 @@ public sealed class TransactionEventIngest : ICoupleScoped
         string? rawNotificationTextRedacted,
         DateTime createdAtUtc)
     {
-        if (coupleId == Guid.Empty) throw new ArgumentException("CoupleId is required.", nameof(coupleId));
-        if (userId == Guid.Empty) throw new ArgumentException("UserId is required.", nameof(userId));
-        if (string.IsNullOrWhiteSpace(bank)) throw new ArgumentException("Bank is required.", nameof(bank));
-        if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount), "Amount must be greater than zero.");
-        if (string.IsNullOrWhiteSpace(currency)) throw new ArgumentException("Currency is required.", nameof(currency));
+        if (coupleId == Guid.Empty) throw new ArgumentException("O casal é obrigatório.", nameof(coupleId));
+        if (userId == Guid.Empty) throw new ArgumentException("O usuário é obrigatório.", nameof(userId));
+        if (string.IsNullOrWhiteSpace(bank)) throw new ArgumentException("O banco é obrigatório.", nameof(bank));
+        if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount), "O valor deve ser maior que zero.");
+        if (string.IsNullOrWhiteSpace(currency)) throw new ArgumentException("A moeda é obrigatória.", nameof(currency));
 
         return new TransactionEventIngest(
             Guid.NewGuid(), coupleId, userId, bank.Trim().ToUpperInvariant(),

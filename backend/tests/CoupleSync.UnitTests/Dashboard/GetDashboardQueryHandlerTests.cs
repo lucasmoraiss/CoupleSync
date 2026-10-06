@@ -1,4 +1,5 @@
 using CoupleSync.Application.Dashboard;
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Domain.Entities;
 using CoupleSync.UnitTests.Support;
 
@@ -238,11 +239,11 @@ public sealed class GetDashboardQueryHandlerTests
         var start = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc);
         var end = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+        var ex = await Assert.ThrowsAsync<BadRequestException>(() =>
             handler.HandleAsync(
                 new GetDashboardQuery(coupleId, start, end),
                 CancellationToken.None));
 
-        Assert.Contains("INVALID_DATE_RANGE", ex.Message);
+        Assert.Equal("INVALID_DATE_RANGE", ex.Code);
     }
 }

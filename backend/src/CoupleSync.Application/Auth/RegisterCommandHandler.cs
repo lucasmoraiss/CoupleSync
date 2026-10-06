@@ -39,7 +39,7 @@ public sealed class RegisterCommandHandler
 
         if (await _authRepository.EmailExistsAsync(email, cancellationToken))
         {
-            throw new ConflictException("EMAIL_ALREADY_IN_USE", "Email is already in use.");
+            throw new ConflictException("EMAIL_ALREADY_IN_USE", "Já existe uma conta com esse e-mail.");
         }
 
         var now = _dateTimeProvider.UtcNow;
@@ -63,7 +63,7 @@ public sealed class RegisterCommandHandler
         }
         catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
-            throw new ConflictException("EMAIL_ALREADY_IN_USE", "Email already in use.");
+            throw new ConflictException("EMAIL_ALREADY_IN_USE", "Já existe uma conta com esse e-mail.");
         }
 
         return new AuthResult(

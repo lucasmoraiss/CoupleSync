@@ -22,7 +22,7 @@ public sealed class LinkTransactionToGoalCommandHandler
             command.TransactionId, command.CoupleId, cancellationToken);
 
         if (transaction is null)
-            throw new NotFoundException("TRANSACTION_NOT_FOUND", "Transaction not found.");
+            throw new NotFoundException("TRANSACTION_NOT_FOUND", "Transação não encontrada.");
 
         if (command.GoalId is not null)
         {
@@ -30,7 +30,7 @@ public sealed class LinkTransactionToGoalCommandHandler
                 command.GoalId.Value, command.CoupleId, cancellationToken);
 
             if (goal is null)
-                throw new NotFoundException("GOAL_NOT_FOUND", "Goal not found.");
+                throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
         }
 
         transaction.LinkToGoal(command.GoalId);

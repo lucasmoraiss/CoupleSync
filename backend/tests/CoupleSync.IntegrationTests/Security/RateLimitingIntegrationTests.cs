@@ -43,6 +43,7 @@ public sealed class RateLimitingIntegrationTests
         Assert.Equal(HttpStatusCode.TooManyRequests, sixth.StatusCode);
         var error = await sixth.Content.ReadFromJsonAsync<ErrorDto>();
         Assert.Equal("RATE_LIMIT_EXCEEDED", error!.Code);
+        Assert.Equal("Muitas tentativas. Aguarde um instante e tente novamente.", error.Message);
         Assert.False(string.IsNullOrWhiteSpace(error.Message));
         Assert.False(string.IsNullOrWhiteSpace(error.TraceId));
         Assert.True(sixth.Headers.Contains("Retry-After"));

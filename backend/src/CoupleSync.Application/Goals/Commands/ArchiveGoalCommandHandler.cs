@@ -20,7 +20,7 @@ public sealed class ArchiveGoalCommandHandler
         var goal = await _repository.GetByIdAsync(command.Id, command.CoupleId, cancellationToken);
 
         if (goal is null)
-            throw new NotFoundException("GOAL_NOT_FOUND", "Goal not found.");
+            throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
         var now = _dateTimeProvider.UtcNow;
         goal.Archive(now);

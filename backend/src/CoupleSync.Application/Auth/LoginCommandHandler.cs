@@ -39,7 +39,7 @@ public sealed class LoginCommandHandler
 
         if (user is null || !_passwordHasher.VerifyPassword(command.Password, user.PasswordHash) || !user.IsActive)
         {
-            throw new UnauthorizedException("INVALID_CREDENTIALS", "Invalid credentials.");
+            throw new UnauthorizedException("INVALID_CREDENTIALS", "E-mail ou senha incorretos.");
         }
 
         var now = _dateTimeProvider.UtcNow;
