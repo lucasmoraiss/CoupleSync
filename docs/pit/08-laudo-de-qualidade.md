@@ -35,7 +35,7 @@ A avaliação combinou verificação e validação, nesta ordem.
 
 **6. Verificação em produção.** Depois de publicada, a API foi conferida no ambiente real: saúde, conexão com o banco, autenticação e limite de tentativas. Essa etapa encontrou um erro que nenhum teste local revelava (A17).
 
-**7. Execução do aplicativo.** O APK foi instalado em um emulador Android 14 e conectado à API publicada, com contas de demonstração e dados fictícios. Todas as telas foram percorridas por roteiro de toques, incluindo lançamento manual, troca de categoria, exclusão, importação de extrato com correção de valores e edição de meta. Essa etapa encontrou defeitos visuais que os testes de lógica não mostravam (A18).
+**7. Execução do aplicativo.** O APK foi instalado em um emulador Android 14 e conectado à API publicada, com contas de demonstração e dados fictícios. Todas as telas foram percorridas por roteiro de toques, incluindo lançamento manual, troca de categoria, exclusão, importação de extrato com correção de valores e edição de meta. Essa etapa encontrou defeitos visuais que os testes de lógica não mostravam (A18). Também confirmou na prática a renovação de sessão (A03): depois de 17 minutos sem uso, o aplicativo continuou autenticado e carregou os dados, sem voltar à tela de entrada. O APK final foi instalado do zero e conferido antes de ser publicado em <https://github.com/lucasmoraiss/CoupleSync/releases/tag/v1.0.0-pit>.
 
 A revisão de código e a execução dos roteiros foram feitas com apoio de ferramentas de IA para programação, sob condução do autor. Os arquivos de teste da importação de extrato são PDFs sintéticos, com dados inventados.
 
