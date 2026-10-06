@@ -54,14 +54,15 @@ public sealed class GetIntegrationStatusQueryHandler
     {
         if (lastRejected is not null
             && lastRejected.ErrorMessage is not null
-            && lastRejected.ErrorMessage.Contains("validation", StringComparison.OrdinalIgnoreCase))
+            && (lastRejected.ErrorMessage.Contains("validation", StringComparison.OrdinalIgnoreCase)
+                || lastRejected.ErrorMessage.Contains("validaç", StringComparison.OrdinalIgnoreCase)))
         {
-            return "Check notification format settings";
+            return "Verifique o formato das notificações enviadas pelo aplicativo do banco.";
         }
 
         if (!isActive && lastEventTime.HasValue)
         {
-            return "Verify notification access permission is enabled";
+            return "Confira se o acesso do CoupleSync às notificações está ativado nas configurações do Android.";
         }
 
         if (!isActive && !lastEventTime.HasValue)
@@ -71,7 +72,7 @@ public sealed class GetIntegrationStatusQueryHandler
 
         if (lastRejected is not null && lastRejected.ErrorMessage is not null)
         {
-            return $"Review rejected event error: {lastRejected.ErrorMessage}";
+            return $"Revise o erro do último evento rejeitado: {lastRejected.ErrorMessage}";
         }
 
         return null;

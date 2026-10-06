@@ -77,7 +77,7 @@ export default function CoupleSetupScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
             <Text style={styles.emoji}>🎉</Text>
-            <Text style={styles.title}>Casal criado!</Text>
+            <Text style={styles.title} accessibilityRole="header">Casal criado!</Text>
             <Text style={styles.subtitle}>
               Compartilhe este código com seu parceiro(a)
             </Text>
@@ -125,14 +125,14 @@ export default function CoupleSetupScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
             <Text style={styles.emoji}>🔗</Text>
-            <Text style={styles.title}>Entrar no casal</Text>
+            <Text style={styles.title} accessibilityRole="header">Entrar no casal</Text>
             <Text style={styles.subtitle}>
               Cole o código que seu parceiro(a) compartilhou
             </Text>
           </View>
 
           <View style={styles.form}>
-            <TextInput
+            <TextInput accessibilityLabel="Código de convite do grupo"
               style={styles.codeInput}
               placeholder="XXXXXXXX"
               placeholderTextColor={colors.placeholder}
@@ -180,7 +180,7 @@ export default function CoupleSetupScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Text style={styles.emoji}>💑</Text>
-          <Text style={styles.title}>Vamos configurar</Text>
+          <Text style={styles.title} accessibilityRole="header">Vamos configurar</Text>
           <Text style={styles.subtitle}>
             Crie um casal ou entre com um código de convite
           </Text>
@@ -317,6 +317,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   linkButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
     marginTop: 24,
     paddingVertical: 8,
@@ -348,6 +350,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   copyButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     backgroundColor: colors.border,
     borderRadius: 8,
     paddingHorizontal: 20,

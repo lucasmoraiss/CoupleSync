@@ -60,13 +60,13 @@ export default function ChangePasswordScreen() {
           <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Voltar">
             <Text style={styles.back}>← Voltar</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>Alterar senha</Text>
+          <Text style={styles.title} accessibilityRole="header">Alterar senha</Text>
           <Text style={styles.hint}>
             A senha nova precisa ter pelo menos 8 caracteres, com letras e números, e não pode ser uma senha comum.
           </Text>
 
           <Text style={styles.label}>Senha atual</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Senha atual"
             style={styles.input}
             value={currentPassword}
             onChangeText={setCurrentPassword}
@@ -79,7 +79,7 @@ export default function ChangePasswordScreen() {
           />
 
           <Text style={styles.label}>Senha nova</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Senha nova"
             style={styles.input}
             value={newPassword}
             onChangeText={setNewPassword}
@@ -92,7 +92,7 @@ export default function ChangePasswordScreen() {
           />
 
           <Text style={styles.label}>Confirmar senha nova</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Confirmar a senha nova"
             style={styles.input}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
@@ -104,7 +104,7 @@ export default function ChangePasswordScreen() {
             placeholderTextColor={colors.placeholder}
           />
 
-          <TouchableOpacity
+          <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }}
             onPress={() => setShowPasswords((v) => !v)}
             accessibilityRole="button"
             accessibilityLabel={showPasswords ? 'Ocultar senhas' : 'Mostrar senhas'}
@@ -131,7 +131,7 @@ export default function ChangePasswordScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 40 },
-  back: { color: colors.primaryLight, fontSize: 15, marginBottom: 16 },
+  back: { minHeight: 44, textAlignVertical: 'center', color: colors.primaryLight, fontSize: 15, marginBottom: 16 },
   title: { fontSize: 26, fontWeight: '700', color: colors.text, marginBottom: 8 },
   hint: { fontSize: 14, color: colors.textMuted, marginBottom: 20, lineHeight: 20 },
   label: { fontSize: 14, color: colors.textMuted, marginBottom: 6, marginTop: 12 },

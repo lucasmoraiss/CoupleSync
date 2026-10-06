@@ -4,6 +4,7 @@
 package com.couplesync.app
 
 import android.app.Notification
+import android.content.Context
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -18,12 +19,23 @@ import android.service.notification.StatusBarNotification
  */
 object NotificationEventBus {
     private const val MAX_BUFFER_SIZE = 50
+    private const val PREFS_NAME = "couplesync_capture"
+    private const val KEY_ENABLED = "enabled"
 
     @Volatile
     var listener: ((packageName: String, title: String, body: String, timestampMs: Long) -> Unit)? = null
 
     private val buffer = mutableListOf<NotificationEvent>()
     private val lock = Any()
+
+    // Guarda explícita contra recursão: se um listener (direta ou indiretamente) chamar dispatch de novo
+    // na mesma thread, o evento vai para o buffer em vez de reentrar no listener (MOB-08).
+    private val dispatching = ThreadLocal<Boolean>()
+
+    // Consentimento do usuário (MOB-03): a captura só roda depois de o app (JS) liberar, e o valor fica salvo
+    // para o serviço, que o sistema pode iniciar sem o app aberto. Padrão: desligada.
+    @Volatile
+    private var captureEnabled: Boolean? = null
 
     data class NotificationEvent(
         val packageName: String,
@@ -32,17 +44,47 @@ object NotificationEventBus {
         val timestampMs: Long
     )
 
+    fun isCaptureEnabled(context: Context): Boolean {
+        captureEnabled?.let { return it }
+        val stored = context.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ENABLED, false)
+        captureEnabled = stored
+        return stored
+    }
+
+    fun setCaptureEnabled(context: Context, enabled: Boolean) {
+        context.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_ENABLED, enabled).apply()
+        captureEnabled = enabled
+        if (!enabled) {
+            // Desligar descarta o que ainda esperava a ponte: nada capturado antes do "desligar" sai depois dele.
+            synchronized(lock) { buffer.clear() }
+        }
+    }
+
+    /** Guarda o evento sem acionar o listener. Usado quando o listener existe mas ainda não pode entregar. */
+    fun buffer(packageName: String, title: String, body: String, timestampMs: Long) {
+        synchronized(lock) {
+            if (buffer.size >= MAX_BUFFER_SIZE) {
+                buffer.removeAt(0) // Drop oldest
+            }
+            buffer.add(NotificationEvent(packageName, title, body, timestampMs))
+        }
+    }
+
     fun dispatch(packageName: String, title: String, body: String, timestampMs: Long) {
         val currentListener = listener
-        if (currentListener != null) {
+        if (currentListener == null || dispatching.get() == true) {
+            buffer(packageName, title, body, timestampMs)
+            return
+        }
+        dispatching.set(true)
+        try {
             currentListener(packageName, title, body, timestampMs)
-        } else {
-            synchronized(lock) {
-                if (buffer.size >= MAX_BUFFER_SIZE) {
-                    buffer.removeAt(0) // Drop oldest
-                }
-                buffer.add(NotificationEvent(packageName, title, body, timestampMs))
-            }
+        } finally {
+            dispatching.set(false)
         }
     }
 
@@ -78,6 +120,9 @@ class NotificationCaptureService : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         sbn ?: return
+
+        // Sem consentimento (ou com a captura desligada) a notificação nem é lida (MOB-03).
+        if (!NotificationEventBus.isCaptureEnabled(applicationContext)) return
 
         val packageName = sbn.packageName ?: return
         if (packageName !in SUPPORTED_PACKAGES) return

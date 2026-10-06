@@ -31,23 +31,28 @@ class NotificationBridgeModule(private val reactContext: ReactApplicationContext
                     .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                     .emit("NotificationCaptured", params)
             } else {
-                // Bridge registered but React instance not yet active — re-buffer (FR-005)
-                NotificationEventBus.dispatch(packageName, title, body, timestampMs)
+                // Bridge registered but React instance not yet active — re-buffer (FR-005).
+                // Direto no buffer: chamar dispatch aqui reentraria neste mesmo listener, em recursão infinita (MOB-08).
+                NotificationEventBus.buffer(packageName, title, body, timestampMs)
             }
         }
 
         // Flush events buffered while the bridge was inactive (NFR-001: no title/body logged)
         // Safe to emit unconditionally: init guarantees a valid ReactApplicationContext
         NotificationEventBus.flush { packageName, title, body, timestampMs ->
-            val params = WritableNativeMap().apply {
-                putString("packageName", packageName)
-                putString("title", title)
-                putString("body", body)
-                putDouble("timestampMs", timestampMs.toDouble())
+            if (reactContext.hasActiveReactInstance()) {
+                val params = WritableNativeMap().apply {
+                    putString("packageName", packageName)
+                    putString("title", title)
+                    putString("body", body)
+                    putDouble("timestampMs", timestampMs.toDouble())
+                }
+                reactContext
+                    .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                    .emit("NotificationCaptured", params)
+            } else {
+                NotificationEventBus.buffer(packageName, title, body, timestampMs)
             }
-            reactContext
-                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                .emit("NotificationCaptured", params)
         }
     }
 
@@ -67,6 +72,15 @@ class NotificationBridgeModule(private val reactContext: ReactApplicationContext
         } catch (e: Exception) {
             promise.resolve(false)
         }
+    }
+
+    /**
+     * Liga/desliga a captura no serviço nativo (consentimento do usuário). Desligada, o serviço ignora
+     * as notificações e descarta o que estava em espera. O app chama isto a cada mudança de consentimento.
+     */
+    @ReactMethod
+    fun setCaptureEnabled(enabled: Boolean) {
+        NotificationEventBus.setCaptureEnabled(reactContext, enabled)
     }
 
     /**

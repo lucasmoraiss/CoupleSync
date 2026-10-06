@@ -19,9 +19,19 @@ jest.mock('@/services/apiClient', () => ({
 
 import { getPendingRetryCount, handleRawNotificationEvent } from '../eventUploader';
 import { clearUserData } from '@/state/userData';
+import { useSessionStore } from '@/state/sessionStore';
+import { useConsentStore } from '@/modules/privacy/consentStore';
+
+/** Usuário logado que já aceitou a captura (sem isso o uploader descarta tudo). */
+async function signInWithCaptureConsent() {
+  await useSessionStore.getState().setSession('access-1', 'refresh-1', 'user-1', 'couple-1');
+  await useConsentStore.getState().load('user-1');
+  await useConsentStore.getState().acceptCapture();
+}
 
 describe('fila de reenvio de notificações', () => {
   it('é esvaziada ao sair da conta', async () => {
+    await signInWithCaptureConsent();
     mockPost.mockRejectedValue(new Error('Network Error'));
     const queued = await handleRawNotificationEvent({
       packageName: 'com.nu.production',
@@ -43,6 +53,7 @@ describe('reenvio em andamento durante a saída', () => {
   afterEach(() => jest.useRealTimers());
 
   it('um flush que já estava em curso não devolve à fila os eventos de quem saiu', async () => {
+    await signInWithCaptureConsent();
     mockPost.mockReset();
     mockPost.mockRejectedValueOnce(new Error('Network Error')); // envio inicial falha: entra na fila
     await handleRawNotificationEvent({

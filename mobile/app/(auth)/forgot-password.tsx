@@ -124,7 +124,7 @@ export default function ForgotPasswordScreen() {
             <Text style={styles.back}>← Voltar</Text>
           </TouchableOpacity>
 
-          <Text style={styles.title}>Esqueci minha senha</Text>
+          <Text style={styles.title} accessibilityRole="header">Esqueci minha senha</Text>
 
           {unavailable && (
             <View style={styles.notice} accessibilityRole="alert">
@@ -136,7 +136,7 @@ export default function ForgotPasswordScreen() {
             <>
               <Text style={styles.hint}>Informe o e-mail da sua conta. Se ele estiver cadastrado, enviaremos um código de 6 dígitos.</Text>
               <Text style={styles.label}>E-mail</Text>
-              <TextInput
+              <TextInput accessibilityLabel="E-mail da conta"
                 style={styles.input}
                 value={email}
                 onChangeText={setEmail}
@@ -157,7 +157,7 @@ export default function ForgotPasswordScreen() {
               >
                 {loading ? <ActivityIndicator color={colors.text} /> : <Text style={styles.buttonText}>Enviar código</Text>}
               </TouchableOpacity>
-              <TouchableOpacity style={styles.link} onPress={() => setStep('reset')} accessibilityRole="button">
+              <TouchableOpacity accessibilityLabel="Já tenho um código" style={styles.link} onPress={() => setStep('reset')} accessibilityRole="button">
                 <Text style={styles.linkText}>Já tenho um código</Text>
               </TouchableOpacity>
             </>
@@ -169,7 +169,7 @@ export default function ForgotPasswordScreen() {
               </Text>
 
               <Text style={styles.label}>E-mail</Text>
-              <TextInput
+              <TextInput accessibilityLabel="E-mail da conta"
                 style={styles.input}
                 value={email}
                 onChangeText={setEmail}
@@ -196,7 +196,7 @@ export default function ForgotPasswordScreen() {
               />
 
               <Text style={styles.label}>Senha nova</Text>
-              <TextInput
+              <TextInput accessibilityLabel="Senha nova"
                 style={styles.input}
                 value={newPassword}
                 onChangeText={setNewPassword}
@@ -209,7 +209,7 @@ export default function ForgotPasswordScreen() {
               />
 
               <Text style={styles.label}>Confirmar senha nova</Text>
-              <TextInput
+              <TextInput accessibilityLabel="Confirmar a senha nova"
                 style={styles.input}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
@@ -221,7 +221,7 @@ export default function ForgotPasswordScreen() {
                 placeholderTextColor={colors.placeholder}
               />
 
-              <TouchableOpacity
+              <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }}
                 onPress={() => setShowPasswords((v) => !v)}
                 accessibilityRole="button"
                 accessibilityLabel={showPasswords ? 'Ocultar senhas' : 'Mostrar senhas'}
@@ -262,7 +262,7 @@ export default function ForgotPasswordScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 40 },
-  back: { color: colors.primaryLight, fontSize: 15, marginBottom: 16 },
+  back: { minHeight: 44, textAlignVertical: 'center', color: colors.primaryLight, fontSize: 15, marginBottom: 16 },
   title: { fontSize: 26, fontWeight: '700', color: colors.text, marginBottom: 8 },
   hint: { fontSize: 14, color: colors.textMuted, marginBottom: 20, lineHeight: 20 },
   notice: {
@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
   button: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
   buttonText: { color: colors.text, fontSize: 16, fontWeight: '700' },
   disabled: { opacity: 0.6 },
-  link: { alignItems: 'center', marginTop: 20, paddingVertical: 8 },
+  link: { minHeight: 44, textAlignVertical: 'center', alignItems: 'center', marginTop: 20, paddingVertical: 8 },
   linkText: { color: colors.primaryLight, fontSize: 14, fontWeight: '600' },
   linkDisabled: { color: colors.textDisabled },
 });

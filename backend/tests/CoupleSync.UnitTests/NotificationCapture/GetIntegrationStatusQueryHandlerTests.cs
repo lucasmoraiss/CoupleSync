@@ -99,7 +99,7 @@ public sealed class GetIntegrationStatusQueryHandlerTests
         Assert.Equal(1, result.TotalRejected);
         Assert.NotNull(result.LastErrorAtUtc);
         Assert.Equal("Parser failed", result.LastErrorMessage);
-        Assert.Equal("Review rejected event error: Parser failed", result.RecoveryHint);
+        Assert.Equal("Revise o erro do último evento rejeitado: Parser failed", result.RecoveryHint);
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public sealed class GetIntegrationStatusQueryHandlerTests
 
         var result = await handler.HandleAsync(new GetIntegrationStatusQuery(CoupleId), CancellationToken.None);
 
-        Assert.Equal("Check notification format settings", result.RecoveryHint);
+        Assert.Equal("Verifique o formato das notificações enviadas pelo aplicativo do banco.", result.RecoveryHint);
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class GetIntegrationStatusQueryHandlerTests
         var result = await handler.HandleAsync(new GetIntegrationStatusQuery(CoupleId), CancellationToken.None);
 
         Assert.False(result.IsActive);
-        Assert.Equal("Verify notification access permission is enabled", result.RecoveryHint);
+        Assert.Equal("Confira se o acesso do CoupleSync às notificações está ativado nas configurações do Android.", result.RecoveryHint);
     }
 
     [Fact]

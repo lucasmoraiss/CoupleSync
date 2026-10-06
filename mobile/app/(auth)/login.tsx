@@ -84,7 +84,7 @@ export default function LoginScreen() {
 
         <View style={styles.form}>
           <Text style={styles.label}>E-mail</Text>
-          <TextInput
+          <TextInput accessibilityLabel="E-mail"
             style={styles.input}
             placeholder="seu@email.com"
             placeholderTextColor={colors.placeholder}
@@ -98,7 +98,7 @@ export default function LoginScreen() {
 
           <Text style={styles.label}>Senha</Text>
           <View style={styles.inputWrapper}>
-            <TextInput
+            <TextInput accessibilityLabel="Senha"
               style={styles.inputField}
               placeholder="••••••••"
               placeholderTextColor={colors.placeholder}
@@ -107,7 +107,7 @@ export default function LoginScreen() {
               secureTextEntry={!showPassword}
               editable={!loading}
             />
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
               onPress={() => setShowPassword(!showPassword)}
               style={styles.eyeButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -116,7 +116,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Entrar" accessibilityState={{ disabled: loading, busy: loading }}
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={loading}
@@ -139,7 +139,7 @@ export default function LoginScreen() {
             <Text style={styles.forgotText}>Esqueci minha senha</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Ir para o cadastro de conta nova"
             style={styles.linkButton}
             onPress={() => router.push('/register' as any)}
             disabled={loading}
@@ -221,6 +221,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   forgotButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
     marginTop: 16,
     paddingVertical: 8,
@@ -231,6 +233,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   linkButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
     marginTop: 8,
     paddingVertical: 8,

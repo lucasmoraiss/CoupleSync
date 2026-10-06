@@ -1,4 +1,5 @@
 // AC-124, AC-126, AC-127: OCR review screen — candidates with checkboxes, edit fields, confirm
+import { spokenBRL } from '@/utils/a11y';
 import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
@@ -251,8 +252,8 @@ export default function OcrReviewScreen({ uploadId }: Props) {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Revisão de Importação</Text>
-          <TouchableOpacity onPress={toggleAll} style={styles.toggleAllBtn}>
+          <Text style={styles.title} accessibilityRole="header">Revisão de Importação</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={allSelected ? 'Desmarcar todos os lançamentos' : 'Selecionar todos os lançamentos'} onPress={toggleAll} style={styles.toggleAllBtn}>
             <Text style={styles.toggleAllText}>
               {allSelected ? 'Desmarcar Todos' : 'Selecionar Todos'}
             </Text>
@@ -282,7 +283,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
             >
               {/* Top row: checkbox + date + confidence */}
               <View style={styles.cardTopRow}>
-                <TouchableOpacity
+                <TouchableOpacity accessibilityLabel={`Selecionar ${row.description}`}
                   onPress={() => toggleRow(row.index)}
                   style={styles.checkboxArea}
                   accessibilityRole="checkbox"
@@ -307,7 +308,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
               )}
 
               {/* Editable description */}
-              <TextInput
+              <TextInput accessibilityLabel="Descrição do lançamento"
                 style={[styles.input, errors?.description ? styles.inputError : null]}
                 value={row.description}
                 onChangeText={(t) => updateDescription(row.index, t)}
@@ -321,7 +322,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
               {/* Editable amount */}
               <View style={styles.amountRow}>
                 <Text style={styles.currencyLabel}>R$</Text>
-                <TextInput
+                <TextInput accessibilityLabel="Valor do lançamento em reais"
                   style={[styles.input, styles.amountInput, errors?.amount ? styles.inputError : null]}
                   value={formatBRLInput(row.amountCents)}
                   keyboardType="numeric"
@@ -385,7 +386,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
                   <View style={styles.creditBadge}>
                     <Text style={styles.creditBadgeText}>Entrada</Text>
                   </View>
-                  <Text style={styles.creditAmount}>{`R$ ${formatBRLInput(Math.round(credit.amount * 100))}`}</Text>
+                  <Text style={styles.creditAmount} accessibilityLabel={spokenBRL(credit.amount)}>{`R$ ${formatBRLInput(Math.round(credit.amount * 100))}`}</Text>
                 </View>
               ))}
             </View>
@@ -395,7 +396,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
 
         {/* Confirm buttons: with lines left unselected the user chooses what happens to them */}
         <View style={styles.footer}>
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Importar os lançamentos selecionados"
             style={[
               styles.confirmBtn,
               (confirmMutation.isPending || rows.length === 0) && styles.confirmBtnDisabled,
@@ -412,7 +413,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
             )}
           </TouchableOpacity>
           {leftOut > 0 ? (
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button"
               style={[styles.laterBtn, confirmMutation.isPending && styles.confirmBtnDisabled]}
               onPress={handleConfirmLater}
               disabled={confirmMutation.isPending}
@@ -442,7 +443,7 @@ const styles = StyleSheet.create({
     borderBottomColor: BORDER,
   },
   title: { fontSize: 18, fontWeight: '700', color: TEXT },
-  toggleAllBtn: { paddingVertical: 6, paddingHorizontal: 10 },
+  toggleAllBtn: { minHeight: 44, paddingVertical: 6, paddingHorizontal: 10 },
   toggleAllText: { fontSize: 13, color: PRIMARY, fontWeight: '600' },
   successBanner: {
     flexDirection: 'row',
@@ -464,7 +465,7 @@ const styles = StyleSheet.create({
   },
   cardWarning: { borderColor: WARNING },
   cardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  checkboxArea: { padding: 2 },
+  checkboxArea: { minHeight: 44, minWidth: 44, padding: 2 },
   checkbox: {
     width: 22,
     height: 22,
@@ -497,6 +498,8 @@ const styles = StyleSheet.create({
   categoryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   categoryLabel: { fontSize: 13, color: MUTED, fontWeight: '600', minWidth: 72 },
   categoryChip: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,

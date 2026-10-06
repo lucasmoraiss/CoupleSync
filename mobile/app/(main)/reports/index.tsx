@@ -15,6 +15,8 @@ import { reportsApiClient, goalsApiClient } from '@/services/apiClient';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getCategoryLabel } from '@/modules/transactions/categories';
+import { describeProgress, describeSlices, spokenBRL } from '@/utils/a11y';
+import { monthLabelFromIso } from '@/utils/format';
 
 const PERIOD_OPTIONS = [
   { label: '3m', months: 3 },
@@ -99,6 +101,21 @@ function ReportsScreenInner() {
   const periodExpense = trendsData?.months?.reduce((sum, m) => sum + (m.expense ?? 0), 0) ?? 0;
   const periodBalance = periodIncome - periodExpense;
 
+  // Resumo em texto dos gráficos, para quem usa leitor de tela.
+  const pieSummary = describeSlices(
+    'Gastos por categoria',
+    (spendingData?.categories ?? [])
+      .filter((c) => typeof c.total === 'number' && c.total > 0)
+      .map((c) => ({ label: getCategoryLabel(c.name), value: c.total })),
+  );
+  const barSummary = describeSlices(
+    'Gastos mensais',
+    (trendsData?.months ?? [])
+      .filter((m) => typeof m.expense === 'number' && !Number.isNaN(m.expense))
+      .map((m) => ({ label: monthLabelFromIso(m.month ?? '') || (m.month ?? ''), value: Math.max(0, m.expense) })),
+    { showPercent: false, limit: 12 },
+  );
+
   const hasSpendingData = pieData.length > 0 && pieData.some((d) => d.value > 0);
   const hasTrendsData = barData.length > 0 && barData.some((d) => d.value > 0);
 
@@ -106,12 +123,12 @@ function ReportsScreenInner() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Header */}
-        <Text style={styles.screenTitle}>Relatórios</Text>
+        <Text style={styles.screenTitle} accessibilityRole="header">Relatórios</Text>
 
         {/* Period selector */}
         <View style={styles.periodRow}>
           {PERIOD_OPTIONS.map((opt) => (
-            <Pressable
+            <Pressable accessibilityLabel={`Período: ${opt.label}`}
               key={opt.months}
               style={[styles.periodBtn, period === opt.months && styles.periodBtnActive]}
               onPress={() => setPeriod(opt.months)}
@@ -141,7 +158,7 @@ function ReportsScreenInner() {
         {hasError && !isLoading && (
           <View style={styles.centeredBox}>
             <Text style={styles.errorText}>Erro ao carregar dados</Text>
-            <Pressable
+            <Pressable accessibilityLabel="Tentar novamente"
               style={styles.retryBtn}
               onPress={() => { refetchSpending(); refetchTrends(); }}
               accessibilityRole="button"
@@ -156,14 +173,14 @@ function ReportsScreenInner() {
           <>
             {/* Renda, despesas e saldo do período */}
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Resumo do período</Text>
+              <Text style={styles.cardTitle} accessibilityRole="header">Resumo do período</Text>
               <View style={styles.legendItem}>
                 <Text style={styles.legendLabel}>Renda</Text>
-                <Text style={styles.legendValue}>{formatBRL(periodIncome)}</Text>
+                <Text style={styles.legendValue} accessibilityLabel={spokenBRL(periodIncome)}>{formatBRL(periodIncome)}</Text>
               </View>
               <View style={styles.legendItem}>
                 <Text style={styles.legendLabel}>Despesas</Text>
-                <Text style={styles.legendValue}>{formatBRL(periodExpense)}</Text>
+                <Text style={styles.legendValue} accessibilityLabel={spokenBRL(periodExpense)}>{formatBRL(periodExpense)}</Text>
               </View>
               <View style={styles.legendItem}>
                 <Text style={styles.legendLabel}>Saldo</Text>
@@ -172,6 +189,7 @@ function ReportsScreenInner() {
                     styles.legendValue,
                     { color: periodBalance >= 0 ? colors.success : colors.errorLight },
                   ]}
+                  accessibilityLabel={spokenBRL(periodBalance)}
                 >
                   {formatBRL(periodBalance)}
                 </Text>
@@ -179,11 +197,11 @@ function ReportsScreenInner() {
             </View>
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Gastos por categoria</Text>
+              <Text style={styles.cardTitle} accessibilityRole="header">Gastos por categoria</Text>
 
               {hasSpendingData ? (
                 <>
-                  <View style={styles.chartCenter}>
+                  <View style={styles.chartCenter} accessible accessibilityRole="image" accessibilityLabel={pieSummary}>
                     <PieChart
                       data={pieData}
                       donut
@@ -210,7 +228,7 @@ function ReportsScreenInner() {
                         <Text style={styles.legendLabel} numberOfLines={1}>
                           {getCategoryLabel(c.name)}
                         </Text>
-                        <Text style={styles.legendValue}>{formatBRL(c.total)}</Text>
+                        <Text style={styles.legendValue} accessibilityLabel={spokenBRL(c.total)}>{formatBRL(c.total)}</Text>
                       </View>
                     ))}
                   </View>
@@ -222,10 +240,10 @@ function ReportsScreenInner() {
 
             {/* Monthly trends — Bar chart */}
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Gastos mensais</Text>
+              <Text style={styles.cardTitle} accessibilityRole="header">Gastos mensais</Text>
 
               {hasTrendsData ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} accessible accessibilityRole="image" accessibilityLabel={barSummary}>
                   <BarChart
                     data={barData}
                     barWidth={28}
@@ -252,7 +270,7 @@ function ReportsScreenInner() {
             {/* Goals progress */}
             {!goalsLoading && (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Progresso das Metas</Text>
+                <Text style={styles.cardTitle} accessibilityRole="header">Progresso das Metas</Text>
                 {(goalsData?.goals ?? []).length === 0 ? (
                   <View style={styles.emptyBox}>
                     <Text style={styles.emptyIcon}>🎯</Text>
@@ -261,7 +279,13 @@ function ReportsScreenInner() {
                 ) : (
                   <View style={{ gap: 16 }}>
                     {goalsData!.goals.map((g) => (
-                      <View key={g.id}>
+                      <View
+                        key={g.id}
+                        accessible
+                        accessibilityRole="progressbar"
+                        accessibilityLabel={describeProgress(g.title, g.progressPercent, g.currentAmount, g.targetAmount)}
+                        accessibilityValue={{ min: 0, max: 100, now: Math.round(Math.min(100, g.progressPercent)) }}
+                      >
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
                           <Text style={styles.legendLabel} numberOfLines={1}>{g.title}</Text>
                           <Text style={styles.legendValue}>{g.progressPercent.toFixed(0)}%</Text>
@@ -318,6 +342,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   periodBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs + 2,
     borderRadius: borderRadius.md,
@@ -348,6 +374,8 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.md,
   },
   retryBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     backgroundColor: colors.primary,

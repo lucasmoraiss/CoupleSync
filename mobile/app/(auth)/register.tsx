@@ -80,13 +80,13 @@ export default function RegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
-          <Text style={styles.title}>Criar conta</Text>
+          <Text style={styles.title} accessibilityRole="header">Criar conta</Text>
           <Text style={styles.subtitle}>Junte-se ao CoupleSync</Text>
         </View>
 
         <View style={styles.form}>
           <Text style={styles.label}>Nome</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Nome"
             style={styles.input}
             placeholder="Seu nome"
             placeholderTextColor={colors.placeholder}
@@ -97,7 +97,7 @@ export default function RegisterScreen() {
           />
 
           <Text style={styles.label}>E-mail</Text>
-          <TextInput
+          <TextInput accessibilityLabel="E-mail"
             style={styles.input}
             placeholder="seu@email.com"
             placeholderTextColor={colors.placeholder}
@@ -111,7 +111,7 @@ export default function RegisterScreen() {
 
           <Text style={styles.label}>Senha</Text>
           <View style={styles.inputWrapper}>
-            <TextInput
+            <TextInput accessibilityLabel="Senha"
               style={styles.inputField}
               placeholder="Mínimo 8 caracteres, com letras e números"
               placeholderTextColor={colors.placeholder}
@@ -120,7 +120,7 @@ export default function RegisterScreen() {
               secureTextEntry={!showPassword}
               editable={!loading}
             />
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
               onPress={() => setShowPassword(!showPassword)}
               style={styles.eyeButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -131,7 +131,7 @@ export default function RegisterScreen() {
 
           <Text style={styles.label}>Confirmar senha</Text>
           <View style={styles.inputWrapper}>
-            <TextInput
+            <TextInput accessibilityLabel="Confirmar senha"
               style={styles.inputField}
               placeholder="Repita a senha"
               placeholderTextColor={colors.placeholder}
@@ -140,7 +140,7 @@ export default function RegisterScreen() {
               secureTextEntry={!showConfirmPassword}
               editable={!loading}
             />
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={showConfirmPassword ? 'Ocultar a confirmação de senha' : 'Mostrar a confirmação de senha'}
               onPress={() => setShowConfirmPassword(!showConfirmPassword)}
               style={styles.eyeButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -149,7 +149,7 @@ export default function RegisterScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Criar conta" accessibilityState={{ disabled: loading, busy: loading }}
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleRegister}
             disabled={loading}
@@ -162,7 +162,7 @@ export default function RegisterScreen() {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Já tenho conta: fazer login"
             style={styles.linkButton}
             onPress={() => router.back()}
             disabled={loading}
@@ -240,6 +240,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   linkButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
     marginTop: 24,
     paddingVertical: 8,

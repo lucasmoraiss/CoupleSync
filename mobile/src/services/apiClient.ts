@@ -1,11 +1,13 @@
 // AC-011: Typed Axios API client with Authorization interceptor and 401 handler (refresh + retry)
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { router } from 'expo-router';
-import { useSessionStore } from '@/state/sessionStore';
+import { getSessionEpoch, useSessionStore } from '@/state/sessionStore';
 import { clearUserData } from '@/state/userData';
 import { clearGroupScopedQueries, queryClient } from '@/services/queryClient';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { installAuthRefresh } from './authRefresh';
+import { handleSessionExpired } from './sessionExpiry';
+import { getDevicePushToken } from './deviceToken';
 import { getApiErrorCode } from './apiError';
 import type {
   AuthResponse,
@@ -95,6 +97,7 @@ installAuthRefresh(axiosInstance, {
     const { accessToken, refreshToken } = useSessionStore.getState();
     return { accessToken, refreshToken };
   },
+  getSessionEpoch,
   // Plain axios (no interceptors): the refresh call must not carry the expired Bearer token
   // nor re-enter the 401 handling.
   requestRefresh: async (refreshToken) => {
@@ -107,11 +110,17 @@ installAuthRefresh(axiosInstance, {
   },
   saveTokens: ({ accessToken, refreshToken }) =>
     useSessionStore.getState().setTokens(accessToken, refreshToken),
-  onSessionExpired: async () => {
-    await clearUserData();
-    showToastGlobal('Sua sessão expirou. Entre novamente.', 'warning');
-    router.replace('/login' as any);
-  },
+  onSessionExpired: () =>
+    handleSessionExpired({
+      getRefreshToken: () => useSessionStore.getState().refreshToken,
+      getDevicePushToken,
+      clearUserData,
+      notifySignedOut: () => {
+        showToastGlobal('Sua sessão expirou. Entre novamente.', 'warning');
+        router.replace('/login' as any);
+      },
+      revokeOnServer: (refreshToken, devicePushToken) => authApiClient.logout(refreshToken, devicePushToken),
+    }),
 });
 
 /** Returns true when the error is a 403 with code COUPLE_REQUIRED (toast already shown globally). */

@@ -13,7 +13,7 @@ export function ErrorState({
   onRetry,
 }: ErrorStateProps) {
   return (
-    <View style={styles.container}>
+    <View style={styles.container} accessibilityRole="alert">
       <Ionicons name="alert-circle-outline" size={56} color={colors.error} />
       <Text style={styles.message}>{message}</Text>
       {onRetry ? (

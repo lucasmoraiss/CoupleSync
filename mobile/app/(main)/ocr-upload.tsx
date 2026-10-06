@@ -247,14 +247,14 @@ export default function OcrUploadScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.backBtn}
           onPress={() => router.back()}
           accessibilityLabel="Voltar"
         >
           <Ionicons name="arrow-back" size={22} color={TEXT} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Importar extrato</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Importar extrato</Text>
         <View style={styles.backBtn} />
       </View>
 
@@ -262,12 +262,12 @@ export default function OcrUploadScreen() {
       {state.phase === 'idle' && (
         <View style={styles.body}>
           <Ionicons name="cloud-upload-outline" size={56} color={ACCENT} style={styles.icon} />
-          <Text style={styles.title}>Importar extrato em PDF</Text>
+          <Text style={styles.title} accessibilityRole="header">Importar extrato em PDF</Text>
           <Text style={styles.subtitle}>
             Selecione o extrato bancário em PDF para importar as transações automaticamente.
           </Text>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.optionBtn}
             onPress={handleFilePicker}
             accessibilityLabel="Selecionar arquivo PDF"
@@ -294,14 +294,14 @@ export default function OcrUploadScreen() {
                         {new Date(item.createdAtUtc).toLocaleDateString('pt-BR')} · {summary.pending}
                       </Text>
                       <View style={styles.openActions}>
-                        <TouchableOpacity
+                        <TouchableOpacity accessibilityRole="button"
                           style={styles.openPrimary}
                           onPress={() => handleReopen(item.uploadId)}
                           accessibilityLabel={`Revisar ${summary.title}`}
                         >
                           <Text style={styles.openPrimaryText}>Revisar</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
+                        <TouchableOpacity accessibilityRole="button"
                           style={styles.openSecondary}
                           onPress={() => handleDiscardRest(item.uploadId)}
                           accessibilityLabel={`Descartar o restante de ${summary.title}`}
@@ -322,7 +322,7 @@ export default function OcrUploadScreen() {
       {state.phase === 'uploading' && (
         <View style={styles.body}>
           <LoadingState message="Enviando arquivo..." />
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.cancelBtn}
             onPress={handleCancelUpload}
             accessibilityLabel="Cancelar envio"
@@ -361,7 +361,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 16,
   },
-  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  backBtn: { minHeight: 44, minWidth: 44, width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
   body: {
     flex: 1,
@@ -402,9 +402,9 @@ const styles = StyleSheet.create({
   openName: { fontSize: 14, fontWeight: '600', color: TEXT },
   openMeta: { fontSize: 12, color: MUTED, marginTop: 2 },
   openActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  openPrimary: { backgroundColor: PRIMARY, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  openPrimary: { minHeight: 44, backgroundColor: PRIMARY, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
   openPrimaryText: { color: TEXT, fontSize: 13, fontWeight: '600' },
-  openSecondary: { borderRadius: 8, borderWidth: 1, borderColor: BORDER, paddingHorizontal: 14, paddingVertical: 8 },
+  openSecondary: { minHeight: 44, borderRadius: 8, borderWidth: 1, borderColor: BORDER, paddingHorizontal: 14, paddingVertical: 8 },
   openSecondaryText: { color: MUTED, fontSize: 13 },
   statusText: { fontSize: 16, fontWeight: '600', color: TEXT, marginTop: 20 },
   statusHint: { fontSize: 13, color: MUTED, marginTop: 8, textAlign: 'center' },

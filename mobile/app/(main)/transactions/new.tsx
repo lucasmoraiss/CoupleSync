@@ -93,15 +93,15 @@ export default function NewTransactionScreen() {
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.headerRow}>
-            <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button">
+            <Pressable accessibilityLabel="Voltar" onPress={() => router.back()} hitSlop={12} accessibilityRole="button">
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </Pressable>
-            <Text style={styles.title}>Nova transação</Text>
+            <Text style={styles.title} accessibilityRole="header">Nova transação</Text>
             <View style={{ width: 24 }} />
           </View>
 
           <Text style={styles.label}>Valor (R$)</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Valor em reais"
             style={styles.input}
             keyboardType="decimal-pad"
             placeholder="0,00"
@@ -112,7 +112,7 @@ export default function NewTransactionScreen() {
           />
 
           <Text style={styles.label}>Descrição (opcional)</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Descrição"
             style={styles.input}
             placeholder="Ex: Mercado"
             placeholderTextColor={colors.placeholder}
@@ -122,7 +122,7 @@ export default function NewTransactionScreen() {
           />
 
           <Text style={styles.label}>Estabelecimento (opcional)</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Estabelecimento"
             style={styles.input}
             placeholder="Ex: Pão de Açúcar"
             placeholderTextColor={colors.placeholder}
@@ -136,7 +136,7 @@ export default function NewTransactionScreen() {
             {categories.map((c) => {
               const selected = category === c.value;
               return (
-                <Pressable
+                <Pressable accessibilityLabel={`Categoria ${c.label}`}
                   key={c.value}
                   style={[styles.categoryChip, selected && styles.categoryChipActive]}
                   onPress={() => setCategory(c.value)}
@@ -158,7 +158,7 @@ export default function NewTransactionScreen() {
             })}
           </View>
 
-          <Pressable
+          <Pressable accessibilityLabel="Salvar transação"
             style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
             onPress={handleSubmit}
             disabled={submitting}
@@ -221,6 +221,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   categoryChip: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,

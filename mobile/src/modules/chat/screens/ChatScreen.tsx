@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,8 +19,62 @@ import { useChat } from '../hooks/useChat';
 import type { Message } from '../hooks/useChat';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 import { EmptyState } from '@/components/EmptyState';
+import { TextSections } from '@/components/TextSections';
+import { AI_CHAT_SECTIONS, AI_CHAT_TITLE } from '@/modules/privacy/privacyContent';
+import { useConsentStore } from '@/modules/privacy/consentStore';
+
+/** SEG-10: primeira abertura do chat: aviso de envio ao Google Gemini, com aceitar / não usar. */
+function AiChatDisclosure({ declined }: { declined: boolean }) {
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView contentContainerStyle={styles.disclosureContent}>
+        <Text style={styles.disclosureTitle} accessibilityRole="header">{AI_CHAT_TITLE}</Text>
+        {declined && (
+          <Text style={styles.disclosureNote}>O Chat IA está desativado. Você pode aceitar quando quiser.</Text>
+        )}
+        <TextSections sections={AI_CHAT_SECTIONS} />
+      </ScrollView>
+      <View style={styles.disclosureActions}>
+        <TouchableOpacity
+          style={styles.acceptBtn}
+          onPress={() => void useConsentStore.getState().acceptAiChat()}
+          accessibilityRole="button"
+          accessibilityLabel="Aceitar e usar o Chat IA. Meus dados financeiros serão enviados ao Google Gemini."
+        >
+          <Text style={styles.acceptText}>Aceitar e usar o Chat IA</Text>
+        </TouchableOpacity>
+        {!declined && (
+          <TouchableOpacity
+            style={styles.declineBtn}
+            onPress={() => void useConsentStore.getState().declineAiChat()}
+            accessibilityRole="button"
+            accessibilityLabel="Não usar o Chat IA"
+          >
+            <Text style={styles.declineText}>Não usar</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </SafeAreaView>
+  );
+}
 
 export default function ChatScreen() {
+  const consentLoaded = useConsentStore((s) => s.loaded);
+  const aiRecord = useConsentStore((s) => s.record.aiChat);
+  const accepted = consentLoaded && aiRecord.acceptedAt !== null;
+
+  if (!consentLoaded) {
+    return (
+      <SafeAreaView style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator color={colors.primary} />
+      </SafeAreaView>
+    );
+  }
+  if (!accepted) return <AiChatDisclosure declined={aiRecord.declinedAt !== null} />;
+  return <ChatConversation />;
+}
+
+function ChatConversation() {
   const { messages, isLoading, error, sendMessage, clearError } = useChat();
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList<Message>>(null);
@@ -44,7 +99,7 @@ export default function ChatScreen() {
     return (
       <View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowAi]}>
         {!isUser && (
-          <View style={styles.aiAvatar}>
+          <View style={styles.aiAvatar} accessible={false} importantForAccessibility="no-hide-descendants">
             <Ionicons name="sparkles" size={14} color={colors.primary} />
           </View>
         )}
@@ -53,6 +108,8 @@ export default function ChatScreen() {
             styles.bubble,
             isUser ? styles.bubbleUser : styles.bubbleAi,
           ]}
+          accessible
+          accessibilityLabel={`${isUser ? 'Você' : 'Assistente'}: ${item.content}`}
         >
           <Text style={[styles.bubbleText, isUser ? styles.bubbleTextUser : styles.bubbleTextAi]}>
             {item.content}
@@ -66,7 +123,7 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <Ionicons name="sparkles" size={20} color={colors.primary} />
-        <Text style={styles.headerTitle}>Chat IA</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Chat IA</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -89,7 +146,7 @@ export default function ChatScreen() {
             showsVerticalScrollIndicator={false}
             ListFooterComponent={
               isLoading ? (
-                <View style={styles.loadingBubble}>
+                <View style={styles.loadingBubble} accessible accessibilityLabel="Analisando sua pergunta" accessibilityLiveRegion="polite">
                   <ActivityIndicator size="small" color={colors.textMuted} />
                   <Text style={styles.loadingText}>Analisando...</Text>
                 </View>
@@ -99,7 +156,7 @@ export default function ChatScreen() {
         )}
 
         {error != null && (
-          <TouchableOpacity style={styles.errorBanner} onPress={clearError} activeOpacity={0.8}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Fechar o aviso: ${error}`} style={styles.errorBanner} onPress={clearError} activeOpacity={0.8}>
             <Ionicons name="alert-circle-outline" size={16} color={colors.errorLight} />
             <Text style={styles.errorText}>{error}</Text>
             <Ionicons name="close" size={14} color={colors.errorLight} />
@@ -107,7 +164,7 @@ export default function ChatScreen() {
         )}
 
         <View style={styles.inputRow}>
-          <TextInput
+          <TextInput accessibilityLabel="Pergunta para o Chat IA"
             style={styles.textInput}
             value={inputText}
             onChangeText={setInputText}
@@ -140,6 +197,14 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
+  disclosureContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.lg },
+  disclosureTitle: { fontSize: typography.fontSize.xxl, fontWeight: typography.fontWeight.semibold, color: colors.text, marginBottom: spacing.md },
+  disclosureNote: { fontSize: typography.fontSize.md, color: colors.warning, marginBottom: spacing.md },
+  disclosureActions: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, paddingTop: spacing.sm, gap: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
+  acceptBtn: { minHeight: 48, borderRadius: borderRadius.lg, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  acceptText: { color: colors.text, fontSize: typography.fontSize.lg, fontWeight: typography.fontWeight.semibold },
+  declineBtn: { minHeight: 48, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  declineText: { color: colors.textSubtle, fontSize: typography.fontSize.lg, fontWeight: typography.fontWeight.semibold },
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -230,6 +295,7 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
   },
   errorBanner: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,

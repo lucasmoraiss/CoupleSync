@@ -36,7 +36,7 @@ export function EmailVerificationBanner() {
           Confirme seu e-mail. <Text style={styles.action}>Digitar código</Text>
         </Text>
       </TouchableOpacity>
-      <TouchableOpacity
+      <TouchableOpacity style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
         onPress={() => setDismissed(true)}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         accessibilityRole="button"

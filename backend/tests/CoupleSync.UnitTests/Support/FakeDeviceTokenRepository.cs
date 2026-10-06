@@ -40,5 +40,19 @@ public sealed class FakeDeviceTokenRepository : IDeviceTokenRepository
         return Task.CompletedTask;
     }
 
-    public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
+    /// <summary>Exceptions to throw from the next SaveChangesAsync calls, one per call (simulates losing an insert race).</summary>
+    public Queue<Exception> SaveFailures { get; } = new();
+
+    public int SaveCalls { get; private set; }
+
+    public int DiscardCalls { get; private set; }
+
+    public Task SaveChangesAsync(CancellationToken ct)
+    {
+        SaveCalls++;
+        if (SaveFailures.Count > 0) throw SaveFailures.Dequeue();
+        return Task.CompletedTask;
+    }
+
+    public void DiscardPendingChanges() => DiscardCalls++;
 }

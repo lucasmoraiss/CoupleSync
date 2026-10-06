@@ -63,8 +63,8 @@ export function QuickIncomeModal({ visible, currentIncome, onClose }: QuickIncom
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.kav}
         >
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.title}>Atualizar renda mensal</Text>
+          <Pressable accessible={false} style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.title} accessibilityRole="header">Atualizar renda mensal</Text>
             <Text style={styles.label}>Renda bruta (R$)</Text>
             <TextInput
               style={styles.input}
@@ -79,10 +79,10 @@ export function QuickIncomeModal({ visible, currentIncome, onClose }: QuickIncom
               autoFocus
             />
             <View style={styles.actions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={onClose} accessibilityRole="button">
+              <TouchableOpacity accessibilityLabel="Cancelar" style={styles.cancelBtn} onPress={onClose} accessibilityRole="button">
                 <Text style={styles.cancelText}>Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
+              <TouchableOpacity accessibilityLabel="Salvar renda"
                 style={[styles.saveBtn, mutation.isPending && styles.saveBtnDisabled]}
                 onPress={handleSave}
                 disabled={mutation.isPending}

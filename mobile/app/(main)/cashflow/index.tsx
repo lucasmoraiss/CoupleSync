@@ -16,6 +16,7 @@ import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { spokenBRL } from '@/utils/a11y';
 
 type Horizon = 30 | 90;
 
@@ -37,14 +38,14 @@ export default function CashFlowScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Fluxo de Caixa</Text>
+        <Text style={styles.title} accessibilityRole="header">Fluxo de Caixa</Text>
         <Text style={styles.subtitle}>Projeção do mês</Text>
       </View>
 
       {/* Horizon toggle */}
       <View style={styles.tabRow}>
         {([30, 90] as Horizon[]).map((h) => (
-          <TouchableOpacity
+          <TouchableOpacity accessibilityLabel={`Horizonte de ${h} dias`}
             key={h}
             style={[styles.tab, horizon === h && styles.tabActive]}
             onPress={() => setHorizon(h)}
@@ -88,10 +89,14 @@ export default function CashFlowScreen() {
                 styles.cardValue,
                 data.projectedMonthEndBalance >= 0 ? styles.balancePositive : styles.balanceNegative,
               ]}
+              accessibilityLabel={spokenBRL(data.projectedMonthEndBalance)}
             >
               {formatBRL(data.projectedMonthEndBalance)}
             </Text>
-            <Text style={styles.periodText}>
+            <Text
+              style={styles.periodText}
+              accessibilityLabel={`Renda do mês ${spokenBRL(data.monthIncome)}, menos gasto até hoje ${spokenBRL(data.monthSpentToDate)}, menos gasto previsto ${spokenBRL(data.forecastRemainingSpend)}, ${data.remainingDays} ${data.remainingDays === 1 ? 'dia restante' : 'dias restantes'}`}
+            >
               Renda do mês {formatBRL(data.monthIncome)} − gasto até hoje {formatBRL(data.monthSpentToDate)} −
               gasto previsto {formatBRL(data.forecastRemainingSpend)} ({data.remainingDays}{' '}
               {data.remainingDays === 1 ? 'dia restante' : 'dias restantes'})
@@ -101,7 +106,7 @@ export default function CashFlowScreen() {
           {/* Main summary card */}
           <View style={styles.card}>
             <Text style={styles.cardLabel}>Gasto histórico ({horizon} dias)</Text>
-            <Text style={styles.cardValue}>{formatBRL(data.totalHistoricalSpend)}</Text>
+            <Text style={styles.cardValue} accessibilityLabel={spokenBRL(data.totalHistoricalSpend)}>{formatBRL(data.totalHistoricalSpend)}</Text>
             <Text style={styles.periodText}>
               {formatDatePtBR(data.historicalPeriodStart)} –{' '}
               {formatDatePtBR(data.historicalPeriodEnd)} · {data.transactionCount} transações
@@ -112,13 +117,13 @@ export default function CashFlowScreen() {
           <View style={styles.cardRow}>
             <View style={[styles.card, styles.cardHalf]}>
               <Text style={styles.cardLabel}>Média diária</Text>
-              <Text style={[styles.cardValue, styles.cardValueSm]}>
+              <Text style={[styles.cardValue, styles.cardValueSm]} accessibilityLabel={spokenBRL(data.averageDailySpend)}>
                 {formatBRL(data.averageDailySpend)}
               </Text>
             </View>
             <View style={[styles.card, styles.cardHalf]}>
               <Text style={styles.cardLabel}>Gasto previsto no mês</Text>
-              <Text style={[styles.cardValue, styles.cardValueSm, styles.projectedValue]}>
+              <Text style={[styles.cardValue, styles.cardValueSm, styles.projectedValue]} accessibilityLabel={spokenBRL(data.projectedSpend)}>
                 {formatBRL(data.projectedSpend)}
               </Text>
             </View>
@@ -127,13 +132,13 @@ export default function CashFlowScreen() {
           {/* Category breakdown */}
           {Object.keys(data.categoryBreakdown).length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Por categoria</Text>
+              <Text style={styles.sectionTitle} accessibilityRole="header">Por categoria</Text>
               {Object.entries(data.categoryBreakdown)
                 .sort(([, a], [, b]) => b - a)
                 .map(([category, amount]) => (
                   <View key={category} style={styles.categoryRow}>
                     <Text style={styles.categoryName}>{getCategoryLabel(category)}</Text>
-                    <Text style={styles.categoryAmount}>{formatBRL(amount)}</Text>
+                    <Text style={styles.categoryAmount} accessibilityLabel={spokenBRL(amount)}>{formatBRL(amount)}</Text>
                   </View>
                 ))}
             </View>
@@ -164,7 +169,7 @@ const styles = StyleSheet.create({
     padding: 4,
     marginBottom: 20,
   },
-  tab: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+  tab: { minHeight: 44, flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   tabActive: { backgroundColor: colors.primary },
   tabText: { fontSize: 14, fontWeight: '600', color: colors.textMuted },
   tabTextActive: { color: colors.text },

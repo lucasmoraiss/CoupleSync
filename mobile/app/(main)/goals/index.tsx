@@ -30,6 +30,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
 import { amountCentsError, centsFromDigits } from '@/utils/amount';
 import { isDeadlineBeforeToday } from '@/utils/goalDeadline';
+import { describeProgress, spokenBRL } from '@/utils/a11y';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -195,17 +196,17 @@ function GoalFormModal({
         style={styles.modalOverlay}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <Pressable style={styles.modalBackdrop} onPress={onClose} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Fechar" style={styles.modalBackdrop} onPress={onClose} />
         <View style={styles.modalSheet}>
           {/* Handle */}
           <View style={styles.modalHandle} />
 
           {/* Header */}
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>
+            <Text style={styles.modalTitle} accessibilityRole="header">
               {mode === 'create' ? 'Nova meta' : 'Editar meta'}
             </Text>
-            <TouchableOpacity onPress={onClose} accessibilityLabel="Fechar" disabled={isSaving}>
+            <TouchableOpacity style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="button" onPress={onClose} accessibilityLabel="Fechar" disabled={isSaving}>
               <Ionicons name="close" size={24} color={MUTED} />
             </TouchableOpacity>
           </View>
@@ -272,7 +273,10 @@ function GoalFormModal({
                   accessibilityLabel="Valor guardado manualmente na meta"
                 />
                 {form.linkedAmount > 0 && (
-                  <Text style={styles.fieldHint}>
+                  <Text
+                    style={styles.fieldHint}
+                    accessibilityLabel={`Mais ${spokenBRL(form.linkedAmount)} de transações vinculadas, somados automaticamente.`}
+                  >
                     Mais {formatBRL(form.linkedAmount)} de transações vinculadas, somados automaticamente.
                   </Text>
                 )}
@@ -297,7 +301,7 @@ function GoalFormModal({
             )}
 
             {/* Save button */}
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button"
               style={[styles.saveBtn, (!isValid || isSaving) && styles.saveBtnDisabled]}
               onPress={() => isValid && !isSaving && onSave(form)}
               disabled={!isValid || isSaving}
@@ -360,13 +364,22 @@ function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
       ) : null}
 
       {/* Progress bar */}
-      <View style={styles.progressBarBg}>
+      <View
+        style={styles.progressBarBg}
+        accessible
+        accessibilityRole="progressbar"
+        accessibilityLabel={describeProgress(goal.title, progressPercent, goal.currentAmount, goal.targetAmount)}
+        accessibilityValue={{ min: 0, max: 100, now: Math.round(Math.min(100, progressPercent)) }}
+      >
         <View style={[styles.progressBarFill, { width: `${progressPercent}%` as any }]} />
       </View>
-      <Text style={styles.progressText}>
+      <Text style={styles.progressText} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
         {formatBRL(goal.currentAmount)} / {formatBRL(goal.targetAmount)} ({Math.floor(progressPercent)}%)
       </Text>
-      <Text style={styles.progressBreakdown}>
+      <Text
+        style={styles.progressBreakdown}
+        accessibilityLabel={`Guardado manualmente: ${spokenBRL(manualAmount)}. Por transações: ${spokenBRL(linkedAmount)}.`}
+      >
         Guardado manualmente: {formatBRL(manualAmount)} · Por transações: {formatBRL(linkedAmount)}
       </Text>
 
@@ -383,7 +396,7 @@ function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
 
       {/* Actions */}
       <View style={styles.cardActions}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.cardActionBtn}
           onPress={() => onEdit(goal)}
           accessibilityLabel={`Editar meta ${goal.title}`}
@@ -391,7 +404,7 @@ function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
           <Ionicons name="pencil-outline" size={16} color={ACCENT} />
           <Text style={styles.cardActionText}>Editar</Text>
         </TouchableOpacity>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={[styles.cardActionBtn, styles.cardActionBtnDanger]}
           onPress={() => onDelete(goal)}
           accessibilityLabel={`Excluir meta ${goal.title}`}
@@ -525,10 +538,10 @@ export default function GoalsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Metas</Text>
+          <Text style={styles.title} accessibilityRole="header">Metas</Text>
           <Text style={styles.subtitle}>Objetivos financeiros do casal</Text>
         </View>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.addBtn}
           onPress={() => setCreateModalVisible(true)}
           accessibilityLabel="Criar nova meta"

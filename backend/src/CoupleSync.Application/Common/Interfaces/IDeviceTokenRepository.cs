@@ -10,4 +10,6 @@ public interface IDeviceTokenRepository
     /// <summary>Deletes the registration of this push token when it belongs to this user; no-op otherwise. Applies immediately.</summary>
     Task DeleteForUserAsync(Guid userId, string token, CancellationToken ct);
     Task SaveChangesAsync(CancellationToken ct);
+    /// <summary>Forgets changes that were staged but not saved (after a failed save), so the operation can be redone from a clean state.</summary>
+    void DiscardPendingChanges();
 }

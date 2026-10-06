@@ -122,12 +122,12 @@ export default function EditTransactionScreen() {
             <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="Voltar">
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </Pressable>
-            <Text style={styles.title}>Editar transação</Text>
+            <Text style={styles.title} accessibilityRole="header">Editar transação</Text>
             <View style={{ width: 24 }} />
           </View>
 
           <Text style={styles.label}>Valor (R$)</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Valor em reais"
             style={styles.input}
             keyboardType="decimal-pad"
             placeholder="0,00"
@@ -138,7 +138,7 @@ export default function EditTransactionScreen() {
           />
 
           <Text style={styles.label}>Estabelecimento</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Estabelecimento"
             style={styles.input}
             placeholder="Ex: Pão de Açúcar"
             placeholderTextColor={colors.placeholder}
@@ -149,7 +149,7 @@ export default function EditTransactionScreen() {
           />
 
           <Text style={styles.label}>Descrição</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Descrição"
             style={styles.input}
             placeholder="Ex: Mercado"
             placeholderTextColor={colors.placeholder}
@@ -190,7 +190,7 @@ export default function EditTransactionScreen() {
             {categories.map((c) => {
               const selected = category === c.value;
               return (
-                <Pressable
+                <Pressable accessibilityLabel={`Categoria ${c.label}`}
                   key={c.value}
                   style={[styles.categoryChip, selected && styles.categoryChipActive]}
                   onPress={() => setCategory(c.value)}
@@ -212,7 +212,7 @@ export default function EditTransactionScreen() {
             })}
           </View>
 
-          <Pressable
+          <Pressable accessibilityLabel="Salvar alterações"
             style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
             onPress={handleSubmit}
             disabled={submitting}
@@ -266,6 +266,7 @@ const styles = StyleSheet.create({
   timeInput: { flex: 1 },
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
   categoryChip: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,

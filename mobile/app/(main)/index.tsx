@@ -24,6 +24,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
+import { spokenBRL } from '@/utils/a11y';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -44,7 +45,7 @@ function TotalExpensesCard({ data }: { data: DashboardResponse }) {
   return (
     <View style={styles.card}>
       <Text style={styles.cardLabel}>Total de gastos</Text>
-      <Text style={styles.cardValue}>{formatBRL(data.totalExpenses)}</Text>
+      <Text style={styles.cardValue} accessibilityLabel={spokenBRL(data.totalExpenses)}>{formatBRL(data.totalExpenses)}</Text>
       <Text style={styles.cardHint}>{data.transactionCount} transações</Text>
     </View>
   );
@@ -70,7 +71,7 @@ function PartnerBreakdownRow({
           <Text style={styles.miniLabel}>
             {memberLabel(p.userId, currentUserId, members)}
           </Text>
-          <Text style={styles.miniValue}>{formatBRL(p.totalAmount)}</Text>
+          <Text style={styles.miniValue} accessibilityLabel={spokenBRL(p.totalAmount)}>{formatBRL(p.totalAmount)}</Text>
         </View>
       ))}
       {data.partnerBreakdown.length === 0 && (
@@ -87,14 +88,14 @@ function CategoryBreakdown({ data }: { data: DashboardResponse }) {
   if (entries.length === 0) return null;
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Por categoria</Text>
+      <Text style={styles.sectionTitle} accessibilityRole="header">Por categoria</Text>
       {entries.map(([cat, amount]) => (
         <View key={cat} style={styles.categoryRow}>
           <View style={styles.categoryLeft}>
             <Ionicons name={getCategoryIcon(cat) as any} size={20} color={colors.primaryLight} style={styles.categoryIcon} />
             <Text style={styles.categoryName}>{getCategoryLabel(cat)}</Text>
           </View>
-          <Text style={styles.categoryAmount}>{formatBRL(amount)}</Text>
+          <Text style={styles.categoryAmount} accessibilityLabel={spokenBRL(amount)}>{formatBRL(amount)}</Text>
         </View>
       ))}
     </View>
@@ -146,7 +147,7 @@ export default function DashboardScreen() {
               <Text style={styles.subtitle}>Resumo financeiro do casal</Text>
             )}
           </View>
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.transactionsBtn}
             onPress={() => router.push('/transactions' as any)}
             accessibilityLabel="Ver transações"
@@ -190,7 +191,7 @@ export default function DashboardScreen() {
 
         {/* Quick Income chip */}
         {!isLoading && (
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.incomeChip}
             onPress={() => router.push('/(main)/budget' as any)}
             accessibilityLabel="Ver rendas"
@@ -202,7 +203,7 @@ export default function DashboardScreen() {
 
         {/* Transactions shortcut */}
         {!isLoading && (
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.viewAllBtn}
             onPress={() => router.push('/transactions' as any)}
             accessibilityLabel="Ver todas as transações"
@@ -223,7 +224,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   greeting: { fontSize: 22, fontWeight: '700', color: TEXT },
   subtitle: { fontSize: 14, color: MUTED, marginTop: 2 },
-  transactionsBtn: { backgroundColor: CARD, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: BORDER },
+  transactionsBtn: { minHeight: 44, minWidth: 44, backgroundColor: CARD, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: BORDER },
   centered: { alignItems: 'center', paddingVertical: 48 },
   loadingText: { color: MUTED, marginTop: 12, fontSize: 14 },
   card: {

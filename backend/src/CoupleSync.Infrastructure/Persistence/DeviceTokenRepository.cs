@@ -67,4 +67,9 @@ public sealed class DeviceTokenRepository : IDeviceTokenRepository
     {
         return _dbContext.SaveChangesAsync(ct);
     }
+
+    public void DiscardPendingChanges()
+    {
+        _dbContext.ChangeTracker.Clear();
+    }
 }

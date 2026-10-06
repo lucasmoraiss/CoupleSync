@@ -2,6 +2,7 @@
 // Uses the existing axiosInstance (auth interceptor already attached).
 import axiosInstance from '@/services/apiClient';
 import { registerUserDataCleaner } from '@/state/userData';
+import { isCaptureAllowedNow } from '@/modules/privacy/consentStore';
 import { classifyNotification } from './notificationParser';
 import { buildIngestRequest, type IngestNotificationEventRequest } from './ingestRequest';
 
@@ -43,6 +44,11 @@ async function postEvent(request: IngestNotificationEventRequest): Promise<void>
 
 async function flushQueue(): Promise<void> {
   if (retryQueue.length === 0) return;
+  if (!isCaptureAllowedNow()) {
+    // Consentimento retirado (ou de outro usuário): nada pendente deve sair do aparelho.
+    clearPendingEvents();
+    return;
+  }
 
   const generation = queueGeneration;
   const now = Date.now();
@@ -92,6 +98,12 @@ async function flushQueue(): Promise<void> {
 export async function handleRawNotificationEvent(
   event: RawNotificationEvent,
 ): Promise<boolean> {
+  // Porta de consentimento (autoritativa, do lado do JS): sem aceite, ou com a captura desligada,
+  // a notificação nem é lida. Vale mesmo que o módulo nativo (APK antigo) continue entregando eventos.
+  if (!isCaptureAllowedNow()) {
+    return false;
+  }
+
   const decision = classifyNotification(
     event.packageName,
     event.title,
@@ -148,6 +160,7 @@ export function getPendingRetryCount(): number {
  * Exposed for use from other modules that already have the request shape.
  */
 export async function uploadEvent(request: IngestNotificationEventRequest): Promise<void> {
+  if (!isCaptureAllowedNow()) return;
   const generation = queueGeneration;
   try {
     await postEvent(request);

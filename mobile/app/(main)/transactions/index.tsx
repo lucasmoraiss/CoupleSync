@@ -44,6 +44,8 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
 import { useSessionStore } from '@/state/sessionStore';
+import { useConsentStore } from '@/modules/privacy/consentStore';
+import { spokenBRL } from '@/utils/a11y';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -119,11 +121,22 @@ function TransactionRow({
   const authorLabel = getDisplayAuthorName(item, currentUserId);
   const sourceBadge = getSourceBadge(item.source);
   return (
-    <TouchableOpacity
+    <TouchableOpacity accessibilityRole="button"
       style={styles.txRow}
       onPress={() => onPress(item)}
       onLongPress={() => onLongPress(item)}
-      accessibilityLabel={`Transação: ${label}, ${formatBRL(item.amount)}`}
+      accessibilityLabel={`Transação: ${label}, ${spokenBRL(item.amount)}, ${getCategoryLabel(item.category)}, ${formatRelativeDate(item.eventTimestampUtc)}, ${authorLabel}`}
+      accessibilityHint="Toque para alterar a categoria"
+      // Os botões de editar e excluir ficam dentro da linha, e o leitor de tela trata a linha como um só item:
+      // por isso as mesmas duas ações são oferecidas como ações personalizadas (deslizar para cima/baixo).
+      accessibilityActions={[
+        { name: 'edit', label: 'Editar transação' },
+        { name: 'delete', label: 'Excluir transação' },
+      ]}
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === 'edit') onEdit(item);
+        else if (event.nativeEvent.actionName === 'delete') onDelete(item);
+      }}
       activeOpacity={0.7}
     >
       <View style={styles.txIconWrap}>
@@ -147,10 +160,10 @@ function TransactionRow({
         <Text style={styles.txAuthor}>{authorLabel}</Text>
       </View>
       <View style={styles.txRight}>
-        <Text style={styles.txAmount}>{formatBRL(item.amount)}</Text>
+        <Text style={styles.txAmount} accessibilityLabel={spokenBRL(item.amount)}>{formatBRL(item.amount)}</Text>
         <Text style={styles.txDate}>{formatRelativeDate(item.eventTimestampUtc)}</Text>
       </View>
-      <TouchableOpacity
+      <TouchableOpacity accessibilityRole="button"
         onPress={() => onEdit(item)}
         style={styles.deleteBtn}
         accessibilityLabel={`Editar transação ${label}`}
@@ -158,7 +171,7 @@ function TransactionRow({
       >
         <Ionicons name="create-outline" size={18} color={ACCENT} />
       </TouchableOpacity>
-      <TouchableOpacity
+      <TouchableOpacity accessibilityRole="button"
         onPress={() => onDelete(item)}
         style={styles.deleteBtn}
         accessibilityLabel={`Excluir transação ${label}`}
@@ -197,24 +210,24 @@ function CategoryPickerModal({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <Pressable style={styles.modalOverlay} onPress={onClose}>
-        <Pressable style={styles.modalSheet} onPress={() => undefined}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Fechar" style={styles.modalOverlay} onPress={onClose}>
+        <Pressable accessible={false} style={styles.modalSheet} onPress={() => undefined}>
           {/* Handle */}
           <View style={styles.modalHandle} />
 
           {/* Title */}
-          <Text style={styles.modalTitle}>Editar categoria</Text>
+          <Text style={styles.modalTitle} accessibilityRole="header">Editar categoria</Text>
           <Text style={styles.modalSubtitle} numberOfLines={1}>
             {label}
           </Text>
-          <Text style={styles.modalAmount}>{formatBRL(transaction.amount)}</Text>
+          <Text style={styles.modalAmount} accessibilityLabel={spokenBRL(transaction.amount)}>{formatBRL(transaction.amount)}</Text>
 
           {/* Categories list */}
           <ScrollView style={styles.categoriesScroll} showsVerticalScrollIndicator={false}>
             {categories.map((cat) => {
               const selected = cat.value === currentKey;
               return (
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="radio" accessibilityState={{ selected }}
                   key={cat.value}
                   style={[styles.categoryItem, selected && styles.categoryItemSelected]}
                   onPress={() => !isUpdating && onSelect(cat.value)}
@@ -237,7 +250,7 @@ function CategoryPickerModal({
             })}
           </ScrollView>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.cancelBtn}
             onPress={() => onEdit(transaction)}
             disabled={isUpdating}
@@ -247,7 +260,7 @@ function CategoryPickerModal({
           </TouchableOpacity>
 
           {/* Cancel */}
-          <TouchableOpacity style={styles.cancelBtn} onPress={onClose} disabled={isUpdating}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" style={styles.cancelBtn} onPress={onClose} disabled={isUpdating}>
             <Text style={styles.cancelText}>Fechar</Text>
           </TouchableOpacity>
         </Pressable>
@@ -404,12 +417,12 @@ export default function TransactionsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Transações</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Transações</Text>
         <View style={styles.headerRight}>
           {totalCount != null && (
             <Text style={styles.headerCount}>{totalCount} no total</Text>
           )}
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.addBtn}
             onPress={() => router.push('/(main)/transactions/new' as any)}
             accessibilityLabel="Adicionar transação manualmente"
@@ -418,7 +431,7 @@ export default function TransactionsScreen() {
             <Ionicons name="add" size={20} color="#fff" />
             <Text style={styles.addBtnLabel}>Nova</Text>
           </TouchableOpacity>
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.importBtn}
             onPress={() => router.push('/(main)/ocr-upload' as any)}
             accessibilityLabel="Importar extrato via OCR"
@@ -434,7 +447,19 @@ export default function TransactionsScreen() {
         <View style={styles.permissionBanner}>
           <Ionicons name="notifications-off-outline" size={18} color={WARNING} />
           <Text style={styles.bannerText}>Captura de notificações desativada</Text>
-          <TouchableOpacity onPress={openNotificationListenerSettings}>
+          <TouchableOpacity
+            onPress={() => {
+              // Sem aceite registrado, ativar passa primeiro pela tela de consentimento.
+              if (useConsentStore.getState().record.capture.acceptedAt === null) {
+                router.push('/(main)/settings/capture-consent' as any);
+              } else {
+                openNotificationListenerSettings();
+              }
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Ativar a captura de notificações"
+            style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center' }}
+          >
             <Text style={styles.bannerAction}>Ativar</Text>
           </TouchableOpacity>
         </View>
@@ -526,6 +551,8 @@ const styles = StyleSheet.create({
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerCount: { fontSize: 13, color: MUTED },
   importBtn: {
+    minHeight: 44,
+    minWidth: 44,
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -534,6 +561,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtn: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,

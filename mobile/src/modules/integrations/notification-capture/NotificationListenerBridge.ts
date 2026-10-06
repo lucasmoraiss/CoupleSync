@@ -8,6 +8,8 @@ import { handleRawNotificationEvent, type RawNotificationEvent } from './eventUp
 interface NotificationBridgeNativeModule {
   isPermissionGranted(): Promise<boolean>;
   openNotificationListenerSettings(): void;
+  /** Só existe em APK novo (consentimento da captura). Em APK antigo o porteiro é só o JS. */
+  setCaptureEnabled?(enabled: boolean): void;
 }
 
 const NotificationBridge: NotificationBridgeNativeModule | undefined =
@@ -46,6 +48,21 @@ export async function checkNotificationListenerPermission(): Promise<boolean> {
 export function openNotificationListenerSettings(): void {
   if (!isNotificationBridgeAvailable()) return;
   NotificationBridge!.openNotificationListenerSettings();
+}
+
+/**
+ * Avisa o serviço nativo se a captura está liberada (aceite do usuário + interruptor ligado). Desligada, o serviço
+ * ignora as notificações. No-op em APK sem esse método (a porta de consentimento do JS continua valendo).
+ */
+export function setNativeCaptureEnabled(enabled: boolean): void {
+  if (!isNotificationBridgeAvailable()) return;
+  try {
+    if (typeof NotificationBridge!.setCaptureEnabled === 'function') {
+      NotificationBridge!.setCaptureEnabled(enabled);
+    }
+  } catch {
+    // O porteiro do JS continua valendo.
+  }
 }
 
 /**

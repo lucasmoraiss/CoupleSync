@@ -88,7 +88,7 @@ export default function VerifyEmailScreen() {
           <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Voltar">
             <Text style={styles.back}>← Voltar</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>Confirmar e-mail</Text>
+          <Text style={styles.title} accessibilityRole="header">Confirmar e-mail</Text>
           <Text style={styles.hint}>
             Digite o código de 6 dígitos que enviamos para o seu e-mail (vale por 15 minutos). Você pode usar o app normalmente
             mesmo sem confirmar.
@@ -145,7 +145,7 @@ export default function VerifyEmailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 40 },
-  back: { color: colors.primaryLight, fontSize: 15, marginBottom: 16 },
+  back: { minHeight: 44, textAlignVertical: 'center', color: colors.primaryLight, fontSize: 15, marginBottom: 16 },
   title: { fontSize: 26, fontWeight: '700', color: colors.text, marginBottom: 8 },
   hint: { fontSize: 14, color: colors.textMuted, marginBottom: 20, lineHeight: 20 },
   notice: {
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
   button: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
   buttonText: { color: colors.text, fontSize: 16, fontWeight: '700' },
   disabled: { opacity: 0.6 },
-  link: { alignItems: 'center', marginTop: 20, paddingVertical: 8 },
+  link: { minHeight: 44, textAlignVertical: 'center', alignItems: 'center', marginTop: 20, paddingVertical: 8 },
   linkText: { color: colors.primaryLight, fontSize: 14, fontWeight: '600' },
   linkDisabled: { color: colors.textDisabled },
 });

@@ -136,7 +136,7 @@ export default function GroupScreen() {
         <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Voltar">
           <Text style={styles.back}>← Voltar</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Grupo</Text>
+        <Text style={styles.title} accessibilityRole="header">Grupo</Text>
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Código de convite</Text>
@@ -169,7 +169,7 @@ export default function GroupScreen() {
           ) : null}
         </View>
 
-        <Text style={styles.sectionTitle}>Membros</Text>
+        <Text style={styles.sectionTitle} accessibilityRole="header">Membros</Text>
         <View style={styles.card}>
           {data.members.map((member, index) => {
             const isMe = member.userId === userId;
@@ -187,7 +187,7 @@ export default function GroupScreen() {
                   </Text>
                 </View>
                 {owner && !isMe ? (
-                  <TouchableOpacity
+                  <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }}
                     onPress={() => confirmRemove(member)}
                     disabled={busy}
                     accessibilityRole="button"
@@ -218,7 +218,7 @@ export default function GroupScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 40 },
-  back: { color: colors.primaryLight, fontSize: 14, fontWeight: '600', marginBottom: 12 },
+  back: { minHeight: 44, textAlignVertical: 'center', color: colors.primaryLight, fontSize: 14, fontWeight: '600', marginBottom: 12 },
   title: { fontSize: 26, fontWeight: '700', color: colors.text, marginBottom: 20 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginTop: 24, marginBottom: 8 },
   card: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 20 },
@@ -227,6 +227,8 @@ const styles = StyleSheet.create({
   validity: { fontSize: 13, color: colors.textMuted, textAlign: 'center', marginTop: 6, marginBottom: 12 },
   validityExpired: { color: colors.errorLight },
   secondaryButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     backgroundColor: colors.border,
     borderRadius: 8,
     paddingHorizontal: 20,
