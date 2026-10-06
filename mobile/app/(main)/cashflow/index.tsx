@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { cashFlowApiClient } from '@/services/apiClient';
+import { getCategoryLabel } from '@/modules/transactions/categories';
 import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
@@ -112,7 +113,7 @@ export default function CashFlowScreen() {
                 .sort(([, a], [, b]) => b - a)
                 .map(([category, amount]) => (
                   <View key={category} style={styles.categoryRow}>
-                    <Text style={styles.categoryName}>{category}</Text>
+                    <Text style={styles.categoryName}>{getCategoryLabel(category)}</Text>
                     <Text style={styles.categoryAmount}>{formatBRL(amount)}</Text>
                   </View>
                 ))}
