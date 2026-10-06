@@ -106,3 +106,13 @@ export function getApiErrorMessage(error: unknown, fallback: string = DEFAULT_ER
   if (status >= 500) return SERVER_ERROR_MESSAGE;
   return STATUS_MESSAGES[status] ?? fallback;
 }
+
+/**
+ * A API diz que o usuário não tem grupo: 403 COUPLE_REQUIRED (rotas de dados) ou 404 COUPLE_NOT_FOUND
+ * (tela do grupo). Quem recebe isso tem um groupId velho guardado e deve ir para a configuração do grupo.
+ */
+export function isNoGroupError(error: unknown): boolean {
+  const status = getApiErrorStatus(error);
+  const code = getApiErrorCode(error);
+  return (status === 403 && code === 'COUPLE_REQUIRED') || (status === 404 && code === 'COUPLE_NOT_FOUND');
+}

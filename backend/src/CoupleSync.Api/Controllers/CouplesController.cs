@@ -47,7 +47,7 @@ public sealed class CouplesController : ControllerBase
             new CreateCoupleCommand(GetAuthenticatedUserId()),
             cancellationToken);
 
-        return StatusCode(StatusCodes.Status201Created, new CreateCoupleResponse(result.CoupleId, result.JoinCode, result.AccessToken));
+        return StatusCode(StatusCodes.Status201Created, new CreateCoupleResponse(result.CoupleId, result.JoinCode, result.AccessToken, result.RefreshToken));
     }
 
     [HttpPost("join")]
@@ -63,7 +63,7 @@ public sealed class CouplesController : ControllerBase
             new JoinCoupleCommand(GetAuthenticatedUserId(), request.JoinCode),
             cancellationToken);
 
-        return Ok(new JoinCoupleResponse(result.CoupleId, result.Members.Select(ToMemberResponse).ToArray(), result.AccessToken));
+        return Ok(new JoinCoupleResponse(result.CoupleId, result.Members.Select(ToMemberResponse).ToArray(), result.AccessToken, result.RefreshToken));
     }
 
     [HttpGet("me")]

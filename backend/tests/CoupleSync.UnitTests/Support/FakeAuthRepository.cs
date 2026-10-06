@@ -90,6 +90,11 @@ public sealed class FakeAuthRepository : IAuthRepository
         return Task.FromResult(true);
     }
 
+    public Task<bool> RevokeRefreshTokenByHashAsync(string tokenHash, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(RefreshTokens.RemoveAll(x => x.TokenHash == tokenHash) > 0);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         if (SaveChangesException is not null)

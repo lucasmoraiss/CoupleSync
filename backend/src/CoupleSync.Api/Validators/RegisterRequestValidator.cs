@@ -17,6 +17,6 @@ public sealed class RegisterRequestValidator : AbstractValidator<RegisterRequest
 
         RuleFor(x => x.Password)
             .NotEmpty()
-            .MinimumLength(8);
+            .MeetsPasswordPolicy(x => x.Email);
     }
 }

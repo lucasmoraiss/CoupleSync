@@ -6,6 +6,7 @@ import {
   getApiErrorCode,
   getApiErrorMessage,
   getApiErrorStatus,
+  isNoGroupError,
 } from '../apiError';
 
 /** Erro como o axios entrega: com resposta do servidor. */
@@ -95,5 +96,21 @@ describe('getApiErrorCode / getApiErrorStatus', () => {
   it('devolve o status HTTP, ou undefined sem resposta', () => {
     expect(getApiErrorStatus(httpError(409, {}))).toBe(409);
     expect(getApiErrorStatus({ isAxiosError: true, code: 'ERR_NETWORK' })).toBeUndefined();
+  });
+});
+
+describe('isNoGroupError', () => {
+  it('reconhece "sem grupo": 403 COUPLE_REQUIRED e 404 COUPLE_NOT_FOUND', () => {
+    expect(isNoGroupError(httpError(403, { code: 'COUPLE_REQUIRED', message: 'Conecte-se.' }))).toBe(true);
+    expect(isNoGroupError(httpError(404, { code: 'COUPLE_NOT_FOUND', message: 'Casal não encontrado.' }))).toBe(true);
+  });
+
+  it('não confunde com outros erros', () => {
+    expect(isNoGroupError(httpError(403, { code: 'FORBIDDEN', message: 'Sem permissão.' }))).toBe(false);
+    expect(isNoGroupError(httpError(404, { code: 'GOAL_NOT_FOUND', message: 'Meta não encontrada.' }))).toBe(false);
+    expect(isNoGroupError(httpError(404, 'texto solto'))).toBe(false);
+    expect(isNoGroupError(httpError(500, { code: 'COUPLE_NOT_FOUND', message: 'x' }))).toBe(false);
+    expect(isNoGroupError(new Error('Network Error'))).toBe(false);
+    expect(isNoGroupError(undefined)).toBe(false);
   });
 });

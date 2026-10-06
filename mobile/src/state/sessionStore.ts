@@ -19,8 +19,14 @@ interface SessionActions {
     coupleId: string | null
   ) => Promise<void>;
   setCoupleId: (coupleId: string) => Promise<void>;
-  /** Update the persisted access token and couple id atomically (used after create/join couple). */
-  setAccessTokenAndCouple: (accessToken: string, coupleId: string) => Promise<void>;
+  /**
+   * Update the persisted access token and couple id atomically (used after create/join couple).
+   * The API also returns a refresh token when the user had none (e.g. after being removed from a group):
+   * when present it replaces the stored one; when absent the stored one is kept.
+   */
+  setAccessTokenAndCouple: (accessToken: string, coupleId: string, refreshToken?: string | null) => Promise<void>;
+  /** The server says the user has no group (anymore): forget the stale group id, keep the session. */
+  clearCouple: () => Promise<void>;
   /** Replace the token pair after a refresh, keeping userId and coupleId. No-op if there is no session. */
   setTokens: (accessToken: string, refreshToken: string) => Promise<void>;
   /** After leaving the group: store the group-less token pair and forget the group. */
@@ -55,16 +61,30 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ coupleId });
   },
 
-  setAccessTokenAndCouple: async (accessToken: string, coupleId: string) => {
+  setAccessTokenAndCouple: async (accessToken: string, coupleId: string, newRefreshToken?: string | null) => {
     const state = get();
-    const payload: SessionState = { ...state, accessToken, coupleId };
+    const refreshToken = newRefreshToken || state.refreshToken;
+    const payload: SessionState = { ...state, accessToken, refreshToken, coupleId };
     await SecureStore.setItemAsync(SECURE_STORE_KEY, JSON.stringify({
       accessToken: payload.accessToken,
       refreshToken: payload.refreshToken,
       userId: payload.userId,
       coupleId: payload.coupleId,
     }));
-    set({ accessToken, coupleId });
+    set({ accessToken, refreshToken, coupleId });
+  },
+
+  clearCouple: async () => {
+    const state = get();
+    // No session (already signed out) or no stale group to forget: nothing to write.
+    if (!state.userId || state.coupleId === null) return;
+    await SecureStore.setItemAsync(SECURE_STORE_KEY, JSON.stringify({
+      accessToken: state.accessToken,
+      refreshToken: state.refreshToken,
+      userId: state.userId,
+      coupleId: null,
+    }));
+    set({ coupleId: null });
   },
 
   setTokens: async (accessToken: string, refreshToken: string) => {

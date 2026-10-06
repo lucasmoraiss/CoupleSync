@@ -2,6 +2,7 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { router } from 'expo-router';
 import { useSessionStore } from '@/state/sessionStore';
+import { clearUserData } from '@/state/userData';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { installAuthRefresh } from './authRefresh';
 import { getApiErrorCode } from './apiError';
@@ -73,6 +74,8 @@ axiosInstance.interceptors.response.use(
         'Conecte-se com seu parceiro primeiro para usar este recurso',
         'warning',
       );
+      // O grupo guardado não vale mais (ex.: removido por outro membro): esquece-o e volta à configuração.
+      void useSessionStore.getState().clearCouple();
       router.replace('/(auth)/couple-setup' as any);
     }
     return Promise.reject(error);
@@ -100,7 +103,7 @@ installAuthRefresh(axiosInstance, {
   saveTokens: ({ accessToken, refreshToken }) =>
     useSessionStore.getState().setTokens(accessToken, refreshToken),
   onSessionExpired: async () => {
-    await useSessionStore.getState().clearSession();
+    await clearUserData();
     showToastGlobal('Sua sessão expirou. Entre novamente.', 'warning');
     router.replace('/login' as any);
   },
@@ -121,6 +124,11 @@ interface LoginRequest {
   password: string;
 }
 
+interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
 interface RegisterRequest {
   email: string;
   password: string;
@@ -133,6 +141,13 @@ export const authApiClient = {
 
   register: (data: RegisterRequest): Promise<AxiosResponse<AuthResponse>> =>
     axiosInstance.post<AuthResponse>('/api/v1/auth/register', data),
+  /** Revoga o refresh token no servidor (responde 204 mesmo se ele já não valer). Não precisa de sessão válida. */
+  logout: (refreshToken: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.post<void>('/api/v1/auth/logout', { refreshToken }, { timeout: 8000 }),
+
+  /** Troca a senha; devolve o novo par de tokens (os refresh tokens dos outros aparelhos deixam de valer). */
+  changePassword: (data: ChangePasswordRequest): Promise<AxiosResponse<RefreshResponse>> =>
+    axiosInstance.post<RefreshResponse>('/api/v1/auth/change-password', data),
   // O refresh não é exposto aqui: é chamado só pelo tratamento de 401 (installAuthRefresh acima).
 };
 

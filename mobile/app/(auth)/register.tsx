@@ -38,10 +38,7 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (password.length < 8) {
-      Alert.alert('Senha fraca', 'A senha deve ter pelo menos 8 caracteres.');
-      return;
-    }
+    // A regra da senha (tamanho, letra, número, senhas comuns) é só do servidor; ele diz o que falta.
 
     setLoading(true);
     try {
@@ -114,7 +111,7 @@ export default function RegisterScreen() {
           <View style={styles.inputWrapper}>
             <TextInput
               style={styles.inputField}
-              placeholder="Mínimo 8 caracteres"
+              placeholder="Mínimo 8 caracteres, com letras e números"
               placeholderTextColor={colors.placeholder}
               value={password}
               onChangeText={setPassword}

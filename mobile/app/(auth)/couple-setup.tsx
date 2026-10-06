@@ -27,7 +27,7 @@ export default function CoupleSetupScreen() {
     try {
       const { data } = await coupleApiClient.create();
       // Persist new JWT (backend returns a fresh token containing couple_id claim).
-      await useSessionStore.getState().setAccessTokenAndCouple(data.accessToken, data.coupleId);
+      await useSessionStore.getState().setAccessTokenAndCouple(data.accessToken, data.coupleId, data.refreshToken);
       setCreatedCode(data.joinCode);
       setMode('create');
     } catch (err: any) {
@@ -47,7 +47,7 @@ export default function CoupleSetupScreen() {
     try {
       const { data } = await coupleApiClient.join({ joinCode: joinCode.trim().toUpperCase() });
       // Persist new JWT so the next requests send couple_id in the claim.
-      await useSessionStore.getState().setAccessTokenAndCouple(data.accessToken, data.coupleId);
+      await useSessionStore.getState().setAccessTokenAndCouple(data.accessToken, data.coupleId, data.refreshToken);
       router.replace('/' as any);
     } catch (err: any) {
       Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao entrar no casal. Tente novamente.'));

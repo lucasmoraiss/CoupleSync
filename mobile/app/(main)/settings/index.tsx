@@ -2,7 +2,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Alert } from 'react-native';
 import { router } from 'expo-router';
-import { useSessionStore } from '@/state/sessionStore';
+import { logout } from '@/services/logout';
 import { openNotificationListenerSettings } from '@/modules/integrations/notification-capture/NotificationListenerBridge';
 import { colors } from '@/theme';
 
@@ -14,7 +14,7 @@ export default function SettingsScreen() {
         text: 'Sair',
         style: 'destructive',
         onPress: async () => {
-          await useSessionStore.getState().clearSession();
+          await logout();
           router.replace('/login' as any);
         },
       },
@@ -50,6 +50,16 @@ export default function SettingsScreen() {
           accessibilityRole="button"
         >
           <Text style={styles.menuText}>Grupo e código de convite</Text>
+          <Text style={styles.menuArrow}>›</Text>
+        </TouchableOpacity>
+        <View style={styles.divider} />
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => router.push('/(main)/settings/change-password' as any)}
+          accessibilityLabel="Alterar a senha da conta"
+          accessibilityRole="button"
+        >
+          <Text style={styles.menuText}>Alterar senha</Text>
           <Text style={styles.menuArrow}>›</Text>
         </TouchableOpacity>
         <View style={styles.divider} />

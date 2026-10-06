@@ -1,6 +1,7 @@
 // AC-009: Event uploader — queued POST to /api/v1/integrations/events with exponential backoff.
 // Uses the existing axiosInstance (auth interceptor already attached).
 import axiosInstance from '@/services/apiClient';
+import { registerUserDataCleaner } from '@/state/userData';
 import { classifyNotification } from './notificationParser';
 import { buildIngestRequest, type IngestNotificationEventRequest } from './ingestRequest';
 
@@ -113,6 +114,20 @@ export async function handleRawNotificationEvent(
     return true; // Event was recognised; upload deferred
   }
 }
+
+/**
+ * Drops events captured but not yet delivered. They belong to the user who is leaving; if kept, the next
+ * user on this device would upload them into their own group.
+ */
+export function clearPendingEvents(): void {
+  retryQueue = [];
+  if (pollHandle !== null) {
+    clearInterval(pollHandle);
+    pollHandle = null;
+  }
+}
+
+registerUserDataCleaner(clearPendingEvents);
 
 /** Current number of events pending retry (for diagnostics/testing). */
 export function getPendingRetryCount(): number {

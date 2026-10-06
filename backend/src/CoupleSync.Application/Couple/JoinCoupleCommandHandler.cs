@@ -1,7 +1,10 @@
+using CoupleSync.Application.Auth;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Application.Common.Options;
 using CoupleSync.Domain.Entities;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CoupleSync.Application.Couples;
 
@@ -12,14 +15,23 @@ public sealed class JoinCoupleCommandHandler
     private readonly IJwtTokenService _jwtTokenService;
     private readonly INotificationEventRepository _notificationEventRepository;
     private readonly ILogger<JoinCoupleCommandHandler> _logger;
+    private readonly IAuthRepository _authRepository;
+    private readonly ITokenHasher _tokenHasher;
+    private readonly JwtOptions _jwtOptions;
 
     public JoinCoupleCommandHandler(
         ICoupleRepository coupleRepository,
         IDateTimeProvider dateTimeProvider,
         IJwtTokenService jwtTokenService,
         INotificationEventRepository notificationEventRepository,
-        ILogger<JoinCoupleCommandHandler> logger)
+        ILogger<JoinCoupleCommandHandler> logger,
+        IAuthRepository authRepository,
+        ITokenHasher tokenHasher,
+        IOptions<JwtOptions> jwtOptions)
     {
+        _authRepository = authRepository;
+        _tokenHasher = tokenHasher;
+        _jwtOptions = jwtOptions.Value;
         _coupleRepository = coupleRepository;
         _dateTimeProvider = dateTimeProvider;
         _jwtTokenService = jwtTokenService;
@@ -60,6 +72,11 @@ public sealed class JoinCoupleCommandHandler
         }
 
         couple.AddMember(user, now);
+
+        // A user removed from a group has no refresh token left; give them a working one (null when they already
+        // have one) so the session does not die at the next renewal. Saved together with the membership.
+        var refreshTokenRaw = await RefreshTokenIssuer.EnsureAsync(
+            _authRepository, _tokenHasher, user.Id, now, _jwtOptions.RefreshTokenTtlDays, cancellationToken);
         await _coupleRepository.SaveChangesAsync(cancellationToken);
 
         // Notify the existing member that a partner has joined.
@@ -92,6 +109,6 @@ public sealed class JoinCoupleCommandHandler
         // Without this, the app stays in a "no couple" state until re-login.
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
 
-        return new JoinCoupleResult(couple.Id, members, accessToken);
+        return new JoinCoupleResult(couple.Id, members, accessToken, refreshTokenRaw);
     }
 }

@@ -62,6 +62,16 @@ public sealed class User
         CoupleJoinedAtUtc = coupleJoinedAtUtc;
     }
 
+    public void ChangePasswordHash(string passwordHash)
+    {
+        if (string.IsNullOrWhiteSpace(passwordHash))
+        {
+            throw new ArgumentException("A senha é obrigatória.", nameof(passwordHash));
+        }
+
+        PasswordHash = passwordHash;
+    }
+
     public void LeaveCouple()
     {
         CoupleId = null;

@@ -26,5 +26,8 @@ public interface IAuthRepository
         DateTime now,
         CancellationToken cancellationToken);
 
+    /// <summary>Deletes the refresh token with this hash. Returns false when none matched (already gone).</summary>
+    Task<bool> RevokeRefreshTokenByHashAsync(string tokenHash, CancellationToken cancellationToken);
+
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

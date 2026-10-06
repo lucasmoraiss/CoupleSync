@@ -49,6 +49,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<RegisterCommandHandler>();
 builder.Services.AddScoped<LoginCommandHandler>();
 builder.Services.AddScoped<RefreshTokenCommandHandler>();
+builder.Services.AddScoped<LogoutCommandHandler>();
+builder.Services.AddScoped<ChangePasswordCommandHandler>();
 builder.Services.AddScoped<CreateCoupleCommandHandler>();
 builder.Services.AddScoped<JoinCoupleCommandHandler>();
 builder.Services.AddScoped<LeaveCoupleCommandHandler>();

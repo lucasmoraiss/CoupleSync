@@ -1,6 +1,9 @@
 using CoupleSync.Api.Contracts.Auth;
 using CoupleSync.Api.RateLimiting;
+using System.Security.Claims;
 using CoupleSync.Application.Auth;
+using CoupleSync.Application.Common.Exceptions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -13,12 +16,18 @@ public sealed class AuthController : ControllerBase
     private readonly RegisterCommandHandler _registerHandler;
     private readonly LoginCommandHandler _loginHandler;
     private readonly RefreshTokenCommandHandler _refreshTokenHandler;
+    private readonly LogoutCommandHandler _logoutHandler;
+    private readonly ChangePasswordCommandHandler _changePasswordHandler;
 
     public AuthController(
         RegisterCommandHandler registerHandler,
         LoginCommandHandler loginHandler,
-        RefreshTokenCommandHandler refreshTokenHandler)
+        RefreshTokenCommandHandler refreshTokenHandler,
+        LogoutCommandHandler logoutHandler,
+        ChangePasswordCommandHandler changePasswordHandler)
     {
+        _logoutHandler = logoutHandler;
+        _changePasswordHandler = changePasswordHandler;
         _registerHandler = registerHandler;
         _loginHandler = loginHandler;
         _refreshTokenHandler = refreshTokenHandler;
@@ -60,6 +69,45 @@ public sealed class AuthController : ControllerBase
     {
         var result = await _refreshTokenHandler.HandleAsync(
             new RefreshTokenCommand(request.RefreshToken),
+            cancellationToken);
+
+        return Ok(new RefreshResponse(result.AccessToken, result.RefreshToken));
+    }
+
+    /// <summary>
+    /// Revokes the refresh token. Needs no access token: the caller may be signing out precisely because it
+    /// expired. Always 204, whether or not the token was known. One refresh token exists per user, so this
+    /// also ends the session on every other device.
+    /// </summary>
+    [HttpPost("logout")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest request, CancellationToken cancellationToken)
+    {
+        await _logoutHandler.HandleAsync(new LogoutCommand(request.RefreshToken), cancellationToken);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Changes the password of the signed-in user (needs the current one) and replaces every refresh token
+    /// with a new one returned here, so other devices are signed out and this one keeps going.
+    /// </summary>
+    [HttpPost("change-password")]
+    [Authorize]
+    [EnableRateLimiting(RateLimitPolicies.AuthChangePassword)]
+    [ProducesResponseType(typeof(RefreshResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<RefreshResponse>> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.FindFirstValue("user_id"), out var userId))
+        {
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
+        }
+
+        var result = await _changePasswordHandler.HandleAsync(
+            new ChangePasswordCommand(userId, request.CurrentPassword, request.NewPassword),
             cancellationToken);
 
         return Ok(new RefreshResponse(result.AccessToken, result.RefreshToken));

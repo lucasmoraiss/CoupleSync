@@ -45,7 +45,7 @@ public sealed class GroupManagementHandlerTests
 
     private JoinCoupleCommandHandler JoinHandler(DateTime now) => new(
         _couples, new FixedDateTimeProvider(now), new StubJwtTokenService(), new FakeNotificationEventRepository(),
-        NullLogger<JoinCoupleCommandHandler>.Instance);
+        NullLogger<JoinCoupleCommandHandler>.Instance, new FakeAuthRepository(), new CoupleSync.Infrastructure.Security.Sha256TokenHasher(), TestJwtOptions.Default());
 
     // leave
 

@@ -16,6 +16,8 @@ export interface CreateCoupleResponse {
   readonly coupleId: string;
   readonly joinCode: string;
   readonly accessToken: string;
+  /** Só vem quando o usuário não tinha refresh token válido (ex.: foi removido de um grupo). */
+  readonly refreshToken?: string | null;
 }
 
 export interface CoupleMemberResponse {
@@ -28,6 +30,8 @@ export interface JoinCoupleResponse {
   readonly coupleId: string;
   readonly members: readonly CoupleMemberResponse[];
   readonly accessToken: string;
+  /** Só vem quando o usuário não tinha refresh token válido (ex.: foi removido de um grupo). */
+  readonly refreshToken?: string | null;
 }
 
 export interface GetCoupleMeResponse {

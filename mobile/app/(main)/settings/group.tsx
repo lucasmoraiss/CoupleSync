@@ -1,6 +1,6 @@
 // Tela do grupo: membros, código de convite com validade (sempre visível, com botão de copiar)
 // e as ações sair / remover membro / gerar novo código, cada uma com confirmação.
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,7 +15,7 @@ import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { coupleApiClient } from '@/services/apiClient';
-import { getApiErrorMessage } from '@/services/apiError';
+import { getApiErrorMessage, isNoGroupError } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
 import { describeJoinCodeValidity, isGroupOwner } from '@/modules/couple/group';
 import { ErrorState } from '@/components/ErrorState';
@@ -30,10 +30,22 @@ export default function GroupScreen() {
   const userId = useSessionStore((s) => s.userId);
   const [copied, setCopied] = useState(false);
 
-  const { data, isLoading, isError, refetch } = useQuery<GetCoupleMeResponse>({
+  const { data, error, isLoading, isError, refetch } = useQuery<GetCoupleMeResponse>({
     queryKey: QUERY_KEY,
     queryFn: () => coupleApiClient.getMyCouple().then((r) => r.data),
+    // "Você não tem grupo" não muda ao tentar de novo.
+    retry: (failureCount, err) => !isNoGroupError(err) && failureCount < 2,
   });
+
+  // O servidor diz que não há grupo (removido, ou grupo guardado velho): esquece o grupo e vai configurar outro.
+  const noGroup = isNoGroupError(error);
+  useEffect(() => {
+    if (!noGroup) return;
+    void useSessionStore.getState().clearCouple();
+    // Nada do grupo antigo deve aparecer depois. Esta própria consulta fica: removê-la a refaria em laço.
+    queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== QUERY_KEY[0] });
+    router.replace('/(auth)/couple-setup' as any);
+  }, [noGroup, queryClient]);
 
   const owner = isGroupOwner(data?.ownerUserId, userId);
   const validity = data?.joinCodeExpiresAtUtc ? describeJoinCodeValidity(data.joinCodeExpiresAtUtc) : null;
@@ -106,7 +118,7 @@ export default function GroupScreen() {
     ]);
   };
 
-  if (isLoading) return <LoadingState />;
+  if (isLoading || noGroup) return <LoadingState />;
   if (isError || !data) {
     return (
       <SafeAreaView style={styles.container}>

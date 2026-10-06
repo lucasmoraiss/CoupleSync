@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StatusBar, View } from 'react-native';
 import { Slot } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import {
   Ionicons,
   MaterialIcons,
@@ -14,12 +14,7 @@ import * as Font from 'expo-font';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors } from '@/theme';
 import { ToastProvider } from '@/components/Toast/ToastProvider';
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { retry: 2, staleTime: 30_000 },
-  },
-});
+import { queryClient } from '@/services/queryClient';
 
 export default function RootLayout() {
   const hydrateFromStore = useSessionStore((s) => s.hydrateFromStore);

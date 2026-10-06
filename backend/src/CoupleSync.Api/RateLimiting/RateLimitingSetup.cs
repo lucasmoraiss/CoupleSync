@@ -15,6 +15,7 @@ public static class RateLimitPolicies
     public const string AuthLogin = "auth-login";
     public const string AuthRegister = "auth-register";
     public const string CoupleJoin = "couple-join";
+    public const string AuthChangePassword = "auth-change-password";
 }
 
 /// <summary>Bound to the <c>RateLimiting</c> configuration section (env: <c>RATELIMITING__AUTH__PERMITLIMIT</c> etc.).</summary>
@@ -54,6 +55,14 @@ public static class RateLimitingSetup
 
             limiter.AddPolicy(RateLimitPolicies.AuthRegister, context =>
                 CreatePartition($"ip:{GetClientIp(context)}", GetOptions(context).Auth));
+
+            // The current password is checked here, so a stolen access token must not be able to guess it freely.
+            limiter.AddPolicy(RateLimitPolicies.AuthChangePassword, context =>
+            {
+                var userId = context.User.FindFirstValue("user_id");
+                var key = string.IsNullOrWhiteSpace(userId) ? $"ip:{GetClientIp(context)}" : $"user:{userId}";
+                return CreatePartition($"change-password:{key}", GetOptions(context).Auth);
+            });
 
             limiter.AddPolicy(RateLimitPolicies.CoupleJoin, context =>
             {

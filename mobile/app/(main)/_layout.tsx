@@ -92,6 +92,7 @@ export default function MainLayout() {
       <Tabs.Screen name="settings/index" options={{ title: 'Config', tabBarLabel: 'Config', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="settings-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="settings/alerts" options={{ href: null }} />
       <Tabs.Screen name="settings/group" options={{ href: null }} />
+      <Tabs.Screen name="settings/change-password" options={{ href: null }} />
       <Tabs.Screen name="ocr-upload" options={{ href: null }} />
       <Tabs.Screen name="ocr-review" options={{ href: null }} />
       <Tabs.Screen name="transactions/new" options={{ href: null }} />

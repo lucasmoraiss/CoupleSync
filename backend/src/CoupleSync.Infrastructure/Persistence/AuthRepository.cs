@@ -79,6 +79,15 @@ public sealed class AuthRepository : IAuthRepository
         return affectedRows == 1;
     }
 
+    public async Task<bool> RevokeRefreshTokenByHashAsync(string tokenHash, CancellationToken cancellationToken)
+    {
+        var affectedRows = await _dbContext.RefreshTokens
+            .Where(x => x.TokenHash == tokenHash)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        return affectedRows > 0;
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return _dbContext.SaveChangesAsync(cancellationToken);

@@ -35,6 +35,8 @@ public static class ValidationLocalization
         ["Message"] = "Mensagem",
         ["Month"] = "Mês",
         ["Name"] = "Nome",
+        ["CurrentPassword"] = "Senha atual",
+        ["NewPassword"] = "Senha nova",
         ["Password"] = "Senha",
         ["RawNotificationText"] = "Texto da notificação",
         ["RefreshToken"] = "Token de renovação",
