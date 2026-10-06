@@ -8,7 +8,7 @@ public enum CoupleStatus
 
 public sealed class Couple
 {
-    private readonly List<User> _members = new();
+    private readonly List<CoupleMember> _members = new();
 
     private Couple()
     {
@@ -39,7 +39,7 @@ public sealed class Couple
     /// <summary>The member who manages the group (removes members, renews the code); null only for a group with no member left.</summary>
     public Guid? OwnerUserId { get; private set; }
 
-    public IReadOnlyCollection<User> Members => _members;
+    public IReadOnlyCollection<CoupleMember> Members => _members;
 
     public static Couple Create(string joinCode, DateTime createdAtUtc)
     {
@@ -60,9 +60,12 @@ public sealed class Couple
         JoinCodeExpiresAtUtc = nowUtc + JoinCodeValidity;
     }
 
+    public bool HasMember(Guid userId) => _members.Any(x => x.UserId == userId);
+
     /// <summary>
     /// Takes the member out of the group. The owner leaving passes ownership to the oldest remaining member;
     /// the last member leaving leaves a group nobody can reach (its code is expired, its data is kept).
+    /// The user's active group is not touched here: the caller decides what it becomes.
     /// </summary>
     public void RemoveMember(User user, DateTime nowUtc)
     {
@@ -71,27 +74,28 @@ public sealed class Couple
             throw new ArgumentNullException(nameof(user));
         }
 
-        var member = _members.SingleOrDefault(x => x.Id == user.Id)
+        var member = _members.SingleOrDefault(x => x.UserId == user.Id)
             ?? throw new InvalidOperationException("O usuário não faz parte deste casal.");
 
         _members.Remove(member);
-        member.LeaveCouple();
 
         if (_members.Count == 0)
         {
             OwnerUserId = null;
             JoinCodeExpiresAtUtc = nowUtc;
         }
-        else if (OwnerUserId == member.Id)
+        else if (member.Role == CoupleRole.Owner || OwnerUserId == member.UserId)
         {
-            OwnerUserId = OldestMember().Id;
+            var successor = OldestMember();
+            successor.ChangeRole(CoupleRole.Owner);
+            OwnerUserId = successor.UserId;
         }
     }
 
-    // Same rule as the migration that backfills owners: earliest join (user creation date when unknown), then id.
-    private User OldestMember() => _members
-        .OrderBy(x => x.CoupleJoinedAtUtc ?? x.CreatedAtUtc)
-        .ThenBy(x => x.Id)
+    // Same rule as the migration that backfills owners: earliest join, then id.
+    private CoupleMember OldestMember() => _members
+        .OrderBy(x => x.JoinedAtUtc)
+        .ThenBy(x => x.UserId)
         .First();
 
     private static string NormalizeJoinCode(string joinCode)
@@ -112,6 +116,7 @@ public sealed class Couple
         return normalized;
     }
 
+    /// <summary>Adds the user to the group (as owner when it has none) and makes it the user's active group.</summary>
     public void AddMember(User user, DateTime joinedAtUtc)
     {
         if (user is null)
@@ -119,13 +124,18 @@ public sealed class Couple
             throw new ArgumentNullException(nameof(user));
         }
 
-        if (_members.Any(x => x.Id == user.Id))
+        if (HasMember(user.Id))
         {
             throw new InvalidOperationException("O usuário já faz parte deste casal.");
         }
 
-        user.AssignCouple(Id, joinedAtUtc);
-        _members.Add(user);
-        OwnerUserId ??= user.Id;
+        var role = _members.Any(x => x.Role == CoupleRole.Owner) ? CoupleRole.Member : CoupleRole.Owner;
+        _members.Add(new CoupleMember(Id, user, role, joinedAtUtc));
+        if (role == CoupleRole.Owner)
+        {
+            OwnerUserId = user.Id;
+        }
+
+        user.SetActiveCouple(Id, joinedAtUtc);
     }
 }

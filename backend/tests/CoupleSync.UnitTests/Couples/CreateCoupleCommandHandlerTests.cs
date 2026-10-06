@@ -23,7 +23,7 @@ public sealed class CreateCoupleCommandHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_WhenUserAlreadyInCouple_ShouldThrowConflict()
+    public async Task HandleAsync_WhenUserAlreadyHasAGroup_CreatesAnotherAndMakesItActive()
     {
         var repo = new FakeCoupleRepository();
         var user = User.Create(EmailAddress.From("user@example.com"), "Test User", "hashed", FixedNow);
@@ -33,10 +33,13 @@ public sealed class CreateCoupleCommandHandlerTests
         repo.Couples.Add(existingCouple);
 
         var handler = new CreateCoupleCommandHandler(repo, new FixedJoinCodeGenerator("NEWCOD"), new FixedDateTimeProvider(FixedNow), new StubJwtTokenService(), new FakeAuthRepository(), new CoupleSync.Infrastructure.Security.Sha256TokenHasher(), TestJwtOptions.Default());
-        var command = new CreateCoupleCommand(user.Id);
 
-        var ex = await Assert.ThrowsAsync<ConflictException>(() => handler.HandleAsync(command, CancellationToken.None));
-        Assert.Equal("USER_ALREADY_IN_COUPLE", ex.Code);
+        var result = await handler.HandleAsync(new CreateCoupleCommand(user.Id), CancellationToken.None);
+
+        Assert.NotEqual(existingCouple.Id, result.CoupleId);
+        Assert.Equal(result.CoupleId, user.ActiveCoupleId);
+        Assert.True(existingCouple.HasMember(user.Id));
+        Assert.Equal(2, repo.Couples.Count(c => c.HasMember(user.Id)));
     }
 
     [Fact]

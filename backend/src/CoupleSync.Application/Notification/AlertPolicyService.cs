@@ -187,7 +187,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
         var couple = await _coupleRepository.FindByIdWithMembersAsync(coupleId, ct);
         var recipients = new List<Guid>();
         if (couple is not null)
-            recipients.AddRange(couple.Members.Where(m => m.IsActive).Select(m => m.Id));
+            recipients.AddRange(couple.Members.Where(m => m.User.IsActive).Select(m => m.UserId));
 
         if (!recipients.Contains(authorId))
             recipients.Add(authorId);

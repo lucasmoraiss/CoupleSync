@@ -39,6 +39,8 @@ public sealed class CreateCoupleCommandHandler
 
     public async Task<CreateCoupleResult> HandleAsync(CreateCoupleCommand command, CancellationToken cancellationToken)
     {
+        // Serialises this user's membership changes, so the limit below cannot be passed by parallel requests.
+        await using var change = await _coupleRepository.BeginMembershipChangeAsync(command.UserId, cancellationToken);
         var user = await _coupleRepository.FindUserByIdAsync(command.UserId, cancellationToken);
 
         if (user is null || !user.IsActive)
@@ -46,10 +48,8 @@ public sealed class CreateCoupleCommandHandler
             throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        if (user.CoupleId.HasValue)
-        {
-            throw new ConflictException("USER_ALREADY_IN_COUPLE", "Você já faz parte de um casal.");
-        }
+        var groups = await _coupleRepository.GetGroupsOfUserAsync(user.Id, cancellationToken);
+        GroupLimit.EnsureRoomForOneMore(groups.Count);
 
         var now = _dateTimeProvider.UtcNow;
         var joinCode = await GenerateUniqueJoinCodeAsync(cancellationToken);
@@ -63,10 +63,9 @@ public sealed class CreateCoupleCommandHandler
         var refreshTokenRaw = await RefreshTokenIssuer.EnsureAsync(
             _authRepository, _tokenHasher, user.Id, now, _jwtOptions.RefreshTokenTtlDays, cancellationToken);
         await _coupleRepository.SaveChangesAsync(cancellationToken);
+        await change.CommitAsync(cancellationToken);
 
-        // Regenerate JWT so the user's couple_id claim reflects the new couple membership.
-        // Without this, subsequent authenticated requests would fail COUPLE_REQUIRED checks
-        // until the user logs in again.
+        // The new group is now the user's active one: the access token carries it in the couple_id claim.
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
 
         return new CreateCoupleResult(couple.Id, couple.JoinCode, accessToken, refreshTokenRaw);

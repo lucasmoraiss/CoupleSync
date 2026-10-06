@@ -48,6 +48,12 @@ public sealed class DeviceToken : ICoupleScoped
         LastSeenAtUtc = nowUtc;
     }
 
+    /// <summary>The user left the group the device was registered under; the registration follows the user.</summary>
+    public void MoveToCouple(Guid coupleId)
+    {
+        CoupleId = coupleId;
+    }
+
     /// <summary>The device now belongs to this user's current couple, with this token.</summary>
     public void Refresh(Guid coupleId, string token, DateTime nowUtc)
     {

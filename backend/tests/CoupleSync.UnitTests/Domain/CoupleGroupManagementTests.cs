@@ -63,7 +63,7 @@ public sealed class CoupleGroupManagementTests
     }
 
     [Fact]
-    public void RemoveMember_DetachesUserFromGroup()
+    public void RemoveMember_TakesTheMembershipAway_AndLeavesTheOwnerInPlace()
     {
         var couple = Couple.Create("ABC123", T0);
         var owner = NewUser("owner");
@@ -73,9 +73,8 @@ public sealed class CoupleGroupManagementTests
 
         couple.RemoveMember(other, T0.AddDays(2));
 
-        Assert.Null(other.CoupleId);
-        Assert.Null(other.CoupleJoinedAtUtc);
-        Assert.Single(couple.Members);
+        Assert.False(couple.HasMember(other.Id));
+        Assert.Equal(owner.Id, Assert.Single(couple.Members).UserId);
         Assert.Equal(owner.Id, couple.OwnerUserId);
     }
 
@@ -129,6 +128,6 @@ public sealed class CoupleGroupManagementTests
         var second = Couple.Create("XYZ789", T0);
         second.AddMember(user, T0.AddDays(2));
 
-        Assert.Equal(second.Id, user.CoupleId);
+        Assert.Equal(second.Id, user.ActiveCoupleId);
     }
 }

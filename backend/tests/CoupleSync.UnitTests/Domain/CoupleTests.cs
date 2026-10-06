@@ -59,6 +59,6 @@ public sealed class CoupleTests
 
         couple.AddMember(user, FixedNow);
 
-        Assert.Equal(couple.Id, user.CoupleId);
+        Assert.Equal(couple.Id, user.ActiveCoupleId);
     }
 }

@@ -14,12 +14,15 @@ public sealed class NotificationDispatcherJobTests
 
     private static ServiceProvider BuildServiceProvider(
         FakeNotificationEventRepository eventRepo,
-        FakeDeviceTokenRepository tokenRepo)
+        FakeDeviceTokenRepository tokenRepo,
+        FakeCoupleRepository? couples = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<INotificationEventRepository>(eventRepo);
         services.AddSingleton<IDeviceTokenRepository>(tokenRepo);
         services.AddSingleton<IDateTimeProvider>(DateTimeProvider);
+        services.AddSingleton<ICoupleMembership>(couples is null ? new EveryoneIsAMember() : new MembersOf(couples));
+        services.AddSingleton<ICoupleRepository>(couples ?? new FakeCoupleRepository());
         return services.BuildServiceProvider();
     }
 
@@ -170,10 +173,102 @@ public sealed class NotificationDispatcherJobTests
         Assert.Equal(0, stubFcm.SendCallCount);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_EventOfAGroupTheUserHasLeft_IsDroppedWithoutSending()
+    {
+        var user = User.Create(CoupleSync.Domain.ValueObjects.EmailAddress.From("ana@example.com"), "Ana", "hash", FixedNow);
+        var current = Couple.Create("CURRENT1", FixedNow);
+        current.AddMember(user, FixedNow);
+        var left = Couple.Create("LEFT1234", FixedNow);
+        var couples = new FakeCoupleRepository();
+        couples.Couples.AddRange([current, left]);
+
+        var eventRepo = new FakeNotificationEventRepository();
+        var tokenRepo = new FakeDeviceTokenRepository();
+        var ofLeftGroup = BuildPendingEvent(left.Id, user.Id);
+        var ofCurrentGroup = BuildPendingEvent(current.Id, user.Id);
+        eventRepo.Events.AddRange([ofLeftGroup, ofCurrentGroup]);
+        tokenRepo.Add(BuildDeviceToken(user.Id, current.Id));
+
+        var stubFcm = new StubFcmAdapter(returnsSuccess: true);
+        var job = new NotificationDispatcherJob(
+            BuildServiceProvider(eventRepo, tokenRepo, couples).GetRequiredService<IServiceScopeFactory>(),
+            stubFcm,
+            NullLogger<NotificationDispatcherJob>.Instance);
+
+        using var cts = new CancellationTokenSource();
+        var runTask = job.StartAsync(cts.Token);
+        await Task.Delay(100);
+        cts.Cancel();
+        await runTask;
+
+        Assert.Equal("Failed", ofLeftGroup.Status);
+        Assert.Equal("Delivered", ofCurrentGroup.Status);
+        Assert.Equal(1, stubFcm.SendCallCount);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UserInSeveralGroups_PushSaysWhichGroup_EvenWhenItIsNotTheActiveOne()
+    {
+        var ana = User.Create(CoupleSync.Domain.ValueObjects.EmailAddress.From("ana@example.com"), "Ana", "hash", FixedNow);
+        var bruno = User.Create(CoupleSync.Domain.ValueObjects.EmailAddress.From("bruno@example.com"), "Bruno", "hash", FixedNow);
+        var withBruno = Couple.Create("WITHBRUN", FixedNow);
+        withBruno.AddMember(bruno, FixedNow);
+        withBruno.AddMember(ana, FixedNow);
+        var alone = Couple.Create("ALONE123", FixedNow);
+        alone.AddMember(ana, FixedNow.AddDays(1)); // Ana's active group is "alone"; the alert is from the other one
+        var couples = new FakeCoupleRepository();
+        couples.Couples.AddRange([withBruno, alone]);
+
+        var eventRepo = new FakeNotificationEventRepository();
+        var tokenRepo = new FakeDeviceTokenRepository();
+        var forAna = BuildPendingEvent(withBruno.Id, ana.Id);
+        var forBruno = BuildPendingEvent(withBruno.Id, bruno.Id);
+        eventRepo.Events.AddRange([forAna, forBruno]);
+        tokenRepo.Add(DeviceToken.Create(ana.Id, alone.Id, "fcm-ana", FixedNow));
+        tokenRepo.Add(DeviceToken.Create(bruno.Id, withBruno.Id, "fcm-bruno", FixedNow));
+
+        var stubFcm = new StubFcmAdapter(returnsSuccess: true);
+        var job = new NotificationDispatcherJob(
+            BuildServiceProvider(eventRepo, tokenRepo, couples).GetRequiredService<IServiceScopeFactory>(),
+            stubFcm,
+            NullLogger<NotificationDispatcherJob>.Instance);
+
+        using var cts = new CancellationTokenSource();
+        var runTask = job.StartAsync(cts.Token);
+        await Task.Delay(100);
+        cts.Cancel();
+        await runTask;
+
+        Assert.Equal("Delivered", forAna.Status);
+        Assert.Equal("Large Transaction · Grupo com Bruno", stubFcm.TitlesByToken["fcm-ana"]);
+        Assert.Equal("Large Transaction", stubFcm.TitlesByToken["fcm-bruno"]);
+    }
+
+    private sealed class MembersOf : ICoupleMembership
+    {
+        private readonly FakeCoupleRepository _couples;
+
+        public MembersOf(FakeCoupleRepository couples) => _couples = couples;
+
+        public Task<bool> IsMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken)
+            => Task.FromResult(_couples.Couples.Any(c => c.Id == coupleId && c.HasMember(userId)));
+
+        public Task<bool> IsOwnerAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken) => Task.FromResult(false);
+    }
+
+    private sealed class EveryoneIsAMember : ICoupleMembership
+    {
+        public Task<bool> IsMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken) => Task.FromResult(true);
+
+        public Task<bool> IsOwnerAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken) => Task.FromResult(false);
+    }
+
     private sealed class StubFcmAdapter : IFcmAdapter
     {
         private readonly bool _returnsSuccess;
         public int SendCallCount { get; private set; }
+        public Dictionary<string, string> TitlesByToken { get; } = new();
 
         public StubFcmAdapter(bool returnsSuccess)
         {
@@ -183,6 +278,7 @@ public sealed class NotificationDispatcherJobTests
         public Task<bool> SendAsync(string deviceToken, string title, string body, CancellationToken ct)
         {
             SendCallCount++;
+            TitlesByToken[deviceToken] = title;
             return Task.FromResult(_returnsSuccess);
         }
     }

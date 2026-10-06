@@ -1,21 +1,23 @@
-using CoupleSync.Application.Auth;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Common.Options;
-using CoupleSync.Domain.Entities;
 using Microsoft.Extensions.Options;
 
 namespace CoupleSync.Application.Couples;
 
-public sealed record LeaveCoupleCommand(Guid UserId);
-
-/// <summary>Fresh tokens for the user, who is no longer in any group (the old refresh token no longer works).</summary>
-public sealed record LeaveCoupleResult(string AccessToken, string RefreshToken);
+/// <param name="CoupleId">The group to leave; null means the user's active group.</param>
+public sealed record LeaveCoupleCommand(Guid UserId, Guid? CoupleId = null);
 
 /// <summary>
-/// The user leaves their group. Transactions they entered stay in the group; the group is kept even when
-/// nobody is left in it (it simply becomes unreachable). The old refresh token is replaced, so no session
-/// opened before the exit can renew itself into the group, and the response carries a token pair with no group.
+/// Fresh tokens for the user (the old refresh token no longer works) and the group that is active now:
+/// another of the user's groups when the one they left was the active one, or none.
+/// </summary>
+public sealed record LeaveCoupleResult(string AccessToken, string RefreshToken, Guid? ActiveCoupleId);
+
+/// <summary>
+/// The user leaves one of their groups. Transactions they entered stay in the group; the group is kept even
+/// when nobody is left in it (it simply becomes unreachable). The old refresh token is replaced, so no session
+/// opened before the exit can renew itself into the group.
 /// </summary>
 public sealed class LeaveCoupleCommandHandler
 {
@@ -44,6 +46,7 @@ public sealed class LeaveCoupleCommandHandler
 
     public async Task<LeaveCoupleResult> HandleAsync(LeaveCoupleCommand command, CancellationToken cancellationToken)
     {
+        await using var change = await _coupleRepository.BeginMembershipChangeAsync(command.UserId, cancellationToken);
         var user = await _coupleRepository.FindUserByIdAsync(command.UserId, cancellationToken);
 
         if (user is null || !user.IsActive)
@@ -51,30 +54,51 @@ public sealed class LeaveCoupleCommandHandler
             throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        if (!user.CoupleId.HasValue)
-        {
-            throw new NotFoundException("COUPLE_NOT_FOUND", "Você não faz parte de nenhum grupo.");
-        }
+        var coupleId = command.CoupleId ?? user.ActiveCoupleId
+            ?? throw new NotFoundException("COUPLE_NOT_FOUND", "Você não está em nenhum grupo no momento.");
 
-        var coupleId = user.CoupleId.Value;
-        var couple = await _coupleRepository.FindByIdWithMembersAsync(coupleId, cancellationToken)
-            ?? throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");
+        // Members are read after the lock, so two members leaving at once each see the other's exit: exactly one
+        // of them is the last to leave (and expires the code), and ownership never passes to someone already gone.
+        await change.LockCoupleAsync(coupleId, cancellationToken);
+        var couple = await _coupleRepository.FindByIdWithMembersAsync(coupleId, cancellationToken);
+
+        // Same answer for a group that does not exist and for one the user is not in.
+        if (couple is null || !couple.HasMember(user.Id))
+        {
+            throw new NotFoundException("COUPLE_NOT_FOUND", "Você não faz parte deste grupo.");
+        }
 
         var now = _dateTimeProvider.UtcNow;
         couple.RemoveMember(user, now);
-        await _coupleRepository.StopDeliveriesToMemberAsync(user.Id, coupleId, cancellationToken);
 
-        var accessToken = _jwtTokenService.GenerateAccessToken(user);
-        var refreshTokenRaw = RefreshTokenGenerator.Generate();
-        var refreshToken = RefreshToken.CreateForUser(
-            user.Id,
-            _tokenHasher.Hash(refreshTokenRaw),
-            now.AddDays(_jwtOptions.RefreshTokenTtlDays),
-            now);
-        await _authRepository.UpsertRefreshTokenAsync(refreshToken, cancellationToken);
+        var remaining = (await _coupleRepository.GetGroupsOfUserAsync(user.Id, cancellationToken))
+            .Where(g => g.CoupleId != coupleId)
+            .ToList();
+
+        // Leaving the active group: the oldest of the remaining groups becomes active, or none.
+        // (Leaving another group changes nothing about which one is active.)
+        if (user.ActiveCoupleId == coupleId)
+        {
+            var next = remaining.FirstOrDefault();
+            if (next is null)
+            {
+                user.ClearActiveCouple();
+            }
+            else
+            {
+                user.SetActiveCouple(next.CoupleId, next.JoinedAtUtc);
+            }
+        }
+
+        await _coupleRepository.StopDeliveriesToMemberAsync(
+            user.Id, coupleId, user.ActiveCoupleId ?? remaining.FirstOrDefault()?.CoupleId, cancellationToken);
+
+        var (accessToken, refreshToken) = await SessionTokens.ReplaceAsync(
+            user, _jwtTokenService, _authRepository, _tokenHasher, now, _jwtOptions.RefreshTokenTtlDays, cancellationToken);
 
         await _coupleRepository.SaveChangesAsync(cancellationToken);
+        await change.CommitAsync(cancellationToken);
 
-        return new LeaveCoupleResult(accessToken, refreshTokenRaw);
+        return new LeaveCoupleResult(accessToken, refreshToken, user.ActiveCoupleId);
     }
 }

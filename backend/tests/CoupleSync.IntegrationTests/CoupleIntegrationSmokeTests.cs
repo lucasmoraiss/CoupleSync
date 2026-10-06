@@ -46,7 +46,7 @@ public sealed class CoupleIntegrationSmokeTests
     }
 
     [Fact]
-    public async Task CreateCouple_WhenUserAlreadyInCouple_ShouldReturnConflict()
+    public async Task CreateCouple_WhenUserAlreadyHasAGroup_CreatesAnother_AndJoiningOnesOwnGroupIsAConflict()
     {
         await using var factory = new CoupleIntegrationWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -57,10 +57,15 @@ public sealed class CoupleIntegrationSmokeTests
         var first = await client.PostAsJsonAsync("/api/v1/couples", new { });
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
 
+        // A user may be in several groups: a second one is created (it becomes the active group).
         var second = await client.PostAsJsonAsync("/api/v1/couples", new { });
-        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        var secondGroup = await second.Content.ReadFromJsonAsync<CreateCoupleDto>();
 
-        var payload = await second.Content.ReadFromJsonAsync<ErrorDto>();
+        var joinOwn = await client.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = secondGroup!.JoinCode });
+        Assert.Equal(HttpStatusCode.Conflict, joinOwn.StatusCode);
+
+        var payload = await joinOwn.Content.ReadFromJsonAsync<ErrorDto>();
         Assert.NotNull(payload);
         Assert.Equal("USER_ALREADY_IN_COUPLE", payload!.Code);
     }

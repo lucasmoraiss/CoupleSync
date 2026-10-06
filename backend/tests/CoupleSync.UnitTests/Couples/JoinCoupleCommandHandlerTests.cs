@@ -23,7 +23,7 @@ public sealed class JoinCoupleCommandHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_WhenUserAlreadyInCouple_ShouldThrowConflict()
+    public async Task HandleAsync_WhenUserIsAlreadyInThatGroup_ShouldThrowConflict()
     {
         var repo = new FakeCoupleRepository();
         var user = User.Create(EmailAddress.From("already@example.com"), "Already In", "hashed", FixedNow);

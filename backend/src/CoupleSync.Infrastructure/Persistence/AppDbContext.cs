@@ -25,6 +25,8 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<Couple> Couples => Set<Couple>();
 
+    public DbSet<CoupleMember> CoupleMembers => Set<CoupleMember>();
+
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     public DbSet<EmailCode> EmailCodes => Set<EmailCode>();
@@ -63,8 +65,9 @@ public sealed class AppDbContext : DbContext
 
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id");
-            entity.Property(x => x.CoupleId).HasColumnName("couple_id");
-            entity.Property(x => x.CoupleJoinedAtUtc).HasColumnName("couple_joined_at_utc");
+            // The active group (a pointer; membership lives in couple_members). Column names predate that table.
+            entity.Property(x => x.ActiveCoupleId).HasColumnName("couple_id");
+            entity.Property(x => x.ActiveCoupleJoinedAtUtc).HasColumnName("couple_joined_at_utc");
             entity.Property(x => x.Email).HasColumnName("email").HasMaxLength(254).IsRequired();
             entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(120).IsRequired();
             entity.Property(x => x.PasswordHash).HasColumnName("password_hash").HasMaxLength(255).IsRequired();
@@ -73,11 +76,11 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.EmailVerified).HasColumnName("email_verified").IsRequired().HasDefaultValue(false);
 
             entity.HasIndex(x => x.Email).IsUnique();
-            entity.HasIndex(x => x.CoupleId);
+            entity.HasIndex(x => x.ActiveCoupleId);
 
-            entity.HasOne(x => x.Couple)
-                .WithMany(x => x.Members)
-                .HasForeignKey(x => x.CoupleId)
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.ActiveCoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -98,6 +101,42 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at").IsRequired();
 
             entity.HasIndex(x => x.JoinCode).IsUnique();
+
+            // ClientCascade: a member taken out of the collection is deleted by EF (the row IS the membership);
+            // in the database the key stays restrictive, like every other key (a group with members cannot be deleted).
+            entity.HasMany(x => x.Members)
+                .WithOne()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.ClientCascade);
+        });
+
+        modelBuilder.Entity<CoupleMember>(entity =>
+        {
+            entity.ToTable("couple_members");
+
+            // One row per user and group: this row is the membership.
+            entity.HasKey(x => new { x.CoupleId, x.UserId });
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.Role)
+                .HasColumnName("role")
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(x => x.JoinedAtUtc).HasColumnName("joined_at_utc").IsRequired();
+
+            entity.HasIndex(x => x.UserId);
+
+            // At most one owner per group, guaranteed by the database.
+            entity.HasIndex(x => x.CoupleId)
+                .IsUnique()
+                .HasFilter("role = 'Owner'")
+                .HasDatabaseName("IX_couple_members_one_owner_per_couple");
+
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>
@@ -218,7 +257,6 @@ public sealed class AppDbContext : DbContext
                 .HasForeignKey(x => x.IngestEventId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-
             entity.HasOne<Goal>()
                 .WithMany()
                 .HasForeignKey(x => x.GoalId)
@@ -268,7 +306,6 @@ public sealed class AppDbContext : DbContext
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(x => x.CreatedByUserId)
@@ -296,7 +333,6 @@ public sealed class AppDbContext : DbContext
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
@@ -315,14 +351,14 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.BillReminderEnabled).HasColumnName("bill_reminder_enabled").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
 
-            entity.HasIndex(x => x.UserId).IsUnique();
+            // A user has one set of alert preferences per group they belong to.
+            entity.HasIndex(x => new { x.UserId, x.CoupleId }).IsUnique();
             entity.HasIndex(x => x.CoupleId);
 
             entity.HasOne<Couple>()
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
-
 
             entity.HasOne<User>()
                 .WithMany()
@@ -350,7 +386,6 @@ public sealed class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
-
 
             entity.HasOne<User>()
                 .WithMany()
@@ -422,7 +457,6 @@ public sealed class AppDbContext : DbContext
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
@@ -466,7 +500,6 @@ public sealed class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
-
 
             entity.HasOne<User>()
                 .WithMany()

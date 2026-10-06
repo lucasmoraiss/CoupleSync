@@ -31,6 +31,7 @@ public sealed class RegenerateJoinCodeCommandHandler
 
     public async Task<RegenerateJoinCodeResult> HandleAsync(RegenerateJoinCodeCommand command, CancellationToken cancellationToken)
     {
+        await using var change = await _coupleRepository.BeginMembershipChangeAsync(command.UserId, cancellationToken);
         var user = await _coupleRepository.FindUserByIdAsync(command.UserId, cancellationToken);
 
         if (user is null || !user.IsActive)
@@ -38,12 +39,16 @@ public sealed class RegenerateJoinCodeCommandHandler
             throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        if (!user.CoupleId.HasValue)
+        if (!user.ActiveCoupleId.HasValue)
         {
-            throw new NotFoundException("COUPLE_NOT_FOUND", "Você não faz parte de nenhum grupo.");
+            throw new NotFoundException("COUPLE_NOT_FOUND", "Você não está em nenhum grupo no momento.");
         }
 
-        var coupleId = user.CoupleId.Value;
+        var coupleId = user.ActiveCoupleId.Value;
+
+        // Ownership is read after the lock: an owner whose exit is being committed no longer renews the code
+        // (otherwise an emptied group could end with a valid code).
+        await change.LockCoupleAsync(coupleId, cancellationToken);
 
         if (!await _membership.IsOwnerAsync(user.Id, coupleId, cancellationToken))
         {
@@ -56,6 +61,7 @@ public sealed class RegenerateJoinCodeCommandHandler
         var joinCode = await GenerateUniqueJoinCodeAsync(cancellationToken);
         couple.RegenerateJoinCode(joinCode, _dateTimeProvider.UtcNow);
         await _coupleRepository.SaveChangesAsync(cancellationToken);
+        await change.CommitAsync(cancellationToken);
 
         return new RegenerateJoinCodeResult(couple.JoinCode, couple.JoinCodeExpiresAtUtc);
     }

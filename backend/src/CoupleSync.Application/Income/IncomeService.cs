@@ -104,11 +104,12 @@ public sealed class IncomeService
         var sources = IncomeSchedule.EffectiveIn(candidates, month);
         var couple = await _coupleRepository.FindByIdWithMembersAsync(coupleId, ct);
 
-        var currentUserName = couple?.Members.FirstOrDefault(m => m.Id == userId)?.Name ?? "Você";
+        var currentUserName = couple?.Members.FirstOrDefault(m => m.UserId == userId)?.User.Name ?? "Você";
 
         // A group may have more than two members: every other member is a partner.
         var partners = (couple?.Members ?? [])
-            .Where(m => m.Id != userId)
+            .Where(m => m.UserId != userId)
+            .Select(m => m.User)
             .OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(m => m.Id)
             .ToList();

@@ -323,7 +323,7 @@ public sealed class SessionAndPasswordIntegrationTests
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var coupleId = (await db.Users.SingleAsync(u => u.Id == owner.UserId)).CoupleId!.Value;
+            var coupleId = (await db.Users.SingleAsync(u => u.Id == owner.UserId)).ActiveCoupleId!.Value;
             db.DeviceTokens.Add(DeviceToken.Create(owner.UserId, coupleId, "fcm-owner", DateTime.UtcNow));
             db.DeviceTokens.Add(DeviceToken.Create(member.UserId, coupleId, "fcm-member", DateTime.UtcNow));
             await db.SaveChangesAsync();
@@ -349,7 +349,7 @@ public sealed class SessionAndPasswordIntegrationTests
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var coupleId = (await db.Users.SingleAsync(u => u.Id == owner.UserId)).CoupleId!.Value;
+            var coupleId = (await db.Users.SingleAsync(u => u.Id == owner.UserId)).ActiveCoupleId!.Value;
             db.DeviceTokens.Add(DeviceToken.Create(owner.UserId, coupleId, "fcm-owner", DateTime.UtcNow));
             await db.SaveChangesAsync();
         }

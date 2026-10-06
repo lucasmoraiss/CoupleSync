@@ -54,13 +54,13 @@ public sealed class GroupManagementHandlerTests
     {
         var result = await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_member.Id), default);
 
-        Assert.Null(_member.CoupleId);
-        Assert.DoesNotContain(_member, _group.Members);
+        Assert.Null(_member.ActiveCoupleId);
+        Assert.False(_group.HasMember(_member.Id));
         Assert.Equal("no-group-token", result.AccessToken);
         var stored = Assert.Single(_auth.RefreshTokens, t => t.UserId == _member.Id);
         Assert.NotEqual("old-hash", stored.TokenHash);
         Assert.Equal(new Sha256TokenHasher().Hash(result.RefreshToken), stored.TokenHash);
-        Assert.Contains((_member.Id, _group.Id), _couples.StoppedDeliveries);
+        Assert.Contains((_member.Id, _group.Id, (Guid?)null), _couples.StoppedDeliveries);
         Assert.Equal(1, _couples.SaveChangesCalls);
     }
 
@@ -90,9 +90,9 @@ public sealed class GroupManagementHandlerTests
     {
         await RemoveHandler(T0.AddDays(2)).HandleAsync(new RemoveCoupleMemberCommand(_owner.Id, _member.Id), default);
 
-        Assert.Null(_member.CoupleId);
+        Assert.Null(_member.ActiveCoupleId);
         Assert.Equal([_member.Id], _couples.RevokedRefreshTokenUserIds);
-        Assert.Contains((_member.Id, _group.Id), _couples.StoppedDeliveries);
+        Assert.Contains((_member.Id, _group.Id, (Guid?)null), _couples.StoppedDeliveries);
         Assert.Equal(1, _couples.SaveChangesCalls);
     }
 
@@ -103,7 +103,7 @@ public sealed class GroupManagementHandlerTests
             () => RemoveHandler(T0).HandleAsync(new RemoveCoupleMemberCommand(_member.Id, _owner.Id), default));
 
         Assert.Equal("NOT_COUPLE_OWNER", ex.Code);
-        Assert.Equal(_group.Id, _owner.CoupleId);
+        Assert.Equal(_group.Id, _owner.ActiveCoupleId);
         Assert.Equal(0, _couples.SaveChangesCalls);
     }
 
@@ -138,7 +138,7 @@ public sealed class GroupManagementHandlerTests
         Assert.Equal("NEWCODE8", result.JoinCode);
         Assert.Equal(now.AddDays(7), result.JoinCodeExpiresAtUtc);
         Assert.Equal("NEWCODE8", _group.JoinCode);
-        Assert.Null(await _couples.FindByJoinCodeAsync("ABC123", default));
+        Assert.Null(await _couples.FindIdByJoinCodeAsync("ABC123", default));
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public sealed class GroupManagementHandlerTests
         Assert.Equal("JOIN_CODE_EXPIRED", ex.Code);
         Assert.Equal(410, ex.StatusCode);
         Assert.Contains("código", ex.Message);
-        Assert.Null(joiner.CoupleId);
+        Assert.Null(joiner.ActiveCoupleId);
     }
 
     [Fact]
@@ -215,10 +215,11 @@ public sealed class GroupManagementHandlerTests
         public StubMembership(Couple couple) => _couple = couple;
 
         public Task<bool> IsMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken)
-            => Task.FromResult(coupleId == _couple.Id && _couple.Members.Any(m => m.Id == userId));
+            => Task.FromResult(coupleId == _couple.Id && _couple.HasMember(userId));
 
         public Task<bool> IsOwnerAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken)
-            => Task.FromResult(coupleId == _couple.Id && _couple.OwnerUserId == userId);
+            => Task.FromResult(coupleId == _couple.Id
+                && _couple.Members.Any(m => m.UserId == userId && m.Role == CoupleRole.Owner));
     }
 
     private sealed class FixedCode : ICoupleJoinCodeGenerator

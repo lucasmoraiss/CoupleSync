@@ -186,10 +186,35 @@ public sealed class MigrationTests
         Assert.Equal(seed.U5, couples[seed.Couple2].Owner);   // no join date: the oldest account
         Assert.Null(couples[seed.Couple3].Owner);             // nobody in the group
         Assert.Equal("ABC123", couples[seed.Couple1].Code);
-        foreach (var (_, value) in couples)
+        foreach (var (id, value) in couples.Where(c => c.Key != seed.Couple3))
         {
             Assert.InRange(value.Expires, beforeMigration.AddDays(7).AddMinutes(-1), afterMigration.AddDays(7).AddMinutes(1));
         }
+
+        // --- AddCoupleMembers: the single group of each user becomes a membership row; users.couple_id stays (active group)
+        var memberships = (await database.RowsAsync("SELECT couple_id, user_id, role, joined_at_utc FROM couple_members"))
+            .ToDictionary(r => (Guid)r[1]!, r => (Couple: (Guid)r[0]!, Role: (string)r[2]!, Joined: ((DateTime)r[3]!).ToUniversalTime()));
+        Assert.Equal(5, memberships.Count);
+        Assert.Equal((seed.Couple1, "Owner", new DateTime(2026, 1, 3, 12, 0, 0, DateTimeKind.Utc)), memberships[seed.U1]);
+        Assert.Equal((seed.Couple1, "Member", new DateTime(2026, 1, 5, 12, 0, 0, DateTimeKind.Utc)), memberships[seed.U2]);
+        Assert.Equal((seed.Couple1, "Member", new DateTime(2026, 1, 4, 12, 0, 0, DateTimeKind.Utc)), memberships[seed.U3]);
+        Assert.Equal((seed.Couple2, "Member", new DateTime(2026, 2, 2, 12, 0, 0, DateTimeKind.Utc)), memberships[seed.U4]); // no join date: account creation
+        Assert.Equal((seed.Couple2, "Owner", new DateTime(2026, 2, 1, 12, 0, 0, DateTimeKind.Utc)), memberships[seed.U5]);
+        Assert.DoesNotContain(seed.U6, memberships.Keys); // never had a group
+        var activeGroups = (await database.RowsAsync("SELECT id, couple_id FROM users"))
+            .ToDictionary(r => (Guid)r[0]!, r => (Guid?)r[1]);
+        Assert.Equal(seed.Couple1, activeGroups[seed.U1]);
+        Assert.Equal(seed.Couple1, activeGroups[seed.U2]);
+        Assert.Equal(seed.Couple1, activeGroups[seed.U3]);
+        Assert.Equal(seed.Couple2, activeGroups[seed.U4]);
+        Assert.Equal(seed.Couple2, activeGroups[seed.U5]);
+        Assert.Null(activeGroups[seed.U6]);
+        // The group nobody is in can no longer be joined: its code expired when the migration ran.
+        Assert.InRange(couples[seed.Couple3].Expires, beforeMigration.AddMinutes(-1), afterMigration.AddMinutes(1));
+        // Alert preferences: one row per user AND group from now on (the old index allowed one group only).
+        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM pg_indexes WHERE indexname = 'IX_notification_settings_user_id'"));
+        Assert.True(await database.ScalarAsync<bool>(
+            "SELECT indisunique FROM pg_index WHERE indexrelid = 'public.\"IX_notification_settings_user_id_couple_id\"'::regclass"));
 
         Assert.Equal(8, await database.ScalarAsync<int>(
             "SELECT character_maximum_length FROM information_schema.columns WHERE table_name = 'couples' AND column_name = 'join_code'"));
@@ -242,6 +267,112 @@ public sealed class MigrationTests
         Assert.Equal(10, transactions.GetProperty("totalCount").GetInt32());
         Assert.All(transactions.GetProperty("items").EnumerateArray(), item =>
             Assert.Contains(item.GetProperty("category").GetString(), new[] { "ALIMENTACAO", "SAUDE", "TRANSPORTE", "OUTROS", "LAZER" }));
+    }
+
+    private const string MigrationBeforeMemberships = "20261006211931_AddForeignKeysForCoupleAndUserRelations";
+
+    /// <summary>
+    /// Data as the release before the membership table could leave it, including what its unserialised
+    /// leave/join could produce: an owner who is not a member and an empty group whose code still works.
+    /// </summary>
+    [PostgresFact]
+    public async Task TheMembershipMigration_BackfillsRoles_RepairsBrokenGroups_KeepsEverything_AndCanBeUndone()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await MigrateAsync(database, MigrationBeforeMemberships);
+
+        Guid healthy = Guid.NewGuid(), strayOwner = Guid.NewGuid(), noOwner = Guid.NewGuid(), abandoned = Guid.NewGuid(), longEmpty = Guid.NewGuid();
+        Guid owner = Guid.NewGuid(), older = Guid.NewGuid(), inactive = Guid.NewGuid(), p = Guid.NewGuid(), q = Guid.NewGuid(),
+            r = Guid.NewGuid(), loner = Guid.NewGuid();
+        await database.ExecuteAsync($"""
+            INSERT INTO couples (id, created_at, join_code, status, owner_user_id, join_code_expires_at_utc) VALUES
+              ('{healthy}',    '2026-01-01T12:00:00Z', 'HEALTHY1', 'Active', '{owner}', now() + interval '5 days'),
+              ('{strayOwner}', '2026-01-01T12:00:00Z', 'STRAY123', 'Active', '{owner}', now() + interval '5 days'),
+              ('{noOwner}',    '2026-01-01T12:00:00Z', 'NOOWNER1', 'Active', NULL,      now() + interval '5 days'),
+              ('{abandoned}',  '2026-01-01T12:00:00Z', 'ABANDON1', 'Active', '{loner}', now() + interval '5 days'),
+              ('{longEmpty}',  '2026-01-01T12:00:00Z', 'LONGEMP1', 'Active', NULL,      '2026-02-01T12:00:00Z');
+
+            INSERT INTO users (id, couple_id, couple_joined_at_utc, created_at_utc, email, is_active, name, password_hash, email_verified) VALUES
+              ('{owner}',    '{healthy}',    '2026-03-05T12:00:00Z', '2026-01-01T12:00:00Z', 'owner@m.test',    true,  'Dona',    'x', false),
+              ('{older}',    '{healthy}',    '2026-03-01T12:00:00Z', '2026-01-01T12:00:00Z', 'older@m.test',    true,  'Antigo',  'x', false),
+              ('{inactive}', '{healthy}',    '2026-03-09T12:00:00Z', '2026-01-01T12:00:00Z', 'inactive@m.test', false, 'Inativa', 'x', false),
+              ('{p}',        '{strayOwner}', '2026-02-02T12:00:00Z', '2026-01-01T12:00:00Z', 'p@m.test',        true,  'Paula',   'x', false),
+              ('{q}',        '{strayOwner}', '2026-02-01T12:00:00Z', '2026-01-01T12:00:00Z', 'q@m.test',        true,  'Quico',   'x', false),
+              ('{r}',        '{noOwner}',    NULL,                   '2026-01-07T12:00:00Z', 'r@m.test',        true,  'Rita',    'x', false),
+              ('{loner}',    NULL,           NULL,                   '2026-01-01T12:00:00Z', 'loner@m.test',    true,  'Só',      'x', false);
+
+            INSERT INTO notification_settings (id, bill_reminder_enabled, couple_id, large_transaction_enabled, low_balance_enabled, updated_at_utc, user_id) VALUES
+              ('{Guid.NewGuid()}', true, '{healthy}', false, true, '2026-09-01T12:00:00Z', '{owner}');
+            """);
+        var usersBefore = await database.RowsAsync("SELECT id, couple_id, couple_joined_at_utc FROM users ORDER BY id");
+        var beforeMigration = DateTime.UtcNow;
+
+        await MigrateAsync(database);
+
+        var afterMigration = DateTime.UtcNow;
+        var rows = (await database.RowsAsync("SELECT user_id, couple_id, role, joined_at_utc FROM couple_members"))
+            .ToDictionary(x => (Guid)x[0]!, x => (Couple: (Guid)x[1]!, Role: (string)x[2]!, Joined: ((DateTime)x[3]!).ToUniversalTime()));
+        Assert.Equal(6, rows.Count);
+        // The registered owner keeps the role even though another member joined earlier.
+        Assert.Equal((healthy, "Owner", new DateTime(2026, 3, 5, 12, 0, 0, DateTimeKind.Utc)), rows[owner]);
+        Assert.Equal((healthy, "Member", new DateTime(2026, 3, 1, 12, 0, 0, DateTimeKind.Utc)), rows[older]);
+        Assert.Equal((healthy, "Member", new DateTime(2026, 3, 9, 12, 0, 0, DateTimeKind.Utc)), rows[inactive]); // nothing is lost for a deactivated account
+        // Registered owner was not a member: the oldest member takes over.
+        Assert.Equal((strayOwner, "Owner"), (rows[q].Couple, rows[q].Role));
+        Assert.Equal((strayOwner, "Member"), (rows[p].Couple, rows[p].Role));
+        Assert.Equal((noOwner, "Owner", new DateTime(2026, 1, 7, 12, 0, 0, DateTimeKind.Utc)), rows[r]);
+        Assert.DoesNotContain(loner, rows.Keys);
+
+        var groups = (await database.RowsAsync("SELECT id, owner_user_id, join_code, join_code_expires_at_utc FROM couples"))
+            .ToDictionary(x => (Guid)x[0]!, x => (Owner: (Guid?)x[1], Code: (string)x[2]!, Expires: ((DateTime)x[3]!).ToUniversalTime()));
+        Assert.Equal(owner, groups[healthy].Owner);
+        Assert.Equal(q, groups[strayOwner].Owner);
+        Assert.Equal(r, groups[noOwner].Owner);
+        Assert.Null(groups[abandoned].Owner);
+        Assert.Null(groups[longEmpty].Owner);
+        // Groups with members keep their code and its validity; the abandoned one stops being joinable now.
+        Assert.True(groups[healthy].Expires > afterMigration.AddDays(4));
+        Assert.True(groups[strayOwner].Expires > afterMigration.AddDays(4));
+        Assert.InRange(groups[abandoned].Expires, beforeMigration.AddMinutes(-1), afterMigration.AddMinutes(1));
+        Assert.Equal(new DateTime(2026, 2, 1, 12, 0, 0, DateTimeKind.Utc), groups[longEmpty].Expires);
+        Assert.Equal("ABANDON1", groups[abandoned].Code);
+
+        // users.couple_id / couple_joined_at_utc are exactly as they were (they now mean "active group").
+        var usersAfter = await database.RowsAsync("SELECT id, couple_id, couple_joined_at_utc FROM users ORDER BY id");
+        Assert.Equal(usersBefore.Select(x => string.Join("|", x)), usersAfter.Select(x => string.Join("|", x)));
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM notification_settings"));
+
+        // The database itself refuses a second owner and a duplicate membership.
+        var secondOwner = await Assert.ThrowsAnyAsync<Npgsql.PostgresException>(() =>
+            database.ExecuteAsync($"UPDATE couple_members SET role = 'Owner' WHERE user_id = '{older}'"));
+        Assert.Equal("23505", secondOwner.SqlState);
+        var duplicate = await Assert.ThrowsAnyAsync<Npgsql.PostgresException>(() => database.ExecuteAsync(
+            $"INSERT INTO couple_members (couple_id, user_id, role, joined_at_utc) VALUES ('{healthy}', '{older}', 'Member', now())"));
+        Assert.Equal("23505", duplicate.SqlState);
+
+        // Through the application: the abandoned group's code is dead, the repaired owner manages their group.
+        await using (var factory = new PostgresApiFactory(database))
+        {
+            var newcomer = await factory.RegisterAsync("Nova", createGroup: false);
+            var join = await newcomer.Client.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = "ABANDON1" });
+            Assert.Equal(HttpStatusCode.Gone, join.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await newcomer.Client.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = "STRAY123" })).StatusCode);
+        }
+
+        // A second group's preferences fit next to the first; then the way back keeps one row per user and the active group.
+        await database.ExecuteAsync($"""
+            INSERT INTO couple_members (couple_id, user_id, role, joined_at_utc) VALUES ('{noOwner}', '{owner}', 'Member', now());
+            INSERT INTO notification_settings (id, bill_reminder_enabled, couple_id, large_transaction_enabled, low_balance_enabled, updated_at_utc, user_id) VALUES
+              ('{Guid.NewGuid()}', false, '{noOwner}', true, true, '2026-10-01T12:00:00Z', '{owner}');
+            """);
+
+        await MigrateAsync(database, MigrationBeforeMemberships);
+
+        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM information_schema.tables WHERE table_name = 'couple_members'"));
+        Assert.Equal(healthy, await database.ScalarAsync<Guid>($"SELECT couple_id FROM users WHERE id = '{owner}'"));
+        Assert.Equal(healthy, await database.ScalarAsync<Guid>($"SELECT couple_id FROM notification_settings WHERE user_id = '{owner}'")); // the active group's row stays
+        await MigrateAsync(database);
+        Assert.Equal(7, await database.ScalarAsync<long>("SELECT count(*) FROM couple_members")); // six from before plus the newcomer who joined
     }
 
     [PostgresFact]

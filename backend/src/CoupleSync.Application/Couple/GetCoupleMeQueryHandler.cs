@@ -21,22 +21,23 @@ public sealed class GetCoupleMeQueryHandler
             throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        if (!user.CoupleId.HasValue)
+        if (!user.ActiveCoupleId.HasValue)
         {
             throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");
         }
 
-        var couple = await _coupleRepository.FindByIdWithMembersAsync(user.CoupleId.Value, cancellationToken);
+        var couple = await _coupleRepository.FindByIdWithMembersAsync(user.ActiveCoupleId.Value, cancellationToken);
 
-        if (couple is null)
+        // The active group is only a pointer: the group is shown to its members and to nobody else.
+        if (couple is null || !couple.HasMember(user.Id))
         {
             throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");
         }
 
         var members = couple.Members
-            .OrderBy(member => member.CoupleJoinedAtUtc ?? member.CreatedAtUtc)
-            .ThenBy(member => member.Id)
-            .Select(member => new CoupleMemberDto(member.Id, member.Name, member.Email))
+            .OrderBy(member => member.JoinedAtUtc)
+            .ThenBy(member => member.UserId)
+            .Select(member => new CoupleMemberDto(member.UserId, member.User.Name, member.User.Email))
             .ToArray();
 
         return new GetCoupleMeResult(couple.Id, couple.JoinCode, couple.CreatedAtUtc, members, couple.OwnerUserId, couple.JoinCodeExpiresAtUtc);

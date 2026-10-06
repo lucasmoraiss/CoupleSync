@@ -20,9 +20,17 @@ public sealed class User
 
     public Guid Id { get; private set; }
 
-    public Guid? CoupleId { get; private set; }
+    /// <summary>The most groups one user may belong to at the same time.</summary>
+    public const int MaxGroups = 5;
 
-    public DateTime? CoupleJoinedAtUtc { get; private set; }
+    /// <summary>
+    /// The group the user is working in (it goes into the access token). Only a pointer: belonging to the
+    /// group is decided by the membership rows, never by this value.
+    /// </summary>
+    public Guid? ActiveCoupleId { get; private set; }
+
+    /// <summary>When the user joined the active group; null when no group is active.</summary>
+    public DateTime? ActiveCoupleJoinedAtUtc { get; private set; }
 
     public string Email { get; private set; } = string.Empty;
 
@@ -36,8 +44,6 @@ public sealed class User
 
     /// <summary>True once the user typed the code sent to their e-mail. Existing accounts start false and keep working.</summary>
     public bool EmailVerified { get; private set; }
-
-    public Couple? Couple { get; private set; }
 
     public static User Create(EmailAddress email, string name, string passwordHash, DateTime createdAtUtc)
     {
@@ -54,15 +60,16 @@ public sealed class User
         return new User(Guid.NewGuid(), email.Value, name.Trim(), passwordHash, createdAtUtc);
     }
 
-    public void AssignCouple(Guid coupleId, DateTime coupleJoinedAtUtc)
+    public void SetActiveCouple(Guid coupleId, DateTime joinedAtUtc)
     {
-        if (CoupleId.HasValue)
-        {
-            throw new InvalidOperationException("O usuário já faz parte de um casal.");
-        }
+        ActiveCoupleId = coupleId;
+        ActiveCoupleJoinedAtUtc = joinedAtUtc;
+    }
 
-        CoupleId = coupleId;
-        CoupleJoinedAtUtc = coupleJoinedAtUtc;
+    public void ClearActiveCouple()
+    {
+        ActiveCoupleId = null;
+        ActiveCoupleJoinedAtUtc = null;
     }
 
     public void ChangePasswordHash(string passwordHash)
@@ -78,11 +85,5 @@ public sealed class User
     public void MarkEmailVerified()
     {
         EmailVerified = true;
-    }
-
-    public void LeaveCouple()
-    {
-        CoupleId = null;
-        CoupleJoinedAtUtc = null;
     }
 }

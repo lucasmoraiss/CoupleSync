@@ -387,7 +387,7 @@ public sealed class GroupManagementIntegrationTests
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            coupleId = (await db.Users.SingleAsync(u => u.Id == owner.UserId)).CoupleId!.Value;
+            coupleId = (await db.Users.SingleAsync(u => u.Id == owner.UserId)).ActiveCoupleId!.Value;
             foreach (var actor in new[] { member, third, owner })
             {
                 db.DeviceTokens.Add(DeviceToken.Create(actor.UserId, coupleId, $"fcm-{actor.UserId:N}", DateTime.UtcNow));
