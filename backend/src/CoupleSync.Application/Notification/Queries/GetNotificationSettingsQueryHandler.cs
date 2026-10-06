@@ -1,5 +1,5 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
-using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Application.Notification.Queries;
 
@@ -39,7 +39,7 @@ public sealed class GetNotificationSettingsQueryHandler
                     cancellationToken);
                 await _repository.SaveChangesAsync(cancellationToken);
             }
-            catch (DbUpdateException)
+            catch (DataStoreException)
             {
                 settings = await _repository.GetByUserIdAsync(query.UserId, query.CoupleId, cancellationToken);
                 if (settings is null) throw;

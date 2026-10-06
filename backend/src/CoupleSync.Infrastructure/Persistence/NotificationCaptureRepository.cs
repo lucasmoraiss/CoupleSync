@@ -25,7 +25,7 @@ public sealed class NotificationCaptureRepository : INotificationCaptureReposito
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
-        return _dbContext.SaveChangesAsync(cancellationToken);
+        return DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
     }
 
     // Manual entries and OCR imports also write ingest rows; the integration status is about

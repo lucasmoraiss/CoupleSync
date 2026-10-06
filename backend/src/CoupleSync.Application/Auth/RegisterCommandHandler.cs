@@ -4,7 +4,6 @@ using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Common.Options;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -69,7 +68,7 @@ public sealed class RegisterCommandHandler
         {
             await _authRepository.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+        catch (UniqueViolationException)
         {
             throw new ConflictException("EMAIL_ALREADY_IN_USE", "Já existe uma conta com esse e-mail.");
         }

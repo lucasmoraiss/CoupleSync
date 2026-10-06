@@ -113,7 +113,7 @@ public sealed class DeviceTokenRepository : IDeviceTokenRepository
 
     public Task SaveChangesAsync(CancellationToken ct)
     {
-        return _dbContext.SaveChangesAsync(ct);
+        return DbSaveTranslator.SaveAsync(_dbContext, ct);
     }
 
     public void DiscardPendingChanges()

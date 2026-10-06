@@ -45,8 +45,21 @@ public sealed class GoalRepository : IGoalRepository
         await _dbContext.Goals.AddAsync(goal, ct);
     }
 
+    public async Task DeleteAsync(Goal goal, CancellationToken ct)
+    {
+        // Nullify GoalId on all transactions linked to this goal (bulk update, no tracking)
+        await _dbContext.Transactions
+            .Where(t => t.GoalId == goal.Id && t.CoupleId == goal.CoupleId)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(t => t.GoalId, (Guid?)null),
+                ct);
+
+        _dbContext.Goals.Remove(goal);
+        await DbSaveTranslator.SaveAsync(_dbContext, ct);
+    }
+
     public Task SaveChangesAsync(CancellationToken ct)
     {
-        return _dbContext.SaveChangesAsync(ct);
+        return DbSaveTranslator.SaveAsync(_dbContext, ct);
     }
 }

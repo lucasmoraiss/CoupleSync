@@ -287,7 +287,7 @@ internal sealed class UniqueIndexTransactionRepository : ITransactionRepository
             if (!keys.Add(Key(transaction.CoupleId, transaction.Fingerprint)))
             {
                 _pending.Clear();
-                throw new DbUpdateException(
+                throw new UniqueViolationException(
                     "An error occurred while saving the entity changes.",
                     new InvalidOperationException("23505: duplicate key value violates unique constraint \"IX_transactions_couple_id_fingerprint\""));
             }

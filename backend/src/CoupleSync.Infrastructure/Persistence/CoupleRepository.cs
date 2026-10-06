@@ -34,6 +34,14 @@ public sealed class CoupleRepository : ICoupleRepository
             .SingleOrDefaultAsync(x => x.Id == coupleId, cancellationToken);
     }
 
+    public Task<Dictionary<Guid, string>> GetMemberNamesAsync(Guid coupleId, CancellationToken cancellationToken)
+    {
+        return _dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.CoupleId == coupleId)
+            .ToDictionaryAsync(user => user.Id, user => user.Name, cancellationToken);
+    }
+
     public Task<bool> JoinCodeExistsAsync(string joinCode, CancellationToken cancellationToken)
     {
         var normalizedJoinCode = joinCode.Trim().ToUpperInvariant();
@@ -75,6 +83,6 @@ public sealed class CoupleRepository : ICoupleRepository
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
-        return _dbContext.SaveChangesAsync(cancellationToken);
+        return DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
     }
 }

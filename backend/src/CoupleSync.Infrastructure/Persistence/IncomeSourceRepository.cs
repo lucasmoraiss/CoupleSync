@@ -47,5 +47,5 @@ public sealed class IncomeSourceRepository : IIncomeSourceRepository
     }
 
     public Task SaveChangesAsync(CancellationToken ct)
-        => _dbContext.SaveChangesAsync(ct);
+        => DbSaveTranslator.SaveAsync(_dbContext, ct);
 }

@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 
@@ -98,7 +99,7 @@ public sealed class IngestNotificationEventCommandHandler
         {
             await _transactionRepository.SaveChangesAsync(cancellationToken);
         }
-        catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+        catch (DataStoreException)
         {
             // Concurrent duplicate: unique constraint on (couple_id, fingerprint) prevented insert.
             ingestEvent.MarkDuplicate();

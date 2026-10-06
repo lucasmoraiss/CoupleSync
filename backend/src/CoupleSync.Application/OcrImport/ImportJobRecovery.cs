@@ -1,7 +1,7 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.OcrImport;
@@ -53,11 +53,10 @@ public sealed class ImportJobRecovery
         {
             await _repository.SaveChangesAsync(ct);
         }
-        catch (DbUpdateConcurrencyException ex)
+        catch (ConcurrencyConflictException)
         {
             // The worker finished the job (or something else changed it) while we were looking: leave it alone.
-            foreach (var entry in ex.Entries)
-                await entry.ReloadAsync(ct);
+            await _repository.ReloadAsync(job, ct);
             return false;
         }
         await TryDeleteFileAsync(job, ct);

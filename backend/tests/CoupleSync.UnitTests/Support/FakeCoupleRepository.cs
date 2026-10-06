@@ -21,6 +21,11 @@ public sealed class FakeCoupleRepository : ICoupleRepository
         return Task.FromResult(Users.SingleOrDefault(u => u.Id == userId));
     }
 
+    public Task<Dictionary<Guid, string>> GetMemberNamesAsync(Guid coupleId, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(Users.Where(u => u.CoupleId == coupleId).ToDictionary(u => u.Id, u => u.Name));
+    }
+
     public Task<CoupleSync.Domain.Entities.Couple?> FindByJoinCodeAsync(string joinCode, CancellationToken cancellationToken)
     {
         var normalized = joinCode.Trim().ToUpperInvariant();

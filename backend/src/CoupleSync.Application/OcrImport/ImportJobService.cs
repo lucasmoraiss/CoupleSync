@@ -5,7 +5,6 @@ using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
 using CoupleSync.Domain.ValueObjects;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.OcrImport;
@@ -330,7 +329,7 @@ public sealed class ImportJobService
             await _transactionRepository.SaveChangesAsync(ct);
             await _repository.SaveChangesAsync(ct);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (ConcurrencyConflictException)
         {
             // Another confirmation changed this import first (the job row is a concurrency token). Nothing of
             // this request was stored; refreshing shows what the other request did.
@@ -338,7 +337,7 @@ public sealed class ImportJobService
                 "OCR_CONFIRM_CONFLICT",
                 "Esta importação foi alterada por outra requisição. Atualize e tente novamente.");
         }
-        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+        catch (UniqueViolationException)
         {
             // Two confirmations raced past the duplicate check; the unique index on
             // (couple_id, fingerprint) let only one of them through.

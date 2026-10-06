@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -144,7 +145,7 @@ public sealed class AuthRepository : IAuthRepository
         _dbContext.EmailCodes.Add(code);
         try
         {
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
         }
         catch (DbUpdateException)
         {
@@ -186,6 +187,6 @@ public sealed class AuthRepository : IAuthRepository
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
-        return _dbContext.SaveChangesAsync(cancellationToken);
+        return DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
     }
 }

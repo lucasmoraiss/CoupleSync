@@ -160,9 +160,9 @@ public sealed class EmailCodeHardeningTests
     public async Task Resend_WhenStoringFailsForAnotherReason_IsAnError_NotASilentSuccess()
     {
         var rig = new Rig();
-        rig.Repository.CodeStoreFailure = new Microsoft.EntityFrameworkCore.DbUpdateException("connection reset by peer");
+        rig.Repository.CodeStoreFailure = new CoupleSync.Application.Common.Exceptions.DataStoreException("connection reset by peer");
 
-        await Assert.ThrowsAsync<Microsoft.EntityFrameworkCore.DbUpdateException>(() =>
+        await Assert.ThrowsAsync<CoupleSync.Application.Common.Exceptions.DataStoreException>(() =>
             new ResendEmailVerificationCommandHandler(rig.Repository, rig.NewFlow())
                 .HandleAsync(new ResendEmailVerificationCommand(rig.User.Id), CancellationToken.None));
 
@@ -173,7 +173,7 @@ public sealed class EmailCodeHardeningTests
     public async Task ForgotPassword_WhenStoringFails_StillAnswersUniformly()
     {
         var rig = new Rig();
-        rig.Repository.CodeStoreFailure = new Microsoft.EntityFrameworkCore.DbUpdateException("connection reset by peer");
+        rig.Repository.CodeStoreFailure = new CoupleSync.Application.Common.Exceptions.DataStoreException("connection reset by peer");
 
         await new RequestPasswordResetCommandHandler(rig.Repository, rig.NewFlow(), EmailTestKit.NewCodeService())
             .HandleAsync(new RequestPasswordResetCommand("ana@example.com"), CancellationToken.None);

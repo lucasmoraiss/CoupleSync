@@ -143,7 +143,7 @@ public sealed class AuthRepositoryEmailCodeTests : IDisposable
             userId, EmailCodePurpose.EmailVerification, "h", Now.AddMinutes(15), Now, 5, TimeSpan.FromHours(1), CancellationToken.None));
 
         var duplicate = EmailCode.Create(userId, EmailCodePurpose.PasswordReset, "other", Now.AddMinutes(15), Now);
-        await Assert.ThrowsAsync<DbUpdateException>(() => repository.AddEmailCodeAsync(duplicate, CancellationToken.None));
+        await Assert.ThrowsAsync<CoupleSync.Application.Common.Exceptions.UniqueViolationException>(() => repository.AddEmailCodeAsync(duplicate, CancellationToken.None));
 
         // The failed entity was detached: the same context keeps working.
         Assert.Equal(EmailCodeReissueResult.Reissued, await repository.TryReissueEmailCodeAsync(

@@ -21,7 +21,10 @@ public sealed class ImportJobRepository : IImportJobRepository
         => _dbContext.ImportJobs.AddAsync(job, ct).AsTask();
 
     public Task SaveChangesAsync(CancellationToken ct)
-        => _dbContext.SaveChangesAsync(ct);
+        => DbSaveTranslator.SaveAsync(_dbContext, ct);
+
+    public Task ReloadAsync(ImportJob job, CancellationToken ct)
+        => _dbContext.Entry(job).ReloadAsync(ct);
 
     public async Task<IReadOnlyList<ImportJob>> GetPendingAsync(int limit, CancellationToken ct)
         => await _dbContext.ImportJobs

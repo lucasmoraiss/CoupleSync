@@ -55,6 +55,6 @@ public sealed class NotificationEventRepository : INotificationEventRepository
 
     public Task SaveChangesAsync(CancellationToken ct)
     {
-        return _dbContext.SaveChangesAsync(ct);
+        return DbSaveTranslator.SaveAsync(_dbContext, ct);
     }
 }

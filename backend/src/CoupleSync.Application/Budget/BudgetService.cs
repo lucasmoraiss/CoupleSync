@@ -5,7 +5,6 @@ using CoupleSync.Application.Common;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
-using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Application.Budget;
 
@@ -57,13 +56,13 @@ public sealed class BudgetService
             await _repository.SaveChangesAsync(cancellationToken);
             return MapToDto(plan);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (ConcurrencyConflictException)
         {
             throw new ConflictException(
                 "BUDGET_PLAN_CONFLICT",
                 "O orçamento foi alterado ao mesmo tempo por outra requisição. Tente novamente.");
         }
-        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+        catch (UniqueViolationException)
         {
             throw new ConflictException(
                 "BUDGET_PLAN_CONFLICT",
@@ -123,7 +122,7 @@ public sealed class BudgetService
             var updated = await _repository.ReplaceAllocationsAsync(plan, inputs, now, cancellationToken);
             return MapToDto(updated);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (ConcurrencyConflictException)
         {
             throw new ConflictException(
                 "BUDGET_PLAN_CONFLICT",
@@ -189,13 +188,13 @@ public sealed class BudgetService
             await _repository.SaveChangesAsync(cancellationToken);
             return MapToDto(plan);
         }
-        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+        catch (UniqueViolationException)
         {
             throw new ConflictException(
                 "BUDGET_PLAN_DUPLICATE",
                 "Já existe um orçamento para este período.");
         }
-        catch (DbUpdateConcurrencyException)
+        catch (ConcurrencyConflictException)
         {
             throw new ConflictException(
                 "BUDGET_PLAN_CONFLICT",

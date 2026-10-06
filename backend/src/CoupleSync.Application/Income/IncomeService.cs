@@ -5,7 +5,6 @@ using CoupleSync.Application.Income.Commands;
 using CoupleSync.Application.Income.Queries;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
-using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Application.Income;
 
@@ -49,7 +48,7 @@ public sealed class IncomeService
             await _repository.AddAsync(source, ct);
             await _repository.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
+        catch (UniqueViolationException)
         {
             throw new ConflictException(
                 "INCOME_SOURCE_DUPLICATE",

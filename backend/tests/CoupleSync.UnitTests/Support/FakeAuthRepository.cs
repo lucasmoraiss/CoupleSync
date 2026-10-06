@@ -173,7 +173,7 @@ public sealed class FakeAuthRepository : IAuthRepository
         if (FailNextCodeStores > 0)
         {
             FailNextCodeStores--;
-            throw new Microsoft.EntityFrameworkCore.DbUpdateException("duplicate key value violates unique constraint 23505");
+            throw new CoupleSync.Application.Common.Exceptions.UniqueViolationException("duplicate key value violates unique constraint 23505");
         }
 
         EmailCodes.Add(code);

@@ -1,18 +1,17 @@
 using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Application.Common.Interfaces;
-using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Application.Transactions.Queries;
 
 public sealed class GetTransactionsQueryHandler
 {
     private readonly ITransactionRepository _repository;
-    private readonly IQueryDbContext _dbContext;
+    private readonly ICoupleRepository _coupleRepository;
 
-    public GetTransactionsQueryHandler(ITransactionRepository repository, IQueryDbContext dbContext)
+    public GetTransactionsQueryHandler(ITransactionRepository repository, ICoupleRepository coupleRepository)
     {
         _repository = repository;
-        _dbContext = dbContext;
+        _coupleRepository = coupleRepository;
     }
 
     public async Task<GetTransactionsResult> HandleAsync(GetTransactionsQuery query, CancellationToken cancellationToken)
@@ -27,10 +26,7 @@ public sealed class GetTransactionsQueryHandler
             query.EndDate,
             cancellationToken);
 
-        var userNameMap = await _dbContext.Users
-            .AsNoTracking()
-            .Where(user => user.CoupleId == query.CoupleId)
-            .ToDictionaryAsync(user => user.Id, user => user.Name, cancellationToken);
+        var userNameMap = await _coupleRepository.GetMemberNamesAsync(query.CoupleId, cancellationToken);
 
         var items = transactions
             .Select(t => new TransactionDto(

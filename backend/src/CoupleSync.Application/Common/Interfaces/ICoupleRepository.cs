@@ -11,6 +11,9 @@ public interface ICoupleRepository
 
     Task<CoupleEntityType?> FindByIdWithMembersAsync(Guid coupleId, CancellationToken cancellationToken);
 
+    /// <summary>Display names of the couple's members, by user id.</summary>
+    Task<Dictionary<Guid, string>> GetMemberNamesAsync(Guid coupleId, CancellationToken cancellationToken);
+
     Task<bool> JoinCodeExistsAsync(string joinCode, CancellationToken cancellationToken);
 
     /// <summary>

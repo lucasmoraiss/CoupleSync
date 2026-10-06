@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Notification.Commands;
 using CoupleSync.UnitTests.Support;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,7 @@ public sealed class RegisterDeviceTokenCommandHandlerTests
 
     private static FixedDateTimeProvider FixedClock() => new(new DateTime(2026, 10, 6, 12, 0, 0, DateTimeKind.Utc));
 
-    private static DbUpdateException UniqueViolation() =>
+    private static UniqueViolationException UniqueViolation() =>
         new("save failed", new Exception("23505: duplicate key value violates unique constraint \"IX_DeviceTokens_Token\""));
 
     [Fact]
@@ -53,7 +54,7 @@ public sealed class RegisterDeviceTokenCommandHandlerTests
     {
         var repo = new FakeDeviceTokenRepository();
         var delays = new DelayRecorder();
-        repo.SaveFailures.Enqueue(new DbUpdateConcurrencyException("0 rows affected", new Exception("expected 1")));
+        repo.SaveFailures.Enqueue(new ConcurrencyConflictException("0 rows affected", new Exception("expected 1")));
         var handler = new RegisterDeviceTokenCommandHandler(repo, FixedClock(), delays.Record);
 
         await handler.HandleAsync(new RegisterDeviceTokenCommand(UserId, CoupleId, "fcm-1"), CancellationToken.None);
@@ -83,10 +84,10 @@ public sealed class RegisterDeviceTokenCommandHandlerTests
     {
         var repo = new FakeDeviceTokenRepository();
         var delays = new DelayRecorder();
-        repo.SaveFailures.Enqueue(new DbUpdateException("save failed", new Exception("connection reset")));
+        repo.SaveFailures.Enqueue(new DataStoreException("save failed", new Exception("connection reset")));
         var handler = new RegisterDeviceTokenCommandHandler(repo, FixedClock(), delays.Record);
 
-        await Assert.ThrowsAsync<DbUpdateException>(() =>
+        await Assert.ThrowsAsync<DataStoreException>(() =>
             handler.HandleAsync(new RegisterDeviceTokenCommand(UserId, CoupleId, "fcm-1"), CancellationToken.None));
 
         Assert.Equal(1, repo.SaveCalls);

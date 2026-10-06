@@ -126,12 +126,11 @@ public sealed class OcrBackgroundJob : BackgroundService
                 // Delete the uploaded file only after successful processing
                 await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
             }
-            catch (DbUpdateConcurrencyException ex)
+            catch (ConcurrencyConflictException)
             {
                 // Recovery failed this job while it was being processed: its verdict stands, the result is dropped.
                 _logger.LogWarning("Import job {JobId} was changed by recovery while processing; result discarded.", job.Id);
-                foreach (var entry in ex.Entries)
-                    await entry.ReloadAsync(ct);
+                await repo.ReloadAsync(job, ct);
             }
             catch (OcrQuotaExhaustedException ex)
             {

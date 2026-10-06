@@ -10,7 +10,7 @@ namespace CoupleSync.UnitTests.Transactions;
 public sealed class GetTransactionsQueryHandlerTests
 {
     private static GetTransactionsQueryHandler BuildHandler(FakeTransactionRepository? repo = null, AppDbContext? dbContext = null)
-        => new(repo ?? new FakeTransactionRepository(), dbContext ?? BuildDbContext());
+        => new(repo ?? new FakeTransactionRepository(), new CoupleRepository(dbContext ?? BuildDbContext()));
 
     private static AppDbContext BuildDbContext()
     {

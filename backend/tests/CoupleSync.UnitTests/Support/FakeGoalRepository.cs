@@ -32,6 +32,12 @@ public sealed class FakeGoalRepository : IGoalRepository
         return Task.CompletedTask;
     }
 
+    public Task DeleteAsync(Goal goal, CancellationToken ct)
+    {
+        Goals.Remove(goal);
+        return Task.CompletedTask;
+    }
+
     public Task SaveChangesAsync(CancellationToken ct)
     {
         return Task.CompletedTask;

@@ -280,7 +280,7 @@ public sealed class ImportJobLifecycleTests
         // rejected (nothing of this request is stored) and the app is told to refresh and retry.
         var (service, jobs, transactions, _) = Build();
         var job = AddReadyJob(jobs, Debit(0, "Mercado", 80m), Debit(1, "Farmácia", 35m));
-        transactions.BeforeSave = () => throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("row changed by another request");
+        transactions.BeforeSave = () => throw new CoupleSync.Application.Common.Exceptions.ConcurrencyConflictException("row changed by another request");
 
         var ex = await Assert.ThrowsAsync<ConflictException>(
             () => service.ConfirmCandidatesAsync(job.Id, CoupleId, UserId, [1], null, CancellationToken.None, keepJobOpen: true));
@@ -441,11 +441,13 @@ public sealed class ImportJobLifecycleTests
             if (Jobs.Any(j => j.Status == ImportJobStatus.Ready))
             {
                 ConflictRaised = true;
-                throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("recovery failed the job first");
+                throw new CoupleSync.Application.Common.Exceptions.ConcurrencyConflictException("recovery failed the job first");
             }
 
             return Task.CompletedTask;
         }
+
+        public Task ReloadAsync(ImportJob job, CancellationToken ct) => Task.CompletedTask;
 
         public Task<IReadOnlyList<ImportJob>> GetPendingAsync(int limit, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<ImportJob>>(Jobs.Where(j => j.Status == ImportJobStatus.Pending).ToList());

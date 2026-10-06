@@ -6,7 +6,7 @@ using ICoupleScoped = CoupleSync.Domain.Interfaces.ICoupleScoped;
 
 namespace CoupleSync.Infrastructure.Persistence;
 
-public sealed class AppDbContext : DbContext, IQueryDbContext
+public sealed class AppDbContext : DbContext
 {
     private readonly ICoupleContext? _coupleContext;
 

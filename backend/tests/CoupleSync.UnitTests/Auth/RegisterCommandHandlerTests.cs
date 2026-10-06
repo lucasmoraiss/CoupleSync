@@ -50,7 +50,7 @@ public sealed class RegisterCommandHandlerTests
         var now = new DateTime(2026, 4, 13, 12, 0, 0, DateTimeKind.Utc);
         var repository = new FakeAuthRepository
         {
-            SaveChangesException = new DbUpdateException("duplicate key value violates unique constraint 23505")
+            SaveChangesException = new UniqueViolationException("duplicate key value violates unique constraint 23505")
         };
 
         var handler = new RegisterCommandHandler(

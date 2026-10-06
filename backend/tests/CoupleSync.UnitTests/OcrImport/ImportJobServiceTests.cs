@@ -333,6 +333,8 @@ internal sealed class FakeImportJobRepository : IImportJobRepository
 
     public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
 
+    public Task ReloadAsync(ImportJob job, CancellationToken ct) => Task.CompletedTask;
+
     public Task<IReadOnlyList<ImportJob>> GetPendingAsync(int limit, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<ImportJob>>(Jobs.Where(j => j.Status == ImportJobStatus.Pending).Take(limit).ToList());
 
@@ -402,6 +404,8 @@ internal sealed class FakeTransactionRepository : ITransactionRepository
         => Task.FromResult(new Dictionary<string, decimal>());
 
     public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
+
+    public Task ReloadAsync(ImportJob job, CancellationToken ct) => Task.CompletedTask;
 }
 
 //  Local classifier stubs removed — classification now lives in OcrProcessingService.

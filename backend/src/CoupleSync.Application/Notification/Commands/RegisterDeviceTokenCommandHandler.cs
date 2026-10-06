@@ -1,7 +1,6 @@
 using CoupleSync.Application.Common;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
-using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Application.Notification.Commands;
 
@@ -38,7 +37,7 @@ public sealed class RegisterDeviceTokenCommandHandler
                 await registration.CommitAsync(cancellationToken);
                 return;
             }
-            catch (DbUpdateException ex) when (ex is DbUpdateConcurrencyException || ex.IsUniqueViolation())
+            catch (DataStoreException ex) when (ex is ConcurrencyConflictException or UniqueViolationException)
             {
                 // Concurrent registrations of the same token (or user) raced: another one won a unique index, or already deleted
                 // the row this pass meant to hand over (a concurrency exception).

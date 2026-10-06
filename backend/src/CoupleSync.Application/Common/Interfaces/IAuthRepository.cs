@@ -57,7 +57,7 @@ public interface IAuthRepository
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Inserts the first code of a user and purpose. Throws <see cref="Microsoft.EntityFrameworkCore.DbUpdateException"/>
+    /// Inserts the first code of a user and purpose. Throws <see cref="Exceptions.UniqueViolationException"/>
     /// when a concurrent request inserted it first (unique index); the failed entity is detached so the caller can retry.
     /// </summary>
     Task AddEmailCodeAsync(EmailCode code, CancellationToken cancellationToken);
