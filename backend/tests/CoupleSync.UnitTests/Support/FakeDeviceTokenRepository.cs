@@ -34,5 +34,11 @@ public sealed class FakeDeviceTokenRepository : IDeviceTokenRepository
         return Task.CompletedTask;
     }
 
+    public Task DeleteForUserAsync(Guid userId, string token, CancellationToken ct)
+    {
+        _tokens.RemoveAll(d => d.UserId == userId && d.Token == token);
+        return Task.CompletedTask;
+    }
+
     public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
 }

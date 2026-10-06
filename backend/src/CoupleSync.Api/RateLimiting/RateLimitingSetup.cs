@@ -16,6 +16,7 @@ public static class RateLimitPolicies
     public const string AuthRegister = "auth-register";
     public const string CoupleJoin = "couple-join";
     public const string AuthChangePassword = "auth-change-password";
+    public const string AuthLogout = "auth-logout";
 }
 
 /// <summary>Bound to the <c>RateLimiting</c> configuration section (env: <c>RATELIMITING__AUTH__PERMITLIMIT</c> etc.).</summary>
@@ -51,6 +52,10 @@ public static class RateLimitingSetup
             limiter.OnRejected = WriteRejectionAsync;
 
             limiter.AddPolicy(RateLimitPolicies.AuthLogin, context =>
+                CreatePartition($"ip:{GetClientIp(context)}", GetOptions(context).Auth));
+
+            // Own bucket: signing out must not eat the login budget (and vice versa).
+            limiter.AddPolicy(RateLimitPolicies.AuthLogout, context =>
                 CreatePartition($"ip:{GetClientIp(context)}", GetOptions(context).Auth));
 
             limiter.AddPolicy(RateLimitPolicies.AuthRegister, context =>

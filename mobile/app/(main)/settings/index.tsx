@@ -8,7 +8,7 @@ import { colors } from '@/theme';
 
 export default function SettingsScreen() {
   const handleLogout = async () => {
-    Alert.alert('Sair', 'Deseja realmente sair da conta?', [
+    Alert.alert('Sair', 'Deseja realmente sair da conta? Você também será desconectado dos outros aparelhos em que usa esta conta.', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Sair',

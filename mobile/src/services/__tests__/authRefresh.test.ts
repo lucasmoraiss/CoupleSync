@@ -267,6 +267,26 @@ describe('A03 — renovação de sessão no 401', () => {
     expect(h.calls).toHaveLength(1);
   });
 
+  it('refresh que termina depois do logout não grava tokens, não repete a requisição nem avisa sessão expirada', async () => {
+    const h = createHarness();
+    h.holdRefresh();
+
+    const pending = statusOf(h.instance.get('/api/v1/dashboard'));
+    await flush();
+    await flush();
+    expect(h.requestRefresh).toHaveBeenCalledTimes(1);
+
+    // O usuário sai enquanto o refresh está em andamento.
+    h.session.accessToken = null;
+    h.session.refreshToken = null;
+    h.releaseRefresh();
+
+    expect(await pending).toBe(401);
+    expect(h.saveTokens).not.toHaveBeenCalled();
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+    expect(h.calls).toHaveLength(1); // nenhuma repetição com o token novo
+  });
+
   it('quando o refresh não devolve refresh token, mantém o anterior', async () => {
     const h = createHarness({ refreshResult: { accessToken: 'access-2', refreshToken: null } });
 

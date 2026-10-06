@@ -80,11 +80,13 @@ public sealed class AuthController : ControllerBase
     /// also ends the session on every other device.
     /// </summary>
     [HttpPost("logout")]
+    [EnableRateLimiting(RateLimitPolicies.AuthLogout)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Logout([FromBody] LogoutRequest request, CancellationToken cancellationToken)
     {
-        await _logoutHandler.HandleAsync(new LogoutCommand(request.RefreshToken), cancellationToken);
+        await _logoutHandler.HandleAsync(new LogoutCommand(request.RefreshToken, request.DeviceToken), cancellationToken);
 
         return NoContent();
     }

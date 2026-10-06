@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import { authApiClient } from '@/services/apiClient';
 import { getApiErrorMessage } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
+import { resetUserCaches } from '@/state/userData';
 import { colors } from '@/theme';
 
 export default function RegisterScreen() {
@@ -48,6 +49,7 @@ export default function RegisterScreen() {
         password,
       });
 
+      await resetUserCaches(); // segunda trava: nada de uma conta anterior sobrevive ao novo cadastro
       await useSessionStore.getState().setSession(
         data.accessToken,
         data.refreshToken,

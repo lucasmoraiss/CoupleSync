@@ -54,6 +54,15 @@ public sealed class DeviceTokenRepository : IDeviceTokenRepository
         }
     }
 
+    public async Task DeleteForUserAsync(Guid userId, string token, CancellationToken ct)
+    {
+        // The registration may sit under a group the caller no longer belongs to, hence IgnoreQueryFilters.
+        await _dbContext.DeviceTokens
+            .IgnoreQueryFilters()
+            .Where(d => d.UserId == userId && d.Token == token)
+            .ExecuteDeleteAsync(ct);
+    }
+
     public Task SaveChangesAsync(CancellationToken ct)
     {
         return _dbContext.SaveChangesAsync(ct);

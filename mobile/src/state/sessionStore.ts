@@ -113,8 +113,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   clearSession: async () => {
-    await SecureStore.deleteItemAsync(SECURE_STORE_KEY);
+    // Memória primeiro e de forma síncrona: a partir daqui nenhuma requisição leva o token de quem saiu e
+    // nenhum refresh em andamento consegue gravar tokens (setTokens exige userId). O armazenamento seguro
+    // é nativo e assíncrono; esperá-lo antes deixaria as telas montadas com o token vivo.
     set({ accessToken: null, refreshToken: null, userId: null, coupleId: null });
+    try {
+      await SecureStore.deleteItemAsync(SECURE_STORE_KEY);
+    } catch {
+      // Não conseguiu apagar: sobrescreve com um valor inválido, que hydrateFromStore descarta, para
+      // que a sessão não volte na próxima abertura do app. Se nem isso der, a saída em memória vale.
+      try {
+        await SecureStore.setItemAsync(SECURE_STORE_KEY, '{}');
+      } catch {
+        // nada mais a fazer
+      }
+    }
   },
 
   hydrateFromStore: async () => {

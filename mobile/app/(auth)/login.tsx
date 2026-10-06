@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import { authApiClient, coupleApiClient } from '@/services/apiClient';
 import { getApiErrorMessage } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
+import { resetUserCaches } from '@/state/userData';
 import { colors } from '@/theme';
 
 export default function LoginScreen() {
@@ -33,6 +34,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const { data } = await authApiClient.login({ email: email.trim(), password });
+      await resetUserCaches(); // segunda trava: nada de uma conta anterior sobrevive ao novo login
       
       // Try to get couple info — user may not have one yet
       let coupleId: string | null = null;

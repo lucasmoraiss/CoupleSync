@@ -82,6 +82,12 @@ export function installAuthRefresh(instance: AxiosInstance, deps: AuthRefreshDep
       return { kind: 'unavailable', error };
     }
 
+    // O usuário saiu (ou a sessão mudou) enquanto o refresh estava em andamento: o resultado não vale
+    // para ninguém. Não grava tokens, não repete a requisição e não avisa "sessão expirada".
+    if (deps.getTokens().refreshToken !== refreshToken) {
+      return { kind: 'rejected' };
+    }
+
     if (!result?.accessToken) {
       await expireSession();
       return { kind: 'rejected' };

@@ -8,10 +8,16 @@ jest.mock('expo-secure-store', () => ({
   }),
   getItemAsync: jest.fn(async (key: string) => secureStore[key] ?? null),
   deleteItemAsync: jest.fn(async (key: string) => {
+    if (failDelete) throw new Error('keystore');
     delete secureStore[key];
   }),
 }));
 
+let failDelete = false;
+const mockDeviceToken = jest.fn();
+jest.mock('@/services/deviceToken', () => ({
+  getDevicePushToken: () => mockDeviceToken(),
+}));
 const mockServerLogout = jest.fn();
 jest.mock('@/services/apiClient', () => ({
   authApiClient: { logout: (...args: unknown[]) => mockServerLogout(...args) },
@@ -39,6 +45,9 @@ async function signIn() {
 beforeEach(async () => {
   for (const key of Object.keys(secureStore)) delete secureStore[key];
   mockServerLogout.mockReset();
+  mockDeviceToken.mockReset();
+  mockDeviceToken.mockResolvedValue(null);
+  failDelete = false;
   await signIn();
 });
 
@@ -65,7 +74,7 @@ describe('logout', () => {
     await logout();
 
     expect(mockServerLogout).toHaveBeenCalledTimes(1);
-    expect(mockServerLogout).toHaveBeenCalledWith('refresh-1');
+    expect(mockServerLogout).toHaveBeenCalledWith('refresh-1', undefined);
   });
 
   it('sai do mesmo jeito quando o servidor não responde', async () => {
@@ -112,5 +121,35 @@ describe('logout', () => {
     expect(unregistered).toHaveBeenCalled();
     expect(useSessionStore.getState().accessToken).toBeNull();
     expect(secureStore['couplesync_session']).toBeUndefined();
+  });
+});
+
+describe('logout: falha do armazenamento seguro e push', () => {
+  it('termina deslogado, avisa o servidor e não rejeita mesmo se o armazenamento seguro falhar', async () => {
+    failDelete = true;
+    mockServerLogout.mockResolvedValue({ status: 204 });
+
+    await expect(logout()).resolves.toBeUndefined();
+
+    expect(useSessionStore.getState().accessToken).toBeNull();
+    expect(mockServerLogout).toHaveBeenCalledWith('refresh-1', undefined);
+  });
+
+  it('envia o token push do aparelho para o servidor desregistrá-lo', async () => {
+    mockDeviceToken.mockResolvedValue('fcm-token-1');
+    mockServerLogout.mockResolvedValue({ status: 204 });
+
+    await logout();
+
+    expect(mockServerLogout).toHaveBeenCalledWith('refresh-1', 'fcm-token-1');
+  });
+
+  it('sem token push (sem permissão, sem Play Services), sai do mesmo jeito', async () => {
+    mockDeviceToken.mockRejectedValue(new Error('sem fcm'));
+    mockServerLogout.mockResolvedValue({ status: 204 });
+
+    await expect(logout()).resolves.toBeUndefined();
+
+    expect(mockServerLogout).toHaveBeenCalledWith('refresh-1', undefined);
   });
 });

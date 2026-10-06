@@ -27,6 +27,9 @@ const MAX_ATTEMPTS = RETRY_DELAYS_MS.length + 1; // 6 total (1 initial + 5 retri
 const QUEUE_POLL_INTERVAL_MS = 3_000;
 
 let retryQueue: QueueEntry[] = [];
+// Sobe a cada limpeza. Um envio ou flush que começou antes da limpeza compara e descarta o resultado,
+// em vez de recolocar na fila eventos do usuário que saiu.
+let queueGeneration = 0;
 let pollHandle: ReturnType<typeof setInterval> | null = null;
 
 function ensurePolling(): void {
@@ -41,6 +44,7 @@ async function postEvent(request: IngestNotificationEventRequest): Promise<void>
 async function flushQueue(): Promise<void> {
   if (retryQueue.length === 0) return;
 
+  const generation = queueGeneration;
   const now = Date.now();
   const due = retryQueue.filter((e) => e.nextRetryAt <= now);
   const notDue = retryQueue.filter((e) => e.nextRetryAt > now);
@@ -67,6 +71,8 @@ async function flushQueue(): Promise<void> {
       }
     }),
   );
+
+  if (generation !== queueGeneration) return; // saiu da conta durante o envio
 
   retryQueue = [...notDue, ...still];
 
@@ -98,11 +104,13 @@ export async function handleRawNotificationEvent(
   }
 
   const request = buildIngestRequest(decision.event);
+  const generation = queueGeneration;
 
   try {
     await postEvent(request);
     return true;
   } catch {
+    if (generation !== queueGeneration) return true; // saiu da conta durante o envio: não enfileira
     // Enqueue for retry (AC-009)
     const delayMs = RETRY_DELAYS_MS[0];
     retryQueue.push({
@@ -120,6 +128,7 @@ export async function handleRawNotificationEvent(
  * user on this device would upload them into their own group.
  */
 export function clearPendingEvents(): void {
+  queueGeneration += 1;
   retryQueue = [];
   if (pollHandle !== null) {
     clearInterval(pollHandle);
@@ -139,9 +148,11 @@ export function getPendingRetryCount(): number {
  * Exposed for use from other modules that already have the request shape.
  */
 export async function uploadEvent(request: IngestNotificationEventRequest): Promise<void> {
+  const generation = queueGeneration;
   try {
     await postEvent(request);
   } catch {
+    if (generation !== queueGeneration) return; // saiu da conta durante o envio
     const delayMs = RETRY_DELAYS_MS[0];
     retryQueue.push({
       request,

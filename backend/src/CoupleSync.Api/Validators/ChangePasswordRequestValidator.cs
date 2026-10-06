@@ -12,6 +12,7 @@ public sealed class ChangePasswordRequestValidator : AbstractValidator<ChangePas
 
         // The e-mail comparison needs the stored e-mail, so the handler applies the same PasswordPolicy with it.
         RuleFor(x => x.NewPassword)
+            .Cascade(CascadeMode.Stop)
             .NotEmpty()
             .MeetsPasswordPolicy<ChangePasswordRequest>();
     }

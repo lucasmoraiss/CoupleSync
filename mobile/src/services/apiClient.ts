@@ -3,6 +3,7 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { router } from 'expo-router';
 import { useSessionStore } from '@/state/sessionStore';
 import { clearUserData } from '@/state/userData';
+import { clearGroupScopedQueries, queryClient } from '@/services/queryClient';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { installAuthRefresh } from './authRefresh';
 import { getApiErrorCode } from './apiError';
@@ -76,6 +77,7 @@ axiosInstance.interceptors.response.use(
       );
       // O grupo guardado não vale mais (ex.: removido por outro membro): esquece-o e volta à configuração.
       void useSessionStore.getState().clearCouple();
+      clearGroupScopedQueries(queryClient);
       router.replace('/(auth)/couple-setup' as any);
     }
     return Promise.reject(error);
@@ -142,8 +144,8 @@ export const authApiClient = {
   register: (data: RegisterRequest): Promise<AxiosResponse<AuthResponse>> =>
     axiosInstance.post<AuthResponse>('/api/v1/auth/register', data),
   /** Revoga o refresh token no servidor (responde 204 mesmo se ele já não valer). Não precisa de sessão válida. */
-  logout: (refreshToken: string): Promise<AxiosResponse<void>> =>
-    axiosInstance.post<void>('/api/v1/auth/logout', { refreshToken }, { timeout: 8000 }),
+  logout: (refreshToken: string, deviceToken?: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.post<void>('/api/v1/auth/logout', { refreshToken, deviceToken }, { timeout: 8000 }),
 
   /** Troca a senha; devolve o novo par de tokens (os refresh tokens dos outros aparelhos deixam de valer). */
   changePassword: (data: ChangePasswordRequest): Promise<AxiosResponse<RefreshResponse>> =>

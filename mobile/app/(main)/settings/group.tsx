@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { coupleApiClient } from '@/services/apiClient';
 import { getApiErrorMessage, isNoGroupError } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
+import { clearGroupScopedQueries } from '@/services/queryClient';
 import { describeJoinCodeValidity, isGroupOwner } from '@/modules/couple/group';
 import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
@@ -43,7 +44,7 @@ export default function GroupScreen() {
     if (!noGroup) return;
     void useSessionStore.getState().clearCouple();
     // Nada do grupo antigo deve aparecer depois. Esta própria consulta fica: removê-la a refaria em laço.
-    queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== QUERY_KEY[0] });
+    clearGroupScopedQueries(queryClient);
     router.replace('/(auth)/couple-setup' as any);
   }, [noGroup, queryClient]);
 

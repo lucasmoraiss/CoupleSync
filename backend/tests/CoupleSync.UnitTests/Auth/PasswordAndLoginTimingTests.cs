@@ -98,7 +98,7 @@ public sealed class PasswordAndLoginTimingTests
         var repository = new FakeAuthRepository();
         var hasher = new Sha256TokenHasher();
         repository.RefreshTokens.Add(RefreshToken.CreateForUser(Guid.NewGuid(), hasher.Hash("raw-token"), Now.AddDays(7), Now));
-        var handler = new LogoutCommandHandler(repository, hasher);
+        var handler = new LogoutCommandHandler(repository, hasher, new FakeDeviceTokenRepository());
 
         await handler.HandleAsync(new LogoutCommand("unknown"), CancellationToken.None);
         Assert.Single(repository.RefreshTokens);

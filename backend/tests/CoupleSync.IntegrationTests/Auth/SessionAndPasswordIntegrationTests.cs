@@ -2,7 +2,11 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using CoupleSync.Domain.Entities;
+using CoupleSync.Infrastructure.Persistence;
 using CoupleSync.IntegrationTests.Transactions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CoupleSync.IntegrationTests.Auth;
 
@@ -307,6 +311,103 @@ public sealed class SessionAndPasswordIntegrationTests
         // Nothing new is issued (an installed app that ignores the field keeps working with the token it has).
         Assert.Equal(JsonValueKind.Null, (await BodyOf(created)).GetProperty("refreshToken").ValueKind);
         Assert.Equal(HttpStatusCode.OK, (await RefreshAsync(session.Client, session.RefreshToken)).StatusCode);
+    }
+
+    // fix round 1
+
+    [Fact]
+    public async Task Logout_WithDeviceToken_DeletesThatDevicesRegistration_ForTheTokenOwnerOnly()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        var (owner, member) = await GroupOfTwoAsync(factory);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var coupleId = (await db.Users.SingleAsync(u => u.Id == owner.UserId)).CoupleId!.Value;
+            db.DeviceTokens.Add(DeviceToken.Create(owner.UserId, coupleId, "fcm-owner", DateTime.UtcNow));
+            db.DeviceTokens.Add(DeviceToken.Create(member.UserId, coupleId, "fcm-member", DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        // The member signs out claiming the OWNER device token: ignored (still 204), nothing of the owner is touched.
+        var spoof = await member.Client.PostAsJsonAsync("/api/v1/auth/logout",
+            new { member.RefreshToken, DeviceToken = "fcm-owner" });
+        Assert.Equal(HttpStatusCode.NoContent, spoof.StatusCode);
+        Assert.Equal(new[] { "fcm-member", "fcm-owner" }, await DeviceTokensAsync(factory));
+
+        var owners = await owner.Client.PostAsJsonAsync("/api/v1/auth/logout",
+            new { owner.RefreshToken, DeviceToken = "fcm-owner" });
+        Assert.Equal(HttpStatusCode.NoContent, owners.StatusCode);
+        Assert.Equal(new[] { "fcm-member" }, await DeviceTokensAsync(factory));
+    }
+
+    [Fact]
+    public async Task Logout_WithAnUnknownRefreshToken_NeverDeletesADeviceToken()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        var (owner, _) = await GroupOfTwoAsync(factory);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var coupleId = (await db.Users.SingleAsync(u => u.Id == owner.UserId)).CoupleId!.Value;
+            db.DeviceTokens.Add(DeviceToken.Create(owner.UserId, coupleId, "fcm-owner", DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        var response = await owner.Client.PostAsJsonAsync("/api/v1/auth/logout",
+            new { RefreshToken = "never-existed", DeviceToken = "fcm-owner" });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(new[] { "fcm-owner" }, await DeviceTokensAsync(factory));
+    }
+
+    [Fact]
+    public async Task Logout_AndRefresh_RejectAnOversizedToken()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        using var client = factory.CreateClient();
+        var huge = new string('x', 513);
+
+        var logout = await client.PostAsJsonAsync("/api/v1/auth/logout", new { RefreshToken = huge });
+        var refresh = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { RefreshToken = huge });
+        var hugeDevice = await client.PostAsJsonAsync("/api/v1/auth/logout", new { RefreshToken = "abc", DeviceToken = huge });
+
+        Assert.Equal(HttpStatusCode.BadRequest, logout.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, refresh.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, hugeDevice.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_EmptyPassword_ReportsOnlyThatItIsRequired()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/auth/register",
+            new { Email = $"empty-{Guid.NewGuid():N}@example.com", Name = "Empty", Password = "" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Single((await BodyOf(response)).GetProperty("errors").GetProperty("Password").EnumerateArray().ToArray());
+    }
+
+    [Fact]
+    public async Task ChangePassword_EmptyNewPassword_ReportsOnlyThatItIsRequired()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        var session = await RegisterAsync(factory);
+
+        var response = await session.Client.PostAsJsonAsync("/api/v1/auth/change-password",
+            new { CurrentPassword = StrongPassword, NewPassword = "" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Single((await BodyOf(response)).GetProperty("errors").GetProperty("NewPassword").EnumerateArray().ToArray());
+    }
+
+    private static async Task<string[]> DeviceTokensAsync(TransactionWebApplicationFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return (await db.DeviceTokens.IgnoreQueryFilters().Select(d => d.Token).ToListAsync()).Order().ToArray();
     }
 
     private static async Task<(Session Owner, Session Member)> GroupOfTwoAsync(TransactionWebApplicationFactory factory)
