@@ -59,7 +59,7 @@ public sealed class OcrController : ControllerBase
         var userId = GetAuthenticatedUserId();
 
         var uploadId = await _importJobService.UploadAsync(
-            coupleId, userId, fileStream, detectedMime, ct);
+            coupleId, userId, fileStream, detectedMime, ct, file.FileName);
 
         return Ok(new UploadResponse(uploadId));
     }
@@ -78,6 +78,20 @@ public sealed class OcrController : ControllerBase
         if (!Guid.TryParse(claimValue, out var userId))
             throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return userId;
+    }
+
+    /// <summary>The couple's imports that still have lines waiting for review (to reopen them).</summary>
+    [HttpGet("open")]
+    [ProducesResponseType(typeof(OcrOpenImportsResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<OcrOpenImportsResponse>> GetOpenImports(CancellationToken ct)
+    {
+        var coupleId = GetAuthenticatedCoupleId();
+        var open = await _importJobService.GetOpenImportsAsync(coupleId, ct);
+
+        return Ok(new OcrOpenImportsResponse(open
+            .Select(i => new OcrOpenImportResponse(
+                i.UploadId, i.FileName, i.CreatedAtUtc, i.PendingLines, i.TotalLines, i.CreditsCount))
+            .ToList()));
     }
 
     /// <summary>Get the processing status of an OCR job.</summary>

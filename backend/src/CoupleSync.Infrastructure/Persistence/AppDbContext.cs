@@ -371,7 +371,8 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .HasColumnName("status")
                 .HasConversion<string>()
                 .HasMaxLength(16)
-                .IsRequired();
+                .IsRequired()
+                .IsConcurrencyToken();
             entity.Property(x => x.OcrResultJson)
                 .HasColumnName("ocr_result_json")
                 .HasColumnType("jsonb");
@@ -379,7 +380,10 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.ErrorMessage).HasColumnName("error_message").HasMaxLength(512);
             entity.Property(x => x.QuotaResetDate).HasColumnName("quota_reset_date");
             entity.Property(x => x.RetryCount).HasColumnName("retry_count").HasDefaultValue(0).IsRequired();
-            entity.Property(x => x.LineStatesJson).HasColumnName("line_states_json").HasColumnType("text");
+            // Status and the line states are concurrency tokens: a write made on a stale copy of the job (the worker
+            // finishing a job that recovery already failed, two confirmations of different lines) is rejected.
+            entity.Property(x => x.LineStatesJson).HasColumnName("line_states_json").HasColumnType("text").IsConcurrencyToken();
+            entity.Property(x => x.SourceFileName).HasColumnName("source_file_name").HasMaxLength(ImportJob.MaxFileNameLength);
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
 

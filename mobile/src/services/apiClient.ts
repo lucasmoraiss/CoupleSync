@@ -40,6 +40,7 @@ import type {
   OcrResultsResponse,
   OcrConfirmRequest,
   OcrConfirmResponse,
+  OcrOpenImportsResponse,
   ChatHistoryItem,
   ChatResponse,
   SpendingByCategoryResponse,
@@ -394,6 +395,9 @@ export const ocrApiClient = {
 
   confirm: (uploadId: string, data: OcrConfirmRequest): Promise<AxiosResponse<OcrConfirmResponse>> =>
     axiosInstance.post<OcrConfirmResponse>(`/api/v1/ocr/${uploadId}/confirm`, data),
+
+  getOpenImports: (): Promise<AxiosResponse<OcrOpenImportsResponse>> =>
+    axiosInstance.get<OcrOpenImportsResponse>('/api/v1/ocr/open'),
 };
 
 // --- AI Chat API ---

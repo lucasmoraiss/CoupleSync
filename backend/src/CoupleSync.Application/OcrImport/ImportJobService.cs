@@ -52,7 +52,8 @@ public sealed class ImportJobService
         Guid userId,
         Stream fileStream,
         string detectedMimeType,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? fileName = null)
     {
         var uploadId = Guid.NewGuid();
         var storagePath = await _storageAdapter.UploadAsync(
@@ -63,7 +64,8 @@ public sealed class ImportJobService
             userId,
             storagePath,
             detectedMimeType,
-            _dateTimeProvider.UtcNow);
+            _dateTimeProvider.UtcNow,
+            fileName);
 
         await _repository.AddAsync(job, ct);
         await _repository.SaveChangesAsync(ct);
@@ -104,6 +106,31 @@ public sealed class ImportJobService
                     : "A leitura do extrato ainda não terminou.");
 
         return JsonSerializer.Deserialize<List<OcrCandidate>>(job.OcrResultJson!) ?? new List<OcrCandidate>();
+    }
+
+    /// <summary>
+    /// The couple's imports that still have debit lines waiting for review (newest first, at most 20).
+    /// </summary>
+    public async Task<IReadOnlyList<OpenImport>> GetOpenImportsAsync(Guid coupleId, CancellationToken ct)
+    {
+        var jobs = await _repository.GetReadyByCoupleAsync(coupleId, 20, ct);
+        var result = new List<OpenImport>();
+
+        foreach (var job in jobs)
+        {
+            if (string.IsNullOrWhiteSpace(job.OcrResultJson)) continue;
+
+            var candidates = JsonSerializer.Deserialize<List<OcrCandidate>>(job.OcrResultJson) ?? new();
+            var debits = candidates.Where(c => c.Type != TransactionType.Credit).ToList();
+            var pending = debits.Count(c => job.GetLineState(c.Index) == ImportLineState.Pending);
+            if (pending == 0) continue;
+
+            result.Add(new OpenImport(
+                job.Id, job.SourceFileName, job.CreatedAtUtc, pending, debits.Count,
+                candidates.Count - debits.Count));
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -300,6 +327,14 @@ public sealed class ImportJobService
             await _transactionRepository.SaveChangesAsync(ct);
             await _repository.SaveChangesAsync(ct);
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Another confirmation changed this import first (the job row is a concurrency token). Nothing of
+            // this request was stored; refreshing shows what the other request did.
+            throw new ConflictException(
+                "OCR_CONFIRM_CONFLICT",
+                "Esta importação foi alterada por outra requisição. Atualize e tente novamente.");
+        }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
             // Two confirmations raced past the duplicate check; the unique index on
@@ -371,6 +406,10 @@ public sealed record CandidateEdit(string? Description, decimal? Amount);
 
 /// <summary>Outcome of confirming an import: what was stored and how many lines were skipped as already imported.</summary>
 public sealed record ConfirmCandidatesResult(IReadOnlyList<Transaction> Created, int DuplicatesSkipped, int RemainingLines = 0);
+
+/// <summary>An import with lines still waiting for review, as listed on the import entry screen.</summary>
+public sealed record OpenImport(
+    Guid UploadId, string? FileName, DateTime CreatedAtUtc, int PendingLines, int TotalLines, int CreditsCount);
 
 /// <summary>A debit line of the review with what already happened to it.</summary>
 public sealed record ImportReviewLine(OcrCandidate Candidate, ImportLineState State);

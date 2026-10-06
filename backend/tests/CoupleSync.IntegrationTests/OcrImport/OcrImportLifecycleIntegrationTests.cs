@@ -139,6 +139,137 @@ public sealed class OcrImportLifecycleIntegrationTests
         Assert.Equal("PROCESSING_TIMEOUT", status.GetProperty("errorCode").GetString());
     }
 
+    [Fact]
+    public async Task TwoRequestsWritingTheLineStatesOfTheSameJob_TheSecondIsRejected_NotSilentlyOverwritten()
+    {
+        await using var factory = new OcrWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await OcrConfirmIntegrationTests.AuthenticateWithCoupleAsync(client);
+        var uploadId = await OcrConfirmIntegrationTests.UploadAndMarkReadyAsync(factory, client,
+            [Debit(0, "Mercado", 80m), Debit(1, "Farmácia", 35m), Debit(2, "Padaria", 12m)]);
+
+        using var scopeA = factory.Services.CreateScope();
+        using var scopeB = factory.Services.CreateScope();
+        var dbA = scopeA.ServiceProvider.GetRequiredService<AppDbContext>();
+        var dbB = scopeB.ServiceProvider.GetRequiredService<AppDbContext>();
+        var jobA = await dbA.ImportJobs.FindAsync(uploadId);
+        var jobB = await dbB.ImportJobs.FindAsync(uploadId);
+
+        jobA!.SetLineState(0, CoupleSync.Domain.Entities.ImportLineState.Confirmed, DateTime.UtcNow);
+        await dbA.SaveChangesAsync();
+
+        jobB!.SetLineState(1, CoupleSync.Domain.Entities.ImportLineState.Confirmed, DateTime.UtcNow);
+        await Assert.ThrowsAsync<Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException>(() => dbB.SaveChangesAsync());
+
+        using var check = factory.Services.CreateScope();
+        var stored = await check.ServiceProvider.GetRequiredService<AppDbContext>().ImportJobs.FindAsync(uploadId);
+        Assert.Equal(CoupleSync.Domain.Entities.ImportLineState.Confirmed, stored!.GetLineState(0));
+        Assert.Equal(CoupleSync.Domain.Entities.ImportLineState.Pending, stored.GetLineState(1));
+    }
+
+    [Fact]
+    public async Task AWorkerFinishingAJobThatRecoveryAlreadyFailed_CannotOverwriteTheFailure()
+    {
+        await using var factory = new OcrWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await OcrConfirmIntegrationTests.AuthenticateWithCoupleAsync(client);
+        var uploadId = await OcrConfirmIntegrationTests.UploadAndMarkReadyAsync(factory, client, [Debit(0, "Mercado", 80m)]);
+
+        using (var seed = factory.Services.CreateScope())
+        {
+            var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.ImportJobs.FindAsync(uploadId))!.MarkProcessing(DateTime.UtcNow.AddMinutes(-30));
+            await db.SaveChangesAsync();
+        }
+
+        using var workerScope = factory.Services.CreateScope();
+        using var recoveryScope = factory.Services.CreateScope();
+        var workerDb = workerScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var workerJob = await workerDb.ImportJobs.FindAsync(uploadId);
+
+        var recoveryDb = recoveryScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var recovery = new ImportJobRecovery(
+            new CoupleSync.Infrastructure.Persistence.ImportJobRepository(recoveryDb),
+            new NoopStorage(), new RealClock(), Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        Assert.Equal(1, await recovery.RecoverAllAsync(CancellationToken.None, TimeSpan.Zero));
+
+        workerJob!.MarkReady("[]", DateTime.UtcNow);
+        await Assert.ThrowsAsync<Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException>(() => workerDb.SaveChangesAsync());
+
+        var status = await client.GetFromJsonAsync<JsonElement>($"/api/v1/ocr/{uploadId}/status");
+        Assert.Equal("Failed", status.GetProperty("status").GetString());
+        Assert.Equal("PROCESSING_TIMEOUT", status.GetProperty("errorCode").GetString());
+    }
+
+    [Fact]
+    public async Task OpenImports_ListTheFileAndHowManyLinesArePending()
+    {
+        await using var factory = new OcrWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await OcrConfirmIntegrationTests.AuthenticateWithCoupleAsync(client);
+        var uploadId = await OcrConfirmIntegrationTests.UploadAndMarkReadyAsync(factory, client,
+            [Debit(0, "Mercado", 80m), Debit(1, "Farmácia", 35m), Credit(2, "Reembolso", 500m)]);
+        await client.PostAsJsonAsync($"/api/v1/ocr/{uploadId}/confirm", new { selectedIndices = new[] { 0 }, keepJobOpen = true });
+
+        var open = await client.GetFromJsonAsync<JsonElement>("/api/v1/ocr/open");
+
+        var item = Assert.Single(open.GetProperty("imports").EnumerateArray());
+        Assert.Equal(uploadId, item.GetProperty("uploadId").GetGuid());
+        Assert.Equal("statement.jpg", item.GetProperty("fileName").GetString());
+        Assert.Equal(1, item.GetProperty("pendingLines").GetInt32());
+        Assert.Equal(2, item.GetProperty("totalLines").GetInt32());
+        Assert.Equal(1, item.GetProperty("creditsCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task OpenImports_AreScopedToTheCouple_AndWithoutAuthIs401()
+    {
+        await using var factory = new OcrWebApplicationFactory();
+        using var owner = factory.CreateClient();
+        await OcrConfirmIntegrationTests.AuthenticateWithCoupleAsync(owner);
+        await OcrConfirmIntegrationTests.UploadAndMarkReadyAsync(factory, owner, [Debit(0, "Mercado", 80m)]);
+
+        using var other = factory.CreateClient();
+        await OcrConfirmIntegrationTests.AuthenticateWithCoupleAsync(other);
+        var open = await other.GetFromJsonAsync<JsonElement>("/api/v1/ocr/open");
+        Assert.Equal(0, open.GetProperty("imports").GetArrayLength());
+
+        using var anonymous = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/ocr/open")).StatusCode);
+    }
+
+    [Fact]
+    public async Task DiscardingWhatIsLeft_ClosesTheImport_AndItLeavesTheOpenList()
+    {
+        await using var factory = new OcrWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await OcrConfirmIntegrationTests.AuthenticateWithCoupleAsync(client);
+        var uploadId = await OcrConfirmIntegrationTests.UploadAndMarkReadyAsync(factory, client,
+            [Debit(0, "Mercado", 80m), Debit(1, "Farmácia", 35m)]);
+
+        var response = await client.PostAsJsonAsync($"/api/v1/ocr/{uploadId}/confirm",
+            new { selectedIndices = Array.Empty<int>(), discardedIndices = new[] { 0, 1 }, keepJobOpen = true });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(0, body.GetProperty("transactionsCreated").GetInt32());
+        Assert.Equal(0, body.GetProperty("remainingLines").GetInt32());
+        var open = await client.GetFromJsonAsync<JsonElement>("/api/v1/ocr/open");
+        Assert.Equal(0, open.GetProperty("imports").GetArrayLength());
+    }
+
+    private sealed class NoopStorage : CoupleSync.Domain.Interfaces.IStorageAdapter
+    {
+        public Task<string> UploadAsync(Guid coupleId, Guid uploadId, Stream content, string mimeType, CancellationToken ct) => Task.FromResult("x");
+        public Task<Stream> DownloadAsync(string storagePath, CancellationToken ct) => Task.FromResult<Stream>(new MemoryStream());
+        public Task DeleteAsync(string storagePath, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class RealClock : CoupleSync.Application.Common.Interfaces.IDateTimeProvider
+    {
+        public DateTime UtcNow => DateTime.UtcNow;
+    }
+
     private static OcrCandidate Debit(int index, string description, decimal amount)
     {
         var candidate = OcrConfirmIntegrationTests.Candidate(index, description, amount, $"fp-lifecycle-{index}");

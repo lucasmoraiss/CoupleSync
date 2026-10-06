@@ -1,5 +1,10 @@
 // Lógica pura da tela de revisão do extrato (sem React Native), testável com Jest.
-import type { OcrCandidateEdit, OcrCandidateResponse, OcrConfirmRequest } from '@/types/api';
+import type {
+  OcrCandidateEdit,
+  OcrCandidateResponse,
+  OcrConfirmRequest,
+  OcrOpenImport,
+} from '@/types/api';
 import { toCategoryKey } from '@/modules/transactions/categories';
 import { amountCentsError, centsFromDigits } from '@/utils/amount';
 
@@ -117,6 +122,7 @@ export function validateReviewRows(
 export function buildOcrConfirmRequest(
   rows: readonly ReviewRow[],
   candidates: readonly OcrCandidateResponse[],
+  options: { keepJobOpen?: boolean } = {},
 ): OcrConfirmRequest {
   const originals = indexCandidates(candidates);
   const selected = rows.filter((r) => r.selected);
@@ -141,6 +147,34 @@ export function buildOcrConfirmRequest(
     selectedIndices,
     categoryOverrides,
     ...(candidateEdits.length > 0 ? { candidateEdits } : {}),
+    // Só "confirmar e continuar depois" envia; sem ele a importação fecha (a chamada de sempre).
+    ...(options.keepJobOpen ? { keepJobOpen: true } : {}),
+  };
+}
+
+/** Quantas linhas da revisão ficaram sem seleção. */
+export function unselectedCount(rows: readonly ReviewRow[]): number {
+  return rows.filter((r) => !r.selected).length;
+}
+
+/** Texto da confirmação de "Confirmar e finalizar": o que não foi selecionado é descartado. */
+export function finishConfirmMessage(unselected: number): string {
+  return unselected === 1
+    ? 'A transação não selecionada será descartada e a importação será encerrada.'
+    : `As ${unselected} transações não selecionadas serão descartadas e a importação será encerrada.`;
+}
+
+/** Corpo para descartar de vez as linhas que sobraram (a importação fecha quando não resta pendente). */
+export function buildDiscardRestRequest(pendingIndices: readonly number[]): OcrConfirmRequest {
+  return { selectedIndices: [], discardedIndices: pendingIndices, keepJobOpen: true };
+}
+
+/** Texto de uma importação aberta na lista da tela de importar extrato. */
+export function openImportSummary(item: OcrOpenImport): { title: string; pending: string } {
+  const noun = item.pendingLines === 1 ? 'transação pendente' : 'transações pendentes';
+  return {
+    title: item.fileName && item.fileName.trim() ? item.fileName : 'Extrato',
+    pending: `${item.pendingLines} de ${item.totalLines} ${noun}`,
   };
 }
 

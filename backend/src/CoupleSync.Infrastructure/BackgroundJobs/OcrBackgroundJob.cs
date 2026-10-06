@@ -2,6 +2,7 @@ using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.OcrImport;
 using CoupleSync.Domain.Interfaces;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -70,7 +71,7 @@ public sealed class OcrBackgroundJob : BackgroundService
         _logger.LogInformation("OcrBackgroundJob stopped.");
     }
 
-    /// <summary>Fails import jobs left in Processing beyond the timeout. Public so it can be unit-tested.</summary>
+    /// <summary>Fails every import job left in Processing by a previous process. Public so it can be unit-tested.</summary>
     public async Task<int> RecoverStuckJobsAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -80,7 +81,8 @@ public sealed class OcrBackgroundJob : BackgroundService
             scope.ServiceProvider.GetRequiredService<IDateTimeProvider>(),
             _logger);
 
-        var recovered = await recovery.RecoverAllAsync(ct);
+        // Startup: every job still in Processing is orphaned (single instance), no need to wait for the timeout.
+        var recovered = await recovery.RecoverAllAsync(ct, TimeSpan.Zero);
         if (recovered > 0)
             _logger.LogWarning("{Count} import job(s) stuck in Processing were marked as failed.", recovered);
         return recovered;
@@ -123,6 +125,13 @@ public sealed class OcrBackgroundJob : BackgroundService
 
                 // Delete the uploaded file only after successful processing
                 await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                // Recovery failed this job while it was being processed: its verdict stands, the result is dropped.
+                _logger.LogWarning("Import job {JobId} was changed by recovery while processing; result discarded.", job.Id);
+                foreach (var entry in ex.Entries)
+                    await entry.ReloadAsync(ct);
             }
             catch (OcrQuotaExhaustedException ex)
             {

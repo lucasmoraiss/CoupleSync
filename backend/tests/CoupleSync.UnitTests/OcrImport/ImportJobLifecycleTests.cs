@@ -68,30 +68,6 @@ public sealed class ImportJobLifecycleTests
         Assert.Equal(status, read!.Status);
     }
 
-    [Fact]
-    public async Task ApiStartup_FailsOnlyTheJobsStuckInProcessing()
-    {
-        var jobs = new FakeImportJobRepository();
-        var stuck = AddJob(jobs, ImportJobStatus.Processing, Now.AddMinutes(-30));
-        var running = AddJob(jobs, ImportJobStatus.Processing, Now.AddMinutes(-1));
-        var ready = AddJob(jobs, ImportJobStatus.Ready, Now.AddHours(-5));
-
-        var services = new ServiceCollection();
-        services.AddSingleton<IImportJobRepository>(jobs);
-        services.AddSingleton<IStorageAdapter>(new CountingStorage());
-        services.AddSingleton<IDateTimeProvider>(new FakeDateTimeProvider(Now));
-        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
-        var worker = new OcrBackgroundJob(scopeFactory, NullLogger<OcrBackgroundJob>.Instance);
-
-        var recovered = await worker.RecoverStuckJobsAsync(CancellationToken.None);
-
-        Assert.Equal(1, recovered);
-        Assert.Equal(ImportJobStatus.Failed, stuck.Status);
-        Assert.Equal("PROCESSING_TIMEOUT", stuck.ErrorCode);
-        Assert.Equal(ImportJobStatus.Processing, running.Status);
-        Assert.Equal(ImportJobStatus.Ready, ready.Status);
-    }
-
     // ── S5 5.33: partial confirmation ──────────────────────────────────────
 
     [Fact]
@@ -277,6 +253,208 @@ public sealed class ImportJobLifecycleTests
         Assert.Single(review!.Lines);
         Assert.Empty(review.Credits);
         Assert.Single(result!.Created);
+    }
+
+    // ── Fix round: concurrency, re-selecting, orphans, state guards ────────
+
+    [Fact]
+    public async Task ConcurrentConfirmationOfTheSameLine_LoserGetsTheConflict_AndNothingIsDuplicated()
+    {
+        var (service, jobs, transactions, _) = Build();
+        var job = AddReadyJob(jobs, Debit(0, "Mercado", 80m), Debit(1, "Farmácia", 35m));
+        // The competing request commits the same line between our duplicate check and our INSERT.
+        transactions.BeforeSave = () => transactions.SeedExisting(CoupleId, "fp0000");
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(
+            () => service.ConfirmCandidatesAsync(job.Id, CoupleId, UserId, [0], null, CancellationToken.None, keepJobOpen: true));
+
+        Assert.Equal("OCR_CONFIRM_CONFLICT", ex.Code);
+        Assert.Equal(409, ex.StatusCode);
+        Assert.Empty(transactions.Stored);
+    }
+
+    [Fact]
+    public async Task ConcurrentConfirmationOfDifferentLines_LoserGetsTheConflict_InsteadOfOverwritingTheLineStates()
+    {
+        // The job row carries a concurrency token: when another request changed it first, the write is
+        // rejected (nothing of this request is stored) and the app is told to refresh and retry.
+        var (service, jobs, transactions, _) = Build();
+        var job = AddReadyJob(jobs, Debit(0, "Mercado", 80m), Debit(1, "Farmácia", 35m));
+        transactions.BeforeSave = () => throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("row changed by another request");
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(
+            () => service.ConfirmCandidatesAsync(job.Id, CoupleId, UserId, [1], null, CancellationToken.None, keepJobOpen: true));
+
+        Assert.Equal("OCR_CONFIRM_CONFLICT", ex.Code);
+        Assert.Empty(transactions.Stored);
+    }
+
+    [Fact]
+    public async Task APreviouslyDiscardedLine_CanBeSelectedAgain_WhileTheJobIsOpen()
+    {
+        var (service, jobs, transactions, _) = Build();
+        var open =AddReadyJob(jobs, Debit(0, "Mercado", 80m), Debit(1, "Farmácia", 35m), Debit(2, "Padaria", 12m));
+        await service.ConfirmCandidatesAsync(
+            open.Id, CoupleId, UserId, [], null, CancellationToken.None, keepJobOpen: true, discardedIndices: [1]);
+        Assert.Equal(ImportLineState.Discarded, open.GetLineState(1));
+        Assert.Equal(ImportJobStatus.Ready, open.Status);
+
+        var result = await service.ConfirmCandidatesAsync(
+            open.Id, CoupleId, UserId, [1], null, CancellationToken.None, keepJobOpen: true);
+
+        Assert.Single(result!.Created);
+        Assert.Equal("Farmácia", result.Created[0].Description);
+        Assert.Equal(ImportLineState.Confirmed, open.GetLineState(1));
+        Assert.Equal(2, result.RemainingLines);
+        Assert.Single(transactions.Stored.Where(t => t.Description == "Farmácia"));
+    }
+
+    [Fact]
+    public async Task ApiStartup_FailsEveryJobInProcessing_EvenOnesFreshEnoughForTheOnReadRule()
+    {
+        // Single instance: whatever was Processing when the API starts belongs to a process that is gone.
+        var jobs = new FakeImportJobRepository();
+        var fresh = AddJob(jobs, ImportJobStatus.Processing, Now.AddSeconds(-20));
+        var ready = AddJob(jobs, ImportJobStatus.Ready, Now.AddMinutes(-1));
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IImportJobRepository>(jobs);
+        services.AddSingleton<IStorageAdapter>(new CountingStorage());
+        services.AddSingleton<IDateTimeProvider>(new FakeDateTimeProvider(Now));
+        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        var recovered = await new OcrBackgroundJob(scopeFactory, NullLogger<OcrBackgroundJob>.Instance)
+            .RecoverStuckJobsAsync(CancellationToken.None);
+
+        Assert.Equal(1, recovered);
+        Assert.Equal(ImportJobStatus.Failed, fresh.Status);
+        Assert.Equal("PROCESSING_TIMEOUT", fresh.ErrorCode);
+        Assert.Equal(ImportJobStatus.Ready, ready.Status);
+    }
+
+    [Fact]
+    public void AJobAlreadyFailedByRecovery_CannotBecomeReady_AndKeepsItsError()
+    {
+        var job = ImportJob.Create(CoupleId, UserId, "couples/x/y", "application/pdf", Now);
+        job.MarkProcessing(Now);
+        job.MarkFailed("PROCESSING_TIMEOUT", "interrompido", Now);
+
+        Assert.Throws<InvalidOperationException>(() => job.MarkReady("[]", Now));
+
+        Assert.Equal(ImportJobStatus.Failed, job.Status);
+        Assert.Equal("PROCESSING_TIMEOUT", job.ErrorCode);
+        Assert.Null(job.OcrResultJson);
+    }
+
+    [Fact]
+    public void OnlyAReadyJobCanBeConfirmed()
+    {
+        var job = ImportJob.Create(CoupleId, UserId, "couples/x/y", "application/pdf", Now);
+        job.MarkFailed("x", "y", Now);
+
+        Assert.Throws<InvalidOperationException>(() => job.MarkConfirmed(Now));
+    }
+
+    [Fact]
+    public async Task OpenImports_ListOnlyTheCouplesJobsThatStillHavePendingLines()
+    {
+        var (service, jobs, _, _) = Build();
+        var partial = AddReadyJob(jobs, Debit(0, "Mercado", 80m), Debit(1, "Farmácia", 35m), Credit(2, "Reembolso", 50m));
+        await service.ConfirmCandidatesAsync(partial.Id, CoupleId, UserId, [0], null, CancellationToken.None, keepJobOpen: true);
+        var untouched = AddReadyJob(jobs, Debit(0, "Padaria", 12m));
+        var finished = AddReadyJob(jobs, Debit(0, "Posto", 100m));
+        await service.ConfirmCandidatesAsync(finished.Id, CoupleId, UserId, [0], null, CancellationToken.None);
+        var otherCouple = ImportJob.Create(Guid.NewGuid(), UserId, "couples/x/z", "application/pdf", Now);
+        otherCouple.MarkProcessing(Now);
+        otherCouple.MarkReady(JsonSerializer.Serialize(new[] { Debit(0, "Alheio", 1m) }), Now);
+        jobs.Jobs.Add(otherCouple);
+
+        var open = await service.GetOpenImportsAsync(CoupleId, CancellationToken.None);
+
+        Assert.Equal(2, open.Count);
+        var partialItem = Assert.Single(open, i => i.UploadId == partial.Id);
+        Assert.Equal((1, 2, 1), (partialItem.PendingLines, partialItem.TotalLines, partialItem.CreditsCount));
+        Assert.Contains(open, i => i.UploadId == untouched.Id && i.PendingLines == 1);
+        Assert.DoesNotContain(open, i => i.UploadId == otherCouple.Id);
+    }
+
+    [Fact]
+    public async Task Upload_KeepsOnlyASafeFileName()
+    {
+        var (service, jobs, _, _) = Build();
+
+        var id = await service.UploadAsync(
+            CoupleId, UserId, new MemoryStream([1]), "application/pdf", CancellationToken.None, "C:\\Users\\x\\Extrato Setembro.pdf");
+
+        Assert.Equal("Extrato Setembro.pdf", jobs.Jobs.Single(j => j.Id == id).SourceFileName);
+    }
+
+    [Fact]
+    public async Task WhenRecoveryAlreadyFailedTheJob_TheWorkerDropsItsResult_AndDoesNotRetry()
+    {
+        var jobs = new ConcurrencyRaceRepository();
+        var job = ImportJob.Create(CoupleId, UserId, "couples/x/y", "application/pdf", Now);
+        jobs.Jobs.Add(job);
+        var provider = new FixedProvider("""{"provider":"local-pdf","transactions":[{"date":"2026-01-10","description":"Padaria","amount":12.5,"type":"Debit"}]}""");
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IImportJobRepository>(jobs);
+        services.AddSingleton<IOcrProvider>(provider);
+        services.AddSingleton<IStorageAdapter>(new CountingStorage());
+        services.AddSingleton<IDateTimeProvider>(new FakeDateTimeProvider(Now));
+        services.AddSingleton(new OcrProcessingService(
+            new UniqueIndexTransactionRepository(), new NullCategoryClassifier(), new FakeBudgetRepository()));
+        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        await new OcrBackgroundJob(scopeFactory, NullLogger<OcrBackgroundJob>.Instance)
+            .ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(0, job.RetryCount);
+        Assert.Equal(1, provider.Calls);
+        Assert.True(jobs.ConflictRaised);
+    }
+
+    private sealed class FixedProvider(string json) : IOcrProvider
+    {
+        public int Calls { get; private set; }
+
+        public Task<string> AnalyzeAsync(string storagePath, string mimeType, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(json);
+        }
+    }
+
+    /// <summary>Behaves like the real table when recovery failed the row first: saving "Ready" is a concurrency conflict.</summary>
+    private sealed class ConcurrencyRaceRepository : IImportJobRepository
+    {
+        public List<ImportJob> Jobs { get; } = new();
+        public bool ConflictRaised { get; private set; }
+
+        public Task<ImportJob?> GetByIdAsync(Guid id, Guid coupleId, CancellationToken ct)
+            => Task.FromResult(Jobs.FirstOrDefault(j => j.Id == id && j.CoupleId == coupleId));
+
+        public Task AddAsync(ImportJob job, CancellationToken ct) { Jobs.Add(job); return Task.CompletedTask; }
+
+        public Task SaveChangesAsync(CancellationToken ct)
+        {
+            if (Jobs.Any(j => j.Status == ImportJobStatus.Ready))
+            {
+                ConflictRaised = true;
+                throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("recovery failed the job first");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<ImportJob>> GetPendingAsync(int limit, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ImportJob>>(Jobs.Where(j => j.Status == ImportJobStatus.Pending).ToList());
+
+        public Task<IReadOnlyList<ImportJob>> GetReadyByCoupleAsync(Guid coupleId, int limit, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ImportJob>>([]);
+
+        public Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ImportJob>>([]);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

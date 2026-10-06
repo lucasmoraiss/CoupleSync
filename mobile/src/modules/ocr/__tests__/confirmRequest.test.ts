@@ -1,13 +1,17 @@
 import type { OcrCandidateResponse } from '@/types/api';
 import {
+  buildDiscardRestRequest,
   buildOcrConfirmRequest,
   candidateToRow,
   creditsLabel,
+  finishConfirmMessage,
   formatBRLInput,
+  openImportSummary,
   parseBRLInput,
   seedReviewRows,
   sessionFor,
   validateReviewRows,
+  unselectedCount,
   type ReviewRow,
 } from '../confirmRequest';
 
@@ -194,5 +198,62 @@ describe('S5 5.58 — entradas informadas, nunca importadas', () => {
     expect(creditsLabel(0)).toBe('');
     expect(creditsLabel(1)).toBe('1 entrada não importada');
     expect(creditsLabel(3)).toBe('3 entradas não importadas');
+  });
+});
+
+describe('confirmar e continuar depois', () => {
+  it('a chamada de sempre não envia keepJobOpen (o app instalado e o botão "finalizar" fecham a importação)', () => {
+    const request = buildOcrConfirmRequest(rowsWith({ 1: { selected: false } }), CANDIDATES);
+
+    expect(request.selectedIndices).toEqual([0, 2]);
+    expect('keepJobOpen' in request).toBe(false);
+  });
+
+  it('"continuar depois" envia keepJobOpen e só as linhas selecionadas', () => {
+    const request = buildOcrConfirmRequest(rowsWith({ 1: { selected: false } }), CANDIDATES, { keepJobOpen: true });
+
+    expect(request.selectedIndices).toEqual([0, 2]);
+    expect(request.keepJobOpen).toBe(true);
+  });
+
+  it('conta as linhas deixadas de fora', () => {
+    expect(unselectedCount(rowsWith())).toBe(0);
+    expect(unselectedCount(rowsWith({ 0: { selected: false }, 2: { selected: false } }))).toBe(2);
+  });
+
+  it('o texto de finalizar avisa que o restante é descartado', () => {
+    expect(finishConfirmMessage(1)).toBe('A transação não selecionada será descartada e a importação será encerrada.');
+    expect(finishConfirmMessage(3)).toBe('As 3 transações não selecionadas serão descartadas e a importação será encerrada.');
+  });
+
+  it('descartar o que sobrou envia os índices pendentes e mantém a importação aberta só para fechá-la', () => {
+    expect(buildDiscardRestRequest([4, 5])).toEqual({
+      selectedIndices: [],
+      discardedIndices: [4, 5],
+      keepJobOpen: true,
+    });
+  });
+
+  it('resume a importação aberta para a lista', () => {
+    expect(
+      openImportSummary({
+        uploadId: 'a',
+        fileName: 'extrato-setembro.pdf',
+        createdAtUtc: '2026-09-10T15:00:00Z',
+        pendingLines: 2,
+        totalLines: 5,
+        creditsCount: 0,
+      }),
+    ).toEqual({ title: 'extrato-setembro.pdf', pending: '2 de 5 transações pendentes' });
+    expect(
+      openImportSummary({
+        uploadId: 'b',
+        fileName: null,
+        createdAtUtc: '2026-09-10T15:00:00Z',
+        pendingLines: 1,
+        totalLines: 1,
+        creditsCount: 0,
+      }),
+    ).toEqual({ title: 'Extrato', pending: '1 de 1 transação pendente' });
   });
 });

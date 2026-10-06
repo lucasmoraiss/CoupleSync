@@ -35,6 +35,10 @@ public sealed class ImportJob : ICoupleScoped
     public string StoragePath { get; private set; } = string.Empty;
 
     public string FileMimeType { get; private set; } = string.Empty;
+
+    /// <summary>Name of the file the user sent (shown in the list of open imports). Null for older jobs.</summary>
+    public string? SourceFileName { get; private set; }
+
     public ImportJobStatus Status { get; private set; }
 
     /// <summary>
@@ -61,7 +65,8 @@ public sealed class ImportJob : ICoupleScoped
         Guid userId,
         string storagePath,
         string fileMimeType,
-        DateTime createdAtUtc)
+        DateTime createdAtUtc,
+        string? sourceFileName = null)
     {
         if (string.IsNullOrWhiteSpace(storagePath))
             throw new ArgumentException("O caminho do arquivo é obrigatório.", nameof(storagePath));
@@ -72,7 +77,9 @@ public sealed class ImportJob : ICoupleScoped
         if (createdAtUtc.Kind == DateTimeKind.Unspecified)
             createdAtUtc = DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc);
 
-        return new ImportJob(Guid.NewGuid(), coupleId, userId, storagePath, fileMimeType, createdAtUtc);
+        var job = new ImportJob(Guid.NewGuid(), coupleId, userId, storagePath, fileMimeType, createdAtUtc);
+        job.SourceFileName = NormalizeFileName(sourceFileName);
+        return job;
     }
 
     public void MarkProcessing(DateTime nowUtc)
@@ -83,6 +90,10 @@ public sealed class ImportJob : ICoupleScoped
 
     public void MarkReady(string ocrResultJson, DateTime nowUtc)
     {
+        // A job that recovery already failed (or that is not being processed) never becomes Ready.
+        if (Status != ImportJobStatus.Processing)
+            throw new InvalidOperationException($"Uma importação em {Status} não pode ser marcada como pronta.");
+
         if (string.IsNullOrWhiteSpace(ocrResultJson))
             throw new ArgumentException("O resultado da leitura é obrigatório para concluir a importação.", nameof(ocrResultJson));
 
@@ -105,6 +116,9 @@ public sealed class ImportJob : ICoupleScoped
 
     public void MarkConfirmed(DateTime nowUtc)
     {
+        if (Status != ImportJobStatus.Ready)
+            throw new InvalidOperationException($"Uma importação em {Status} não pode ser confirmada.");
+
         Status = ImportJobStatus.Confirmed;
         UpdatedAtUtc = NormalizeUtc(nowUtc);
     }
@@ -161,6 +175,16 @@ public sealed class ImportJob : ICoupleScoped
     }
 
     public bool CanRetry(int maxRetries) => RetryCount < maxRetries;
+
+    private static string? NormalizeFileName(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return null;
+        var name = new string(Path.GetFileName(fileName.Replace('\\', '/')).Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (name.Length == 0) return null;
+        return name.Length > MaxFileNameLength ? name[..MaxFileNameLength] : name;
+    }
+
+    public const int MaxFileNameLength = 120;
 
     private static DateTime NormalizeUtc(DateTime dt) =>
         dt.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : dt;

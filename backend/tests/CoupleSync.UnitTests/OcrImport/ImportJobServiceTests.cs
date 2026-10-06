@@ -336,6 +336,11 @@ internal sealed class FakeImportJobRepository : IImportJobRepository
     public Task<IReadOnlyList<ImportJob>> GetPendingAsync(int limit, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<ImportJob>>(Jobs.Where(j => j.Status == ImportJobStatus.Pending).Take(limit).ToList());
 
+    public Task<IReadOnlyList<ImportJob>> GetReadyByCoupleAsync(Guid coupleId, int limit, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ImportJob>>(
+            Jobs.Where(j => j.CoupleId == coupleId && j.Status == ImportJobStatus.Ready)
+                .OrderByDescending(j => j.CreatedAtUtc).Take(limit).ToList());
+
     public Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<ImportJob>>(
             Jobs.Where(j => j.Status == ImportJobStatus.Processing && j.UpdatedAtUtc <= cutoffUtc).Take(limit).ToList());

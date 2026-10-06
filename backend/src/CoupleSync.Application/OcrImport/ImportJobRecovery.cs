@@ -1,6 +1,7 @@
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.OcrImport;
@@ -18,7 +19,7 @@ public sealed class ImportJobRecovery
     public const string ProcessingTimeoutCode = "PROCESSING_TIMEOUT";
 
     public const string ProcessingTimeoutMessage =
-        "O processamento do extrato demorou mais que o esperado e foi interrompido. Envie o arquivo novamente.";
+        "O processamento do extrato foi interrompido. Envie o arquivo novamente.";
 
     private readonly IImportJobRepository _repository;
     private readonly IStorageAdapter _storage;
@@ -37,31 +38,49 @@ public sealed class ImportJobRecovery
         _logger = logger;
     }
 
-    /// <summary>Marks <paramref name="job"/> as failed when it is stuck in Processing. Returns true when it did.</summary>
-    public async Task<bool> FailIfStuckAsync(ImportJob job, CancellationToken ct)
+    /// <summary>
+    /// Marks <paramref name="job"/> as failed when it has been in Processing for longer than
+    /// <paramref name="timeout"/> (default: <see cref="ProcessingTimeout"/>). Returns true when it did.
+    /// </summary>
+    public async Task<bool> FailIfStuckAsync(ImportJob job, CancellationToken ct, TimeSpan? timeout = null)
     {
         var now = _dateTimeProvider.UtcNow;
-        if (!job.IsStuckProcessing(now, ProcessingTimeout))
+        if (!job.IsStuckProcessing(now, timeout ?? ProcessingTimeout))
             return false;
 
         job.MarkFailed(ProcessingTimeoutCode, ProcessingTimeoutMessage, now);
-        await _repository.SaveChangesAsync(ct);
+        try
+        {
+            await _repository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            // The worker finished the job (or something else changed it) while we were looking: leave it alone.
+            foreach (var entry in ex.Entries)
+                await entry.ReloadAsync(ct);
+            return false;
+        }
         await TryDeleteFileAsync(job, ct);
 
         _logger.LogWarning("Import job {JobId} was stuck in Processing and was marked as failed.", job.Id);
         return true;
     }
 
-    /// <summary>Fails every stuck job. Returns how many were recovered.</summary>
-    public async Task<int> RecoverAllAsync(CancellationToken ct)
+    /// <summary>
+    /// Fails every job in Processing for longer than <paramref name="timeout"/>. At API startup the caller passes
+    /// <see cref="TimeSpan.Zero"/>: the API is a single instance, so a job in Processing then belongs to a process
+    /// that no longer exists. Returns how many were recovered.
+    /// </summary>
+    public async Task<int> RecoverAllAsync(CancellationToken ct, TimeSpan? timeout = null)
     {
-        var cutoff = _dateTimeProvider.UtcNow - ProcessingTimeout;
+        var effective = timeout ?? ProcessingTimeout;
+        var cutoff = _dateTimeProvider.UtcNow - effective;
         var stuck = await _repository.GetStuckProcessingAsync(cutoff, 100, ct);
 
         var recovered = 0;
         foreach (var job in stuck)
         {
-            if (await FailIfStuckAsync(job, ct))
+            if (await FailIfStuckAsync(job, ct, effective))
                 recovered++;
         }
 

@@ -339,10 +339,31 @@ export interface OcrConfirmRequest {
   readonly selectedIndices: readonly number[];
   readonly categoryOverrides?: readonly OcrCategoryOverride[];
   readonly candidateEdits?: readonly OcrCandidateEdit[];
+  /** true: as linhas não selecionadas ficam pendentes para confirmar depois; omitido, a importação fecha. */
+  readonly keepJobOpen?: boolean;
+  /** Linhas descartadas de vez (deixam de manter a importação aberta). */
+  readonly discardedIndices?: readonly number[];
 }
 
 export interface OcrConfirmResponse {
   readonly transactionsCreated: number;
+  readonly duplicatesSkipped?: number;
+  /** Linhas ainda pendentes depois desta chamada (0 = importação fechada). */
+  readonly remainingLines?: number;
+}
+
+/** Importação com linhas ainda por revisar, listada na tela de importar extrato. */
+export interface OcrOpenImport {
+  readonly uploadId: string;
+  readonly fileName?: string | null;
+  readonly createdAtUtc: string;
+  readonly pendingLines: number;
+  readonly totalLines: number;
+  readonly creditsCount: number;
+}
+
+export interface OcrOpenImportsResponse {
+  readonly imports: readonly OcrOpenImport[];
 }
 
 // --- AI Chat ---

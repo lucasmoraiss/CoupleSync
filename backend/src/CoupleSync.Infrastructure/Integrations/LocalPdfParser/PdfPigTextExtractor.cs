@@ -28,7 +28,8 @@ public class PdfPigTextExtractor : IPdfTextExtractor
         if (Task.WaitAny([worker], Timeout) < 0)
         {
             cancellation.Cancel();
-            // The abandoned read ends with an error once the stream is disposed: observe it, nobody awaits it.
+            // This releases the caller, it does not stop PdfPig: a page that is mid-parse keeps its pool thread
+            // until it returns (the loop stops at the next page boundary). Observe its error, nobody awaits it.
             worker.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
             throw new OcrException(
                 "PDF_TIMEOUT",

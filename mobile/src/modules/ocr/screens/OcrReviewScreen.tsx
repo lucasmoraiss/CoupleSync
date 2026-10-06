@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,8 @@ import * as Haptics from 'expo-haptics';
 import { ocrApiClient, isCoupleRequiredError } from '@/services/apiClient';
 import {
   buildOcrConfirmRequest,
+  finishConfirmMessage,
+  unselectedCount,
   creditsLabel,
   emptyReviewSession,
   formatBRLInput,
@@ -99,6 +102,8 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     queryKey: ['ocr-results', uploadId],
     queryFn: () => ocrApiClient.getResults(uploadId).then((r) => r.data),
     staleTime: Infinity,
+    // Leaving the screen drops the cache: reopening a partly confirmed import must load its current lines.
+    gcTime: 0,
     retry: 1,
   });
 
@@ -118,17 +123,27 @@ export default function OcrReviewScreen({ uploadId }: Props) {
   );
 
   const confirmMutation = useMutation({
-    // Sends the user's edits (candidateEdits) along with the selection and category overrides
-    mutationFn: () =>
-      ocrApiClient.confirm(uploadId, buildOcrConfirmRequest(rows, data?.candidates ?? [])),
+    // Sends the user's edits (candidateEdits) along with the selection and category overrides.
+    // keepJobOpen: the lines left unselected stay pending and can be reviewed later.
+    mutationFn: (keepJobOpen: boolean) =>
+      ocrApiClient.confirm(
+        uploadId,
+        buildOcrConfirmRequest(rows, data?.candidates ?? [], { keepJobOpen }),
+      ),
     onSuccess: (res) => {
       const count = res.data.transactionsCreated;
+      const remaining = res.data.remainingLines ?? 0;
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['ocr-open-imports'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
       queryClient.invalidateQueries({ queryKey: ['budget'] });
       const label = count === 1 ? 'transação importada' : 'transações importadas';
-      setSuccessMsg(`${count} ${label} com sucesso!`);
+      const rest =
+        remaining > 0
+          ? ` ${remaining} ${remaining === 1 ? 'fica' : 'ficam'} para revisar depois.`
+          : '';
+      setSuccessMsg(`${count} ${label} com sucesso!${rest}`);
       setTimeout(() => {
         router.replace('/(main)/transactions' as any);
       }, 1200);
@@ -139,20 +154,39 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     },
   });
 
-  const handleConfirm = useCallback(async () => {
-    const anySelected = rows.some((r) => r.selected);
-    if (!anySelected) {
-      toast.warning('Selecione ao menos uma transação para importar.');
+  const leftOut = unselectedCount(rows);
+
+  // keepJobOpen = false: confirm and finish (what is not selected is discarded, and the user is told so).
+  const submit = useCallback(
+    async (keepJobOpen: boolean) => {
+      const anySelected = rows.some((r) => r.selected);
+      if (!anySelected) {
+        toast.warning('Selecione ao menos uma transação para importar.');
+        return;
+      }
+      if (Object.keys(rowErrors).length > 0) {
+        setShowErrors(true);
+        toast.warning('Corrija os campos destacados antes de importar.');
+        return;
+      }
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      confirmMutation.mutate(keepJobOpen);
+    },
+    [rows, rowErrors, confirmMutation, toast],
+  );
+
+  const handleConfirm = useCallback(() => {
+    if (leftOut === 0) {
+      submit(false);
       return;
     }
-    if (Object.keys(rowErrors).length > 0) {
-      setShowErrors(true);
-      toast.warning('Corrija os campos destacados antes de importar.');
-      return;
-    }
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    confirmMutation.mutate();
-  }, [rows, rowErrors, confirmMutation]);
+    Alert.alert('Confirmar e finalizar', finishConfirmMessage(leftOut), [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Confirmar e finalizar', onPress: () => submit(false) },
+    ]);
+  }, [leftOut, submit]);
+
+  const handleConfirmLater = useCallback(() => submit(true), [submit]);
 
   const toggleAll = useCallback(() => {
     const allSelected = rows.every((r) => r.selected);
@@ -359,7 +393,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
           <View style={styles.scrollPadding} />
         </ScrollView>
 
-        {/* Confirm button */}
+        {/* Confirm buttons: with lines left unselected the user chooses what happens to them */}
         <View style={styles.footer}>
           <TouchableOpacity
             style={[
@@ -372,9 +406,21 @@ export default function OcrReviewScreen({ uploadId }: Props) {
             {confirmMutation.isPending ? (
               <ActivityIndicator color={TEXT} size="small" />
             ) : (
-              <Text style={styles.confirmBtnText}>Confirmar Importação</Text>
+              <Text style={styles.confirmBtnText}>
+                {leftOut > 0 ? 'Confirmar e finalizar' : 'Confirmar Importação'}
+              </Text>
             )}
           </TouchableOpacity>
+          {leftOut > 0 ? (
+            <TouchableOpacity
+              style={[styles.laterBtn, confirmMutation.isPending && styles.confirmBtnDisabled]}
+              onPress={handleConfirmLater}
+              disabled={confirmMutation.isPending}
+              accessibilityLabel="Confirmar e continuar depois"
+            >
+              <Text style={styles.laterBtnText}>Confirmar e continuar depois</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -472,6 +518,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   confirmBtnDisabled: { opacity: 0.5 },
+  laterBtn: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: PRIMARY,
+  },
+  laterBtnText: { color: PRIMARY, fontSize: 15, fontWeight: '600' },
   confirmBtnText: { color: TEXT, fontSize: 16, fontWeight: '700' },
   mutedText: { color: MUTED, fontSize: 14 },
   errorText: { color: ERROR, fontSize: 14 },

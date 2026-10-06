@@ -30,6 +30,13 @@ public sealed class ImportJobRepository : IImportJobRepository
             .Take(limit)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<ImportJob>> GetReadyByCoupleAsync(Guid coupleId, int limit, CancellationToken ct)
+        => await _dbContext.ImportJobs
+            .Where(j => j.CoupleId == coupleId && j.Status == ImportJobStatus.Ready)
+            .OrderByDescending(j => j.CreatedAtUtc)
+            .Take(limit)
+            .ToListAsync(ct);
+
     public async Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct)
         => await _dbContext.ImportJobs
             .Where(j => j.Status == ImportJobStatus.Processing && j.UpdatedAtUtc <= cutoffUtc)
