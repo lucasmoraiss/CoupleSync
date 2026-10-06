@@ -267,6 +267,31 @@ public sealed class MigrationTests
         Assert.Equal(10, transactions.GetProperty("totalCount").GetInt32());
         Assert.All(transactions.GetProperty("items").EnumerateArray(), item =>
             Assert.Contains(item.GetProperty("category").GetString(), new[] { "ALIMENTACAO", "SAUDE", "TRANSPORTE", "OUTROS", "LAZER" }));
+
+        // The legacy user is in exactly their old group, as its owner, and it is the active one...
+        var groups = await client.GetFromJsonAsync<JsonElement>("/api/v1/couples");
+        Assert.Equal(seed.Couple1, groups.GetProperty("activeCoupleId").GetGuid());
+        var only = Assert.Single(groups.GetProperty("groups").EnumerateArray().ToList());
+        Assert.Equal(seed.Couple1, only.GetProperty("coupleId").GetGuid());
+        Assert.True(only.GetProperty("isOwner").GetBoolean());
+        Assert.Equal("Grupo com Carla e Bruno", only.GetProperty("name").GetString());
+        var me = await client.GetFromJsonAsync<JsonElement>("/api/v1/couples/me");
+        Assert.Equal(3, me.GetProperty("members").GetArrayLength());
+        var settings = await client.GetFromJsonAsync<JsonElement>("/api/v1/notifications/settings");
+        Assert.False(settings.GetProperty("lowBalanceEnabled").GetBoolean()); // the preference saved before the migration
+
+        // ...and can now open a second group, where nothing of the first shows, and come back.
+        var created = await client.PostAsJsonAsync("/api/v1/couples", new { });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accessToken").GetString());
+        Assert.Equal(0, (await client.GetFromJsonAsync<JsonElement>("/api/v1/transactions?pageSize=50")).GetProperty("totalCount").GetInt32());
+        Assert.True((await client.GetFromJsonAsync<JsonElement>("/api/v1/notifications/settings")).GetProperty("lowBalanceEnabled").GetBoolean());
+        var back = await client.PostAsJsonAsync("/api/v1/couples/switch", new { coupleId = seed.Couple1 });
+        Assert.Equal(HttpStatusCode.OK, back.StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", (await back.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accessToken").GetString());
+        Assert.Equal(10, (await client.GetFromJsonAsync<JsonElement>("/api/v1/transactions?pageSize=50")).GetProperty("totalCount").GetInt32());
     }
 
     private const string MigrationBeforeMemberships = "20261006211931_AddForeignKeysForCoupleAndUserRelations";

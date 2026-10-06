@@ -12,6 +12,23 @@ public sealed record GetCoupleMeResponse(
     Guid? OwnerUserId,
     DateTime JoinCodeExpiresAtUtc);
 
-public sealed record LeaveCoupleResponse(string AccessToken, string RefreshToken);
+/// <param name="ActiveCoupleId">The group that is active after leaving: another of the user's groups, or null.</param>
+public sealed record LeaveCoupleResponse(string AccessToken, string RefreshToken, Guid? ActiveCoupleId);
+
+public sealed record SwitchCoupleRequest(Guid CoupleId);
+
+public sealed record SwitchCoupleResponse(Guid CoupleId, string AccessToken, string RefreshToken);
+
+public sealed record MyGroupMemberResponse(Guid UserId, string Name);
+
+public sealed record MyGroupResponse(
+    Guid CoupleId,
+    string Name,
+    bool IsOwner,
+    bool IsActive,
+    DateTime JoinedAtUtc,
+    IReadOnlyCollection<MyGroupMemberResponse> Members);
+
+public sealed record MyGroupsResponse(Guid? ActiveCoupleId, int MaxGroups, IReadOnlyCollection<MyGroupResponse> Groups);
 
 public sealed record RegenerateJoinCodeResponse(string JoinCode, DateTime JoinCodeExpiresAtUtc);

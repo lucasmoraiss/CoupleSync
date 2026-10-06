@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace CoupleSync.PostgresTests;
 
@@ -197,5 +199,44 @@ public sealed class GroupMembershipConcurrencyTests
         Assert.Equal(8, statuses.Count(s => s == HttpStatusCode.Conflict));
         Assert.Equal(5, await database.ScalarAsync<long>($"SELECT count(*) FROM couple_members WHERE user_id = '{ana.UserId}'"));
         await AssertConsistentAsync(database);
+    }
+
+    [PostgresFact]
+    public async Task SwitchingIntoAGroupWhileBeingRemovedFromIt_NeverLeavesAnActiveGroupWithoutMembership()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+
+        for (var round = 0; round < Rounds; round++)
+        {
+            var owner = await factory.RegisterAsync("Dona");
+            var member = await factory.RegisterAsync("Membro", joinCode: owner.JoinCode);
+            var created = await member.Client.PostAsJsonAsync("/api/v1/couples", new { }); // the member's own group becomes active
+            var own = await created.Content.ReadFromJsonAsync<JsonElement>();
+            member.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", own.GetProperty("accessToken").GetString());
+
+            var statuses = await AtOnceAsync(
+                () => member.Client.PostAsJsonAsync("/api/v1/couples/switch", new { coupleId = owner.CoupleId }),
+                () => owner.Client.DeleteAsync($"/api/v1/couples/members/{member.UserId}"));
+
+            Assert.Equal(HttpStatusCode.NoContent, statuses[1]);
+            await AssertConsistentAsync(database);
+            var active = await database.ScalarAsync<Guid?>($"SELECT couple_id FROM users WHERE id = '{member.UserId}'");
+            if (statuses[0] == HttpStatusCode.OK)
+            {
+                Assert.Null(active); // switched in first, then removed from what had become the active group
+            }
+            else
+            {
+                Assert.Equal(HttpStatusCode.NotFound, statuses[0]);
+                Assert.Equal(own.GetProperty("coupleId").GetGuid(), active);
+            }
+
+            // Whatever the order, the removed member's token for that group reads nothing of it.
+            using var data = await member.Client.GetAsync("/api/v1/transactions");
+            Assert.True(data.StatusCode is HttpStatusCode.OK or HttpStatusCode.Forbidden);
+            Assert.Equal(0, await database.ScalarAsync<long>(
+                $"SELECT count(*) FROM couple_members WHERE couple_id = '{owner.CoupleId}' AND user_id = '{member.UserId}'"));
+        }
     }
 }

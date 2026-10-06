@@ -20,6 +20,8 @@ public sealed class CouplesController : ControllerBase
     private readonly LeaveCoupleCommandHandler _leaveCoupleHandler;
     private readonly RemoveCoupleMemberCommandHandler _removeMemberHandler;
     private readonly RegenerateJoinCodeCommandHandler _regenerateJoinCodeHandler;
+    private readonly SwitchCoupleCommandHandler _switchCoupleHandler;
+    private readonly GetMyGroupsQueryHandler _getMyGroupsHandler;
 
     public CouplesController(
         CreateCoupleCommandHandler createCoupleHandler,
@@ -27,14 +29,57 @@ public sealed class CouplesController : ControllerBase
         GetCoupleMeQueryHandler getCoupleMeHandler,
         LeaveCoupleCommandHandler leaveCoupleHandler,
         RemoveCoupleMemberCommandHandler removeMemberHandler,
-        RegenerateJoinCodeCommandHandler regenerateJoinCodeHandler)
+        RegenerateJoinCodeCommandHandler regenerateJoinCodeHandler,
+        SwitchCoupleCommandHandler switchCoupleHandler,
+        GetMyGroupsQueryHandler getMyGroupsHandler)
     {
+        _switchCoupleHandler = switchCoupleHandler;
+        _getMyGroupsHandler = getMyGroupsHandler;
         _leaveCoupleHandler = leaveCoupleHandler;
         _removeMemberHandler = removeMemberHandler;
         _regenerateJoinCodeHandler = regenerateJoinCodeHandler;
         _createCoupleHandler = createCoupleHandler;
         _joinCoupleHandler = joinCoupleHandler;
         _getCoupleMeHandler = getCoupleMeHandler;
+    }
+
+    /// <summary>The caller's own groups (never anyone else's) and which one is active.</summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(MyGroupsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<MyGroupsResponse>> MyGroups(CancellationToken cancellationToken)
+    {
+        var result = await _getMyGroupsHandler.HandleAsync(
+            new GetMyGroupsQuery(GetAuthenticatedUserId()),
+            cancellationToken);
+
+        return Ok(new MyGroupsResponse(
+            result.ActiveCoupleId,
+            result.MaxGroups,
+            result.Groups
+                .Select(g => new MyGroupResponse(
+                    g.CoupleId,
+                    g.Name,
+                    g.IsOwner,
+                    g.IsActive,
+                    g.JoinedAtUtc,
+                    g.Members.Select(m => new MyGroupMemberResponse(m.UserId, m.Name)).ToArray()))
+                .ToArray()));
+    }
+
+    /// <summary>Makes another of the caller's groups the active one; answers with tokens for it.</summary>
+    [HttpPost("switch")]
+    [ProducesResponseType(typeof(SwitchCoupleResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SwitchCoupleResponse>> Switch([FromBody] SwitchCoupleRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _switchCoupleHandler.HandleAsync(
+            new SwitchCoupleCommand(GetAuthenticatedUserId(), request.CoupleId),
+            cancellationToken);
+
+        return Ok(new SwitchCoupleResponse(result.CoupleId, result.AccessToken, result.RefreshToken));
     }
 
     [HttpPost]
@@ -95,7 +140,21 @@ public sealed class CouplesController : ControllerBase
             new LeaveCoupleCommand(GetAuthenticatedUserId()),
             cancellationToken);
 
-        return Ok(new LeaveCoupleResponse(result.AccessToken, result.RefreshToken));
+        return Ok(new LeaveCoupleResponse(result.AccessToken, result.RefreshToken, result.ActiveCoupleId));
+    }
+
+    /// <summary>Leaves one specific group of the caller's (the route above leaves the active one).</summary>
+    [HttpPost("{coupleId:guid}/leave")]
+    [ProducesResponseType(typeof(LeaveCoupleResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<LeaveCoupleResponse>> LeaveGroup(Guid coupleId, CancellationToken cancellationToken)
+    {
+        var result = await _leaveCoupleHandler.HandleAsync(
+            new LeaveCoupleCommand(GetAuthenticatedUserId(), coupleId),
+            cancellationToken);
+
+        return Ok(new LeaveCoupleResponse(result.AccessToken, result.RefreshToken, result.ActiveCoupleId));
     }
 
     [HttpDelete("members/{memberUserId:guid}")]

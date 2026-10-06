@@ -60,6 +60,8 @@ builder.Services.AddScoped<GetCurrentUserQueryHandler>();
 builder.Services.AddScoped<CreateCoupleCommandHandler>();
 builder.Services.AddScoped<JoinCoupleCommandHandler>();
 builder.Services.AddScoped<LeaveCoupleCommandHandler>();
+builder.Services.AddScoped<SwitchCoupleCommandHandler>();
+builder.Services.AddScoped<GetMyGroupsQueryHandler>();
 builder.Services.AddScoped<RemoveCoupleMemberCommandHandler>();
 builder.Services.AddScoped<RegenerateJoinCodeCommandHandler>();
 builder.Services.AddScoped<GetCoupleMeQueryHandler>();
