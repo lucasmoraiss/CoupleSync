@@ -299,6 +299,16 @@ export interface ChatResponse {
   readonly reply: string;
 }
 
+// --- Categories ---
+export interface CategoryItemResponse {
+  readonly key: string;
+  readonly label: string;
+}
+
+export interface CategoriesResponse {
+  readonly categories: readonly CategoryItemResponse[];
+}
+
 // --- Reports ---
 export interface CategorySpending {
   readonly name: string;

@@ -1,5 +1,7 @@
 // Lógica pura da tela de revisão do extrato (sem React Native), testável com Jest.
 import type { OcrCandidateEdit, OcrCandidateResponse, OcrConfirmRequest } from '@/types/api';
+import { toCategoryKey } from '@/modules/transactions/categories';
+import { amountCentsError, centsFromDigits } from '@/utils/amount';
 
 /** Linha editável da revisão. */
 export interface ReviewRow {
@@ -16,10 +18,9 @@ export interface ReviewRow {
 /** Erros de validação por índice do candidato; cada mensagem é exibida na própria linha. */
 export type ReviewRowErrors = Record<number, { description?: string; amount?: string }>;
 
-/** Converte o texto do campo de valor ("1.234,56") em centavos (123456). */
+/** Converte o texto do campo de valor ("1.234,56") em centavos (123456), limitado ao teto da API. */
 export function parseBRLInput(value: string): number {
-  const digits = value.replace(/[^\d]/g, '');
-  return digits ? Number(digits) : 0;
+  return centsFromDigits(value);
 }
 
 export function formatBRLInput(cents: number): string {
@@ -38,7 +39,8 @@ export function candidateToRow(c: OcrCandidateResponse): ReviewRow {
     date: c.date,
     confidence: c.confidence,
     duplicateSuspected: c.duplicateSuspected,
-    category: c.suggestedCategory ?? '',
+    // Só categoria canônica segue na linha; qualquer outra grafia vira a chave, o resto fica sem categoria.
+    category: toCategoryKey(c.suggestedCategory) ?? '',
   };
 }
 
@@ -93,8 +95,10 @@ export function validateReviewRows(
         rowErrors.description = `A descrição deve ter no máximo ${DESCRIPTION_MAX_LENGTH} caracteres.`;
       }
     }
-    if (changes.amountCents !== undefined && !(changes.amountCents > 0)) {
-      rowErrors.amount = 'Informe um valor maior que zero.';
+    if (changes.amountCents !== undefined) {
+      // Mesma regra da API: maior que zero e até R$ 999.999.999,99.
+      const amountError = amountCentsError(changes.amountCents);
+      if (amountError) rowErrors.amount = amountError;
     }
 
     if (rowErrors.description || rowErrors.amount) {
@@ -119,8 +123,8 @@ export function buildOcrConfirmRequest(
 
   const selectedIndices = selected.map((r) => r.index);
   const categoryOverrides = selected
-    .filter((r) => r.category.trim().length > 0)
-    .map((r) => ({ index: r.index, category: r.category.trim() }));
+    .map((r) => ({ index: r.index, category: toCategoryKey(r.category) }))
+    .filter((o): o is { index: number; category: string } => o.category !== null);
 
   const candidateEdits: OcrCandidateEdit[] = [];
   for (const row of selected) {

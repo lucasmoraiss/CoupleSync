@@ -1,6 +1,7 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.Transactions.Commands;
@@ -45,8 +46,11 @@ public sealed class CreateManualTransactionCommandHandler
         if (cmd.CoupleId == Guid.Empty) throw new AppException("INVALID_INPUT", "O casal é obrigatório.", 400);
         if (cmd.UserId == Guid.Empty) throw new AppException("INVALID_INPUT", "O usuário é obrigatório.", 400);
         if (cmd.Amount <= 0) throw new AppException("INVALID_INPUT", "O valor deve ser maior que zero.", 400);
-        if (string.IsNullOrWhiteSpace(cmd.Currency)) throw new AppException("INVALID_INPUT", "A moeda é obrigatória.", 400);
+        var currency = CurrencyRules.TryNormalize(cmd.Currency)
+            ?? throw new AppException("INVALID_CURRENCY", CurrencyRules.InvalidMessage, 400);
         if (string.IsNullOrWhiteSpace(cmd.Category)) throw new AppException("INVALID_INPUT", "A categoria é obrigatória.", 400);
+        var category = TransactionCategories.TryNormalize(cmd.Category)
+            ?? throw new AppException("INVALID_CATEGORY", TransactionCategories.InvalidMessage, 400);
 
         var now = _clock.UtcNow;
         var eventTs = cmd.EventTimestampUtc == default ? now : cmd.EventTimestampUtc;
@@ -56,7 +60,7 @@ public sealed class CreateManualTransactionCommandHandler
             userId: cmd.UserId,
             bank: ManualBank,
             amount: cmd.Amount,
-            currency: cmd.Currency,
+            currency: currency,
             eventTimestamp: eventTs,
             description: cmd.Description,
             merchant: cmd.Merchant,
@@ -75,11 +79,11 @@ public sealed class CreateManualTransactionCommandHandler
             fingerprint: fingerprint,
             bank: ManualBank,
             amount: cmd.Amount,
-            currency: cmd.Currency.Trim().ToUpperInvariant(),
+            currency: currency,
             eventTimestampUtc: eventTs,
             description: cmd.Description,
             merchant: cmd.Merchant,
-            category: cmd.Category.Trim(),
+            category: category,
             ingestEventId: ingest.Id,
             createdAtUtc: now);
 

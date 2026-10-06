@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using System.Security.Claims;
 using CoupleSync.Api.Contracts.Goals;
 using CoupleSync.Api.Filters;
@@ -67,7 +68,7 @@ public sealed class GoalsController : ControllerBase
                 request.Title,
                 request.Description,
                 request.TargetAmount,
-                request.Currency ?? "BRL",
+                CurrencyRules.NormalizeOrBrl(request.Currency),
                 deadline),
             cancellationToken);
 

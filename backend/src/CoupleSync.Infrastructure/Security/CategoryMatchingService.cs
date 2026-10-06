@@ -1,4 +1,5 @@
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Infrastructure.Security;
 
@@ -23,10 +24,10 @@ public sealed class CategoryMatchingService : ICategoryMatchingService
             var keywordUpper = rule.Keyword.ToUpperInvariant();
             if (descUpper.Contains(keywordUpper) || merchantUpper.Contains(keywordUpper))
             {
-                return rule.Category;
+                return TransactionCategories.NormalizeOrOther(rule.Category);
             }
         }
 
-        return "OUTROS";
+        return TransactionCategories.Other;
     }
 }

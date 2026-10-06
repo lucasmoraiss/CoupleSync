@@ -92,7 +92,23 @@ describe('A04 — corpo da confirmação do extrato (candidateEdits)', () => {
       CANDIDATES,
     );
 
-    expect(request.categoryOverrides).toEqual([{ index: 0, category: 'Alimentação' }]);
+    // A API recebe a chave canônica, qualquer que seja a grafia da linha.
+    expect(request.categoryOverrides).toEqual([{ index: 0, category: 'ALIMENTACAO' }]);
+  });
+
+  it('não envia categoria fora da lista canônica nem linha sem categoria', () => {
+    const request = buildOcrConfirmRequest(
+      rowsWith({ 0: { category: 'Mercado' }, 1: { category: '' }, 2: { category: 'saude' } }),
+      CANDIDATES,
+    );
+
+    expect(request.categoryOverrides).toEqual([{ index: 2, category: 'SAUDE' }]);
+  });
+
+  it('a sugestão do servidor entra na linha como chave canônica', () => {
+    expect(candidateToRow({ ...candidate(0, 'X', 1), suggestedCategory: 'Alimentação' }).category).toBe('ALIMENTACAO');
+    expect(candidateToRow({ ...candidate(0, 'X', 1), suggestedCategory: 'Educação' }).category).toBe('');
+    expect(candidateToRow(candidate(0, 'X', 1)).category).toBe('');
   });
 });
 
@@ -118,6 +134,15 @@ describe('A04 — validação das linhas antes de enviar', () => {
     expect(validateReviewRows(rowsWith({ 2: { amountCents: parseBRLInput('0,00') } }), CANDIDATES)).toEqual({
       2: { amount: 'Informe um valor maior que zero.' },
     });
+  });
+
+  it('valor acima de R$ 999.999.999,99 gera erro na linha, e o campo nunca passa do teto', () => {
+    expect(parseBRLInput('9.999.999.999,99')).toBe(99_999_999_999);
+    expect(parseBRLInput('99.999.999.999.999,99')).toBe(99_999_999_999);
+    expect(validateReviewRows(rowsWith({ 0: { amountCents: 100_000_000_000 } }), CANDIDATES)).toEqual({
+      0: { amount: 'O valor máximo é R$ 999.999.999,99.' },
+    });
+    expect(validateReviewRows(rowsWith({ 0: { amountCents: 99_999_999_999 } }), CANDIDATES)).toEqual({});
   });
 
   it('linha não selecionada não é validada', () => {

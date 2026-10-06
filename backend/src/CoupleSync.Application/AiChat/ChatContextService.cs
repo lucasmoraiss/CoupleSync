@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using System.Text;
 using CoupleSync.Application.Budget;
 using CoupleSync.Application.Common.Interfaces;
@@ -51,7 +52,8 @@ public sealed class ChatContextService
         }
 
         var categoryTotals = recentTxns
-            .GroupBy(t => t.Category)
+            .Where(t => CurrencyRules.IsBrl(t.Currency))
+            .GroupBy(t => TransactionCategories.NormalizeOrOther(t.Category))
             .Select(g => new { Cat = g.Key, Total = g.Sum(t => t.Amount) })
             .ToList();
 
@@ -59,7 +61,7 @@ public sealed class ChatContextService
         {
             sb.AppendLine("Gastos por categoria nos últimos 30 dias:");
             foreach (var ct_ in categoryTotals)
-                sb.AppendLine($"  - {ct_.Cat}: R${ct_.Total:N2}");
+                sb.AppendLine($"  - {TransactionCategories.Label(ct_.Cat)}: R${ct_.Total:N2}");
         }
 
         var activeGoals = goals.Where(g => g.Status == GoalStatus.Active).ToList();
@@ -69,7 +71,7 @@ public sealed class ChatContextService
             foreach (var goal in activeGoals)
             {
                 var goalTxns = await _transactionRepository.GetByGoalIdAsync(goal.Id, coupleId, ct);
-                var progress = goalTxns.Sum(t => t.Amount);
+                var progress = goalTxns.Where(t => CurrencyRules.IsBrl(t.Currency)).Sum(t => t.Amount);
                 var percent = goal.TargetAmount > 0
                     ? Math.Clamp(progress / goal.TargetAmount * 100m, 0m, 100m)
                     : 0m;

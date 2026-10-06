@@ -1,5 +1,4 @@
 using CoupleSync.Api.Contracts.Budget;
-using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -14,12 +13,8 @@ public sealed class CreateBudgetPlanRequestValidator : AbstractValidator<CreateB
             .Matches(@"^\d{4}-(0[1-9]|1[0-2])$")
             .WithMessage("O mês deve estar no formato AAAA-MM.");
 
-        RuleFor(x => x.GrossIncome)
-            .GreaterThanOrEqualTo(0)
-            .LessThanOrEqualTo(MoneyRules.MaxAmount);
+        RuleFor(x => x.GrossIncome).PositiveMoney();
 
-        RuleFor(x => x.Currency)
-            .NotEmpty()
-            .Length(2, 3);
+        RuleFor(x => x.Currency).BrlCurrency();
     }
 }

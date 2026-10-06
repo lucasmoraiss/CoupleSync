@@ -20,10 +20,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { transactionsApiClient } from '@/services/apiClient';
 import { PREDEFINED_CATEGORIES } from '@/modules/transactions/categories';
+import { useCategories } from '@/modules/transactions/useCategories';
+import { parseAmountText } from '@/utils/amount';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 
 export default function NewTransactionScreen() {
   const queryClient = useQueryClient();
+  const categories = useCategories();
 
   const [amountText, setAmountText] = useState('');
   const [description, setDescription] = useState('');
@@ -42,21 +45,14 @@ export default function NewTransactionScreen() {
     }, [submitting])
   );
 
-  const parseAmount = (raw: string): number | null => {
-    // Accept both "12,34" and "12.34"
-    const normalized = raw.replace(/\s/g, '').replace(',', '.');
-    const n = Number(normalized);
-    if (!Number.isFinite(n) || n <= 0) return null;
-    // Round to 2 decimals
-    return Math.round(n * 100) / 100;
-  };
-
   const handleSubmit = async () => {
-    const amount = parseAmount(amountText);
-    if (amount === null) {
-      Alert.alert('Valor inválido', 'Informe um valor positivo (ex: 42,90).');
+    // Mesma regra da API: maior que zero, até R$ 999.999.999,99 e no máximo duas casas decimais.
+    const parsed = parseAmountText(amountText);
+    if (!parsed.ok) {
+      Alert.alert('Valor inválido', parsed.message);
       return;
     }
+    const amount = parsed.value;
     if (!category) {
       Alert.alert('Categoria', 'Selecione uma categoria.');
       return;
@@ -137,7 +133,7 @@ export default function NewTransactionScreen() {
 
           <Text style={styles.label}>Categoria</Text>
           <View style={styles.categoryGrid}>
-            {PREDEFINED_CATEGORIES.map((c) => {
+            {categories.map((c) => {
               const selected = category === c.value;
               return (
                 <Pressable

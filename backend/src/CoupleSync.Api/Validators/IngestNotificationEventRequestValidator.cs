@@ -5,7 +5,6 @@ namespace CoupleSync.Api.Validators;
 
 public sealed class IngestNotificationEventRequestValidator : AbstractValidator<IngestNotificationEventRequest>
 {
-    private static readonly string[] AllowedCurrencies = ["BRL", "USD", "EUR"];
     private static readonly string[] AllowedBanks = ["NUBANK", "ITAU", "INTER", "C6", "BRADESCO", "XP", "BTG", "SANTANDER", "CAIXA", "BB"];
 
     public IngestNotificationEventRequestValidator()
@@ -18,14 +17,9 @@ public sealed class IngestNotificationEventRequestValidator : AbstractValidator<
             .WithMessage("O banco '{PropertyValue}' não é suportado. Bancos suportados: " + string.Join(", ", AllowedBanks));
 
         RuleFor(x => x.Amount)
-            .GreaterThan(0).WithMessage("O valor deve ser maior que zero.")
-            .LessThanOrEqualTo(1_000_000).WithMessage("O valor excede o máximo permitido.");
+            .PositiveMoney();
 
-        RuleFor(x => x.Currency)
-            .Cascade(CascadeMode.Stop)
-            .NotEmpty().WithMessage("A moeda é obrigatória.")
-            .Must(c => AllowedCurrencies.Contains(c.Trim().ToUpperInvariant()))
-            .WithMessage("A moeda '{PropertyValue}' não é suportada. Use BRL, USD ou EUR.");
+        RuleFor(x => x.Currency).BrlCurrency();
 
         RuleFor(x => x.EventTimestamp)
             .NotEmpty().WithMessage("A data do evento é obrigatória.")

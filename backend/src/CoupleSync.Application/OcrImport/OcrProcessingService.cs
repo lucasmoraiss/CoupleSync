@@ -16,9 +16,7 @@ public sealed class OcrProcessingService
     private static readonly TimeSpan BatchClassificationTimeout = TimeSpan.FromSeconds(15);
 
     internal static readonly string[] DefaultCategories =
-    [
-        "Alimentação", "Transporte", "Lazer", "Saúde", "Moradia", "Educação", "Outros"
-    ];
+        TransactionCategories.All.Select(c => c.Label).ToArray();
 
     public OcrProcessingService(
         ITransactionRepository transactionRepository,
@@ -98,8 +96,11 @@ public sealed class OcrProcessingService
         {
             if (batchCts.IsCancellationRequested) break;
 
-            candidate.SuggestedCategory = await _categoryClassifier.SuggestCategoryAsync(
+            var suggested = await _categoryClassifier.SuggestCategoryAsync(
                 candidate.Description, categories, batchCts.Token);
+
+            // Only canonical categories leave here; anything else the classifier invents is dropped.
+            candidate.SuggestedCategory = TransactionCategories.TryNormalize(suggested);
         }
     }
 
@@ -112,10 +113,10 @@ public sealed class OcrProcessingService
         if (plan?.Allocations.Count > 0)
         {
             var categories = plan.Allocations
-                .Select(a => a.Category.Trim())
-                .Where(c => !string.IsNullOrWhiteSpace(c))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(30)
+                .Select(a => TransactionCategories.TryNormalize(a.Category))
+                .OfType<string>()
+                .Distinct(StringComparer.Ordinal)
+                .Select(TransactionCategories.Label)
                 .ToList();
 
             if (categories.Count > 0)

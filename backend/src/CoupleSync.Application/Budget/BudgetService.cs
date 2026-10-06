@@ -3,6 +3,7 @@ using CoupleSync.Application.Budget.Queries;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Application.Budget;
@@ -85,7 +86,16 @@ public sealed class BudgetService
                 "BUDGET_ALLOCATION_LIMIT",
                 "Um orçamento pode ter no máximo 20 categorias.");
 
-        if (allocations.GroupBy(a => a.Category, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
+        // Every category goes through the canonical list ("Alimentação" and "alimentacao" are the same).
+        allocations = allocations
+            .Select(a => a with
+            {
+                Category = TransactionCategories.TryNormalize(a.Category)
+                    ?? throw new BadRequestException("INVALID_CATEGORY", TransactionCategories.InvalidMessage)
+            })
+            .ToList();
+
+        if (allocations.GroupBy(a => a.Category, StringComparer.Ordinal).Any(g => g.Count() > 1))
             throw new UnprocessableEntityException(
                 "BUDGET_ALLOCATION_DUPLICATE_CATEGORY",
                 "Cada categoria só pode aparecer uma vez no orçamento.");
@@ -214,7 +224,7 @@ public sealed class BudgetService
         var allocations = plan.Allocations
             .Select(a =>
             {
-                var spent = actualSpentMap.GetValueOrDefault(a.Category, 0m);
+                var spent = actualSpentMap.GetValueOrDefault(TransactionCategories.NormalizeOrOther(a.Category), 0m);
                 return new BudgetAllocationDto(a.Id, a.Category, a.AllocatedAmount, a.Currency, spent, a.AllocatedAmount - spent);
             })
             .ToList();

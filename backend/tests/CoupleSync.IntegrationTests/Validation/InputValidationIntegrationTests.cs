@@ -77,9 +77,10 @@ public sealed class InputValidationIntegrationTests
 
         var timestamp = DateTime.UtcNow.AddHours(-2).ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
 
+        // An absent currency means BRL (the installed app always sends it, but older clients may not).
         var withoutCurrency = await PostJsonAsync(client, "/api/v1/integrations/events",
             $$"""{"bank":"NUBANK","amount":10.5,"eventTimestamp":"{{timestamp}}"}""");
-        Assert.Equal(HttpStatusCode.BadRequest, withoutCurrency.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, withoutCurrency.StatusCode);
 
         var emptyBody = await PostJsonAsync(client, "/api/v1/integrations/events", "{}");
         Assert.Equal(HttpStatusCode.BadRequest, emptyBody.StatusCode);

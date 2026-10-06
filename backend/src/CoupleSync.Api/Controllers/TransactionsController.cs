@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using System.Security.Claims;
 using CoupleSync.Api.Contracts.Transactions;
 using CoupleSync.Api.Filters;
@@ -124,7 +125,7 @@ public sealed class TransactionsController : ControllerBase
         var coupleId = GetAuthenticatedCoupleId();
         var userId = GetAuthenticatedUserId();
 
-        var currency = string.IsNullOrWhiteSpace(request.Currency) ? "BRL" : request.Currency;
+        var currency = CurrencyRules.NormalizeOrBrl(request.Currency);
         var eventTs = request.EventTimestampUtc ?? DateTime.UtcNow;
         if (eventTs.Kind == DateTimeKind.Unspecified)
             eventTs = DateTime.SpecifyKind(eventTs, DateTimeKind.Utc);

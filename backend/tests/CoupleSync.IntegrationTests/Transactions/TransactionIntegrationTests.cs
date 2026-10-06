@@ -283,7 +283,7 @@ public sealed class TransactionIntegrationTests
         var payload = await response.Content.ReadFromJsonAsync<TransactionResponseDto>();
         Assert.NotNull(payload);
         Assert.Equal(txn.Id, payload!.Id);
-        Assert.Equal("Saúde", payload.Category);
+        Assert.Equal("SAUDE", payload.Category);
     }
 
     [Fact]

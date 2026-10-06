@@ -27,9 +27,9 @@ public sealed class BudgetControllerTests
     private static ReplaceAllocationsRequestDto ValidAllocationsRequest() => new(
         Allocations:
         [
-            new("Food", 1000m, "BRL"),
-            new("Transport", 500m, "BRL"),
-            new("Bills", 1500m, "BRL")
+            new("ALIMENTACAO", 1000m, "BRL"),
+            new("TRANSPORTE", 500m, "BRL"),
+            new("MORADIA", 1500m, "BRL")
         ]);
 
     // ── Unauthenticated / no couple ────────────────────────────────────────
@@ -190,7 +190,7 @@ public sealed class BudgetControllerTests
         var payload = await response.Content.ReadFromJsonAsync<BudgetPlanResponseDto>();
         Assert.NotNull(payload);
         Assert.Equal(3, payload!.Allocations.Count);
-        Assert.Contains(payload.Allocations, a => a.Category == "Food" && a.AllocatedAmount == 1000m);
+        Assert.Contains(payload.Allocations, a => a.Category == "ALIMENTACAO" && a.AllocatedAmount == 1000m);
     }
 
     [Fact]
@@ -209,7 +209,7 @@ public sealed class BudgetControllerTests
 
         var tooMany = new ReplaceAllocationsRequestDto(
             Allocations: Enumerable.Range(1, 21)
-                .Select(i => new AllocationItemDto($"Category{i}", 100m, "BRL"))
+                .Select(i => new AllocationItemDto(CoupleSync.Domain.ValueObjects.TransactionCategories.All[i % 7].Key, 100m, "BRL"))
                 .ToArray());
 
         var response = await client.PutAsJsonAsync(
@@ -239,8 +239,8 @@ public sealed class BudgetControllerTests
         var dupRequest = new ReplaceAllocationsRequestDto(
             Allocations:
             [
-                new("Food", 500m, "BRL"),
-                new("Food", 300m, "BRL") // duplicate
+                new("ALIMENTACAO", 500m, "BRL"),
+                new("ALIMENTACAO", 300m, "BRL") // duplicate
             ]);
 
         var response = await client.PutAsJsonAsync(
@@ -254,7 +254,7 @@ public sealed class BudgetControllerTests
     }
 
     [Fact]
-    public async Task ReplaceAllocations_CurrencyMismatch_Returns422()
+    public async Task ReplaceAllocations_NonBrlCurrency_Returns400()
     {
         await using var factory = new BudgetWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -270,17 +270,17 @@ public sealed class BudgetControllerTests
         var mismatchRequest = new ReplaceAllocationsRequestDto(
             Allocations:
             [
-                new("Food", 500m, "USD") // USD mismatch against BRL plan
+                new("ALIMENTACAO", 500m, "USD") // USD mismatch against BRL plan
             ]);
 
         var response = await client.PutAsJsonAsync(
             $"/api/v1/budgets/{plan!.Id}/allocations",
             mismatchRequest);
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var error = await response.Content.ReadFromJsonAsync<ErrorDto>();
         Assert.NotNull(error);
-        Assert.Equal("BUDGET_ALLOCATION_CURRENCY_MISMATCH", error!.Code);
+        Assert.Equal("VALIDATION_ERROR", error!.Code);
     }
 
     // ── Couple isolation ───────────────────────────────────────────────────

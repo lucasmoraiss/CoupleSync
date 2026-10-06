@@ -1,6 +1,5 @@
 using CoupleSync.Api.Contracts.Goals;
 using CoupleSync.Application.Common.Interfaces;
-using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -28,17 +27,9 @@ public sealed class UpdateGoalRequestValidator : AbstractValidator<UpdateGoalReq
             .MaximumLength(512)
             .When(x => x.Description is not null);
 
-        RuleFor(x => x.TargetAmount)
-            .GreaterThan(0)
-            .LessThanOrEqualTo(MoneyRules.MaxAmount)
-            .Must(amount => MoneyRules.HasAtMostTwoDecimals(amount!.Value))
-            .WithMessage("O valor da meta deve ter no máximo duas casas decimais.")
-            .When(x => x.TargetAmount is not null);
+        RuleFor(x => x.TargetAmount).PositiveMoney();
 
-        RuleFor(x => x.CurrentAmount)
-            .GreaterThanOrEqualTo(0)
-            .LessThanOrEqualTo(MoneyRules.MaxAmount)
-            .When(x => x.CurrentAmount is not null);
+        RuleFor(x => x.CurrentAmount).NonNegativeMoney();
 
         // Same rule as CreateGoalRequestValidator: today or later, and only when a deadline is sent.
         RuleFor(x => x.Deadline)

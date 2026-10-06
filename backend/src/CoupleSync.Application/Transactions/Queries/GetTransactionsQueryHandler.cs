@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Application.Common.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -20,7 +21,8 @@ public sealed class GetTransactionsQueryHandler
             query.CoupleId,
             query.Page,
             query.PageSize,
-            query.Category,
+            // A filter typed as "Alimentação" or "alimentacao" means the canonical key.
+            TransactionCategories.TryNormalize(query.Category) ?? query.Category,
             query.StartDate,
             query.EndDate,
             cancellationToken);

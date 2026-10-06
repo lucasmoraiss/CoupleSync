@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -109,13 +110,14 @@ public sealed class TransactionRepository : ITransactionRepository
         // Sum(decimal) to SQL, so we apply the aggregation in LINQ to Objects.
         var rows = await _dbContext.Transactions
             .Where(t => t.CoupleId == coupleId
+                        && t.Currency == CurrencyRules.Brl
                         && t.EventTimestampUtc >= startUtc
                         && t.EventTimestampUtc < endUtc)
             .Select(t => new { t.Category, t.Amount })
             .ToListAsync(ct);
 
         return rows
-            .GroupBy(r => r.Category)
+            .GroupBy(r => TransactionCategories.NormalizeOrOther(r.Category))
             .ToDictionary(g => g.Key, g => g.Sum(r => r.Amount));
     }
 

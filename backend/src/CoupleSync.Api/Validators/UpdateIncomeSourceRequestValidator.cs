@@ -1,5 +1,4 @@
 using CoupleSync.Api.Contracts.Income;
-using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -14,9 +13,6 @@ public sealed class UpdateIncomeSourceRequestValidator : AbstractValidator<Updat
             .MaximumLength(64)
             .When(x => x.Name is not null);
 
-        RuleFor(x => x.Amount)
-            .GreaterThanOrEqualTo(0)
-            .LessThanOrEqualTo(MoneyRules.MaxAmount)
-            .When(x => x.Amount is not null);
+        RuleFor(x => x.Amount).PositiveMoney();
     }
 }

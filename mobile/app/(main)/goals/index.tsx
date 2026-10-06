@@ -28,6 +28,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
+import { amountCentsError, centsFromDigits } from '@/utils/amount';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -146,9 +147,7 @@ function GoalFormModal({
   }, [visible, initialValues]);
 
   const handleAmountChange = (raw: string) => {
-    const digitsOnly = raw.replace(/[^\d]/g, '');
-    const cents = digitsOnly ? Number(digitsOnly) : 0;
-    setForm((f) => ({ ...f, amountCents: cents }));
+    setForm((f) => ({ ...f, amountCents: centsFromDigits(raw) }));
   };
 
   const handleDeadlineChange = (raw: string) => {
@@ -161,7 +160,8 @@ function GoalFormModal({
   };
 
   const titleError = !form.title.trim() ? 'Título é obrigatório' : null;
-  const amountError = form.amountCents <= 0 ? 'Valor deve ser maior que zero' : null;
+  const amountError = amountCentsError(form.amountCents);
+  const currentAmountError = amountCentsError(form.currentAmountCents, { allowZero: true });
   const deadlineError = (() => {
     const iso = parseDateInput(form.deadlineInput);
     if (!iso) return 'Data inválida (DD/MM/AAAA)';
@@ -169,7 +169,7 @@ function GoalFormModal({
     if (new Date(iso) < today) return 'O prazo deve ser hoje ou uma data futura';
     return null;
   })();
-  const isValid = !titleError && !amountError && !deadlineError;
+  const isValid = !titleError && !amountError && !currentAmountError && !deadlineError;
 
   return (
     <Modal
@@ -238,6 +238,9 @@ function GoalFormModal({
               editable={!isSaving}
               accessibilityLabel="Valor alvo da meta"
             />
+            {form.title.trim().length > 0 && amountError && (
+              <Text style={styles.fieldError}>{amountError}</Text>
+            )}
 
             {/* Current amount (progress) */}
             {mode === 'edit' && (
@@ -247,8 +250,7 @@ function GoalFormModal({
                   style={styles.input}
                   value={form.currentAmountCents > 0 ? formatBRLInput(form.currentAmountCents) : ''}
                   onChangeText={(raw) => {
-                    const digits = raw.replace(/[^\d]/g, '');
-                    setForm((f) => ({ ...f, currentAmountCents: digits ? Number(digits) : 0 }));
+                    setForm((f) => ({ ...f, currentAmountCents: centsFromDigits(raw) }));
                   }}
                   placeholder="0,00"
                   placeholderTextColor={MUTED}

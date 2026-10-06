@@ -3,6 +3,7 @@ using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -160,15 +161,16 @@ public sealed class ImportJobService
                 continue;
             }
 
-            var category = "Outros";
+            var category = TransactionCategories.Other;
             if (categoryOverrides is not null && categoryOverrides.TryGetValue(candidate.Index, out var userCategory)
                 && !string.IsNullOrWhiteSpace(userCategory))
             {
-                category = userCategory;
+                category = TransactionCategories.TryNormalize(userCategory)
+                    ?? throw new BadRequestException("INVALID_CATEGORY", TransactionCategories.InvalidMessage);
             }
             else if (!string.IsNullOrWhiteSpace(candidate.SuggestedCategory))
             {
-                category = candidate.SuggestedCategory;
+                category = TransactionCategories.NormalizeOrOther(candidate.SuggestedCategory);
             }
 
             // Corrections typed on the review screen win over what was read from the statement.

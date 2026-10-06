@@ -1,4 +1,5 @@
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Infrastructure.Persistence;
@@ -23,6 +24,7 @@ public sealed class CashFlowRepository : ICashFlowRepository
         var transactions = await _dbContext.Transactions
             .AsNoTracking()
             .Where(t => t.CoupleId == coupleId
+                     && t.Currency == CurrencyRules.Brl
                      && t.Amount > 0
                      && t.EventTimestampUtc >= fromUtc
                      && t.EventTimestampUtc <= toUtc)
@@ -31,7 +33,7 @@ public sealed class CashFlowRepository : ICashFlowRepository
         var totalSpend = transactions.Sum(t => t.Amount);
 
         var categoryBreakdown = (IReadOnlyDictionary<string, decimal>)transactions
-            .GroupBy(t => t.Category)
+            .GroupBy(t => TransactionCategories.NormalizeOrOther(t.Category))
             .ToDictionary(g => g.Key, g => g.Sum(t => t.Amount));
 
         return new CashFlowData(

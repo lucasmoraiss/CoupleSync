@@ -1,5 +1,4 @@
 using CoupleSync.Api.Contracts.Transactions;
-using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -12,16 +11,9 @@ public sealed class CreateManualTransactionRequestValidator : AbstractValidator<
 {
     public CreateManualTransactionRequestValidator()
     {
-        RuleFor(x => x.Amount)
-            .GreaterThanOrEqualTo(MoneyRules.MinPositiveAmount)
-            .WithMessage("O valor deve ser maior que zero.")
-            .LessThanOrEqualTo(MoneyRules.MaxAmount)
-            .WithMessage("O valor excede o máximo permitido.");
+        RuleFor(x => x.Amount).PositiveMoney();
 
-        RuleFor(x => x.Currency)
-            .Must(c => c!.Trim().Length == 3 && c.Trim().All(char.IsAsciiLetter))
-            .When(x => !string.IsNullOrWhiteSpace(x.Currency))
-            .WithMessage("A moeda deve ser um código de 3 letras (ex.: BRL).");
+        RuleFor(x => x.Currency).BrlCurrency();
 
         RuleFor(x => x.Description)
             .MaximumLength(512)
@@ -31,9 +23,6 @@ public sealed class CreateManualTransactionRequestValidator : AbstractValidator<
             .MaximumLength(512)
             .When(x => x.Merchant is not null);
 
-        RuleFor(x => x.Category)
-            .Must(c => !string.IsNullOrWhiteSpace(c))
-            .WithMessage("A categoria é obrigatória.")
-            .MaximumLength(64);
+        RuleFor(x => x.Category).CanonicalCategory();
     }
 }

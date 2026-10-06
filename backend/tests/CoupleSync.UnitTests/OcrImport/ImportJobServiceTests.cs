@@ -211,7 +211,7 @@ public sealed class ImportJobServiceTests
         var created = await svc.ConfirmCandidatesAsync(id, CoupleId, UserId, [0, 1], null, CancellationToken.None);
 
         Assert.NotNull(created);
-        Assert.All(created!.Created, t => Assert.Equal("Alimentação", t.Category));
+        Assert.All(created!.Created, t => Assert.Equal("ALIMENTACAO", t.Category));
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public sealed class ImportJobServiceTests
         var created = await svc.ConfirmCandidatesAsync(id, CoupleId, UserId, [0, 1], null, CancellationToken.None);
 
         Assert.NotNull(created);
-        Assert.All(created!.Created, t => Assert.Equal("Outros", t.Category));
+        Assert.All(created!.Created, t => Assert.Equal("OUTROS", t.Category));
     }
 
     [Fact]
@@ -248,8 +248,8 @@ public sealed class ImportJobServiceTests
         var created = await svc.ConfirmCandidatesAsync(id, CoupleId, UserId, [0, 1], overrides, CancellationToken.None);
 
         Assert.NotNull(created);
-        Assert.Equal("Saúde", created!.Created[0].Category);
-        Assert.Equal("Transporte", created!.Created[1].Category);
+        Assert.Equal("SAUDE", created!.Created[0].Category);
+        Assert.Equal("TRANSPORTE", created!.Created[1].Category);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

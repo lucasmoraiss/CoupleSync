@@ -194,7 +194,7 @@ public sealed class NotificationCaptureIntegrationTests
             .OrderByDescending(t => t.CreatedAtUtc)
             .FirstOrDefaultAsync();
         Assert.NotNull(transaction);
-        Assert.Equal("Alimentação", transaction!.Category);
+        Assert.Equal("ALIMENTACAO", transaction!.Category);
     }
 
     [Fact]
@@ -244,8 +244,8 @@ public sealed class NotificationCaptureIntegrationTests
             .OrderByDescending(t => t.CreatedAtUtc)
             .FirstOrDefaultAsync();
         Assert.NotNull(transaction);
-        Assert.Equal("Alimentação", transaction!.Category);
-        Assert.NotEqual("Transporte", transaction.Category);
+        Assert.Equal("ALIMENTACAO", transaction!.Category);
+        Assert.NotEqual("TRANSPORTE", transaction.Category);
     }
 
     private static IngestRequestDto BuildValidRequest()

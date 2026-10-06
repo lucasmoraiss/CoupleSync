@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using CoupleSync.Api.Contracts.Ocr;
+using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Api.Filters;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.OcrImport;
@@ -108,7 +109,8 @@ public sealed class OcrController : ControllerBase
         var response = new OcrResultsResponse(
             candidates.Select(c => new OcrCandidateResponse(
                 c.Index, c.Date, c.Description, c.Amount,
-                c.Currency, c.Confidence, c.DuplicateSuspected, c.SuggestedCategory)).ToList());
+                c.Currency, c.Confidence, c.DuplicateSuspected,
+                c.SuggestedCategory is null ? null : TransactionCategories.NormalizeOrOther(c.SuggestedCategory))).ToList());
 
         return Ok(response);
     }

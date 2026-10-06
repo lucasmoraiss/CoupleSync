@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using System.Security.Claims;
 using CoupleSync.Api.Contracts.Budget;
 using CoupleSync.Api.Filters;
@@ -40,7 +41,7 @@ public sealed class BudgetController : ControllerBase
             coupleId,
             request.Month,
             request.GrossIncome,
-            request.Currency,
+            CurrencyRules.NormalizeOrBrl(request.Currency),
             cancellationToken);
 
         return Ok(MapToResponse(dto));
@@ -101,7 +102,7 @@ public sealed class BudgetController : ControllerBase
         var coupleId = GetAuthenticatedCoupleId();
 
         var inputs = request.Allocations
-            .Select(a => new AllocationInput(a.Category, a.AllocatedAmount, a.Currency))
+            .Select(a => new AllocationInput(a.Category, a.AllocatedAmount, CurrencyRules.NormalizeOrBrl(a.Currency)))
             .ToList();
 
         var dto = await _budgetService.ReplaceAllocationsAsync(
@@ -124,7 +125,7 @@ public sealed class BudgetController : ControllerBase
         CancellationToken cancellationToken)
     {
         var coupleId = GetAuthenticatedCoupleId();
-        var currency = request.Currency ?? "BRL";
+        var currency = CurrencyRules.NormalizeOrBrl(request.Currency);
 
         var dto = await _budgetService.UpdateIncomeAsync(
             coupleId,

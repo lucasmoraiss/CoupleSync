@@ -30,6 +30,7 @@ import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
+import { useCategories } from '@/modules/transactions/useCategories';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -65,6 +66,7 @@ interface Props {
 export default function OcrReviewScreen({ uploadId }: Props) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const categories = useCategories();
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [successMsg, setSuccessMsg] = useState('');
   // Field errors are shown only after the first confirm attempt, then update live
@@ -154,9 +156,10 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     );
   }, []);
 
-  const updateCategory = useCallback((index: number, text: string) => {
+  // Tocar na categoria escolhida de novo a limpa (a API usa "Outros" quando não há categoria).
+  const updateCategory = useCallback((index: number, key: string) => {
     setRows((prev) =>
-      prev.map((r) => (r.index === index ? { ...r, category: text } : r))
+      prev.map((r) => (r.index === index ? { ...r, category: r.category === key ? '' : key } : r))
     );
   }, []);
 
@@ -275,18 +278,29 @@ export default function OcrReviewScreen({ uploadId }: Props) {
                 <Text style={styles.fieldErrorText}>{errors.amount}</Text>
               ) : null}
 
-              {/* Category chip — pre-filled from AI suggestion, editable */}
-              <View style={styles.categoryRow}>
-                <Text style={styles.categoryLabel}>Categoria:</Text>
-                <TextInput
-                  style={[styles.input, styles.categoryInput]}
-                  value={row.category}
-                  onChangeText={(t) => updateCategory(row.index, t)}
-                  placeholder="Ex: Alimentação"
-                  placeholderTextColor={MUTED}
-                  autoCapitalize="sentences"
-                />
-              </View>
+              {/* Categoria — pré-preenchida pela sugestão; só as da lista canônica */}
+              <Text style={styles.categoryLabel}>Categoria:</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <View style={styles.categoryRow}>
+                  {categories.map((c) => {
+                    const active = row.category === c.value;
+                    return (
+                      <TouchableOpacity
+                        key={c.value}
+                        style={[styles.categoryChip, active && styles.categoryChipActive]}
+                        onPress={() => updateCategory(row.index, c.value)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={`Categoria: ${c.label}`}
+                      >
+                        <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
+                          {c.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
             </View>
             );
           })}
@@ -381,7 +395,16 @@ const styles = StyleSheet.create({
   amountInput: { flex: 1 },
   categoryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   categoryLabel: { fontSize: 13, color: MUTED, fontWeight: '600', minWidth: 72 },
-  categoryInput: { flex: 1, fontSize: 13 },
+  categoryChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  categoryChipActive: { backgroundColor: PRIMARY, borderColor: PRIMARY },
+  categoryChipText: { fontSize: 13, color: MUTED },
+  categoryChipTextActive: { color: colors.text, fontWeight: '600' },
   footer: {
     padding: 16,
     borderTopWidth: 1,

@@ -15,6 +15,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { budgetApiClient } from '@/services/apiClient';
 import { useToast } from '@/components/Toast/useToast';
 import { colors } from '@/theme';
+import { parseAmountText } from '@/utils/amount';
 
 interface QuickIncomeModalProps {
   visible: boolean;
@@ -41,12 +42,12 @@ export function QuickIncomeModal({ visible, currentIncome, onClose }: QuickIncom
   });
 
   const handleSave = () => {
-    const parsed = parseFloat(income.replace(',', '.'));
-    if (isNaN(parsed) || parsed <= 0) {
-      toast.error('Informe um valor de renda válido.');
+    const parsed = parseAmountText(income);
+    if (!parsed.ok) {
+      toast.error(parsed.message);
       return;
     }
-    mutation.mutate(parsed);
+    mutation.mutate(parsed.value);
   };
 
   return (

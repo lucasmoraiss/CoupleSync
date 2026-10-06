@@ -1,5 +1,6 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Application.Goals.Queries;
 
@@ -30,7 +31,7 @@ public sealed class GetGoalProgressQueryHandler
             throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
         var transactions = await _transactionRepository.GetByGoalIdAsync(query.GoalId, query.CoupleId, ct);
-        var contributedAmount = transactions.Sum(t => t.Amount);
+        var contributedAmount = transactions.Where(t => CurrencyRules.IsBrl(t.Currency)).Sum(t => t.Amount);
 
         return _progressService.Compute(goal, contributedAmount, _dateTimeProvider.UtcNow);
     }

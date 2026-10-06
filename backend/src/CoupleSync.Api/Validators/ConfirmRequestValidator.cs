@@ -1,5 +1,4 @@
 using CoupleSync.Api.Contracts.Ocr;
-using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -21,10 +20,7 @@ public sealed class ConfirmRequestValidator : AbstractValidator<ConfirmRequest>
         RuleForEach(x => x.CategoryOverrides)
             .ChildRules(o =>
             {
-                o.RuleFor(x => x.Category)
-                    .Must(c => !string.IsNullOrWhiteSpace(c))
-                    .WithMessage("A categoria é obrigatória.")
-                    .MaximumLength(64);
+                o.RuleFor(x => x.Category).CanonicalCategory();
             })
             .When(x => x.CategoryOverrides is not null && x.CategoryOverrides.All(o => o is not null));
 
@@ -49,12 +45,7 @@ public sealed class ConfirmRequestValidator : AbstractValidator<ConfirmRequest>
                     .MaximumLength(512)
                     .When(e => e.Description is not null);
 
-                edit.RuleFor(e => e.Amount)
-                    .GreaterThan(0)
-                    .LessThanOrEqualTo(MoneyRules.MaxAmount)
-                    .Must(a => MoneyRules.HasAtMostTwoDecimals(a!.Value))
-                    .WithMessage("O valor deve ter no máximo duas casas decimais.")
-                    .When(e => e.Amount is not null);
+                edit.RuleFor(e => e.Amount).PositiveMoney();
             })
             .When(x => x.CandidateEdits is not null && x.CandidateEdits.All(e => e is not null));
     }

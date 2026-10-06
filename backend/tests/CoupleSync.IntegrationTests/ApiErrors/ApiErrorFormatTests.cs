@@ -66,7 +66,7 @@ public sealed class ApiErrorFormatTests
         await AuthenticateWithCoupleAsync(client);
 
         var response = await PostJsonAsync(client, "/api/v1/transactions",
-            """{"amount":10,"currency":"REAISREAIS","category":"Mercado"}""");
+            """{"amount":10,"currency":"REAISREAIS","category":"Compras"}""");
 
         var body = await AssertErrorAsync(response, HttpStatusCode.BadRequest, "VALIDATION_ERROR");
         Assert.True(body.GetProperty("errors").TryGetProperty("Currency", out _));
@@ -91,7 +91,7 @@ public sealed class ApiErrorFormatTests
         await AuthenticateWithCoupleAsync(client);
 
         var response = await PostJsonAsync(client, "/api/v1/transactions",
-            """{"amount":"abc","currency":"BRL","category":"Mercado"}""");
+            """{"amount":"abc","currency":"BRL","category":"Compras"}""");
 
         await AssertErrorAsync(response, HttpStatusCode.BadRequest, "INVALID_REQUEST_BODY");
     }
@@ -165,7 +165,7 @@ public sealed class ApiErrorFormatTests
         await AuthenticateWithCoupleAsync(client);
 
         var created = await PostJsonAsync(client, "/api/v1/transactions",
-            """{"amount":10,"currency":"BRL","category":"Mercado"}""");
+            """{"amount":10,"currency":"BRL","category":"Compras"}""");
         created.EnsureSuccessStatusCode();
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
 

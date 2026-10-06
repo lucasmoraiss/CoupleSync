@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using System.Security.Claims;
 using CoupleSync.Api.Contracts.Integrations;
 using CoupleSync.Api.Filters;
@@ -43,7 +44,7 @@ public sealed class IntegrationsController : ControllerBase
                 coupleId,
                 request.Bank,
                 request.Amount,
-                request.Currency,
+                CurrencyRules.NormalizeOrBrl(request.Currency),
                 request.EventTimestamp,
                 request.Description,
                 request.Merchant,

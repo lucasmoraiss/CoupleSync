@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 
@@ -102,9 +103,9 @@ public sealed class AlertPolicyService : IAlertPolicyService
         if (plan is null)
             return null;
 
-        var category = transaction.Category;
+        var category = TransactionCategories.NormalizeOrOther(transaction.Category);
         var allocation = plan.Allocations
-            .FirstOrDefault(a => string.Equals(a.Category, category, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(a => TransactionCategories.NormalizeOrOther(a.Category) == category);
 
         if (allocation is null)
             return null;
@@ -144,9 +145,9 @@ public sealed class AlertPolicyService : IAlertPolicyService
         if (plan is null)
             return null;
 
-        var category = transaction.Category;
+        var category = TransactionCategories.NormalizeOrOther(transaction.Category);
         var allocation = plan.Allocations
-            .FirstOrDefault(a => string.Equals(a.Category, category, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(a => TransactionCategories.NormalizeOrOther(a.Category) == category);
 
         if (allocation is null)
             return null;

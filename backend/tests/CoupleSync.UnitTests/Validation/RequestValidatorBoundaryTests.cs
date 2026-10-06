@@ -44,7 +44,7 @@ public sealed class RequestValidatorBoundaryTests
             amount: MoneyRules.MaxAmount,
             description: new string('d', 512),
             merchant: new string('m', 512),
-            category: new string('c', 64))).IsValid);
+            category: "OUTROS")).IsValid);
     }
 
     [Theory]
@@ -92,14 +92,13 @@ public sealed class RequestValidatorBoundaryTests
     // ── POST /integrations/events ─────────────────────────────────────────
 
     [Fact]
-    public void IngestEvent_WithoutCurrency_FailsWithoutThrowing()
+    public void IngestEvent_WithoutCurrency_AssumesBrl()
     {
-        var request = new IngestNotificationEventRequest("NUBANK", 10m, null!, DateTime.UtcNow.AddMinutes(-5), null, null, null);
+        var request = new IngestNotificationEventRequest("NUBANK", 10m, null, DateTime.UtcNow.AddMinutes(-5), null, null, null);
 
         var result = new IngestNotificationEventRequestValidator().Validate(request);
 
-        Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, e => e.PropertyName == nameof(IngestNotificationEventRequest.Currency));
+        Assert.True(result.IsValid);
     }
 
     [Fact]

@@ -24,6 +24,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
 import type { IncomeSourceResponse, IncomeGroupResponse } from '@/types/api';
+import { amountCentsError, centsFromDigits } from '@/utils/amount';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -93,10 +94,17 @@ function IncomeSourceRow({
   const [name, setName] = useState(source.name);
   const [amountCents, setAmountCents] = useState(Math.round(source.amount * 100));
 
+  const { toast } = useToast();
+
   const handleSave = useCallback(() => {
+    const error = amountCentsError(amountCents);
+    if (error) {
+      toast.error(error);
+      return;
+    }
     onUpdate(source.id, name.trim() || source.name, amountCents);
     setEditMode(false);
-  }, [source.id, source.name, name, amountCents, onUpdate]);
+  }, [source.id, source.name, name, amountCents, onUpdate, toast]);
 
   const handleCancel = useCallback(() => {
     setName(source.name);
@@ -136,10 +144,7 @@ function IncomeSourceRow({
           <TextInput
             style={styles.editAmountInput}
             value={amountCents > 0 ? formatBRLInput(amountCents) : ''}
-            onChangeText={(raw) => {
-              const digits = raw.replace(/[^\d]/g, '');
-              setAmountCents(digits ? Number(digits) : 0);
-            }}
+            onChangeText={(raw) => setAmountCents(centsFromDigits(raw))}
             placeholder="0,00"
             placeholderTextColor={MUTED}
             keyboardType="numeric"
@@ -277,6 +282,15 @@ function AddIncomeForm({
   const [isRecurring, setIsRecurring] = useState(true);
   const [expanded, setExpanded] = useState(false);
 
+  const handleCreate = () => {
+    const error = amountCentsError(amountCents);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    createMutation.mutate();
+  };
+
   const createMutation = useMutation({
     mutationFn: () =>
       incomeApiClient.create({
@@ -327,10 +341,7 @@ function AddIncomeForm({
         <TextInput
           style={styles.addAmountInput}
           value={amountCents > 0 ? formatBRLInput(amountCents) : ''}
-          onChangeText={(raw) => {
-            const digits = raw.replace(/[^\d]/g, '');
-            setAmountCents(digits ? Number(digits) : 0);
-          }}
+          onChangeText={(raw) => setAmountCents(centsFromDigits(raw))}
           placeholder="0,00"
           placeholderTextColor={MUTED}
           keyboardType="numeric"
@@ -360,7 +371,7 @@ function AddIncomeForm({
       <View style={styles.addFormActions}>
         <TouchableOpacity
           style={[styles.addSaveBtn, createMutation.isPending && styles.btnDisabled]}
-          onPress={() => createMutation.mutate()}
+          onPress={handleCreate}
           disabled={createMutation.isPending || !name.trim()}
           accessibilityLabel="Salvar fonte de renda"
         >

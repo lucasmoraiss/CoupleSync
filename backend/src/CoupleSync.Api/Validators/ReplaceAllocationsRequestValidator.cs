@@ -1,5 +1,4 @@
 using CoupleSync.Api.Contracts.Budget;
-using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -15,17 +14,11 @@ public sealed class ReplaceAllocationsRequestValidator : AbstractValidator<Repla
         RuleForEach(x => x.Allocations)
             .ChildRules(allocation =>
             {
-                allocation.RuleFor(a => a.Category)
-                    .NotEmpty()
-                    .MaximumLength(64);
+                allocation.RuleFor(a => a.Category).CanonicalCategory();
 
-                allocation.RuleFor(a => a.AllocatedAmount)
-                    .GreaterThanOrEqualTo(0)
-                    .LessThanOrEqualTo(MoneyRules.MaxAmount);
+                allocation.RuleFor(a => a.AllocatedAmount).PositiveMoney();
 
-                allocation.RuleFor(a => a.Currency)
-                    .NotEmpty()
-                    .Length(2, 3);
+                allocation.RuleFor(a => a.Currency).BrlCurrency();
             })
             .When(x => x.Allocations is not null);
     }

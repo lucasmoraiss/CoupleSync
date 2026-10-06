@@ -21,10 +21,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { transactionsApiClient, isCoupleRequiredError } from '@/services/apiClient';
 import {
-  PREDEFINED_CATEGORIES,
   getCategoryLabel,
   getCategoryIcon,
+  toCategoryKey,
 } from '@/modules/transactions/categories';
+import { useCategories } from '@/modules/transactions/useCategories';
 import type { TransactionResponse, GetTransactionsResponse } from '@/types/api';
 import { colors } from '@/theme';
 import {
@@ -161,8 +162,10 @@ function CategoryPickerModal({
   onSelect: (category: string) => void;
   isUpdating: boolean;
 }) {
+  const categories = useCategories();
   if (!transaction) return null;
   const label = transaction.merchant ?? transaction.description ?? transaction.bank;
+  const currentKey = toCategoryKey(transaction.category);
   return (
     <Modal
       visible={visible}
@@ -184,8 +187,8 @@ function CategoryPickerModal({
 
           {/* Categories list */}
           <ScrollView style={styles.categoriesScroll} showsVerticalScrollIndicator={false}>
-            {PREDEFINED_CATEGORIES.map((cat) => {
-              const selected = cat.value === transaction.category;
+            {categories.map((cat) => {
+              const selected = cat.value === currentKey;
               return (
                 <TouchableOpacity
                   key={cat.value}

@@ -1,5 +1,6 @@
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Infrastructure.Integrations.Gemini;
 
@@ -19,10 +20,7 @@ public sealed class GeminiCategoryClassifier : ICategoryClassifier
     private static readonly TimeSpan PerCallTimeout = TimeSpan.FromSeconds(3);
 
     public static readonly string[] DefaultCategories =
-    [
-        "Alimentação", "Transporte", "Moradia", "Saúde", "Educação",
-        "Lazer", "Vestuário", "Serviços", "Investimentos", "Outros"
-    ];
+        TransactionCategories.All.Select(c => c.Label).ToArray();
 
     public GeminiCategoryClassifier(IGeminiAdapter gemini)
     {

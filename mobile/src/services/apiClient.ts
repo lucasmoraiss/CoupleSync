@@ -37,6 +37,7 @@ import type {
   ChatHistoryItem,
   ChatResponse,
   SpendingByCategoryResponse,
+  CategoriesResponse,
   MonthlyTrendsResponse,
 } from '@/types/api';
 
@@ -330,6 +331,12 @@ export const chatApiClient = {
     history: ChatHistoryItem[]
   ): Promise<AxiosResponse<ChatResponse>> =>
     axiosInstance.post<ChatResponse>('/api/v1/ai/chat', { message, history }),
+};
+
+// --- Categories API (lista canônica; o app mantém uma cópia embutida como reserva) ---
+export const categoriesApiClient = {
+  list: (): Promise<AxiosResponse<CategoriesResponse>> =>
+    axiosInstance.get<CategoriesResponse>('/api/v1/categories'),
 };
 
 // --- Reports API ---

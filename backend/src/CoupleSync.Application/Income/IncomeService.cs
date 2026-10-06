@@ -3,6 +3,7 @@ using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Income.Commands;
 using CoupleSync.Application.Income.Queries;
 using CoupleSync.Domain.Entities;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Application.Income;
@@ -131,13 +132,13 @@ public sealed class IncomeService
                     .Where(s => s.UserId == partner.Id && !s.IsShared)
                     .Select(MapToDto)
                     .ToList();
-                return new IncomeGroupDto(partner.Id, partner.Name, partnerSources, partnerSources.Sum(s => s.Amount));
+                return new IncomeGroupDto(partner.Id, partner.Name, partnerSources, SumInReais(partnerSources));
             })
             .ToList();
 
-        var personalTotal = personalSources.Sum(s => s.Amount);
+        var personalTotal = SumInReais(personalSources);
         var partnersTotal = partnerGroups.Sum(g => g.Total);
-        var sharedTotal = sharedSources.Sum(s => s.Amount);
+        var sharedTotal = SumInReais(sharedSources);
 
         var personalGroup = new IncomeGroupDto(userId, currentUserName, personalSources, personalTotal);
 
@@ -176,6 +177,10 @@ public sealed class IncomeService
         var currentMonth = $"{now.Year:D4}-{now.Month:D2}";
         return await GetMonthlyIncomeAsync(coupleId, userId, currentMonth, ct);
     }
+
+    // Sources stored in another currency stay listed but never enter a total in reais.
+    private static decimal SumInReais(IEnumerable<IncomeSourceDto> sources)
+        => sources.Where(s => CurrencyRules.IsBrl(s.Currency)).Sum(s => s.Amount);
 
     private static IncomeSourceDto MapToDto(IncomeSource source)
         => new(source.Id, source.UserId, source.Name, source.Amount, source.Currency,
