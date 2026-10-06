@@ -66,6 +66,37 @@ flowchart TD
 | Configurações | `/settings` | Acessa as permissões de notificação, os alertas e a saída da conta |
 | Alertas | `/settings/alerts` | Liga e desliga cada tipo de alerta |
 
+### Capturas de tela
+
+Capturas do aplicativo em execução (APK de `preview` em emulador com Android 14, conectado à API publicada), com as contas de demonstração e dados fictícios.
+
+<table>
+<tr>
+<td align="center"><img src="img/01-entrar.png" width="230" alt="Tela Entrar"><br><sub>Entrar</sub></td>
+<td align="center"><img src="img/02-criar-conta.png" width="230" alt="Tela Criar conta"><br><sub>Criar conta</sub></td>
+<td align="center"><img src="img/03-grupo.png" width="230" alt="Tela Grupo"><br><sub>Grupo</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="img/04-painel.png" width="230" alt="Tela Painel"><br><sub>Painel</sub></td>
+<td align="center"><img src="img/05-transacoes.png" width="230" alt="Tela Transações"><br><sub>Transações</sub></td>
+<td align="center"><img src="img/12-nova-transacao.png" width="230" alt="Tela Nova transação"><br><sub>Nova transação</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="img/13-importar-extrato.png" width="230" alt="Tela Importar extrato"><br><sub>Importar extrato</sub></td>
+<td align="center"><img src="img/14-revisar-lancamentos.png" width="230" alt="Tela Revisar lançamentos"><br><sub>Revisar lançamentos</sub></td>
+<td align="center"><img src="img/06-metas.png" width="230" alt="Tela Metas"><br><sub>Metas</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="img/07-fluxo.png" width="230" alt="Tela Fluxo"><br><sub>Fluxo</sub></td>
+<td align="center"><img src="img/08-rendas.png" width="230" alt="Tela Rendas"><br><sub>Rendas</sub></td>
+<td align="center"><img src="img/09-relatorios.png" width="230" alt="Tela Relatórios"><br><sub>Relatórios</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="img/10-configuracoes.png" width="230" alt="Tela Configurações"><br><sub>Configurações</sub></td>
+<td align="center"><img src="img/11-alertas.png" width="230" alt="Tela Alertas"><br><sub>Alertas</sub></td>
+</tr>
+</table>
+
 ### Elementos de interface usados
 
 | Categoria (material da disciplina) | Elementos no aplicativo |
@@ -104,15 +135,15 @@ O material da disciplina lista oito qualidades de uma boa interface. Para cada u
 - As mensagens de erro do login distinguem a causa: credenciais erradas, servidor indisponível, sem conexão, tempo esgotado.
 - Na importação de extrato, cada falha tem uma mensagem própria que diz o que fazer: "O PDF está protegido por senha. Por enquanto, exporte o extrato sem senha e tente novamente."
 - Listas vazias explicam o próximo passo em vez de ficarem em branco.
-- Cada despesa mostra quem lançou e de onde veio (manual, extrato ou notificação).
+- Cada despesa mostra quem lançou e de onde veio (manual, extrato ou notificação), e o painel separa os gastos pelo nome de cada membro.
 
-**Onde falha:** a aba "Rendas" abre uma tela chamada "Fontes de Renda" cuja rota interna é `budget`; restam termos em inglês ou abreviados ("Dashboard", "Config"); o item "Notificações do sistema" não deixa claro que se trata da captura de notificações bancárias.
+**Onde falha:** a aba "Rendas" abre uma tela chamada "Fontes de Renda" cuja rota interna é `budget`; resta um rótulo abreviado ("Config") e siglas nos períodos dos relatórios ("3m", "6m", "12m"); o item "Notificações do sistema" não deixa claro que se trata da captura de notificações bancárias.
 
 ### Consistente
 
 - Cores, espaçamentos e tamanhos de fonte vêm de um tema central.
 - Os estados de carregando, vazio e erro são componentes compartilhados (`LoadingState`, `EmptyState`, `ErrorState`), então se comportam igual em telas diferentes.
-- Cada categoria tem sempre o mesmo ícone e o mesmo nome.
+- Cada categoria tem sempre o mesmo ícone e o mesmo nome, em todas as telas, qualquer que seja a grafia devolvida pela API.
 - Excluir uma despesa, uma meta ou uma fonte de renda segue a mesma sequência: toque, diálogo de confirmação com "Cancelar", ação destrutiva em vermelho.
 
 **Onde falha:** as telas maiores ainda usam medidas escritas à mão em vez das do tema; erros aparecem ora em diálogo, ora em aviso temporário; há dois estilos de campo de valor (com máscara de centavos e em texto livre).
