@@ -17,7 +17,7 @@ import {
   Platform,
 } from 'react-native';
 import { router } from 'expo-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { transactionsApiClient, isCoupleRequiredError } from '@/services/apiClient';
 import {
@@ -26,6 +26,11 @@ import {
   toCategoryKey,
 } from '@/modules/transactions/categories';
 import { useCategories } from '@/modules/transactions/useCategories';
+import {
+  TRANSACTIONS_PAGE_SIZE,
+  flattenTransactionPages,
+  getNextTransactionsPage,
+} from '@/modules/transactions/pagination';
 import type { TransactionResponse, GetTransactionsResponse } from '@/types/api';
 import { colors } from '@/theme';
 import {
@@ -98,12 +103,14 @@ function TransactionRow({
   currentUserId,
   onPress,
   onLongPress,
+  onEdit,
   onDelete,
 }: {
   item: TransactionResponse;
   currentUserId: string | null;
   onPress: (item: TransactionResponse) => void;
   onLongPress: (item: TransactionResponse) => void;
+  onEdit: (item: TransactionResponse) => void;
   onDelete: (item: TransactionResponse) => void;
 }) {
   const label = item.merchant ?? item.description ?? item.bank;
@@ -137,6 +144,14 @@ function TransactionRow({
         <Text style={styles.txDate}>{formatRelativeDate(item.eventTimestampUtc)}</Text>
       </View>
       <TouchableOpacity
+        onPress={() => onEdit(item)}
+        style={styles.deleteBtn}
+        accessibilityLabel={`Editar transação ${label}`}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Ionicons name="create-outline" size={18} color={ACCENT} />
+      </TouchableOpacity>
+      <TouchableOpacity
         onPress={() => onDelete(item)}
         style={styles.deleteBtn}
         accessibilityLabel={`Excluir transação ${label}`}
@@ -154,12 +169,14 @@ function CategoryPickerModal({
   transaction,
   onClose,
   onSelect,
+  onEdit,
   isUpdating,
 }: {
   visible: boolean;
   transaction: TransactionResponse | null;
   onClose: () => void;
   onSelect: (category: string) => void;
+  onEdit: (transaction: TransactionResponse) => void;
   isUpdating: boolean;
 }) {
   const categories = useCategories();
@@ -213,6 +230,15 @@ function CategoryPickerModal({
             })}
           </ScrollView>
 
+          <TouchableOpacity
+            style={styles.cancelBtn}
+            onPress={() => onEdit(transaction)}
+            disabled={isUpdating}
+            accessibilityLabel="Editar valor, descrição e data da transação"
+          >
+            <Text style={[styles.cancelText, { color: PRIMARY }]}>Editar valor, descrição e data</Text>
+          </TouchableOpacity>
+
           {/* Cancel */}
           <TouchableOpacity style={styles.cancelBtn} onPress={onClose} disabled={isUpdating}>
             <Text style={styles.cancelText}>Fechar</Text>
@@ -239,13 +265,27 @@ export default function TransactionsScreen() {
     }
   }, []);
 
-  const { data, isLoading, isError, error: loadError, refetch } = useQuery<GetTransactionsResponse>({
-    queryKey: ['transactions', 1, 20],
-    queryFn: async () => {
-      const res = await transactionsApiClient.list({ page: 1, pageSize: 20 });
+  const {
+    data,
+    isLoading,
+    isError,
+    error: loadError,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery<GetTransactionsResponse, Error, { pages: GetTransactionsResponse[] }, string[], number>({
+    queryKey: ['transactions', 'list'],
+    initialPageParam: 1,
+    queryFn: async ({ pageParam }) => {
+      const res = await transactionsApiClient.list({ page: pageParam, pageSize: TRANSACTIONS_PAGE_SIZE });
       return res.data;
     },
+    getNextPageParam: (lastPage, allPages) => getNextTransactionsPage(lastPage, allPages),
   });
+
+  const transactions = flattenTransactionPages(data?.pages);
+  const totalCount = data?.pages[0]?.totalCount;
 
   const { mutate: updateCategory, isPending: isUpdating } = useMutation({
     mutationFn: ({ id, category }: { id: string; category: string }) =>
@@ -277,11 +317,35 @@ export default function TransactionsScreen() {
     },
   });
 
+  // Puxar para atualizar volta à primeira página (em vez de rebuscar todas as já carregadas).
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    queryClient.setQueryData<{ pages: GetTransactionsResponse[]; pageParams: number[] }>(
+      ['transactions', 'list'],
+      (old) => (old ? { pages: old.pages.slice(0, 1), pageParams: old.pageParams.slice(0, 1) } : old),
+    );
     await refetch();
     setRefreshing(false);
-  }, [refetch]);
+  }, [queryClient, refetch]);
+
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const handleEdit = useCallback((item: TransactionResponse) => {
+    setModalVisible(false);
+    setSelectedTx(null);
+    router.push({
+      pathname: '/(main)/transactions/edit',
+      params: {
+        id: item.id,
+        amount: String(item.amount),
+        description: item.description ?? '',
+        category: item.category,
+        eventTimestampUtc: item.eventTimestampUtc,
+      },
+    } as any);
+  }, []);
 
   const handleTxPress = useCallback((item: TransactionResponse) => {
     setSelectedTx(item);
@@ -334,8 +398,8 @@ export default function TransactionsScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Transações</Text>
         <View style={styles.headerRight}>
-          {data && (
-            <Text style={styles.headerCount}>{data.totalCount} no total</Text>
+          {totalCount != null && (
+            <Text style={styles.headerCount}>{totalCount} no total</Text>
           )}
           <TouchableOpacity
             style={styles.addBtn}
@@ -382,7 +446,7 @@ export default function TransactionsScreen() {
       {/* Data / empty state */}
       {!isLoading && !isError && (
         <FlatList
-          data={data?.items ?? []}
+          data={transactions}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <TransactionRow
@@ -390,6 +454,7 @@ export default function TransactionsScreen() {
               currentUserId={currentUserId}
               onPress={handleTxPress}
               onLongPress={handleLongPress}
+              onEdit={handleEdit}
               onDelete={handleDeletePress}
             />
           )}
@@ -405,8 +470,21 @@ export default function TransactionsScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={ACCENT} />
           }
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View style={styles.listFooter} accessibilityLabel="Carregando mais transações">
+                <ActivityIndicator size="small" color={ACCENT} />
+              </View>
+            ) : !hasNextPage && transactions.length > 0 ? (
+              <View style={styles.listFooter}>
+                <Text style={styles.listFooterText}>Fim da lista</Text>
+              </View>
+            ) : null
+          }
           contentContainerStyle={
-            (data?.items?.length ?? 0) === 0 ? styles.flatListEmpty : styles.flatListContent
+            transactions.length === 0 ? styles.flatListEmpty : styles.flatListContent
           }
           showsVerticalScrollIndicator={false}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -419,6 +497,7 @@ export default function TransactionsScreen() {
         transaction={selectedTx}
         onClose={handleCloseModal}
         onSelect={handleCategorySelect}
+        onEdit={handleEdit}
         isUpdating={isUpdating}
       />
     </SafeAreaView>
@@ -460,6 +539,8 @@ const styles = StyleSheet.create({
   loadingText: { color: MUTED, marginTop: 12, fontSize: 14 },
   flatListContent: { paddingHorizontal: 16, paddingBottom: 24 },
   flatListEmpty: { flex: 1, justifyContent: 'center' },
+  listFooter: { paddingVertical: 20, alignItems: 'center' },
+  listFooterText: { color: MUTED, fontSize: 13 },
   separator: { height: 1, backgroundColor: BORDER, marginHorizontal: 16 },
   txRow: {
     flexDirection: 'row',

@@ -12,7 +12,8 @@ namespace CoupleSync.Application.Notification;
 /// </summary>
 public sealed class AlertPolicyService : IAlertPolicyService
 {
-    private const decimal LargeTransactionThreshold = 500m;
+    internal const decimal LargeTransactionThreshold = 500m;
+    internal const string LargeTransactionKind = "LargeTransaction";
     internal const decimal LowBalanceThreshold = 3000m;
 
     private const string BudgetExceededKind = "BudgetExceeded";
@@ -62,7 +63,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
             {
                 var settings = await SettingsOfAsync(recipient, coupleId, nowUtc, ct);
                 if (settings.LargeTransactionEnabled)
-                    events.Add(NotificationEvent.Create(coupleId, recipient, "LargeTransaction", title, body, nowUtc));
+                    events.Add(NotificationEvent.Create(coupleId, recipient, LargeTransactionKind, title, body, nowUtc));
             }
         }
 

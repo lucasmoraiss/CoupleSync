@@ -193,6 +193,10 @@ export const transactionsApiClient = {
   updateCategory: (id: string, category: string): Promise<AxiosResponse<TransactionResponse>> =>
     axiosInstance.patch<TransactionResponse>(`/api/v1/transactions/${id}/category`, { category }),
 
+  /** Edição parcial: só os campos enviados mudam; descrição vazia limpa a descrição. */
+  update: (id: string, data: UpdateTransactionBody): Promise<AxiosResponse<TransactionResponse>> =>
+    axiosInstance.patch<TransactionResponse>(`/api/v1/transactions/${id}`, data),
+
   /** Creates a transaction manually (without relying on OCR or push notifications). */
   createManual: (data: CreateManualTransactionBody): Promise<AxiosResponse<TransactionResponse>> =>
     axiosInstance.post<TransactionResponse>('/api/v1/transactions', data),
@@ -200,6 +204,14 @@ export const transactionsApiClient = {
   delete: (id: string): Promise<AxiosResponse<void>> =>
     axiosInstance.delete<void>(`/api/v1/transactions/${id}`),
 };
+
+export interface UpdateTransactionBody {
+  amount?: number;
+  description?: string;
+  /** Instante UTC (ISO) da data/hora de Brasília escolhida. */
+  eventTimestampUtc?: string;
+  category?: string;
+}
 
 export interface CreateManualTransactionBody {
   amount: number;

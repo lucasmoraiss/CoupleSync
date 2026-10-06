@@ -26,19 +26,22 @@ public sealed class TransactionsController : ControllerBase
     private readonly LinkTransactionToGoalCommandHandler _linkToGoalHandler;
     private readonly CreateManualTransactionCommandHandler _createManualHandler;
     private readonly DeleteTransactionCommandHandler _deleteHandler;
+    private readonly UpdateTransactionCommandHandler _updateHandler;
 
     public TransactionsController(
         GetTransactionsQueryHandler getTransactionsHandler,
         UpdateTransactionCategoryCommandHandler updateCategoryHandler,
         LinkTransactionToGoalCommandHandler linkToGoalHandler,
         CreateManualTransactionCommandHandler createManualHandler,
-        DeleteTransactionCommandHandler deleteHandler)
+        DeleteTransactionCommandHandler deleteHandler,
+        UpdateTransactionCommandHandler updateHandler)
     {
         _getTransactionsHandler = getTransactionsHandler;
         _updateCategoryHandler = updateCategoryHandler;
         _linkToGoalHandler = linkToGoalHandler;
         _createManualHandler = createManualHandler;
         _deleteHandler = deleteHandler;
+        _updateHandler = updateHandler;
     }
 
     [HttpGet]
@@ -107,6 +110,38 @@ public sealed class TransactionsController : ControllerBase
         return Ok(new TransactionResponse(
             result.Id, result.UserId, authorName, result.Bank, result.Amount, result.Currency,
             result.EventTimestampUtc, result.Description, result.Merchant, result.Category, result.Source.ToString(), result.CreatedAtUtc));
+    }
+
+    /// <summary>
+    /// Edits amount, description, date and/or category of a transaction of the couple (partial update).
+    /// </summary>
+    [HttpPatch("{id:guid}")]
+    [ProducesResponseType(typeof(TransactionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<TransactionResponse>> Patch(
+        Guid id,
+        [FromBody] PatchTransactionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var coupleId = GetAuthenticatedCoupleId();
+
+        var eventTs = request.EventTimestampUtc;
+        if (eventTs.HasValue && eventTs.Value.Kind == DateTimeKind.Unspecified)
+            eventTs = DateTime.SpecifyKind(eventTs.Value, DateTimeKind.Utc);
+
+        var transaction = await _updateHandler.HandleAsync(
+            new UpdateTransactionCommand(id, coupleId, request.Amount, request.Description, eventTs, request.Category),
+            cancellationToken);
+
+        var authorName = transaction.UserId == GetAuthenticatedUserId() ? GetAuthenticatedUserName() : "Desconhecido";
+
+        return Ok(new TransactionResponse(
+            transaction.Id, transaction.UserId, authorName, transaction.Bank, transaction.Amount, transaction.Currency,
+            transaction.EventTimestampUtc, transaction.Description, transaction.Merchant, transaction.Category,
+            transaction.Source.ToString(), transaction.CreatedAtUtc));
     }
 
     /// <summary>
