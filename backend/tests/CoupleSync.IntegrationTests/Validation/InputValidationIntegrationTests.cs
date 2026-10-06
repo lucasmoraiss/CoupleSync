@@ -160,7 +160,7 @@ public sealed class InputValidationIntegrationTests
         using var client = factory.CreateClient();
         await AuthenticateWithCoupleAsync(client);
 
-        var month = DateTime.UtcNow.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        var month = CoupleSync.Domain.ValueObjects.BrazilTime.MonthOf(DateTime.UtcNow);
         var create = await PostJsonAsync(client, "/api/v1/incomes",
             $$"""{"month":"{{month}}","name":"Salário","amount":5000,"currency":"BRL","isShared":false}""");
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
@@ -192,7 +192,7 @@ public sealed class InputValidationIntegrationTests
         var income = await SendJsonAsync(client, HttpMethod.Patch, "/api/v1/budgets/income", """{"grossIncome":1e20}""");
         Assert.Equal(HttpStatusCode.BadRequest, income.StatusCode);
 
-        var month = DateTime.UtcNow.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        var month = CoupleSync.Domain.ValueObjects.BrazilTime.MonthOf(DateTime.UtcNow);
         var plan = await PostJsonAsync(client, "/api/v1/budgets",
             $$"""{"month":"{{month}}","grossIncome":8000,"currency":"BRL"}""");
         Assert.Equal(HttpStatusCode.OK, plan.StatusCode);

@@ -145,4 +145,38 @@ public sealed class IngestNotificationEventCommandHandlerTests
         Assert.Single(transactionRepo.Transactions);
         Assert.Equal("OUTROS", transactionRepo.Transactions[0].Category);
     }
+
+    // ── B-M2: only a lost race on the unique index is a duplicate ─────────────
+
+    [Fact]
+    public async Task HandleAsync_WhenTheSaveLosesTheRaceOnTheFingerprintIndex_ReportsDuplicate()
+    {
+        var repo = new FakeNotificationCaptureRepository();
+        var transactions = new FakeTransactionRepository
+        {
+            SaveFailure = new CoupleSync.Application.Common.Exceptions.UniqueViolationException("duplicate key")
+        };
+        var handler = BuildHandler(repo, transactionRepo: transactions);
+
+        var result = await handler.HandleAsync(BuildCommand(), CancellationToken.None);
+
+        Assert.Equal("Duplicate", result.Status);
+    }
+
+    [Fact]
+    public async Task HandleAsync_WhenTheSaveFailsForAnotherReason_DoesNotCallItADuplicate()
+    {
+        var repo = new FakeNotificationCaptureRepository();
+        var transactions = new FakeTransactionRepository
+        {
+            SaveFailure = new CoupleSync.Application.Common.Exceptions.DataStoreException("foreign key violation")
+        };
+        var handler = BuildHandler(repo, transactionRepo: transactions);
+
+        var ex = await Assert.ThrowsAsync<CoupleSync.Application.Common.Exceptions.DataStoreException>(
+            () => handler.HandleAsync(BuildCommand(), CancellationToken.None));
+
+        Assert.Equal("foreign key violation", ex.Message);
+        Assert.NotEqual(IngestStatus.Duplicate, Assert.Single(repo.IngestEvents).Status);
+    }
 }

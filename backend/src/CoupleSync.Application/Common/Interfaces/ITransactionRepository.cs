@@ -18,7 +18,6 @@ public interface ITransactionRepository
     Task<Transaction?> GetByIdAsync(Guid id, Guid coupleId, CancellationToken ct);
     Task<Transaction?> GetByIdRawAsync(Guid id, CancellationToken ct);
     Task DeleteAsync(Transaction transaction, CancellationToken ct);
-    Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct);
     /// <summary>Sum of the BRL transactions linked to each goal (goals without links are absent).</summary>
     Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(Guid coupleId, IReadOnlyCollection<Guid> goalIds, CancellationToken ct);
     Task<IReadOnlyList<Transaction>> GetRecentByCoupleAsync(Guid coupleId, DateTime since, CancellationToken ct);

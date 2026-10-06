@@ -14,4 +14,16 @@ public interface IAlertPolicyService
         IReadOnlyList<Transaction> recentTransactions,
         DateTime nowUtc,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Alerts raised by the transactions created by ONE statement import confirmation (all by the same author).
+    /// Same rules as <see cref="EvaluatePostIngestAsync"/>, applied once to the whole import: several lines above
+    /// the large-transaction threshold produce a single summary alert, not one per line.
+    /// </summary>
+    Task<IReadOnlyList<NotificationEvent>> EvaluatePostImportAsync(
+        Guid coupleId,
+        IReadOnlyList<Transaction> importedTransactions,
+        IReadOnlyList<Transaction> recentTransactions,
+        DateTime nowUtc,
+        CancellationToken ct = default);
 }

@@ -17,7 +17,8 @@ namespace CoupleSync.IntegrationTests.Budget;
 [Trait("Category", "Budget")]
 public sealed class BudgetControllerTests
 {
-    private static string CurrentMonth() => $"{DateTime.UtcNow:yyyy-MM}";
+    // The Brasília month (what the API calls "current"), not the UTC one: they differ in the last three hours of a month.
+    private static string CurrentMonth() => CoupleSync.Domain.ValueObjects.BrazilTime.MonthOf(DateTime.UtcNow);
 
     private static CreateBudgetPlanRequestDto ValidPlanRequest() => new(
         Month: CurrentMonth(),

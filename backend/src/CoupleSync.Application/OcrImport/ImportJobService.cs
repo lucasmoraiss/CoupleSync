@@ -352,15 +352,13 @@ public sealed class ImportJobService
             var nowUtc = _dateTimeProvider.UtcNow;
             var since = nowUtc.AddDays(-30);
             var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(coupleId, since, ct);
-            foreach (var txn in created)
+            // One evaluation for the whole import: N large lines are one summary alert, not N pushes.
+            var alertEvents = await _alertPolicyService.EvaluatePostImportAsync(
+                coupleId, created, recentTransactions, nowUtc, ct);
+            if (alertEvents.Count > 0)
             {
-                var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
-                    coupleId, txn, recentTransactions, nowUtc, ct);
-                if (alertEvents.Count > 0)
-                {
-                    await _notificationEventRepository.AddRangeAsync(alertEvents, ct);
-                    await _notificationEventRepository.SaveChangesAsync(ct);
-                }
+                await _notificationEventRepository.AddRangeAsync(alertEvents, ct);
+                await _notificationEventRepository.SaveChangesAsync(ct);
             }
         }
         catch (Exception ex)

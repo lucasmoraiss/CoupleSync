@@ -19,12 +19,6 @@ public sealed class FakeNotificationEventRepository : INotificationEventReposito
         return Task.FromResult<IReadOnlyList<NotificationEvent>>(result);
     }
 
-    public Task<bool> ExistsByAlertTypeAsync(Guid coupleId, string alertType, CancellationToken ct)
-    {
-        var exists = Events.Any(e => e.CoupleId == coupleId && e.AlertType == alertType);
-        return Task.FromResult(exists);
-    }
-
     public Task<IReadOnlyList<string>> GetAlertTypesSinceAsync(Guid coupleId, DateTime sinceUtc, CancellationToken ct)
     {
         var result = Events

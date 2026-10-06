@@ -27,12 +27,6 @@ public sealed class NotificationEventRepository : INotificationEventRepository
             .ToListAsync(ct);
     }
 
-    public async Task<bool> ExistsByAlertTypeAsync(Guid coupleId, string alertType, CancellationToken ct)
-    {
-        return await _dbContext.NotificationEvents
-            .AnyAsync(e => e.CoupleId == coupleId && e.AlertType == alertType, ct);
-    }
-
     public async Task<IReadOnlyList<string>> GetAlertTypesSinceAsync(Guid coupleId, DateTime sinceUtc, CancellationToken ct)
     {
         return await _dbContext.NotificationEvents

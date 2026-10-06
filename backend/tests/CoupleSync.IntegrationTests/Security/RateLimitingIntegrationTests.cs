@@ -191,16 +191,45 @@ public sealed class RateLimitingIntegrationTests
     }
 
     [Fact]
-    public async Task Refresh_IsNotRateLimited()
+    public async Task Refresh_HasItsOwnGenerousBudgetPerIp_SeparateFromLogin()
     {
         await using var factory = new RateLimitWebApplicationFactory();
         using var client = factory.CreateClient();
 
-        for (var attempt = 1; attempt <= 12; attempt++)
+        // 60 per minute per IP by default: an app refreshes about every 15 minutes, and testers may share an address.
+        for (var attempt = 1; attempt <= 60; attempt++)
         {
             var response = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { RefreshToken = $"invalid-token-{attempt}" });
             Assert.True(HttpStatusCode.Unauthorized == response.StatusCode, $"attempt {attempt}: got {(int)response.StatusCode}");
         }
+
+        var next = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { RefreshToken = "invalid-token-61" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, next.StatusCode);
+        Assert.Equal("RATE_LIMIT_EXCEEDED", (await next.Content.ReadFromJsonAsync<ErrorDto>())!.Code);
+        Assert.True(next.Headers.Contains("Retry-After"));
+
+        // Login keeps its own budget.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(client, "nobody@example.com", "WrongPass123!")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Refresh_LimitIsConfigurable_AndDoesNotFollowTheAuthLimit()
+    {
+        await using var factory = new RateLimitWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["RateLimiting:Auth:PermitLimit"] = "1",
+            ["RateLimiting:Refresh:PermitLimit"] = "3"
+        });
+        using var client = factory.CreateClient();
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            var response = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { RefreshToken = $"invalid-token-{attempt}" });
+            Assert.True(HttpStatusCode.Unauthorized == response.StatusCode, $"attempt {attempt}: got {(int)response.StatusCode}");
+        }
+
+        var fourth = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { RefreshToken = "invalid-token-4" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, fourth.StatusCode);
     }
 
     [Fact]

@@ -76,14 +76,6 @@ public sealed class FakeTransactionRepository : ITransactionRepository
 
     public bool DeleteCalled { get; private set; }
 
-    public Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
-    {
-        IReadOnlyList<Transaction> result = Transactions
-            .Where(t => t.GoalId == goalId && t.CoupleId == coupleId)
-            .ToList();
-        return Task.FromResult(result);
-    }
-
     public Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(Guid coupleId, IReadOnlyCollection<Guid> goalIds, CancellationToken ct)
     {
         var result = Transactions
@@ -124,8 +116,17 @@ public sealed class FakeTransactionRepository : ITransactionRepository
         return Task.FromResult(result);
     }
 
+    /// <summary>When set, the next save fails with it (once), as the real repository does on a database error.</summary>
+    public Exception? SaveFailure { get; set; }
+
     public Task SaveChangesAsync(CancellationToken ct)
     {
+        if (SaveFailure is { } failure)
+        {
+            SaveFailure = null;
+            return Task.FromException(failure);
+        }
+
         return Task.CompletedTask;
     }
 }

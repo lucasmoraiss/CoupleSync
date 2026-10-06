@@ -16,4 +16,14 @@ public sealed class FakeAlertPolicyService : IAlertPolicyService
     {
         return Task.FromResult(EventsToReturn);
     }
+
+    public Task<IReadOnlyList<NotificationEvent>> EvaluatePostImportAsync(
+        Guid coupleId,
+        IReadOnlyList<Transaction> importedTransactions,
+        IReadOnlyList<Transaction> recentTransactions,
+        DateTime nowUtc,
+        CancellationToken ct = default)
+    {
+        return Task.FromResult(EventsToReturn);
+    }
 }

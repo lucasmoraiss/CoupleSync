@@ -99,7 +99,7 @@ public sealed class IngestNotificationEventCommandHandler
         {
             await _transactionRepository.SaveChangesAsync(cancellationToken);
         }
-        catch (DataStoreException)
+        catch (UniqueViolationException)
         {
             // Concurrent duplicate: unique constraint on (couple_id, fingerprint) prevented insert.
             ingestEvent.MarkDuplicate();

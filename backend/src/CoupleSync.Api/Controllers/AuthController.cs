@@ -77,9 +77,11 @@ public sealed class AuthController : ControllerBase
     }
 
     [HttpPost("refresh")]
+    [EnableRateLimiting(RateLimitPolicies.AuthRefresh)]
     [ProducesResponseType(typeof(RefreshResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<RefreshResponse>> Refresh([FromBody] RefreshRequest request, CancellationToken cancellationToken)
     {
         var result = await _refreshTokenHandler.HandleAsync(
@@ -118,13 +120,8 @@ public sealed class AuthController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<RefreshResponse>> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.FindFirstValue("user_id"), out var userId))
-        {
-            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
-        }
-
         var result = await _changePasswordHandler.HandleAsync(
-            new ChangePasswordCommand(userId, request.CurrentPassword, request.NewPassword),
+            new ChangePasswordCommand(RequireUserId(), request.CurrentPassword, request.NewPassword),
             cancellationToken);
 
         return Ok(new RefreshResponse(result.AccessToken, result.RefreshToken));

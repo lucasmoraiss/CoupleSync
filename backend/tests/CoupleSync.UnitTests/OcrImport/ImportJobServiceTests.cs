@@ -387,9 +387,6 @@ internal sealed class FakeTransactionRepository : ITransactionRepository
     public Task DeleteAsync(Transaction transaction, CancellationToken ct)
         => Task.CompletedTask;
 
-    public Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<Transaction>>([]);
-
     public Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(Guid coupleId, IReadOnlyCollection<Guid> goalIds, CancellationToken ct)
         => Task.FromResult(new Dictionary<Guid, decimal>());
 

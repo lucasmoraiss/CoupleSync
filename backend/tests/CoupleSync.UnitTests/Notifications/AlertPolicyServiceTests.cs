@@ -362,4 +362,84 @@ public sealed class AlertPolicyServiceTests
 
         Assert.DoesNotContain(events, e => e.AlertType.StartsWith("Budget"));
     }
+
+    // -- Statement import (B-M4): one summary instead of one alert per line -----
+
+    [Fact]
+    public async Task Import_SeveralLinesAbove500_RaisesOneSummaryAlertPerMember_WithCountAndTotal()
+    {
+        var kit = new AlertPolicyTestKit(memberCount: 2);
+        var imported = new[]
+        {
+            BuildTransaction(kit.CoupleId, kit.Author, 600m),
+            BuildTransaction(kit.CoupleId, kit.Author, 1234.56m),
+            BuildTransaction(kit.CoupleId, kit.Author, 900m),
+            BuildTransaction(kit.CoupleId, kit.Author, 20m),            // below the threshold: not counted
+            BuildTransaction(kit.CoupleId, kit.Author, 700m, currency: "USD"),   // not BRL: not counted
+        };
+
+        var events = await kit.Service.EvaluatePostImportAsync(kit.CoupleId, imported, [], Now.UtcNow);
+
+        var large = events.Where(e => e.AlertType == "LargeTransaction").ToList();
+        Assert.Equal(2, large.Count);
+        Assert.Equal(kit.Members.Select(m => m.Id).OrderBy(id => id), large.Select(e => e.UserId).OrderBy(id => id));
+        Assert.All(large, e =>
+        {
+            Assert.Equal("Transações de valor alto", e.Title);
+            Assert.Equal("3 transações de valor alto foram importadas do extrato, somando R$ 2.734,56.", e.Body);
+        });
+    }
+
+    [Fact]
+    public async Task Import_OneLineAbove500_RaisesTheSameAlertAsASingleTransaction()
+    {
+        var kit = new AlertPolicyTestKit();
+        var imported = new[]
+        {
+            BuildTransaction(kit.CoupleId, kit.Author, 600m),
+            BuildTransaction(kit.CoupleId, kit.Author, 20m),
+        };
+
+        var events = await kit.Service.EvaluatePostImportAsync(kit.CoupleId, imported, [], Now.UtcNow);
+
+        var alert = Assert.Single(events, e => e.AlertType == "LargeTransaction");
+        Assert.Equal("Transação de valor alto", alert.Title);
+        Assert.Equal("Uma transação de R$ 600,00 foi registrada.", alert.Body);
+    }
+
+    [Fact]
+    public async Task Import_NothingAbove500_OrNothingImported_RaisesNoLargeTransactionAlert()
+    {
+        var kit = new AlertPolicyTestKit();
+
+        var small = await kit.Service.EvaluatePostImportAsync(
+            kit.CoupleId, [BuildTransaction(kit.CoupleId, kit.Author, 20m)], [], Now.UtcNow);
+        var none = await kit.Service.EvaluatePostImportAsync(kit.CoupleId, [], [], Now.UtcNow);
+
+        Assert.DoesNotContain(small, e => e.AlertType == "LargeTransaction");
+        Assert.Empty(none);
+    }
+
+    [Fact]
+    public async Task Import_BudgetAlerts_AreRaisedOncePerCategoryOfTheImportedLines()
+    {
+        var kit = new AlertPolicyTestKit();
+        var plan = BudgetPlan.Create(kit.CoupleId, "2026-04", 5000m, "BRL", Now.UtcNow);
+        plan.Allocations.Add(BudgetAllocation.Create(plan.Id, "ALIMENTACAO", 100m, "BRL", Now.UtcNow));
+        plan.Allocations.Add(BudgetAllocation.Create(plan.Id, "LAZER", 100m, "BRL", Now.UtcNow));
+        kit.Budgets.Plans.Add(plan);
+        var imported = new[]
+        {
+            BuildTransaction(kit.CoupleId, kit.Author, 80m, category: "ALIMENTACAO"),
+            BuildTransaction(kit.CoupleId, kit.Author, 90m, category: "ALIMENTACAO"),
+            BuildTransaction(kit.CoupleId, kit.Author, 150m, category: "LAZER"),
+        };
+        kit.Transactions.Transactions.AddRange(imported);
+
+        var events = await kit.Service.EvaluatePostImportAsync(kit.CoupleId, imported, imported, Now.UtcNow);
+
+        Assert.Equal(
+            ["BudgetExceeded|ALIMENTACAO|2026-04", "BudgetExceeded|LAZER|2026-04"],
+            events.Select(e => e.AlertType).OrderBy(t => t, StringComparer.Ordinal));
+    }
 }

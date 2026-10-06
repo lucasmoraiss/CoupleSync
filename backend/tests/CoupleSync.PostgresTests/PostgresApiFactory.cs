@@ -65,6 +65,7 @@ internal sealed class PostgresApiFactory : WebApplicationFactory<Program>
                 ["ConnectionStrings:DefaultConnection"] = _database.ConnectionString,
                 ["RateLimiting:Auth:PermitLimit"] = "10000",
                 ["RateLimiting:CoupleJoin:PermitLimit"] = "10000",
+                ["RateLimiting:Refresh:PermitLimit"] = "10000",
             });
         });
 

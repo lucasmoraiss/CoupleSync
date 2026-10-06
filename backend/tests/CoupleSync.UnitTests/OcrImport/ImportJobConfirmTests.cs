@@ -194,6 +194,40 @@ public sealed class ImportJobConfirmTests
         Assert.Equal("OCR_CONFIRM_CONFLICT", ex.Code);
     }
 
+    // ── B-M4: one "valor alto" alert per import, not one per line ───────────
+
+    [Fact]
+    public async Task Confirm_SeveralLinesAbove500_StoresOneLargeTransactionAlertPerMember()
+    {
+        var kit = new AlertPolicyTestKit(memberCount: 2, nowUtc: FixedNow);
+        var jobs = new FakeImportJobRepository();
+        var service = new ImportJobService(
+            jobs,
+            new FakeStorageAdapter(),
+            new FakeDateTimeProvider(FixedNow),
+            new UniqueIndexTransactionRepository(),
+            new FakeNotificationCaptureRepository(),
+            kit.Service,
+            kit.Events,
+            NullLogger<ImportJobService>.Instance);
+        var job = ImportJob.Create(kit.CoupleId, kit.Author, "couples/x/y", "application/pdf", FixedNow);
+        job.MarkProcessing(FixedNow);
+        job.MarkReady(JsonSerializer.Serialize(new[]
+        {
+            Candidate(0, "Aluguel", 1500m, "fpa"), Candidate(1, "Notebook", 3200m, "fpb"),
+            Candidate(2, "Geladeira", 2100.50m, "fpc"), Candidate(3, "Padaria", 18m, "fpd"),
+        }), FixedNow);
+        jobs.Jobs.Add(job);
+
+        var result = await service.ConfirmCandidatesAsync(job.Id, kit.CoupleId, kit.Author, [0, 1, 2, 3], null, CancellationToken.None);
+
+        Assert.Equal(4, result.Created.Count);
+        var large = kit.Events.Events.Where(e => e.AlertType == "LargeTransaction").ToList();
+        Assert.Equal(2, large.Count);   // one per member, not three per member
+        Assert.All(large, e => Assert.Equal(
+            "3 transações de valor alto foram importadas do extrato, somando R$ 6.800,50.", e.Body));
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
 
     private static (ImportJobService Service, FakeImportJobRepository Jobs, UniqueIndexTransactionRepository Transactions) BuildService()
@@ -315,9 +349,6 @@ internal sealed class UniqueIndexTransactionRepository : ITransactionRepository
         => Task.FromResult(Stored.FirstOrDefault(t => t.Id == id));
 
     public Task DeleteAsync(Transaction transaction, CancellationToken ct) => Task.CompletedTask;
-
-    public Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<Transaction>>([]);
 
     public Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(Guid coupleId, IReadOnlyCollection<Guid> goalIds, CancellationToken ct)
         => Task.FromResult(new Dictionary<Guid, decimal>());

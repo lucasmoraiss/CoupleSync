@@ -8,7 +8,8 @@ namespace CoupleSync.Application.Notification;
 /// Decides which alerts a new transaction raises. Alerts go to every active member of the couple (not only
 /// to whoever entered the transaction), each member's own notification settings applying where a setting
 /// exists. Repeating alerts are sent at most once per month: budget alerts per category and threshold,
-/// the 30-day spending alert once; the large-transaction alert is raised once per transaction.
+/// the 30-day spending alert once; the large-transaction alert is raised once per transaction, or once per
+/// statement import (a summary) when the import brings several.
 /// </summary>
 public sealed class AlertPolicyService : IAlertPolicyService
 {
@@ -40,25 +41,55 @@ public sealed class AlertPolicyService : IAlertPolicyService
         _notificationSettingsRepository = notificationSettingsRepository;
     }
 
-    public async Task<IReadOnlyList<NotificationEvent>> EvaluatePostIngestAsync(
+    public Task<IReadOnlyList<NotificationEvent>> EvaluatePostIngestAsync(
         Guid coupleId,
         Transaction newTransaction,
         IReadOnlyList<Transaction> recentTransactions,
         DateTime nowUtc,
         CancellationToken ct = default)
+        => EvaluateAsync(coupleId, [newTransaction], recentTransactions, nowUtc, ct);
+
+    public Task<IReadOnlyList<NotificationEvent>> EvaluatePostImportAsync(
+        Guid coupleId,
+        IReadOnlyList<Transaction> importedTransactions,
+        IReadOnlyList<Transaction> recentTransactions,
+        DateTime nowUtc,
+        CancellationToken ct = default)
+        => EvaluateAsync(coupleId, importedTransactions, recentTransactions, nowUtc, ct);
+
+    /// <summary>
+    /// The alerts of one user action: a single transaction, or every transaction created by one statement
+    /// import confirmation. Each rule runs once for the whole batch, so an import of many large lines produces
+    /// one summary instead of one push per line.
+    /// </summary>
+    private async Task<IReadOnlyList<NotificationEvent>> EvaluateAsync(
+        Guid coupleId,
+        IReadOnlyList<Transaction> newTransactions,
+        IReadOnlyList<Transaction> recentTransactions,
+        DateTime nowUtc,
+        CancellationToken ct)
     {
         var events = new List<NotificationEvent>();
-        var recipients = await GetRecipientsAsync(coupleId, newTransaction.UserId, ct);
+        if (newTransactions.Count == 0)
+            return events;
+
+        var recipients = await GetRecipientsAsync(coupleId, newTransactions[0].UserId, ct);
 
         var currentMonth = BrazilTime.MonthOf(nowUtc);
         var (monthStart, monthEnd) = BrazilTime.MonthRangeUtc(currentMonth);
         var alertTypesThisMonth = await _notificationEventRepository.GetAlertTypesSinceAsync(coupleId, monthStart, ct);
 
-        // Rule 1: LargeTransaction - one alert per transaction whose amount exceeds the threshold.
-        if (CurrencyRules.IsBrl(newTransaction.Currency) && newTransaction.Amount > LargeTransactionThreshold)
+        // Rule 1: LargeTransaction - amounts above the threshold: one alert for a single transaction, one
+        // summary (count and total) when the batch has several.
+        var large = newTransactions
+            .Where(t => CurrencyRules.IsBrl(t.Currency) && t.Amount > LargeTransactionThreshold)
+            .ToList();
+        if (large.Count > 0)
         {
-            var title = "Transação de valor alto";
-            var body = $"Uma transação de {BrlFormat.Format(newTransaction.Amount)} foi registrada.";
+            var title = large.Count == 1 ? "Transação de valor alto" : "Transações de valor alto";
+            var body = large.Count == 1
+                ? $"Uma transação de {BrlFormat.Format(large[0].Amount)} foi registrada."
+                : $"{large.Count} transações de valor alto foram importadas do extrato, somando {BrlFormat.Format(large.Sum(t => t.Amount))}.";
             foreach (var recipient in recipients)
             {
                 var settings = await SettingsOfAsync(recipient, coupleId, nowUtc, ct);
@@ -88,10 +119,15 @@ public sealed class AlertPolicyService : IAlertPolicyService
 
         // Rule 3: BillReminder - time-based, not triggered post-ingest. Skip for V1.
 
-        // Rule 4: budget alerts for the transaction's category in the current month.
-        var budgetAlert = await CheckBudgetAsync(coupleId, newTransaction, currentMonth, monthStart, monthEnd, alertTypesThisMonth, ct);
-        if (budgetAlert is not null)
+        // Rule 4: budget alerts for each category touched, in the current month.
+        var categories = newTransactions
+            .Select(t => TransactionCategories.NormalizeOrOther(t.Category))
+            .Distinct();
+        foreach (var category in categories)
         {
+            var budgetAlert = await CheckBudgetAsync(coupleId, category, currentMonth, monthStart, monthEnd, alertTypesThisMonth, ct);
+            if (budgetAlert is null) continue;
+
             foreach (var recipient in recipients)
                 events.Add(NotificationEvent.Create(coupleId, recipient, budgetAlert.AlertType, budgetAlert.Title, budgetAlert.Body, nowUtc));
         }
@@ -103,7 +139,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
 
     private async Task<BudgetAlert?> CheckBudgetAsync(
         Guid coupleId,
-        Transaction transaction,
+        string category,
         string currentMonth,
         DateTime monthStart,
         DateTime monthEnd,
@@ -114,7 +150,6 @@ public sealed class AlertPolicyService : IAlertPolicyService
         if (plan is null)
             return null;
 
-        var category = TransactionCategories.NormalizeOrOther(transaction.Category);
         var allocation = plan.Allocations
             .FirstOrDefault(a => TransactionCategories.NormalizeOrOther(a.Category) == category);
         if (allocation is null)

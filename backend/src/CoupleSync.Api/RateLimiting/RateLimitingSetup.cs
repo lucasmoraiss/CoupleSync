@@ -17,6 +17,7 @@ public static class RateLimitPolicies
     public const string CoupleJoin = "couple-join";
     public const string AuthChangePassword = "auth-change-password";
     public const string AuthLogout = "auth-logout";
+    public const string AuthRefresh = "auth-refresh";
     public const string AuthForgotPassword = "auth-forgot-password";
     public const string AuthResetPassword = "auth-reset-password";
     public const string AuthConfirmEmail = "auth-confirm-email";
@@ -33,6 +34,12 @@ public sealed class RateLimitingOptions
 
     /// <summary>POST /couples/join — per authenticated user.</summary>
     public FixedWindowSettings CoupleJoin { get; set; } = new();
+
+    /// <summary>
+    /// POST /auth/refresh — per client IP. Far above normal use (an app refreshes about every 15 minutes per
+    /// device, and several people may share one address) and still a ceiling for someone guessing tokens.
+    /// </summary>
+    public FixedWindowSettings Refresh { get; set; } = new() { PermitLimit = 60 };
 }
 
 public sealed class FixedWindowSettings
@@ -61,6 +68,10 @@ public static class RateLimitingSetup
             // Own bucket: signing out must not eat the login budget (and vice versa).
             limiter.AddPolicy(RateLimitPolicies.AuthLogout, context =>
                 CreatePartition($"ip:{GetClientIp(context)}", GetOptions(context).Auth));
+
+            // Anonymous like login, but called by every signed-in app in the background: its own, larger budget.
+            limiter.AddPolicy(RateLimitPolicies.AuthRefresh, context =>
+                CreatePartition($"refresh:ip:{GetClientIp(context)}", GetOptions(context).Refresh));
 
             limiter.AddPolicy(RateLimitPolicies.AuthRegister, context =>
                 CreatePartition($"ip:{GetClientIp(context)}", GetOptions(context).Auth));

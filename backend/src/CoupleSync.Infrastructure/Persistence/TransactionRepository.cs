@@ -81,13 +81,6 @@ public sealed class TransactionRepository : ITransactionRepository
         return Task.CompletedTask;
     }
 
-    public async Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
-    {
-        return await _dbContext.Transactions
-            .Where(t => t.GoalId == goalId && t.CoupleId == coupleId)
-            .ToListAsync(ct);
-    }
-
     public async Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(
         Guid coupleId,
         IReadOnlyCollection<Guid> goalIds,
