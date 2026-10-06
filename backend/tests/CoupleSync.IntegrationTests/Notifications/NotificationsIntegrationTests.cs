@@ -93,6 +93,31 @@ public sealed class NotificationsIntegrationTests
         Assert.Equal(HttpStatusCode.NoContent, second.StatusCode);
     }
 
+    [Fact]
+    public async Task RegisterDeviceToken_TokenOfAnotherAccount_MovesToTheCurrentUser()
+    {
+        await using var factory = new NotificationsWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var firstUser = await RegisterWithCoupleAndGetTokenAsync(client, $"reg-move-a-{Guid.NewGuid():N}@example.com");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", firstUser);
+        var first = await client.PostAsJsonAsync("/api/v1/devices/token",
+            new { Token = "shared-phone-token", Platform = "android" });
+        Assert.Equal(HttpStatusCode.NoContent, first.StatusCode);
+
+        client.DefaultRequestHeaders.Authorization = null;
+        var secondUser = await RegisterWithCoupleAndGetTokenAsync(client, $"reg-move-b-{Guid.NewGuid():N}@example.com");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secondUser);
+        var second = await client.PostAsJsonAsync("/api/v1/devices/token",
+            new { Token = "shared-phone-token", Platform = "android" });
+        Assert.Equal(HttpStatusCode.NoContent, second.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var rows = await db.DeviceTokens.IgnoreQueryFilters().Where(d => d.Token == "shared-phone-token").ToListAsync();
+        Assert.Single(rows);
+    }
+
     // ── GET /api/v1/notifications/settings ────────────────────────────────
 
     [Fact]

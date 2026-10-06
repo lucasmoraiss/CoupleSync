@@ -227,6 +227,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
 
             entity.HasIndex(x => new { x.UserId, x.Platform }).IsUnique();
+            entity.HasIndex(x => x.Token).IsUnique();
             entity.HasIndex(x => x.CoupleId);
         });
 

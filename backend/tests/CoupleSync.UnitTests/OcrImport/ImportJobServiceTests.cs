@@ -29,8 +29,7 @@ public sealed class ImportJobServiceTests
         var ingestRepo = new FakeNotificationCaptureRepository();
         var alertPolicy = new FakeAlertPolicyService();
         var notifEventRepo = new FakeNotificationEventRepository();
-        var notifSettingsRepo = new FakeNotificationSettingsRepository();
-        return new ImportJobService(jobRepo, storage, dateTime, txnRepo, ingestRepo, alertPolicy, notifEventRepo, notifSettingsRepo, NullLogger<ImportJobService>.Instance);
+        return new ImportJobService(jobRepo, storage, dateTime, txnRepo, ingestRepo, alertPolicy, notifEventRepo, NullLogger<ImportJobService>.Instance);
     }
 
     // ── UploadAsync ────────────────────────────────────────────────────────

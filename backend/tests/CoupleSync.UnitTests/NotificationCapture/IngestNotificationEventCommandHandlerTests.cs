@@ -21,8 +21,7 @@ public sealed class IngestNotificationEventCommandHandlerTests
             categoryService ?? new FakeCategoryMatchingService(),
             new FakeFingerprintGenerator(),
             new FakeAlertPolicyService(),
-            new FakeNotificationEventRepository(),
-            new FakeNotificationSettingsRepository());
+            new FakeNotificationEventRepository());
     }
 
     private static IngestNotificationEventCommand BuildCommand(

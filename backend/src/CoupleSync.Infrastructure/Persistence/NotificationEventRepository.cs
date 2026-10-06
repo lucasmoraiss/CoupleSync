@@ -33,6 +33,15 @@ public sealed class NotificationEventRepository : INotificationEventRepository
             .AnyAsync(e => e.CoupleId == coupleId && e.AlertType == alertType, ct);
     }
 
+    public async Task<IReadOnlyList<string>> GetAlertTypesSinceAsync(Guid coupleId, DateTime sinceUtc, CancellationToken ct)
+    {
+        return await _dbContext.NotificationEvents
+            .Where(e => e.CoupleId == coupleId && e.CreatedAtUtc >= sinceUtc)
+            .Select(e => e.AlertType)
+            .Distinct()
+            .ToListAsync(ct);
+    }
+
     public async Task AddRangeAsync(IReadOnlyList<NotificationEvent> events, CancellationToken ct)
     {
         await _dbContext.NotificationEvents.AddRangeAsync(events, ct);

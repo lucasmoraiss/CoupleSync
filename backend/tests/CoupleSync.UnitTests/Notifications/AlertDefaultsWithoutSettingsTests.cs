@@ -74,9 +74,8 @@ public sealed class AlertDefaultsWithoutSettingsTests
             new FakeTransactionRepository(),
             new FakeCategoryMatchingService(),
             new FakeFingerprintGenerator(),
-            new AlertPolicyService(),
-            events,
-            new FakeNotificationSettingsRepository());
+            Policy(new FakeNotificationSettingsRepository(), events),
+            events);
 
         var result = await handler.HandleAsync(
             new IngestNotificationEventCommand(UserId, CoupleId, "NUBANK", LargeAmount, "BRL", FixedNow.AddHours(-1), "Compra", "Loja", null),
@@ -98,9 +97,8 @@ public sealed class AlertDefaultsWithoutSettingsTests
             new FakeDateTimeProvider(FixedNow),
             new UniqueIndexTransactionRepository(),
             new FakeNotificationCaptureRepository(),
-            new AlertPolicyService(),
+            Policy(new FakeNotificationSettingsRepository(), events),
             events,
-            new FakeNotificationSettingsRepository(),
             NullLogger<ImportJobService>.Instance);
 
         var job = ImportJob.Create(CoupleId, UserId, "couples/x/y", "application/pdf", FixedNow);
@@ -123,6 +121,10 @@ public sealed class AlertDefaultsWithoutSettingsTests
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
+    // The author is the only member the fake couple repository knows about (no members registered).
+    private static AlertPolicyService Policy(FakeNotificationSettingsRepository settings, FakeNotificationEventRepository events)
+        => new(new FakeBudgetRepository(), new FakeTransactionRepository(), events, new FakeCoupleRepository(), settings);
+
     private static CreateManualTransactionCommand ManualCommand()
         => new(CoupleId, UserId, LargeAmount, "BRL", FixedNow.AddHours(-1), "Geladeira", "Loja", "Moradia");
 
@@ -132,8 +134,7 @@ public sealed class AlertDefaultsWithoutSettingsTests
             new FakeTransactionRepository(),
             new FakeNotificationCaptureRepository(),
             new FixedDateTimeProvider(FixedNow),
-            new AlertPolicyService(),
+            Policy(settings, events),
             events,
-            settings,
             NullLogger<CreateManualTransactionCommandHandler>.Instance);
 }

@@ -40,6 +40,13 @@ public sealed class TransactionEventIngest : ICoupleScoped
         Status = IngestStatus.Accepted;
     }
 
+    /// <summary>Bank markers of ingest rows written by manual entry and by OCR import (not by notification capture).</summary>
+    public const string ManualBank = "MANUAL";
+    public const string OcrBank = "OCR";
+
+    /// <summary>Banks that never come from the notification-capture endpoint (its validator only accepts real banks).</summary>
+    public static readonly string[] NonNotificationBanks = [ManualBank, OcrBank];
+
     public Guid Id { get; private set; }
     public Guid CoupleId { get; private set; }
     public Guid UserId { get; private set; }

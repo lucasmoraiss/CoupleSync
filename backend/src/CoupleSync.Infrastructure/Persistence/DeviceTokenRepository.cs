@@ -30,12 +30,22 @@ public sealed class DeviceTokenRepository : IDeviceTokenRepository
     {
         const string platform = "android";
 
+        // A token belongs to a single user: a device that switched accounts hands its token over, so it
+        // stops receiving the previous account's alerts. The previous owner may be in another couple,
+        // hence IgnoreQueryFilters.
+        var heldByOthers = await _dbContext.DeviceTokens
+            .IgnoreQueryFilters()
+            .Where(d => d.Token == token && d.UserId != userId)
+            .ToListAsync(ct);
+        _dbContext.DeviceTokens.RemoveRange(heldByOthers);
+
         var existing = await _dbContext.DeviceTokens
-            .FirstOrDefaultAsync(d => d.UserId == userId && d.CoupleId == coupleId && d.Platform == platform, ct);
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(d => d.UserId == userId && d.Platform == platform, ct);
 
         if (existing is not null)
         {
-            existing.UpdateLastSeen(token, nowUtc);
+            existing.Refresh(coupleId, token, nowUtc);
         }
         else
         {

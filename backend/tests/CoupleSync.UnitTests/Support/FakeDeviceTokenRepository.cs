@@ -9,6 +9,8 @@ public sealed class FakeDeviceTokenRepository : IDeviceTokenRepository
 
     public void Add(DeviceToken token) => _tokens.Add(token);
 
+    public IReadOnlyList<DeviceToken> All => _tokens;
+
     public Task<DeviceToken?> GetByUserIdAsync(Guid userId, Guid coupleId, CancellationToken ct)
     {
         var result = _tokens.FirstOrDefault(d => d.UserId == userId && d.CoupleId == coupleId);
@@ -23,9 +25,10 @@ public sealed class FakeDeviceTokenRepository : IDeviceTokenRepository
 
     public Task UpsertAsync(Guid userId, Guid coupleId, string token, DateTime nowUtc, CancellationToken ct)
     {
-        var existing = _tokens.FirstOrDefault(d => d.UserId == userId && d.CoupleId == coupleId);
+        _tokens.RemoveAll(d => d.Token == token && d.UserId != userId);
+        var existing = _tokens.FirstOrDefault(d => d.UserId == userId);
         if (existing is not null)
-            existing.UpdateLastSeen(token, nowUtc);
+            existing.Refresh(coupleId, token, nowUtc);
         else
             _tokens.Add(DeviceToken.Create(userId, coupleId, token, nowUtc));
         return Task.CompletedTask;

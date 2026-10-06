@@ -208,7 +208,6 @@ public sealed class ImportJobConfirmTests
             new FakeNotificationCaptureRepository(),
             new FakeAlertPolicyService(),
             new FakeNotificationEventRepository(),
-            new FakeNotificationSettingsRepository(),
             NullLogger<ImportJobService>.Instance);
         return (service, jobs, transactions);
     }

@@ -11,7 +11,7 @@ namespace CoupleSync.Application.OcrImport;
 
 public sealed class ImportJobService
 {
-    private const string OcrBank = "OCR";
+    private const string OcrBank = TransactionEventIngest.OcrBank;
 
     private readonly IImportJobRepository _repository;
     private readonly IStorageAdapter _storageAdapter;
@@ -20,7 +20,6 @@ public sealed class ImportJobService
     private readonly INotificationCaptureRepository _ingestRepository;
     private readonly IAlertPolicyService _alertPolicyService;
     private readonly INotificationEventRepository _notificationEventRepository;
-    private readonly INotificationSettingsRepository _notificationSettingsRepository;
     private readonly ILogger<ImportJobService> _logger;
 
     public ImportJobService(
@@ -31,7 +30,6 @@ public sealed class ImportJobService
         INotificationCaptureRepository ingestRepository,
         IAlertPolicyService alertPolicyService,
         INotificationEventRepository notificationEventRepository,
-        INotificationSettingsRepository notificationSettingsRepository,
         ILogger<ImportJobService> logger)
     {
         _repository = repository;
@@ -41,7 +39,6 @@ public sealed class ImportJobService
         _ingestRepository = ingestRepository;
         _alertPolicyService = alertPolicyService;
         _notificationEventRepository = notificationEventRepository;
-        _notificationSettingsRepository = notificationSettingsRepository;
         _logger = logger;
     }
 
@@ -244,15 +241,11 @@ public sealed class ImportJobService
         {
             var nowUtc = _dateTimeProvider.UtcNow;
             var since = nowUtc.AddDays(-30);
-            // No row in notification_settings means the user never changed anything: the defaults
-            // (every alert enabled) apply, exactly as GET /notifications/settings reports them.
-            var settings = await _notificationSettingsRepository.GetByUserIdAsync(userId, coupleId, ct)
-                ?? NotificationSettings.Create(userId, coupleId, nowUtc);
             var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(coupleId, since, ct);
             foreach (var txn in created)
             {
                 var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
-                    coupleId, userId, txn, recentTransactions, settings, nowUtc, ct);
+                    coupleId, txn, recentTransactions, nowUtc, ct);
                 if (alertEvents.Count > 0)
                 {
                     await _notificationEventRepository.AddRangeAsync(alertEvents, ct);

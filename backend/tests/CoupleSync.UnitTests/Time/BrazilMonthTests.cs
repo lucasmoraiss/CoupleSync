@@ -127,10 +127,10 @@ public sealed class BrazilMonthTests
         budgets.Plans.Add(plan);
         var tx = Tx(coupleId, 150m, LateOctoberTx);
         txRepo.Transactions.Add(tx);
-        var settings = NotificationSettings.Create(userId, coupleId, LastNightOfOctober);
-        var svc = new AlertPolicyService(budgets, txRepo, new FakeNotificationEventRepository());
+        var svc = new AlertPolicyService(
+            budgets, txRepo, new FakeNotificationEventRepository(), new FakeCoupleRepository(), new FakeNotificationSettingsRepository());
 
-        var events = await svc.EvaluatePostIngestAsync(coupleId, userId, tx, [], settings, LastNightOfOctober);
+        var events = await svc.EvaluatePostIngestAsync(coupleId, tx, [], LastNightOfOctober);
 
         Assert.Contains(events, e => e.AlertType == "BudgetExceeded|OUTROS|2026-10");
     }

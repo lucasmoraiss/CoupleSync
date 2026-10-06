@@ -13,14 +13,13 @@ namespace CoupleSync.Application.Transactions.Commands;
 /// </summary>
 public sealed class CreateManualTransactionCommandHandler
 {
-    private const string ManualBank = "MANUAL";
+    private const string ManualBank = TransactionEventIngest.ManualBank;
 
     private readonly ITransactionRepository _transactionRepository;
     private readonly INotificationCaptureRepository _ingestRepository;
     private readonly IDateTimeProvider _clock;
     private readonly IAlertPolicyService _alertPolicyService;
     private readonly INotificationEventRepository _notificationEventRepository;
-    private readonly INotificationSettingsRepository _notificationSettingsRepository;
     private readonly ILogger<CreateManualTransactionCommandHandler> _logger;
 
     public CreateManualTransactionCommandHandler(
@@ -29,7 +28,6 @@ public sealed class CreateManualTransactionCommandHandler
         IDateTimeProvider clock,
         IAlertPolicyService alertPolicyService,
         INotificationEventRepository notificationEventRepository,
-        INotificationSettingsRepository notificationSettingsRepository,
         ILogger<CreateManualTransactionCommandHandler> logger)
     {
         _transactionRepository = transactionRepository;
@@ -37,7 +35,6 @@ public sealed class CreateManualTransactionCommandHandler
         _clock = clock;
         _alertPolicyService = alertPolicyService;
         _notificationEventRepository = notificationEventRepository;
-        _notificationSettingsRepository = notificationSettingsRepository;
         _logger = logger;
     }
 
@@ -95,13 +92,9 @@ public sealed class CreateManualTransactionCommandHandler
         {
             var nowUtc = _clock.UtcNow;
             var since = nowUtc.AddDays(-30);
-            // No row in notification_settings means the user never changed anything: the defaults
-            // (every alert enabled) apply, exactly as GET /notifications/settings reports them.
-            var settings = await _notificationSettingsRepository.GetByUserIdAsync(cmd.UserId, cmd.CoupleId, ct)
-                ?? NotificationSettings.Create(cmd.UserId, cmd.CoupleId, nowUtc);
             var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(cmd.CoupleId, since, ct);
             var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
-                cmd.CoupleId, cmd.UserId, transaction, recentTransactions, settings, nowUtc, ct);
+                cmd.CoupleId, transaction, recentTransactions, nowUtc, ct);
             if (alertEvents.Count > 0)
             {
                 await _notificationEventRepository.AddRangeAsync(alertEvents, ct);

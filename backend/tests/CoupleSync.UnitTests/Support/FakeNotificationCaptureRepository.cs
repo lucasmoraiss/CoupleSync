@@ -24,16 +24,19 @@ public sealed class FakeNotificationCaptureRepository : INotificationCaptureRepo
         return Task.CompletedTask;
     }
 
+    private IEnumerable<TransactionEventIngest> FromNotifications(Guid coupleId)
+        => IngestEvents.Where(e => e.CoupleId == coupleId && !TransactionEventIngest.NonNotificationBanks.Contains(e.Bank));
+
     public Task<int> CountByStatusAsync(Guid coupleId, IngestStatus status, CancellationToken cancellationToken)
     {
-        var count = IngestEvents.Count(e => e.CoupleId == coupleId && e.Status == status);
+        var count = FromNotifications(coupleId).Count(e => e.Status == status);
         return Task.FromResult(count);
     }
 
     public Task<TransactionEventIngest?> GetLastByStatusAsync(Guid coupleId, IngestStatus status, CancellationToken cancellationToken)
     {
-        var result = IngestEvents
-            .Where(e => e.CoupleId == coupleId && e.Status == status)
+        var result = FromNotifications(coupleId)
+            .Where(e => e.Status == status)
             .OrderByDescending(e => e.CreatedAtUtc)
             .FirstOrDefault();
         return Task.FromResult(result);
@@ -41,8 +44,7 @@ public sealed class FakeNotificationCaptureRepository : INotificationCaptureRepo
 
     public Task<DateTime?> GetLastEventTimeAsync(Guid coupleId, CancellationToken cancellationToken)
     {
-        var result = IngestEvents
-            .Where(e => e.CoupleId == coupleId)
+        var result = FromNotifications(coupleId)
             .OrderByDescending(e => e.CreatedAtUtc)
             .Select(e => (DateTime?)e.CreatedAtUtc)
             .FirstOrDefault();
