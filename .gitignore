@@ -68,7 +68,8 @@ _bmad/config.user.toml
 _bmad/custom/config.user.toml
 _bmad-output/
 
-# ─── Orchestrator session artifacts ──────────────────────────────────────────
+# ─── Ferramentas de IA de terceiros e artefatos de sessão (uso local) ─────────
+.agents/
 .agents-work/
 
 # ─── MCP server build artifacts ──────────────────────────────────────────────

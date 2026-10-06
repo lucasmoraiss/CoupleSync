@@ -56,6 +56,10 @@ public sealed class TransactionsController : ControllerBase
         if (pageSize < 1) pageSize = DefaultPageSize;
         if (pageSize > MaxPageSize) pageSize = MaxPageSize;
 
+        // The repository computes OFFSET as (page - 1) * pageSize in 32-bit arithmetic.
+        if ((long)(page - 1) * pageSize > int.MaxValue)
+            throw new AppException("VALIDATION_ERROR", "page is out of range.", StatusCodes.Status400BadRequest);
+
         if (startDate.HasValue && startDate.Value.Kind == DateTimeKind.Unspecified)
             startDate = DateTime.SpecifyKind(startDate.Value, DateTimeKind.Utc);
         if (endDate.HasValue && endDate.Value.Kind == DateTimeKind.Unspecified)

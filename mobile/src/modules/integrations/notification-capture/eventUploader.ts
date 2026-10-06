@@ -1,25 +1,10 @@
 // AC-009: Event uploader — queued POST to /api/v1/integrations/events with exponential backoff.
 // Uses the existing axiosInstance (auth interceptor already attached).
 import axiosInstance from '@/services/apiClient';
-import { parseNotification } from './notificationParser';
+import { classifyNotification } from './notificationParser';
+import { buildIngestRequest, type IngestNotificationEventRequest } from './ingestRequest';
 
-// ── Request shape expected by backend IngestNotificationEventRequest ──────────
-export interface IngestNotificationEventRequest {
-  /** Bank name resolved from package, e.g. "Nubank" */
-  readonly bank: string;
-  /** Transaction amount (must be > 0) */
-  readonly amount: number;
-  /** ISO 4217 currency code — 'BRL' | 'USD' | 'EUR' */
-  readonly currency: string;
-  /** ISO 8601 timestamp of when the event occurred */
-  readonly eventTimestamp: string;
-  /** Short transaction description, if available */
-  readonly description?: string;
-  /** Merchant or counter-party name, if extractable */
-  readonly merchant?: string;
-  /** Sanitised raw notification text, max 512 chars */
-  readonly rawNotificationText?: string;
-}
+export type { IngestNotificationEventRequest };
 
 // ── Internal raw event as forwarded from the Kotlin bridge ───────────────────
 export interface RawNotificationEvent {
@@ -93,30 +78,25 @@ async function flushQueue(): Promise<void> {
 /**
  * Parse a raw notification event and attempt to upload it.
  * If the upload fails, the event is queued for retry with exponential backoff.
- * Returns false if the notification did not match a supported bank pattern.
+ * Returns false when nothing is uploaded: unknown bank, credit (Pix recebido, estorno…),
+ * declined purchase, advertising, or no bank-specific expense pattern matched.
+ * The backend records expenses only, so credits must never be sent.
  */
 export async function handleRawNotificationEvent(
   event: RawNotificationEvent,
 ): Promise<boolean> {
-  const parsed = parseNotification(
+  const decision = classifyNotification(
     event.packageName,
     event.title,
     event.body,
     event.timestampMs,
   );
 
-  if (!parsed) {
-    return false; // Unknown bank or no pattern match — nothing to upload
+  if (decision.action !== 'upload') {
+    return false; // Not an expense — nothing leaves the device
   }
 
-  const request: IngestNotificationEventRequest = {
-    bank: parsed.bank,
-    amount: parsed.amount,
-    currency: 'BRL', // V1: Brazilian banks only
-    eventTimestamp: parsed.receivedAt,
-    merchant: parsed.merchant ?? undefined,
-    rawNotificationText: parsed.rawText,
-  };
+  const request = buildIngestRequest(decision.event);
 
   try {
     await postEvent(request);

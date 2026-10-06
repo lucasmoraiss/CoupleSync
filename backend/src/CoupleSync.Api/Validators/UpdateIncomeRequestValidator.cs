@@ -1,4 +1,5 @@
 using CoupleSync.Api.Contracts.Budget;
+using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -9,7 +10,9 @@ public sealed class UpdateIncomeRequestValidator : AbstractValidator<UpdateIncom
     {
         RuleFor(x => x.GrossIncome)
             .GreaterThan(0)
-            .WithMessage("GrossIncome must be greater than zero.");
+            .WithMessage("GrossIncome must be greater than zero.")
+            .LessThanOrEqualTo(MoneyRules.MaxAmount)
+            .WithMessage("GrossIncome exceeds maximum allowed value.");
 
         When(x => x.Currency is not null, () =>
         {

@@ -1,4 +1,6 @@
-// AC-121, AC-129, AC-130: OCR upload screen — camera + file picker + status polling
+// AC-121, AC-129, AC-130: OCR upload screen — PDF file picker + status polling.
+// Only PDF is offered: the server's default parser handles digital PDF statements only and
+// rejects images (IMAGE_NOT_SUPPORTED), so camera and image selection are not exposed.
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
@@ -6,11 +8,9 @@ import {
   StyleSheet,
   SafeAreaView,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import axios from 'axios';
@@ -28,6 +28,8 @@ const TEXT = colors.text;
 const MUTED = colors.textMuted;
 const BORDER = colors.border;
 const ERROR = colors.error;
+const PDF_MIME_TYPE = 'application/pdf';
+const NOT_PDF_ERROR = 'Só é possível importar arquivos PDF. Selecione o extrato bancário em PDF.';
 const PDF_READABILITY_ERROR = 'O PDF selecionado parece estar protegido por senha ou danificado. Exporte sem senha e tente novamente.';
 
 // ─── Polling config ───────────────────────────────────────────────────────────
@@ -67,6 +69,9 @@ export default function OcrUploadScreen() {
 
         if (status === 'Ready') {
           if (isMounted.current) {
+            // This screen is a hidden tab and stays mounted: go back to the initial state
+            // so the next import does not open on a stale "Processando extrato..." spinner.
+            setState({ phase: 'idle' });
             router.replace(`/(main)/ocr-review?uploadId=${uploadId}` as any);
           }
           return;
@@ -88,7 +93,7 @@ export default function OcrUploadScreen() {
           } else if (errorCode === 'PDF_ENCRYPTED') {
             errorMessage = 'O PDF está protegido por senha. Por enquanto, exporte o extrato sem senha e tente novamente. (Suporte a senha será adicionado em breve.)';
           } else if (errorCode === 'IMAGE_NOT_SUPPORTED') {
-            errorMessage = 'Fotos de recibos ainda não são processadas automaticamente. Envie um extrato bancário em PDF.';
+            errorMessage = 'Este arquivo não pôde ser lido como PDF. Envie o extrato bancário em PDF.';
           } else if (errorCode === 'PDF_TOO_SHORT') {
             errorMessage = 'O PDF parece ser uma imagem digitalizada. Envie um extrato em PDF digital (texto selecionável).';
           } else if (errorCode === 'NO_TRANSACTIONS_FOUND') {
@@ -114,7 +119,7 @@ export default function OcrUploadScreen() {
     }
   }, []);
 
-  const ensureFileReadable = useCallback(async (uri: string, mimeType: string) => {
+  const ensureFileReadable = useCallback(async (uri: string) => {
     if (!uri) {
       throw new Error(PDF_READABILITY_ERROR);
     }
@@ -124,16 +129,14 @@ export default function OcrUploadScreen() {
       throw new Error(PDF_READABILITY_ERROR);
     }
 
-    if (mimeType === 'application/pdf') {
-      await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-    }
+    await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
   }, []);
 
   // ─── Upload flow ─────────────────────────────────────────────────────────────
   const uploadFile = useCallback(
-    async (uri: string, mimeType: string, fileName: string) => {
+    async (uri: string, fileName: string) => {
       try {
-        await ensureFileReadable(uri, mimeType);
+        await ensureFileReadable(uri);
       } catch {
         if (isMounted.current) {
           setState({ phase: 'error', message: PDF_READABILITY_ERROR });
@@ -152,7 +155,7 @@ export default function OcrUploadScreen() {
       const formData = new FormData();
       formData.append('file', {
         uri,
-        type: mimeType,
+        type: PDF_MIME_TYPE,
         name: fileName,
       } as any);
 
@@ -194,33 +197,22 @@ export default function OcrUploadScreen() {
     [ensureFileReadable, pollStatus]
   );
 
-  // ─── Camera handler ───────────────────────────────────────────────────────────
-  const handleCamera = useCallback(async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permissão necessária', 'Habilite o acesso à câmera nas configurações do dispositivo.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-      allowsEditing: false,
-    });
-    if (result.canceled || result.assets.length === 0) return;
-    const asset = result.assets[0];
-    const ext = asset.uri.split('.').pop() ?? 'jpg';
-    await uploadFile(asset.uri, asset.mimeType ?? `image/${ext}`, `captura.${ext}`);
-  }, [uploadFile]);
-
-  // ─── File picker handler ──────────────────────────────────────────────────────
+  // ─── File picker handler (PDF only) ───────────────────────────────────────────
   const handleFilePicker = useCallback(async () => {
     const result = await DocumentPicker.getDocumentAsync({
-      type: ['image/*', 'application/pdf'],
+      type: PDF_MIME_TYPE,
       copyToCacheDirectory: true,
     });
     if (result.canceled || result.assets.length === 0) return;
     const asset = result.assets[0];
-    await uploadFile(asset.uri, asset.mimeType ?? 'application/octet-stream', asset.name);
+    // Some file managers ignore the type filter — refuse anything that is not a PDF
+    const isPdf =
+      asset.mimeType === PDF_MIME_TYPE || asset.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      setState({ phase: 'error', message: NOT_PDF_ERROR });
+      return;
+    }
+    await uploadFile(asset.uri, asset.name);
   }, [uploadFile]);
 
   const handleRetry = useCallback(() => setState({ phase: 'idle' }), []);
@@ -252,35 +244,21 @@ export default function OcrUploadScreen() {
       {state.phase === 'idle' && (
         <View style={styles.body}>
           <Ionicons name="cloud-upload-outline" size={56} color={ACCENT} style={styles.icon} />
-          <Text style={styles.title}>Importar via OCR</Text>
+          <Text style={styles.title}>Importar extrato em PDF</Text>
           <Text style={styles.subtitle}>
-            Fotografe ou selecione um extrato bancário para importar transações automaticamente.
+            Selecione o extrato bancário em PDF para importar as transações automaticamente.
           </Text>
 
           <TouchableOpacity
             style={styles.optionBtn}
-            onPress={handleCamera}
-            accessibilityLabel="Usar câmera"
-            activeOpacity={0.8}
-          >
-            <Ionicons name="camera-outline" size={24} color={PRIMARY} style={styles.optionIcon} />
-            <View style={styles.optionText}>
-              <Text style={styles.optionLabel}>Câmera</Text>
-              <Text style={styles.optionHint}>Fotografe o extrato impresso</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={MUTED} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.optionBtn}
             onPress={handleFilePicker}
-            accessibilityLabel="Selecionar arquivo"
+            accessibilityLabel="Selecionar arquivo PDF"
             activeOpacity={0.8}
           >
             <Ionicons name="document-outline" size={24} color={PRIMARY} style={styles.optionIcon} />
             <View style={styles.optionText}>
-              <Text style={styles.optionLabel}>Arquivo</Text>
-              <Text style={styles.optionHint}>PDF ou imagem do dispositivo</Text>
+              <Text style={styles.optionLabel}>Arquivo PDF</Text>
+              <Text style={styles.optionHint}>Extrato em PDF salvo no dispositivo</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={MUTED} />
           </TouchableOpacity>

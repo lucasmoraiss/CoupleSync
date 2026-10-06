@@ -2,6 +2,9 @@ using CoupleSync.Application.AiChat;
 using System.Text;
 using CoupleSync.Api.Health;
 using CoupleSync.Api.Middleware;
+using CoupleSync.Api.RateLimiting;
+using CoupleSync.Api.Security;
+using CoupleSync.Api.Serialization;
 using CoupleSync.Api.Validators;
 using CoupleSync.Application.Auth;
 using CoupleSync.Application.Common.Interfaces;
@@ -34,18 +37,11 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
-const string JwtSecretPlaceholder = "REPLACE_WITH_ENV_JWT_SECRET_32CHARS_MIN";
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
-if (string.IsNullOrWhiteSpace(jwtOptions.Secret)
-    || jwtOptions.Secret.Length < 32
-    || string.Equals(jwtOptions.Secret, JwtSecretPlaceholder, StringComparison.Ordinal))
-{
-    throw new InvalidOperationException(
-        "Invalid JWT secret configuration. Configure Jwt:Secret (or JWT__SECRET) with a non-placeholder value and at least 32 characters.");
-}
+JwtSecretGuard.EnsureValid(jwtOptions.Secret);
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -84,7 +80,8 @@ builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<ChatContextService>();
 builder.Services.AddScoped<GeminiChatService>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter()));
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 
@@ -107,6 +104,7 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddCoupleSyncRateLimiting(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHealthChecks()
@@ -128,6 +126,10 @@ using (var scope = app.Services.CreateScope())
     await seeder.SeedAsync();
 }
 
+// Must run first so that Connection.RemoteIpAddress is the real client behind the reverse proxy
+// (only applied for proxies listed in the ForwardedHeaders configuration section).
+app.UseForwardedHeaders();
+
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
 if (app.Environment.IsDevelopment())
@@ -135,6 +137,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseAuthentication();
+// After authentication (the couples/join policy is partitioned by user) and before authorization.
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();

@@ -1,7 +1,7 @@
 name: Mobile — OTA Update
 
-# Triggered after Deploy succeeds on main, ensuring the backend is live
-# before the mobile bundle is pushed. Also supports manual dispatch.
+# Runs on manual dispatch only: an OTA update replaces the JavaScript of every
+# installed app, so it is published deliberately, not on every push.
 #
 # Uses EAS Update (Over-the-Air) — 100% free, unlimited pushes.
 # No native rebuild required; the installed APK fetches the new JS bundle
@@ -11,10 +11,6 @@ name: Mobile — OTA Update
 #   expo.dev → Settings → Access Tokens → Create token
 
 on:
-  workflow_run:
-    workflows: ["Deploy"]
-    branches: [main]
-    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -25,10 +21,6 @@ jobs:
     name: EAS Update — OTA (production)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout
@@ -56,8 +48,13 @@ jobs:
           # bundling. eas.json build.preview.env only applies to `eas build`,
           # NOT to `eas update`. Without this, process.env.EXPO_PUBLIC_API_BASE_URL
           # is undefined and the app falls back to the emulator address (10.0.2.2:5000).
-          EXPO_PUBLIC_API_BASE_URL: ${{ secrets.EXPO_PUBLIC_API_BASE_URL || 'https://couplesyncapi.azurewebsites.net' }}
+          # No hardcoded fallback: the job fails if the secret is not configured.
+          EXPO_PUBLIC_API_BASE_URL: ${{ secrets.EXPO_PUBLIC_API_BASE_URL }}
         run: |
+          if [ -z "${EXPO_PUBLIC_API_BASE_URL}" ]; then
+            echo "::error::Secret EXPO_PUBLIC_API_BASE_URL is not set."
+            exit 1
+          fi
           eas update \
             --platform android \
             --branch production \

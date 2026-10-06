@@ -1,0 +1,86 @@
+
+> couplesync@1.0.0 test
+> jest --no-color src/modules/integrations/notification-capture/__tests__/notificationParser.test.ts
+
+PASS src/modules/integrations/notification-capture/__tests__/notificationParser.test.ts
+  A06 — compras e pagamentos reconhecidos (um banco por vez)
+    √ Nubank: compra no crédito (15 ms)
+    √ Nubank: Pix enviado (2 ms)
+    √ Itaú: compra no cartão com valor na casa do milhar (1 ms)
+    √ Inter: compra aprovada (1 ms)
+    √ Inter: "Você gastou" (1 ms)
+    √ C6 Bank: compra aprovada (1 ms)
+    √ Bradesco: compra (1 ms)
+    √ Bradesco: débito em conta sem estabelecimento (8 ms)
+    √ estabelecimento chamado "DEPOSITO ..." continua sendo compra (não é confundido com depósito recebido) (1 ms)
+    √ o estabelecimento não carrega o resto da frase (limite disponível) (1 ms)
+  A06 — notificações que NÃO podem virar despesa
+    √ crédito é classificado como "credit" (e não como texto sem padrão) (1 ms)
+    √ texto com valor mas sem padrão de compra é descartado como "no-match" (1 ms)
+    √ aplicativo que não é banco suportado é ignorado
+    Nubank
+      √ Pix recebido → não enviar (1 ms)
+      √ Pix recebido (frase curta) → não enviar
+      √ transferência recebida → não enviar (1 ms)
+      √ depósito em conta → não enviar (1 ms)
+      √ estorno de compra → não enviar
+      √ fatura que vence → não enviar (1 ms)
+      √ limite disponível → não enviar
+      √ propaganda com valor → não enviar (1 ms)
+      √ propaganda de empréstimo → não enviar
+      √ compra negada → não enviar (1 ms)
+      √ compra não autorizada → não enviar
+    Itaú
+      √ Pix recebido → não enviar (1 ms)
+      √ Pix recebido (frase curta) → não enviar
+      √ transferência recebida → não enviar (1 ms)
+      √ depósito em conta → não enviar
+      √ estorno de compra → não enviar
+      √ fatura que vence → não enviar (1 ms)
+      √ limite disponível → não enviar (1 ms)
+      √ propaganda com valor → não enviar
+      √ propaganda de empréstimo → não enviar (1 ms)
+      √ compra negada → não enviar (1 ms)
+      √ compra não autorizada → não enviar
+    Inter
+      √ Pix recebido → não enviar
+      √ Pix recebido (frase curta) → não enviar
+      √ transferência recebida → não enviar (1 ms)
+      √ depósito em conta → não enviar (1 ms)
+      √ estorno de compra → não enviar
+      √ fatura que vence → não enviar (1 ms)
+      √ limite disponível → não enviar
+      √ propaganda com valor → não enviar (1 ms)
+      √ propaganda de empréstimo → não enviar (1 ms)
+      √ compra negada → não enviar (1 ms)
+      √ compra não autorizada → não enviar (1 ms)
+    C6 Bank
+      √ Pix recebido → não enviar
+      √ Pix recebido (frase curta) → não enviar
+      √ transferência recebida → não enviar
+      √ depósito em conta → não enviar
+      √ estorno de compra → não enviar
+      √ fatura que vence → não enviar (2 ms)
+      √ limite disponível → não enviar
+      √ propaganda com valor → não enviar (1 ms)
+      √ propaganda de empréstimo → não enviar
+      √ compra negada → não enviar (1 ms)
+      √ compra não autorizada → não enviar (1 ms)
+    Bradesco
+      √ Pix recebido → não enviar (1 ms)
+      √ Pix recebido (frase curta) → não enviar
+      √ transferência recebida → não enviar
+      √ depósito em conta → não enviar
+      √ estorno de compra → não enviar (1 ms)
+      √ fatura que vence → não enviar (4 ms)
+      √ limite disponível → não enviar
+      √ propaganda com valor → não enviar (1 ms)
+      √ propaganda de empréstimo → não enviar
+      √ compra negada → não enviar (1 ms)
+      √ compra não autorizada → não enviar (1 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       68 passed, 68 total
+Snapshots:   0 total
+Time:        1.472 s
+Ran all test suites matching /src\\modules\\integrations\\notification-capture\\__tests__\\notificationParser.test.ts/i.

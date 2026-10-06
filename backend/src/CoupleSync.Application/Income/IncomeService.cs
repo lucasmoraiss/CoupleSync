@@ -105,34 +105,55 @@ public sealed class IncomeService
         var couple = await _coupleRepository.FindByIdWithMembersAsync(coupleId, ct);
 
         var currentUserName = couple?.Members.FirstOrDefault(m => m.Id == userId)?.Name ?? "Você";
-        var partner = couple?.Members.FirstOrDefault(m => m.Id != userId);
+
+        // A group may have more than two members: every other member is a partner.
+        var partners = (couple?.Members ?? [])
+            .Where(m => m.Id != userId)
+            .OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(m => m.Id)
+            .ToList();
 
         var personalSources = sources
             .Where(s => s.UserId == userId && !s.IsShared)
             .Select(MapToDto)
             .ToList();
 
-        var partnerSources = partner is not null
-            ? sources
-                .Where(s => s.UserId == partner.Id && !s.IsShared)
-                .Select(MapToDto)
-                .ToList()
-            : new List<IncomeSourceDto>();
-
         var sharedSources = sources
             .Where(s => s.IsShared)
             .Select(MapToDto)
             .ToList();
 
+        // One group per partner (new field `partnersIncome`).
+        var partnerGroups = partners
+            .Select(partner =>
+            {
+                var partnerSources = sources
+                    .Where(s => s.UserId == partner.Id && !s.IsShared)
+                    .Select(MapToDto)
+                    .ToList();
+                return new IncomeGroupDto(partner.Id, partner.Name, partnerSources, partnerSources.Sum(s => s.Amount));
+            })
+            .ToList();
+
         var personalTotal = personalSources.Sum(s => s.Amount);
-        var partnerTotal = partnerSources.Sum(s => s.Amount);
+        var partnersTotal = partnerGroups.Sum(g => g.Total);
         var sharedTotal = sharedSources.Sum(s => s.Amount);
 
         var personalGroup = new IncomeGroupDto(userId, currentUserName, personalSources, personalTotal);
 
-        var partnerGroup = partner is not null
-            ? new IncomeGroupDto(partner.Id, partner.Name, partnerSources, partnerTotal)
-            : null;
+        // Existing field `partnerIncome`: with a single partner it is that partner's group, as
+        // before; with several it aggregates all of them so that personal + partner + shared
+        // still adds up to the total for clients that only know this field.
+        var partnerGroup = partnerGroups.Count switch
+        {
+            0 => null,
+            1 => partnerGroups[0],
+            _ => new IncomeGroupDto(
+                null,
+                string.Join(", ", partnerGroups.Select(g => g.UserName)),
+                partnerGroups.SelectMany(g => g.Sources).ToList(),
+                partnersTotal)
+        };
 
         var sharedGroup = new IncomeGroupDto(null, null, sharedSources, sharedTotal);
 
@@ -142,7 +163,8 @@ public sealed class IncomeService
             personalGroup,
             partnerGroup,
             sharedGroup,
-            personalTotal + partnerTotal + sharedTotal);
+            personalTotal + partnersTotal + sharedTotal,
+            partnerGroups);
     }
 
     public async Task<MonthlyIncomeDto> GetCurrentMonthIncomeAsync(

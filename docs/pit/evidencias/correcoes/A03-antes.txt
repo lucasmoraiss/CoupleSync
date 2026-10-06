@@ -1,0 +1,186 @@
+
+> couplesync@1.0.0 test
+> jest src/services/__tests__/authRefresh.test.ts
+
+FAIL src/services/__tests__/authRefresh.test.ts
+  A03 — renovação de sessão no 401
+    × um 401 dispara um refresh e a requisição é repetida com o token novo (147 ms)
+    × grava o novo par de tokens preservando userId e coupleId (21 ms)
+    × três 401 simultâneos esperam exatamente um refresh (30 ms)
+    × 401 atrasado de um token já renovado não dispara um segundo refresh (2 ms)
+    × refresh recusado pelo servidor limpa a sessão uma vez, sem laço (2 ms)
+    × refresh recusado com três requisições simultâneas avisa sessão expirada uma única vez (3 ms)
+    × se a requisição repetida também devolve 401, encerra a sessão sem novo ciclo de refresh (2 ms)
+    √ 401 nas rotas /api/v1/auth/* não dispara refresh nem encerra a sessão (4 ms)
+    √ sem refresh token guardado, encerra a sessão sem chamar o refresh (2 ms)
+    × falha de rede durante o refresh não apaga a sessão (1 ms)
+    × quando o refresh não devolve refresh token, mantém o anterior (1 ms)
+    √ erros que não são 401 passam direto (2 ms)
+
+  ● A03 — renovação de sessão no 401 › um 401 dispara um refresh e a requisição é repetida com o token novo
+
+    AxiosError: Request failed with status code 401
+
+      17 |
+      18 | function httpError(config: InternalAxiosRequestConfig, status: number): AxiosError {
+    > 19 |   return new AxiosError(
+         |          ^
+      20 |     `Request failed with status code ${status}`,
+      21 |     AxiosError.ERR_BAD_REQUEST,
+      22 |     config,
+
+      at httpError (src/services/__tests__/authRefresh.test.ts:19:10)
+      at adapter (src/services/__tests__/authRefresh.test.ts:55:13)
+      at Axios.request (node_modules/axios/lib/core/Axios.js:41:14)
+      at Object.<anonymous> (src/services/__tests__/authRefresh.test.ts:125:22)
+
+  ● A03 — renovação de sessão no 401 › grava o novo par de tokens preservando userId e coupleId
+
+    AxiosError: Request failed with status code 401
+
+      17 |
+      18 | function httpError(config: InternalAxiosRequestConfig, status: number): AxiosError {
+    > 19 |   return new AxiosError(
+         |          ^
+      20 |     `Request failed with status code ${status}`,
+      21 |     AxiosError.ERR_BAD_REQUEST,
+      22 |     config,
+
+      at httpError (src/services/__tests__/authRefresh.test.ts:19:10)
+      at adapter (src/services/__tests__/authRefresh.test.ts:55:13)
+      at Axios.request (node_modules/axios/lib/core/Axios.js:41:14)
+      at Object.<anonymous> (src/services/__tests__/authRefresh.test.ts:140:5)
+
+  ● A03 — renovação de sessão no 401 › três 401 simultâneos esperam exatamente um refresh
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 3
+    + Received  + 3
+
+      Array [
+    -   200,
+    -   200,
+    -   200,
+    +   401,
+    +   401,
+    +   401,
+      ]
+
+      165 |     const statuses = await Promise.all(pending);
+      166 |
+    > 167 |     expect(statuses).toEqual([200, 200, 200]);
+          |                      ^
+      168 |     expect(h.requestRefresh).toHaveBeenCalledTimes(1);
+      169 |     expect(h.calls.slice(3).map((c) => c.authorization)).toEqual([
+      170 |       'Bearer access-2',
+
+      at Object.<anonymous> (src/services/__tests__/authRefresh.test.ts:167:22)
+
+  ● A03 — renovação de sessão no 401 › 401 atrasado de um token já renovado não dispara um segundo refresh
+
+    AxiosError: Request failed with status code 401
+
+      17 |
+      18 | function httpError(config: InternalAxiosRequestConfig, status: number): AxiosError {
+    > 19 |   return new AxiosError(
+         |          ^
+      20 |     `Request failed with status code ${status}`,
+      21 |     AxiosError.ERR_BAD_REQUEST,
+      22 |     config,
+
+      at httpError (src/services/__tests__/authRefresh.test.ts:19:10)
+      at adapter (src/services/__tests__/authRefresh.test.ts:55:13)
+      at Axios.request (node_modules/axios/lib/core/Axios.js:41:14)
+      at Object.<anonymous> (src/services/__tests__/authRefresh.test.ts:179:5)
+
+  ● A03 — renovação de sessão no 401 › refresh recusado pelo servidor limpa a sessão uma vez, sem laço
+
+    expect(jest.fn()).toHaveBeenCalledTimes(expected)
+
+    Expected number of calls: 1
+    Received number of calls: 0
+
+      202 |
+      203 |     expect(status).toBe(401);
+    > 204 |     expect(h.requestRefresh).toHaveBeenCalledTimes(1);
+          |                              ^
+      205 |     expect(h.onSessionExpired).toHaveBeenCalledTimes(1);
+      206 |     expect(h.saveTokens).not.toHaveBeenCalled();
+      207 |     expect(h.calls).toHaveLength(1); // a requisição original não é repetida
+
+      at Object.<anonymous> (src/services/__tests__/authRefresh.test.ts:204:30)
+
+  ● A03 — renovação de sessão no 401 › refresh recusado com três requisições simultâneas avisa sessão expirada uma única vez
+
+    expect(jest.fn()).toHaveBeenCalledTimes(expected)
+
+    Expected number of calls: 1
+    Received number of calls: 0
+
+      218 |
+      219 |     expect(statuses).toEqual([401, 401, 401]);
+    > 220 |     expect(h.requestRefresh).toHaveBeenCalledTimes(1);
+          |                              ^
+      221 |     expect(h.onSessionExpired).toHaveBeenCalledTimes(1);
+      222 |     expect(h.calls).toHaveLength(3);
+      223 |   });
+
+      at Object.<anonymous> (src/services/__tests__/authRefresh.test.ts:220:30)
+
+  ● A03 — renovação de sessão no 401 › se a requisição repetida também devolve 401, encerra a sessão sem novo ciclo de refresh
+
+    expect(jest.fn()).toHaveBeenCalledTimes(expected)
+
+    Expected number of calls: 1
+    Received number of calls: 0
+
+      229 |
+      230 |     expect(status).toBe(401);
+    > 231 |     expect(h.requestRefresh).toHaveBeenCalledTimes(1);
+          |                              ^
+      232 |     expect(h.calls).toHaveLength(2); // original + uma repetição, nada além disso
+      233 |     expect(h.onSessionExpired).toHaveBeenCalledTimes(1);
+      234 |   });
+
+      at Object.<anonymous> (src/services/__tests__/authRefresh.test.ts:231:30)
+
+  ● A03 — renovação de sessão no 401 › falha de rede durante o refresh não apaga a sessão
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "sem-resposta"
+    Received: 401
+
+      262 |     const status = await statusOf(h.instance.get('/api/v1/dashboard'));
+      263 |
+    > 264 |     expect(status).toBe('sem-resposta');
+          |                    ^
+      265 |     expect(h.onSessionExpired).not.toHaveBeenCalled();
+      266 |     expect(h.session.refreshToken).toBe('refresh-1');
+      267 |     expect(h.calls).toHaveLength(1);
+
+      at Object.<anonymous> (src/services/__tests__/authRefresh.test.ts:264:20)
+
+  ● A03 — renovação de sessão no 401 › quando o refresh não devolve refresh token, mantém o anterior
+
+    AxiosError: Request failed with status code 401
+
+      17 |
+      18 | function httpError(config: InternalAxiosRequestConfig, status: number): AxiosError {
+    > 19 |   return new AxiosError(
+         |          ^
+      20 |     `Request failed with status code ${status}`,
+      21 |     AxiosError.ERR_BAD_REQUEST,
+      22 |     config,
+
+      at httpError (src/services/__tests__/authRefresh.test.ts:19:10)
+      at adapter (src/services/__tests__/authRefresh.test.ts:55:13)
+      at Axios.request (node_modules/axios/lib/core/Axios.js:41:14)
+      at Object.<anonymous> (src/services/__tests__/authRefresh.test.ts:273:22)
+
+Test Suites: 1 failed, 1 total
+Tests:       9 failed, 3 passed, 12 total
+Snapshots:   0 total
+Time:        1.91 s
+Ran all test suites matching /src\\services\\__tests__\\authRefresh.test.ts/i.

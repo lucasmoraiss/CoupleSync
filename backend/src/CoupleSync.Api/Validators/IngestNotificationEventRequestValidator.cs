@@ -11,6 +11,7 @@ public sealed class IngestNotificationEventRequestValidator : AbstractValidator<
     public IngestNotificationEventRequestValidator()
     {
         RuleFor(x => x.Bank)
+            .Cascade(CascadeMode.Stop)
             .NotEmpty().WithMessage("Bank is required.")
             .MaximumLength(64).WithMessage("Bank name must not exceed 64 characters.")
             .Must(b => AllowedBanks.Contains(b.Trim().ToUpperInvariant()))
@@ -21,6 +22,7 @@ public sealed class IngestNotificationEventRequestValidator : AbstractValidator<
             .LessThanOrEqualTo(1_000_000).WithMessage("Amount exceeds maximum allowed value.");
 
         RuleFor(x => x.Currency)
+            .Cascade(CascadeMode.Stop)
             .NotEmpty().WithMessage("Currency is required.")
             .Must(c => AllowedCurrencies.Contains(c.Trim().ToUpperInvariant()))
             .WithMessage("Currency '{PropertyValue}' is not supported. Supported: BRL, USD, EUR.");

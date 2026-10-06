@@ -55,9 +55,19 @@ public sealed class OcrProcessingService
         for (int i = 0; i < candidates.Count; i++)
             candidates[i].Index = i;
 
+        // Identical lines inside one statement are distinct purchases (e.g. two rides of the same
+        // price on the same day). The n-th repetition gets an occurrence ordinal in its fingerprint;
+        // statement order is deterministic, so re-importing the same file yields the same values.
+        var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var c in candidates)
         {
-            c.Fingerprint = ComputeFingerprint(coupleId, c.Date, c.Amount, c.Description);
+            var baseFingerprint = ComputeFingerprint(coupleId, c.Date, c.Amount, c.Description);
+            var occurrence = occurrences.GetValueOrDefault(baseFingerprint) + 1;
+            occurrences[baseFingerprint] = occurrence;
+
+            c.Fingerprint = occurrence == 1
+                ? baseFingerprint
+                : ComputeFingerprint(coupleId, c.Date, c.Amount, c.Description, occurrence);
             c.DuplicateSuspected = await _transactionRepository.FingerprintExistsAsync(c.Fingerprint, coupleId, ct);
         }
 
@@ -218,9 +228,17 @@ public sealed class OcrProcessingService
         return sanitized;
     }
 
-    public static string ComputeFingerprint(Guid coupleId, DateTime date, decimal amount, string description)
+    /// <summary>
+    /// Dedup fingerprint of a statement line: couple | date | amount | description, plus the
+    /// occurrence ordinal for the 2nd, 3rd... identical line of the same statement.
+    /// </summary>
+    public static string ComputeFingerprint(Guid coupleId, DateTime date, decimal amount, string description, int occurrence = 1)
     {
+        // The first occurrence keeps the original format so that transactions imported before the
+        // ordinal existed are still recognised as duplicates on re-import.
         var normalized = $"{coupleId}|{date:yyyy-MM-dd}|{amount:F2}|{description.ToLowerInvariant().Trim()}";
+        if (occurrence > 1)
+            normalized += $"|#{occurrence}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }

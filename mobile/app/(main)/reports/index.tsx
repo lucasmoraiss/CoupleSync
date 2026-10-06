@@ -14,6 +14,7 @@ import { PieChart, BarChart } from 'react-native-gifted-charts';
 import { reportsApiClient, goalsApiClient } from '@/services/apiClient';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { getCategoryLabel } from '@/modules/transactions/categories';
 
 const PERIOD_OPTIONS = [
   { label: '3m', months: 3 },
@@ -160,6 +161,7 @@ function ReportsScreenInner() {
                       donut
                       radius={100}
                       innerRadius={60}
+                      innerCircleColor={colors.surface}
                       centerLabelComponent={() => (
                         <Text style={styles.pieCenterLabel}>
                           {formatBRL(pieData.reduce((s, d) => s + d.value, 0))}
@@ -178,7 +180,7 @@ function ReportsScreenInner() {
                       <View key={c.name} style={styles.legendItem}>
                         <View style={[styles.legendDot, { backgroundColor: c.color }]} />
                         <Text style={styles.legendLabel} numberOfLines={1}>
-                          {c.name}
+                          {getCategoryLabel(c.name)}
                         </Text>
                         <Text style={styles.legendValue}>{formatBRL(c.total)}</Text>
                       </View>

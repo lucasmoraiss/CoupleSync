@@ -149,7 +149,7 @@ public sealed class BudgetService
 
     /// <summary>
     /// Updates the gross income for the current calendar month.
-    /// Auto-creates a plan with zero allocations if none exists (ADR-005).
+    /// Auto-creates a plan with zero allocations if none exists (ADR-0011).
     /// </summary>
     public async Task<BudgetPlanDto> UpdateIncomeAsync(
         Guid coupleId,

@@ -1,290 +1,272 @@
-# CoupleSync Backend API
+# CoupleSync — API (back-end)
 
-A .NET 8 Web API for CoupleSync, a couple's budgeting and financial planning app. This backend handles authentication, couple management, transaction ingestion from mobile notifications, cash flow projections, goals tracking, and push notifications via Firebase Cloud Messaging.
+API REST em .NET 8 do CoupleSync, aplicativo de finanças compartilhadas para casais e famílias. Cuida de autenticação, grupos ("casais"), transações, captura de notificações bancárias enviadas pelo app Android, importação de extratos em PDF, rendas, metas, fluxo de caixa, relatórios, alertas por push e, opcionalmente, um assistente de IA.
 
-## Features
+## O que a API faz
 
-- **JWT-based authentication** with refresh token rotation
-- **Couple-scoped data isolation** — enforced at middleware and repository levels
-- **Transaction ingestion** from Android push notifications with deduplication
-- **Automated categorization** of transactions using rule-based patterns
-- **Dashboard aggregation** — net worth, shared expenses, per-partner breakdown
-- **Savings goals** — CRUD, progress tracking, and archival
-- **Cash flow projections** — 30-day and 90-day forecasts with assumptions
-- **Alert policies** — low balance, large transaction, upcoming bills
-- **Firebase Cloud Messaging (FCM)** integration for push notifications
-- **PostgreSQL persistence** with Entity Framework Core
+- **Autenticação por JWT** com refresh token rotacionado a cada uso.
+- **Isolamento por grupo**: o `couple_id` vem do token; os controllers de dados exigem o filtro `[RequireCouple]` e as consultas filtram pelo grupo.
+- **Limite de tentativas** em login, cadastro e entrada em grupo (HTTP 429).
+- **Transações**: lançamento manual, troca de categoria, vínculo com meta e exclusão.
+- **Captura de notificações**: recebe do app eventos já estruturados (banco, valor, moeda, data/hora, estabelecimento), descarta duplicatas e cria a transação com categoria sugerida por regras.
+- **Importação de extrato em PDF**: o arquivo é processado por um job em segundo plano, que devolve candidatos para o usuário revisar e confirmar.
+- **Rendas, orçamento mensal, metas, fluxo de caixa (30 ou 90 dias) e relatórios**.
+- **Alertas** enviados por Firebase Cloud Messaging (opcional: sem credenciais, o envio é pulado e registrado em log).
+- **Assistente de IA** (opcional, desligado por padrão) usando a API do Gemini.
 
-## Requirements
+## Requisitos
 
-- **.NET 8 SDK** (download from [dotnet.microsoft.com](https://dotnet.microsoft.com/download))
-- **PostgreSQL 13+** (local or managed service)
-- **Firebase Project** (for FCM credentials)
-- Environment variables for secrets (see Configuration section)
+- .NET 8 SDK
+- PostgreSQL (o CI usa a versão 16)
+- Opcionais: projeto Firebase (push) e chave da API do Gemini (assistente e categorização automática)
 
-## Quick Start
+## Como rodar
 
-### 1. Clone the Repository
+### 1. Variáveis mínimas
+
+A API **não sobe** sem uma chave JWT válida e sem a conexão com o banco. O `appsettings.json` versionado traz `Jwt:Secret` e `ConnectionStrings:DefaultConnection` vazios de propósito.
 
 ```bash
-git clone https://github.com/lucasmoraiss/CoupleSync.git
-cd CoupleSync/backend
+# Gere a sua chave; não reutilize exemplos de documentação.
+export JWT__SECRET="$(openssl rand -hex 32)"
+export DATABASE_URL="Host=localhost;Port=5432;Database=couplesync;Username=postgres;Password=<sua-senha>"
 ```
 
-### 2. Install Dependencies
+No PowerShell 7:
+
+```powershell
+$env:JWT__SECRET = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$env:DATABASE_URL = "Host=localhost;Port=5432;Database=couplesync;Username=postgres;Password=<sua-senha>"
+```
+
+Como alternativa, crie `src/CoupleSync.Api/appsettings.Development.json` (ignorado pelo Git) com `Jwt:Secret` e `ConnectionStrings:DefaultConnection`.
+
+### 2. Subir
 
 ```bash
+cd backend
 dotnet restore
+dotnet run --project src/CoupleSync.Api --launch-profile http
 ```
 
-### 3. Configure Environment
+A API escuta em `http://localhost:5000` (perfil `http` de `Properties/launchSettings.json`). Ao iniciar, ela **aplica as migrações pendentes** e carrega as regras de categorização; não é preciso rodar `dotnet ef database update` à mão.
 
-Create a `.env.local` file or set environment variables. See the **Environment Variables** section below.
-
-**Minimal example:**
-```bash
-export DATABASE_URL="Host=localhost;Port=5432;Database=couplesync;Username=postgres;Password=postgres"
-export JWT__SECRET="a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
-export FIREBASE_PROJECT_ID="couplesync-pilot"
-export FIREBASE_CREDENTIAL_JSON="{...service account json...}"
-```
-
-### 4. Initialize Database
+### 3. Conferir
 
 ```bash
-# Apply Entity Framework migrations
-dotnet ef database update --startup-project src/CoupleSync.Api
+curl http://localhost:5000/health/ready     # 200 quando o banco responde
 
-# This creates all tables and seeds category rules for transaction auto-categorization
-```
-
-### 5. Run the API
-
-```bash
-# Development mode
-dotnet run --project src/CoupleSync.Api
-
-# Production mode
-dotnet publish -c Release -o ./publish
-dotnet ./publish/CoupleSync.Api.dll
-```
-
-The API will start on `https://localhost:5001` (or `http://localhost:5000` for HTTP).
-
-### 6. Test the API
-
-```bash
-# Register a new user
-curl -X POST https://localhost:5001/api/v1/auth/register \
+curl -X POST http://localhost:5000/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{
-    "email":"pilot@couplesync.local",
-    "name":"Pilot User",
-    "password":"TestPass123!"
-  }'
-
-# Login
-curl -X POST https://localhost:5001/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email":"pilot@couplesync.local",
-    "password":"TestPass123!"
-  }'
+  -d '{"email":"ana@example.com","name":"Ana","password":"<senha-de-8-ou-mais>"}'
 ```
 
-## Environment Variables
+### Com Docker Compose
 
-| Variable | Required | Example | Notes |
-|----------|----------|---------|-------|
-| `DATABASE_URL` | Yes | `Host=localhost;Port=5432;Database=couplesync;Username=postgres;Password=postgres` | PostgreSQL connection string. Used in Program.cs to configure EF Core. |
-| `JWT__SECRET` | Yes | `a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6` | Min 32 characters. Used to sign JWT tokens. Generate with: `openssl rand -hex 16` |
-| `JWT__ISSUER` | No | `CoupleSync` | Defaults to value in appsettings.json. Must match appsettings.json. |
-| `JWT__AUDIENCE` | No | `CoupleSync.Mobile` | Defaults to value in appsettings.json. Must match appsettings.json. |
-| `JWT__ACCESSTOKENTTLMINUTES` | No | `15` | Defaults to 15. Access token lifetime in minutes. |
-| `JWT__REFRESHTOKENTTLDAYS` | No | `7` | Defaults to 7. Refresh token lifetime in days. |
-| `FIREBASE_PROJECT_ID` | Yes | `couplesync-pilot` | Your Firebase project ID. Required for FCM. |
-| `FIREBASE_CREDENTIAL_JSON` | Yes | `{"type":"service_account",...}` | Firebase Admin SDK service account JSON (base64-encoded or raw JSON). Required for FCM dispatch. DO NOT commit. |
+Na raiz do repositório há um `docker-compose.yml` que sobe a API (porta 5000 no host) e um PostgreSQL. Copie `.env.example` para `.env`, defina `JWT__SECRET` e rode `docker compose up --build`.
 
-## Project Structure
+## Variáveis de ambiente
+
+Estas são as chaves que o código lê. Nomes com `__` seguem a convenção do .NET para seções (`JWT__SECRET` equivale a `Jwt:Secret`); maiúsculas e minúsculas não fazem diferença.
+
+| Variável | Obrigatória | Padrão | Para que serve |
+|---|---|---|---|
+| `DATABASE_URL` | Sim (ou `ConnectionStrings__DefaultConnection`) | — | Conexão PostgreSQL. Aceita pares `Host=...;Port=5432;Database=...;Username=...;Password=...` ou URI `postgresql://usuario:senha@host/banco`. Para hosts do Neon, TLS e limites de pool são aplicados automaticamente. |
+| `JWT__SECRET` | Sim | vazio | Chave de assinatura dos tokens. Mínimo de 32 caracteres; a API recusa iniciar se estiver vazia, curta ou igual ao marcador de documentação. Gere com `openssl rand -hex 32`. |
+| `JWT__ISSUER` | Não | `CoupleSync` | Emissor do token. |
+| `JWT__AUDIENCE` | Não | `CoupleSync.Mobile` | Audiência do token. |
+| `JWT__ACCESSTOKENTTLMINUTES` | Não | `15` | Validade do access token, em minutos. |
+| `JWT__REFRESHTOKENTTLDAYS` | Não | `7` | Validade do refresh token, em dias. |
+| `RateLimiting__Auth__PermitLimit` / `RateLimiting__Auth__WindowSeconds` | Não | `5` / `60` | Limite por IP em `POST /auth/login` e `POST /auth/register` (um contador por endpoint). |
+| `RateLimiting__CoupleJoin__PermitLimit` / `RateLimiting__CoupleJoin__WindowSeconds` | Não | `5` / `60` | Limite por usuário em `POST /couples/join`. |
+| `ForwardedHeaders__TrustAllProxies` | Não | `false` | `true` faz a API aceitar `X-Forwarded-For` de qualquer origem. Use só quando o contêiner é alcançável apenas pelo proxy da plataforma. |
+| `ForwardedHeaders__KnownProxies__0`, `ForwardedHeaders__KnownNetworks__0` | Não | vazio | IPs e faixas CIDR de proxies confiáveis (índices `__0`, `__1`, ...). |
+| `ForwardedHeaders__ForwardLimit` | Não | `1` | Quantos saltos de `X-Forwarded-For` são considerados. |
+| `ForwardedHeaders__ClientIpHeader` | Não | vazio | Cabeçalho de valor único com o IP do cliente, preenchido pela CDN (ex.: `CF-Connecting-IP` atrás do Cloudflare). Quando definido, substitui o `X-Forwarded-For`. Necessário em plataformas cujo proxy acrescenta endereços ao `X-Forwarded-For`, como o Render. |
+| `USE_LOCAL_PDF_PARSER` | Não | `true` | `true` usa o parser local de PDF (PdfPig). `false` usa o Azure Document Intelligence. |
+| `Storage__BasePath` | Não | `./uploads` no diretório de trabalho | Pasta onde o arquivo enviado fica até ser processado. |
+| `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`, `AZURE_DOCUMENT_INTELLIGENCE_KEY` | Só com `USE_LOCAL_PDF_PARSER=false` | — | Credenciais do provedor de OCR alternativo. |
+| `Fcm__ProjectId`, `Fcm__CredentialJson` | Não | vazio | Projeto Firebase e JSON da conta de serviço. Sem eles, o envio de push é pulado. |
+| `AI_CHAT_ENABLED` | Não | desligado | `true` habilita o assistente e a categorização automática de candidatos do extrato. |
+| `GEMINI_API_KEY` | Só com IA ligada | vazio | Chave da API do Gemini. |
+| `GEMINI_MODEL` | Não | `gemini-2.0-flash` | Modelo usado. |
+| `ASPNETCORE_URLS` | Não | — | Endereço de escuta. O `Dockerfile` fixa `http://+:8080`. |
+
+**Atrás de proxy reverso.** O limite de tentativas usa o IP do cliente. Sem configurar `ForwardedHeaders`, a API enxerga o IP do proxy e todos os usuários passam a dividir o mesmo contador. Informe os proxies em `KnownProxies`/`KnownNetworks` ou, em plataformas cujo proxy não tem endereço fixo, use `ForwardedHeaders__TrustAllProxies=true`. Veja `src/CoupleSync.Api/RateLimiting/RateLimitingSetup.cs`.
+
+## Endpoints
+
+Todos sob `/api/v1`, exceto os de saúde. Fora os de `auth` e saúde, todos exigem `Authorization: Bearer <access token>`. Os marcados com **G** exigem também que o usuário já pertença a um grupo (senão, 403 `COUPLE_REQUIRED`).
+
+### Autenticação — `AuthController`
+
+| Método | Rota | O que faz |
+|---|---|---|
+| POST | `/auth/register` | Cria a conta (e-mail, nome, senha de 8+ caracteres) e devolve os tokens. Limite: 5/min por IP. |
+| POST | `/auth/login` | Autentica e devolve access token e refresh token. Limite: 5/min por IP. |
+| POST | `/auth/refresh` | Troca um refresh token válido por um novo par de tokens. |
+
+### Grupo ("casal") — `CouplesController`
+
+| Método | Rota | O que faz |
+|---|---|---|
+| POST | `/couples` | Cria o grupo, gera o código de convite de 6 caracteres e devolve um novo access token. |
+| POST | `/couples/join` | Entra em um grupo pelo código. Limite: 5/min por usuário. |
+| GET | `/couples/me` | Dados do grupo do usuário: código de convite e membros. |
+
+Um grupo aceita mais de dois membros. Não há endpoints para sair do grupo, remover membro ou trocar o código, e cada usuário pertence a um único grupo.
+
+### Transações — `TransactionsController` (G)
+
+| Método | Rota | O que faz |
+|---|---|---|
+| GET | `/transactions` | Lista paginada (`page`, `pageSize` até 100), com filtros opcionais `category`, `startDate`, `endDate`. |
+| POST | `/transactions` | Lança uma transação manual. |
+| PATCH | `/transactions/{id}/category` | Troca a categoria. |
+| PATCH | `/transactions/{id}/goal` | Vincula a transação a uma meta. |
+| DELETE | `/transactions/{id}` | Exclui a transação. |
+
+### Captura de notificações — `IntegrationsController` (G)
+
+| Método | Rota | O que faz |
+|---|---|---|
+| POST | `/integrations/events` | Recebe um evento de despesa extraído de uma notificação bancária. |
+| GET | `/integrations/status` | Situação da captura: último evento, último erro e contadores de aceitos, duplicados e rejeitados. |
+
+### Importação de extrato — `OcrController` (G)
+
+| Método | Rota | O que faz |
+|---|---|---|
+| POST | `/ocr/upload` | Recebe o arquivo (até 10 MB) e cria o job de importação. |
+| GET | `/ocr/{uploadId}/status` | Situação do job e código de erro, se houver. |
+| GET | `/ocr/{uploadId}/results` | Candidatos extraídos, com sugestão de categoria e marcação de possível duplicata. |
+| POST | `/ocr/{uploadId}/confirm` | Cria as transações selecionadas. Aceita `categoryOverrides` e `candidateEdits` (correção de descrição e valor); devolve `transactionsCreated` e `duplicatesSkipped`. |
+
+O endpoint de upload reconhece JPEG, PNG e PDF pelos primeiros bytes do arquivo, mas o parser local (padrão) só processa PDF: uma imagem termina com o erro `IMAGE_NOT_SUPPORTED`. O arquivo enviado é apagado do disco ao fim do processamento, com sucesso ou com falha definitiva.
+
+### Rendas — `IncomesController` (G)
+
+| Método | Rota | O que faz |
+|---|---|---|
+| POST | `/incomes` | Cria uma fonte de renda para um mês (`YYYY-MM`). |
+| GET | `/incomes/current` | Rendas do mês corrente: pessoais, dos demais membros e compartilhadas. |
+| GET | `/incomes/{month}` | Rendas de um mês específico. |
+| PUT | `/incomes/{id}` | Altera uma fonte (dono ou compartilhada). |
+| DELETE | `/incomes/{id}` | Remove uma fonte (dono ou compartilhada). |
+
+### Orçamento — `BudgetController` (G)
+
+| Método | Rota | O que faz |
+|---|---|---|
+| POST | `/budgets` | Cria ou atualiza o plano de um mês. |
+| GET | `/budgets/current` | Plano do mês corrente. |
+| GET | `/budgets/{month}` | Plano de um mês (`YYYY-MM`). |
+| PUT | `/budgets/{planId}/allocations` | Substitui as alocações por categoria do plano. |
+| PATCH | `/budgets/income` | Atualiza a renda bruta do mês corrente (cria o plano se não existir). |
+
+O app atual não tem tela para as alocações de orçamento; esses endpoints são usados pelos testes e pelo contexto do assistente.
+
+### Metas — `GoalsController` (G)
+
+| Método | Rota | O que faz |
+|---|---|---|
+| POST | `/goals` | Cria uma meta (título, valor alvo, prazo de hoje em diante). |
+| GET | `/goals` | Lista as metas (`includeArchived=true` inclui as arquivadas). |
+| GET | `/goals/progress-summary` | Resumo de progresso das metas. |
+| GET | `/goals/{id}` | Detalhe de uma meta. |
+| PATCH | `/goals/{id}` | Altera título, descrição, valor alvo, valor atual ou prazo. |
+| DELETE | `/goals/{id}` | Exclui a meta. |
+| DELETE | `/goals/{id}/archive` | Arquiva a meta. |
+| GET | `/goals/{id}/progress` | Progresso de uma meta. |
+
+### Demais
+
+| Método | Rota | Controller | O que faz |
+|---|---|---|---|
+| GET | `/dashboard` (G) | `DashboardController` | Total de gastos do período, gasto por membro e por categoria (`startDate`, `endDate` opcionais). |
+| GET | `/cashflow?horizon=30\|90` (G) | `CashFlowController` | Gasto histórico, média diária e projeção para 30 ou 90 dias. |
+| GET | `/reports/spending-by-category?months=N` (G) | `ReportsController` | Gastos por categoria nos últimos N meses (1 a 60). |
+| GET | `/reports/monthly-trends?months=N` (G) | `ReportsController` | Gasto mês a mês (1 a 60). |
+| POST | `/devices/token` (G) | `NotificationsController` | Registra o token de push do aparelho (só `android`). |
+| GET | `/notifications/settings` (G) | `NotificationsController` | Preferências de alerta do usuário. |
+| PUT | `/notifications/settings` (G) | `NotificationsController` | Atualiza as preferências de alerta. |
+| POST | `/ai/chat` (G) | `ChatController` | Pergunta ao assistente. Devolve 404 `AI_CHAT_DISABLED` quando a IA está desligada; limite de 30 mensagens por hora por grupo. |
+
+### Saúde (sem autenticação)
+
+| Método | Rota | O que faz |
+|---|---|---|
+| GET | `/health` | Responde `healthy` com data e hora. |
+| GET | `/health/live` | Confirma que o processo está de pé (não consulta o banco). |
+| GET | `/health/ready` | Confirma que o banco responde. |
+
+## Estrutura do projeto
 
 ```
 backend/
+├── CoupleSync.sln
+├── Dockerfile
 ├── src/
-│   └── CoupleSync.Api/                   # Web API layer
-│       ├── Controllers/                  # REST endpoints
-│       ├── Contracts/                    # DTOs and request/response models
-│       ├── Filters/                      # Custom action filters
-│       ├── Health/                       # Health check endpoints
-│       ├── Middleware/                   # Authorization, couple-scope enforcement
-│       ├── Program.cs                    # DI container setup and middleware config
-│       ├── appsettings.json              # Config defaults (DO NOT add secrets)
-│       └── appsettings.Development.json
-│   ├── CoupleSync.Application/           # Use-case / service layer
-│       ├── Auth/                         # Auth service and token handlers
-│       ├── Couple/                       # Couple creation and membership
-│       ├── NotificationCapture/          # Transaction event ingestion
-│       ├── Transaction/                  # Transaction queries and updates
-│       ├── Goal/                         # Goal CRUD and progress
-│       ├── CashFlow/                     # Projection service
-│       ├── Dashboard/                    # Aggregation queries
-│       └── Notification/                 # Alert policies and FCM coordination
-│   ├── CoupleSync.Domain/                # Domain entities and business rules
-│       ├── Entities/                     # Couple, User, Transaction, Goal, etc.
-│       ├── Interfaces/                   # Repository and service interfaces
-│       ├── Policies/                     # Business rule implementations
-│       └── ValueObjects/                 # Immutable value types
-│   └── CoupleSync.Infrastructure/        # Data access and external integrations
-│       ├── Persistence/                  # EF Core DbContext and migrations
-│       ├── Migrations/                   # Database schema migrations
-│       ├── Security/                     # Password hashing and JWT utilities
-│       ├── Integrations/                 # Firebase FCM adapter
-│       └── BackgroundJobs/               # Notification dispatcher worker
-├── tests/
-│   ├── CoupleSync.UnitTests/             # Domain and service layer unit tests
-│   ├── CoupleSync.IntegrationTests/      # API and persistence integration tests
-│   └── CoupleSync.E2ETests/              # End-to-end pilot flow tests
-└── CoupleSync.sln                        # Visual Studio solution file
+│   ├── CoupleSync.Api/              # Controllers, contratos, validadores, filtros
+│   │   ├── Controllers/
+│   │   ├── Contracts/
+│   │   ├── Validators/              # FluentValidation
+│   │   ├── Filters/                 # RequireCoupleAttribute
+│   │   ├── Middleware/              # GlobalExceptionMiddleware
+│   │   ├── RateLimiting/            # limites e cabeçalhos de proxy
+│   │   ├── Security/                # JwtSecretGuard
+│   │   ├── Health/
+│   │   └── Program.cs
+│   ├── CoupleSync.Application/      # Casos de uso por módulo (Auth, Couple, Transactions,
+│   │                                # NotificationCapture, OcrImport, Income, Budget, Goals,
+│   │                                # CashFlow, Dashboard, Reports, Notification, AiChat)
+│   ├── CoupleSync.Domain/           # Entidades, interfaces e objetos de valor
+│   └── CoupleSync.Infrastructure/   # EF Core, migrações, segurança, jobs e integrações
+│       ├── Persistence/
+│       ├── Migrations/
+│       ├── Security/                # BCryptPasswordHasher, JwtTokenService, HttpContextCoupleContext
+│       ├── BackgroundJobs/          # OcrBackgroundJob, NotificationDispatcherJob
+│       └── Integrations/            # Fcm, Gemini, LocalPdfParser, AzureDocumentIntelligence, Storage
+└── tests/
+    ├── CoupleSync.UnitTests/
+    ├── CoupleSync.IntegrationTests/
+    └── CoupleSync.E2ETests/
 ```
 
-## Running Tests
+## Testes
 
 ```bash
-# Run all tests
-dotnet test
-
-# Run tests for a specific category
-dotnet test --filter Auth
-dotnet test --filter Couple
-dotnet test --filter Transaction
-dotnet test --filter Dashboard
-dotnet test --filter Goal
-dotnet test --filter CashFlow
-dotnet test --filter Notification
-
-# Run with code coverage
-dotnet test /p:CollectCoverage=true /p:CoverageFormat=opencover
+# na raiz do repositório
+export DATABASE_URL="Host=localhost;Port=5432;Database=couplesync_test;Username=postgres;Password=postgres"
+dotnet test backend/CoupleSync.sln
 ```
 
-## Build and Deploy
+São **592 testes**: 411 de unidade, 180 de integração e 1 de ponta a ponta. Os testes de integração e o de ponta a ponta sobem a API em memória e trocam o banco por SQLite; `DATABASE_URL` precisa estar definida porque a inicialização da API exige uma conexão configurada.
 
-### Development Build
+Para rodar um projeto só:
 
 ```bash
-dotnet build -c Debug
+dotnet test backend/tests/CoupleSync.UnitTests/CoupleSync.UnitTests.csproj
 ```
 
-### Release Build
+## Segurança
 
-```bash
-dotnet publish -c Release -o ./publish
-```
+- **Isolamento por grupo**: o identificador do grupo vem do claim `couple_id` do token (`HttpContextCoupleContext`), é exigido por `Filters/RequireCoupleAttribute.cs` e aplicado nas consultas. Ver [ADR-0002](../docs/adr/0002-autorizacao-por-casal.md).
+- **Senhas** guardadas como hash BCrypt (`Infrastructure/Security/BCryptPasswordHasher.cs`).
+- **Refresh tokens** guardados como hash SHA-256 e rotacionados a cada uso.
+- **Segredos** (chave JWT, senha do banco, credenciais do Firebase e do Gemini) vêm de variáveis de ambiente. O `appsettings.json` versionado não contém segredo, e `appsettings.Development.json` é ignorado pelo Git.
+- **Sem credenciais bancárias**: o app lê notificações no Android e envia só dados estruturados da despesa. O contrato de `POST /integrations/events` ainda aceita os campos opcionais `description` e `rawNotificationText`, que o app não envia.
 
-**Output:** The `publish/` directory contains all binaries and config files needed to run the API.
+## Problemas comuns
 
-### Deploy to Cloud
+| Sintoma | Causa provável | O que fazer |
+|---|---|---|
+| `Invalid JWT secret configuration` ao iniciar | `JWT__SECRET` vazia ou com menos de 32 caracteres | Gere uma chave nova e defina a variável. |
+| `Database connection string is missing` | Nem `DATABASE_URL` nem `ConnectionStrings:DefaultConnection` definidas | Defina `DATABASE_URL`. |
+| `/health/ready` não devolve 200 | Banco inacessível | Confira host, porta, usuário e senha da conexão. |
+| HTTP 429 em login, cadastro ou entrada em grupo | Limite de tentativas atingido | Aguarde o tempo indicado no cabeçalho `Retry-After`. Atrás de proxy, configure `ForwardedHeaders`. |
+| Log `FCM is not configured` | `Fcm__ProjectId` ou `Fcm__CredentialJson` vazios | Esperado em desenvolvimento; os alertas não são enviados por push. |
 
-See [docs/deployment/pilot-runbook.md](../docs/deployment/pilot-runbook.md) for complete step-by-step deployment instructions including:
-- Firebase project setup and service account generation
-- PostgreSQL database initialization
-- Backend API deployment to Azure App Service, AWS EC2, or self-hosted
-- Environment variable configuration
-- Android APK distribution via Google Play Internal Testing
-- Validation checklist
+## Implantação
 
-## API Endpoints
-
-### Auth
-- `POST /api/v1/auth/register` — Create a new user account
-- `POST /api/v1/auth/login` — Authenticate and receive JWT tokens
-- `POST /api/v1/auth/refresh` — Refresh an expired access token
-
-### Couple
-- `POST /api/v1/couples` — Create a new couple workspace
-- `POST /api/v1/couples/join` — Join a couple with a code
-- `GET /api/v1/couples/me` — Get current user's couple metadata
-
-### Transactions
-- `GET /api/v1/transactions` — List transactions with filtering
-- `PATCH /api/v1/transactions/{id}/category` — Update transaction category
-
-### Dashboard
-- `GET /api/v1/dashboard` — Get aggregate net worth, expenses, and balances
-
-### Notifications
-- `POST /api/v1/integrations/events` — Ingest transaction event from mobile
-- `GET /api/v1/integrations` — Get notification capture integration status
-- `POST /api/v1/notifications/device-tokens` — Register FCM device token
-- `GET /api/v1/notifications/settings` — Get alert policy settings
-- `PATCH /api/v1/notifications/settings` — Update alert policy settings
-
-### Goals
-- `POST /api/v1/goals` — Create a savings goal
-- `GET /api/v1/goals` — List goals for the couple
-- `GET /api/v1/goals/{id}` — Get a specific goal
-- `PATCH /api/v1/goals/{id}` — Update a goal
-- `DELETE /api/v1/goals/{id}` — Archive a goal
-
-### CashFlow
-- `GET /api/v1/cashflow` — Get 30 and 90-day projections with assumptions
-
-## Security Considerations
-
-- **Couple-Scoped Isolation:** Every endpoint enforces couple-level data isolation via JWT `couple_id` claim. See [Middleware/CoupleAuthorizationMiddleware.cs](#) for implementation.
-- **No Banking Credentials Stored:** The app uses Android NotificationListenerService to read bank push notifications. Raw banking credentials (passwords, tokens) are never collected or stored.
-- **Secrets Management:** All sensitive values (JWT secret, database password, Firebase credentials) come from environment variables — never hardcoded in source.
-- **Password Hashing:** User passwords are hashed using bcrypt with a cost factor of 11 (configurable in Security/PasswordHasher.cs).
-
-## Troubleshooting
-
-### API Won't Start — Database Connection Error
-
-```
-InvalidOperationException: Unable to connect to database
-```
-
-**Solution:**
-1. Verify PostgreSQL is running: `psql -h localhost -U postgres -c "SELECT 1"`
-2. Verify DATABASE_URL is set: `echo $DATABASE_URL`
-3. Verify connection string syntax: `Host=<host>;Port=5432;Database=<db>;Username=<user>;Password=<pass>`
-
-### Migration Fails — Cannot Apply Migration
-
-```
-Npgsql.PostgresException: relation "Users" already exists
-```
-
-**Solution:**
-1. If you're running migrations on an already-initialized database, you may need to drop and recreate:
-   ```sql
-   DROP DATABASE IF EXISTS couplesync;
-   CREATE DATABASE couplesync;
-   ```
-2. Then re-run: `dotnet ef database update`
-
-### Firebase Credentials Invalid
-
-```
-FirebaseException: Credential does not contain the required fields
-```
-
-**Solution:**
-1. Verify FIREBASE_CREDENTIAL_JSON is set correctly (not truncated or malformed)
-2. If base64-encoded, decode to verify JSON is valid: `echo $FIREBASE_CREDENTIAL_JSON | base64 -d | jq .`
-3. Ensure the service account is from the correct Firebase project
-4. Check Firebase Console Project Settings that the account has "Editor" role
-
-## Contributing
-
-1. Create a feature branch: `git checkout -b feature/your-feature`
-2. Write tests for new code (unit and integration)
-3. Ensure all tests pass: `dotnet test`
-4. Commit with a clear message: `git commit -am "feat: add your feature"`
-5. Push to your fork and create a Pull Request
-
-## License
-
-CoupleSync is proprietary software. See LICENSE file for details.
-
-## Support
-
-For issues, questions, or deployment help, see the full [Pilot Deployment Runbook](../docs/deployment/pilot-runbook.md).
+Veja [docs/deployment/DEPLOY-GUIDE.md](../docs/deployment/DEPLOY-GUIDE.md). As decisões de arquitetura estão em [docs/adr/](../docs/adr/README.md).

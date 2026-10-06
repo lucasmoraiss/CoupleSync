@@ -1,0 +1,495 @@
+$ dotnet test backend/CoupleSync.sln --filter "FullyQualifiedName~CoupleSync.UnitTests.Validation|FullyQualifiedName~InputValidationIntegrationTests"
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  CoupleSync.Domain -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Domain\bin\Debug\net8.0\CoupleSync.Domain.dll
+  CoupleSync.Application -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Application\bin\Debug\net8.0\CoupleSync.Application.dll
+  CoupleSync.Infrastructure -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Infrastructure\bin\Debug\net8.0\CoupleSync.Infrastructure.dll
+  CoupleSync.Api -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Api\bin\Debug\net8.0\CoupleSync.Api.dll
+  CoupleSync.E2ETests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll (.NETCoreApp,Version=v8.0)
+  CoupleSync.IntegrationTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\bin\Debug\net8.0\CoupleSync.IntegrationTests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+No test matches the given testcase filter `FullyQualifiedName~CoupleSync.UnitTests.Validation|FullyQualifiedName~InputValidationIntegrationTests` in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.E2ETests\bin\Debug\net8.0\CoupleSync.E2ETests.dll
+
+  CoupleSync.UnitTests -> C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll
+Test run for C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\bin\Debug\net8.0\CoupleSync.UnitTests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.61]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountAboveCeiling_Fails [FAIL]
+[xUnit.net 00:00:00.63]     CoupleSync.UnitTests.Validation.GlobalExceptionMiddlewareTests.DomainArgumentOutOfRangeException_Returns400 [FAIL]
+[xUnit.net 00:00:00.63]     CoupleSync.UnitTests.Validation.GlobalExceptionMiddlewareTests.ApplicationArgumentException_Returns400 [FAIL]
+[xUnit.net 00:00:00.64]     CoupleSync.UnitTests.Validation.GlobalExceptionMiddlewareTests.DomainArgumentException_Returns400InStandardEnvelope [FAIL]
+[xUnit.net 00:00:00.64]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.IngestEvent_WithoutCurrency_FailsWithoutThrowing [FAIL]
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountAboveCeiling_Fails [51 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountAboveCeiling_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 184
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.GlobalExceptionMiddlewareTests.DomainArgumentOutOfRangeException_Returns400 [59 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 400
+Actual:   500
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.GlobalExceptionMiddlewareTests.DomainArgumentOutOfRangeException_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\GlobalExceptionMiddlewareTests.cs:line 57
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.Validation.GlobalExceptionMiddlewareTests.ApplicationArgumentException_Returns400 [3 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 400
+Actual:   500
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.GlobalExceptionMiddlewareTests.ApplicationArgumentException_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\GlobalExceptionMiddlewareTests.cs:line 77
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.Validation.GlobalExceptionMiddlewareTests.DomainArgumentException_Returns400InStandardEnvelope [4 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 400
+Actual:   500
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.GlobalExceptionMiddlewareTests.DomainArgumentException_Returns400InStandardEnvelope() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\GlobalExceptionMiddlewareTests.cs:line 41
+--- End of stack trace from previous location ---
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.IngestEvent_WithoutCurrency_FailsWithoutThrowing [26 ms]
+  Error Message:
+   System.NullReferenceException : Object reference not set to an instance of an object.
+  Stack Trace:
+     at CoupleSync.Api.Validators.IngestNotificationEventRequestValidator.<>c.<.ctor>b__2_4(String c) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Api\Validators\IngestNotificationEventRequestValidator.cs:line 25
+   at FluentValidation.DefaultValidatorExtensions.<>c__DisplayClass27_0`2.<Must>b__0(T x, TProperty val) in /_/src/FluentValidation/DefaultValidatorExtensions.cs:line 421
+   at FluentValidation.DefaultValidatorExtensions.<>c__DisplayClass28_0`2.<Must>b__0(T x, TProperty val, ValidationContext`1 _) in /_/src/FluentValidation/DefaultValidatorExtensions.cs:line 437
+   at FluentValidation.DefaultValidatorExtensions.<>c__DisplayClass29_0`2.<Must>b__0(T instance, TProperty property, ValidationContext`1 propertyValidatorContext) in /_/src/FluentValidation/DefaultValidatorExtensions.cs:line 453
+   at FluentValidation.Validators.PredicateValidator`2.IsValid(ValidationContext`1 context, TProperty value) in /_/src/FluentValidation/Validators/PredicateValidator.cs:line 36
+   at FluentValidation.Internal.RuleComponent`2.InvokePropertyValidator(ValidationContext`1 context, TProperty value) in /_/src/FluentValidation/Internal/RuleComponent.cs:line 92
+   at FluentValidation.Internal.RuleComponent`2.ValidateAsync(ValidationContext`1 context, TProperty value, Boolean useAsync, CancellationToken cancellation) in /_/src/FluentValidation/Internal/RuleComponent.cs:line 83
+   at FluentValidation.Internal.PropertyRule`2.ValidateAsync(ValidationContext`1 context, Boolean useAsync, CancellationToken cancellation) in /_/src/FluentValidation/Internal/PropertyRule.cs:line 156
+   at FluentValidation.AbstractValidator`1.ValidateInternalAsync(ValidationContext`1 context, Boolean useAsync, CancellationToken cancellation) in /_/src/FluentValidation/AbstractValidator.cs:line 246
+   at FluentValidation.AbstractValidator`1.Validate(ValidationContext`1 context) in /_/src/FluentValidation/AbstractValidator.cs:line 202
+   at FluentValidation.AbstractValidator`1.Validate(T instance) in /_/src/FluentValidation/AbstractValidator.cs:line 167
+   at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.IngestEvent_WithoutCurrency_FailsWithoutThrowing() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 99
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+[xUnit.net 00:00:00.69]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.OcrConfirm_OverrideCategoryWithInvalidLength_Fails(length: 0) [FAIL]
+[xUnit.net 00:00:00.69]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.OcrConfirm_OverrideCategoryWithInvalidLength_Fails(length: 65) [FAIL]
+[xUnit.net 00:00:00.69]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateIncomeSource_BlankName_Fails(name: "   ") [FAIL]
+[xUnit.net 00:00:00.69]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateIncomeSource_BlankName_Fails(name: "") [FAIL]
+[xUnit.net 00:00:00.70]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateBudgetIncome_AmountAboveCeiling_Fails [FAIL]
+[xUnit.net 00:00:00.70]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateGoal_NegativeCurrentAmount_Fails [FAIL]
+[xUnit.net 00:00:00.70]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(amount: "0.001") [FAIL]
+[xUnit.net 00:00:00.70]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(amount: "-1") [FAIL]
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.OcrConfirm_OverrideCategoryWithInvalidLength_Fails(length: 0) [1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.OcrConfirm_OverrideCategoryWithInvalidLength_Fails(Int32 length) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 233
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.OcrConfirm_OverrideCategoryWithInvalidLength_Fails(length: 65) [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.OcrConfirm_OverrideCategoryWithInvalidLength_Fails(Int32 length) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 233
+   at InvokeStub_RequestValidatorBoundaryTests.OcrConfirm_OverrideCategoryWithInvalidLength_Fails(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateIncomeSource_BlankName_Fails(name: "   ") [10 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateIncomeSource_BlankName_Fails(String name) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 122
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateIncomeSource_BlankName_Fails(name: "") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateIncomeSource_BlankName_Fails(String name) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 122
+   at InvokeStub_RequestValidatorBoundaryTests.UpdateIncomeSource_BlankName_Fails(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateBudgetIncome_AmountAboveCeiling_Fails [7 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateBudgetIncome_AmountAboveCeiling_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 148
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateGoal_NegativeCurrentAmount_Fails [20 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateGoal_NegativeCurrentAmount_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 206
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(amount: "0.001") [4 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(String amount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 89
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(amount: "-1") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(String amount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 89
+   at InvokeStub_RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:00:00.71]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(amount: "0") [FAIL]
+[xUnit.net 00:00:00.71]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_CategoryTooLong_Fails [FAIL]
+[xUnit.net 00:00:00.71]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(currency: "REAISREAIS") [FAIL]
+[xUnit.net 00:00:00.71]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(currency: "12A") [FAIL]
+[xUnit.net 00:00:00.71]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(currency: "R$") [FAIL]
+[xUnit.net 00:00:00.71]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(targetAmount: "10.005") [FAIL]
+[xUnit.net 00:00:00.72]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(targetAmount: "0.004") [FAIL]
+[xUnit.net 00:00:00.72]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(targetAmount: "0.001") [FAIL]
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(amount: "0") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(String amount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 89
+   at InvokeStub_RequestValidatorBoundaryTests.ManualTransaction_AmountNotPositiveAfterRounding_Fails(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_CategoryTooLong_Fails [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_CategoryTooLong_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 64
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(currency: "REAISREAIS") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(String currency) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 72
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(currency: "12A") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(String currency) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 72
+   at InvokeStub_RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(currency: "R$") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(String currency) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 72
+   at InvokeStub_RequestValidatorBoundaryTests.ManualTransaction_InvalidCurrency_Fails(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(targetAmount: "10.005") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(String targetAmount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 176
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(targetAmount: "0.004") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(String targetAmount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 176
+   at InvokeStub_RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(targetAmount: "0.001") [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(String targetAmount) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 176
+   at InvokeStub_RequestValidatorBoundaryTests.CreateGoal_TargetAmountWithMoreThanTwoDecimals_Fails(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:00:00.72]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateGoal_CurrentAmountAboveCeiling_Fails [FAIL]
+[xUnit.net 00:00:00.72]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.OcrConfirm_RepeatedOverrideIndex_Fails [FAIL]
+[xUnit.net 00:00:00.72]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateGoal_TargetAmountOutOfBounds_Fails [FAIL]
+[xUnit.net 00:00:00.72]     CoupleSync.UnitTests.Validation.UtcDateTimeJsonConverterTests.Read_NullableWithOffset_ConvertsToUtc [FAIL]
+[xUnit.net 00:00:00.73]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateBudgetPlan_AmountAboveCeiling_Fails [FAIL]
+[xUnit.net 00:00:00.73]     CoupleSync.UnitTests.Validation.UtcDateTimeJsonConverterTests.Read_WithoutZone_IsTreatedAsUtc [FAIL]
+[xUnit.net 00:00:00.73]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.IngestEvent_EmptyBody_FailsWithoutThrowing [FAIL]
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateGoal_CurrentAmountAboveCeiling_Fails [1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateGoal_CurrentAmountAboveCeiling_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 212
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.OcrConfirm_RepeatedOverrideIndex_Fails [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.OcrConfirm_RepeatedOverrideIndex_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 225
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateGoal_TargetAmountOutOfBounds_Fails [1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateGoal_TargetAmountOutOfBounds_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 196
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.UtcDateTimeJsonConverterTests.Read_NullableWithOffset_ConvertsToUtc [153 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: Utc
+Actual:   Local
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.UtcDateTimeJsonConverterTests.Read_NullableWithOffset_ConvertsToUtc() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\UtcDateTimeJsonConverterTests.cs:line 56
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateBudgetPlan_AmountAboveCeiling_Fails [4 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateBudgetPlan_AmountAboveCeiling_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 152
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.UtcDateTimeJsonConverterTests.Read_WithoutZone_IsTreatedAsUtc [1 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: Utc
+Actual:   Unspecified
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.UtcDateTimeJsonConverterTests.Read_WithoutZone_IsTreatedAsUtc() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\UtcDateTimeJsonConverterTests.cs:line 37
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.IngestEvent_EmptyBody_FailsWithoutThrowing [< 1 ms]
+  Error Message:
+   System.NullReferenceException : Object reference not set to an instance of an object.
+  Stack Trace:
+     at CoupleSync.Api.Validators.IngestNotificationEventRequestValidator.<>c.<.ctor>b__2_1(String b) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\src\CoupleSync.Api\Validators\IngestNotificationEventRequestValidator.cs:line 16
+   at FluentValidation.DefaultValidatorExtensions.<>c__DisplayClass27_0`2.<Must>b__0(T x, TProperty val) in /_/src/FluentValidation/DefaultValidatorExtensions.cs:line 421
+   at FluentValidation.DefaultValidatorExtensions.<>c__DisplayClass28_0`2.<Must>b__0(T x, TProperty val, ValidationContext`1 _) in /_/src/FluentValidation/DefaultValidatorExtensions.cs:line 437
+   at FluentValidation.DefaultValidatorExtensions.<>c__DisplayClass29_0`2.<Must>b__0(T instance, TProperty property, ValidationContext`1 propertyValidatorContext) in /_/src/FluentValidation/DefaultValidatorExtensions.cs:line 453
+   at FluentValidation.Validators.PredicateValidator`2.IsValid(ValidationContext`1 context, TProperty value) in /_/src/FluentValidation/Validators/PredicateValidator.cs:line 36
+   at FluentValidation.Internal.RuleComponent`2.InvokePropertyValidator(ValidationContext`1 context, TProperty value) in /_/src/FluentValidation/Internal/RuleComponent.cs:line 92
+   at FluentValidation.Internal.RuleComponent`2.ValidateAsync(ValidationContext`1 context, TProperty value, Boolean useAsync, CancellationToken cancellation) in /_/src/FluentValidation/Internal/RuleComponent.cs:line 83
+   at FluentValidation.Internal.PropertyRule`2.ValidateAsync(ValidationContext`1 context, Boolean useAsync, CancellationToken cancellation) in /_/src/FluentValidation/Internal/PropertyRule.cs:line 156
+   at FluentValidation.AbstractValidator`1.ValidateInternalAsync(ValidationContext`1 context, Boolean useAsync, CancellationToken cancellation) in /_/src/FluentValidation/AbstractValidator.cs:line 246
+   at FluentValidation.AbstractValidator`1.Validate(ValidationContext`1 context) in /_/src/FluentValidation/AbstractValidator.cs:line 202
+   at FluentValidation.AbstractValidator`1.Validate(T instance) in /_/src/FluentValidation/AbstractValidator.cs:line 167
+   at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.IngestEvent_EmptyBody_FailsWithoutThrowing() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 110
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+[xUnit.net 00:00:00.73]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_DescriptionTooLong_Fails(length: 513) [FAIL]
+[xUnit.net 00:00:00.73]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_DescriptionTooLong_Fails(length: 5000) [FAIL]
+[xUnit.net 00:00:00.74]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_MerchantTooLong_Fails [FAIL]
+[xUnit.net 00:00:00.74]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateIncomeSource_AmountAboveCeiling_Fails [FAIL]
+[xUnit.net 00:00:00.74]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountAboveCeiling_Fails [FAIL]
+[xUnit.net 00:00:00.74]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateIncomeSource_AmountAboveCeiling_Fails [FAIL]
+[xUnit.net 00:00:00.74]     CoupleSync.UnitTests.Validation.UtcDateTimeJsonConverterTests.Read_WithOffset_ConvertsToUtc [FAIL]
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_DescriptionTooLong_Fails(length: 513) [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_DescriptionTooLong_Fails(Int32 length) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 54
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_DescriptionTooLong_Fails(length: 5000) [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_DescriptionTooLong_Fails(Int32 length) in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 54
+   at InvokeStub_RequestValidatorBoundaryTests.ManualTransaction_DescriptionTooLong_Fails(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_MerchantTooLong_Fails [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_MerchantTooLong_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 59
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateIncomeSource_AmountAboveCeiling_Fails [12 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.CreateIncomeSource_AmountAboveCeiling_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 140
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountAboveCeiling_Fails [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ManualTransaction_AmountAboveCeiling_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 80
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateIncomeSource_AmountAboveCeiling_Fails [< 1 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.UpdateIncomeSource_AmountAboveCeiling_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 132
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed CoupleSync.UnitTests.Validation.UtcDateTimeJsonConverterTests.Read_WithOffset_ConvertsToUtc [< 1 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: Utc
+Actual:   Local
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.UtcDateTimeJsonConverterTests.Read_WithOffset_ConvertsToUtc() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\UtcDateTimeJsonConverterTests.cs:line 28
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+[xUnit.net 00:00:00.75]     CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ReplaceAllocations_AmountAboveCeiling_Fails [FAIL]
+  Failed CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ReplaceAllocations_AmountAboveCeiling_Fails [21 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at CoupleSync.UnitTests.Validation.RequestValidatorBoundaryTests.ReplaceAllocations_AmountAboveCeiling_Fails() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.UnitTests\Validation\RequestValidatorBoundaryTests.cs:line 160
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+
+Failed!  - Failed:    36, Passed:     8, Skipped:     0, Total:    44, Duration: 207 ms - CoupleSync.UnitTests.dll (net8.0)
+[xUnit.net 00:00:05.51]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.OcrConfirm_WithInvalidCategoryOverrides_Returns400 [FAIL]
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.OcrConfirm_WithInvalidCategoryOverrides_Returns400 [4 s]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: BadRequest
+Actual:   InternalServerError
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.OcrConfirm_WithInvalidCategoryOverrides_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 287
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.OcrConfirm_WithInvalidCategoryOverrides_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 295
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:06.38]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.CreateManualTransaction_WithOffsetTimestamp_IsConvertedToUtc [FAIL]
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.CreateManualTransaction_WithOffsetTimestamp_IsConvertedToUtc [870 ms]
+  Error Message:
+   Assert.Equal() Failure: Strings differ
+                       ↓ (pos 12)
+Expected: "2026-10-03T13:00:00Z"
+Actual:   "2026-10-03T10:00:00-03:00"
+                       ↑ (pos 12)
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.CreateManualTransaction_WithOffsetTimestamp_IsConvertedToUtc() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 39
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.CreateManualTransaction_WithOffsetTimestamp_IsConvertedToUtc() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 39
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:07.14]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Incomes_WithBlankNameOrHugeAmount_Return400 [FAIL]
+[xUnit.net 00:00:07.78]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Dashboard_WithSingleBoundThatInvertsThePeriod_Returns400 [FAIL]
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Incomes_WithBlankNameOrHugeAmount_Return400 [755 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: BadRequest
+Actual:   InternalServerError
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Incomes_WithBlankNameOrHugeAmount_Return400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 169
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Incomes_WithBlankNameOrHugeAmount_Return400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 179
+--- End of stack trace from previous location ---
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Dashboard_WithSingleBoundThatInvertsThePeriod_Returns400 [647 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: BadRequest
+Actual:   InternalServerError
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Dashboard_WithSingleBoundThatInvertsThePeriod_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 265
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Dashboard_WithSingleBoundThatInvertsThePeriod_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 271
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:09.36]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.IngestEvent_WithNonUtcTimestamps_IsAccepted [FAIL]
+[xUnit.net 00:00:10.05]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.IngestEvent_WithMissingFields_Returns400 [FAIL]
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.IngestEvent_WithNonUtcTimestamps_IsAccepted [865 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 2026-10-05T10:45:15.0000000
+Actual:   2026-10-05T13:45:15.0000000
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.IngestEvent_WithNonUtcTimestamps_IsAccepted() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 113
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.IngestEvent_WithNonUtcTimestamps_IsAccepted() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 114
+--- End of stack trace from previous location ---
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.IngestEvent_WithMissingFields_Returns400 [692 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: BadRequest
+Actual:   InternalServerError
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.IngestEvent_WithMissingFields_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 82
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.IngestEvent_WithMissingFields_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 85
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:10.77]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Budgets_WithHugeAmounts_Return400 [FAIL]
+[xUnit.net 00:00:11.42]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Goals_WithOutOfRangeAmounts_Return400 [FAIL]
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Budgets_WithHugeAmounts_Return400 [710 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: BadRequest
+Actual:   OK
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Budgets_WithHugeAmounts_Return400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 192
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Budgets_WithHugeAmounts_Return400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 202
+--- End of stack trace from previous location ---
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Goals_WithOutOfRangeAmounts_Return400 [648 ms]
+  Error Message:
+   create targetAmount 1e16: got 201
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Goals_WithOutOfRangeAmounts_Return400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 220
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.Goals_WithOutOfRangeAmounts_Return400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 248
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:12.07]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.GetTransactions_WithPageThatOverflowsOffset_Returns400 [FAIL]
+[xUnit.net 00:00:12.86]     CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.CreateManualTransaction_WithInvalidFields_Returns400 [FAIL]
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.GetTransactions_WithPageThatOverflowsOffset_Returns400 [650 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: BadRequest
+Actual:   OK
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.GetTransactions_WithPageThatOverflowsOffset_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 131
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.GetTransactions_WithPageThatOverflowsOffset_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 134
+--- End of stack trace from previous location ---
+  Failed CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.CreateManualTransaction_WithInvalidFields_Returns400 [786 ms]
+  Error Message:
+   description 513: expected 400, got 201
+  Stack Trace:
+     at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.CreateManualTransaction_WithInvalidFields_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 62
+   at CoupleSync.IntegrationTests.Validation.InputValidationIntegrationTests.CreateManualTransaction_WithInvalidFields_Returns400() in C:\Users\lucas\source\repos\lucasmoraiss\CoupleSync\backend\tests\CoupleSync.IntegrationTests\Validation\InputValidationIntegrationTests.cs:line 66
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:    10, Passed:     1, Skipped:     0, Total:    11, Duration: 12 s - CoupleSync.IntegrationTests.dll (net8.0)

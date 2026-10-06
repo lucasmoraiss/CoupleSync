@@ -1,13 +1,31 @@
 # CoupleSync — Backlog Futuro
 
 Lista viva de itens identificados durante a estabilização pós-lançamento do piloto.
-Última atualização: **30/Abr/2026** (após execução autônoma de backlog).
+Última atualização: **05/Out/2026**.
+
+---
+
+## ✅ Concluído em 05/Out/2026
+
+Itens resolvidos e conferidos no código nesta data:
+
+- ✅ **Rate limiting em `/auth`** → limitador nativo do ASP.NET Core: 5 tentativas por minuto por IP em `POST /auth/login` e em `POST /auth/register`, e 5 por minuto por usuário em `POST /couples/join`; resposta 429 com `Retry-After`. Atrás de proxy exige configurar `ForwardedHeaders` (`RateLimitingSetup.cs`).
+- ✅ **Extrato — edição de valor e descrição na revisão** → a tela de revisão tem campos editáveis de descrição, valor e categoria, e a confirmação envia `candidateEdits` (`ConfirmRequestValidator`, `ImportJobService`).
+- ✅ **Extrato — confirmação tolerante a duplicatas** → linhas repetidas e transações já existentes são puladas; a resposta traz `transactionsCreated` e `duplicatesSkipped`.
+- ✅ **Extrato — o app oferece apenas PDF** → a opção de câmera/imagem saiu da tela de importação.
+- ✅ **Grupos com mais de dois membros** → o bloqueio `COUPLE_FULL` foi removido do `JoinCoupleCommandHandler`; aceitar mais de dois membros é intencional. O nome `Couple` foi mantido no domínio e as rendas passaram a ser agrupadas por membro.
+- ✅ **Chave JWT fora do `appsettings.json`** → o valor versionado é vazio e a API não inicia sem `JWT__SECRET` com 32 caracteres ou mais (`JwtSecretGuard`).
+- ✅ **Captura de notificações — só despesas, sem texto bruto** → apenas compras, pagamentos e Pix enviados viram transação; o app envia banco, valor, moeda, data/hora e estabelecimento, e não envia o texto da notificação.
+- ✅ **Renovação automática de sessão no app** → no primeiro 401 o cliente chama `POST /auth/refresh` uma vez e repete a requisição (`mobile/src/services/authRefresh.ts`).
+- ✅ **Testes de unidade no app** → `npm test` (Jest) cobre o parser de notificações, o corpo enviado ao servidor, a confirmação do extrato e a renovação de sessão (111 testes).
+
+**Verificação**: a suíte do back-end tem 592 testes (411 de unidade, 180 de integração, 1 de ponta a ponta), todos passando em 05/Out/2026.
 
 ---
 
 ## ✅ Concluído em 30/Abr/2026
 
-Os itens abaixo foram **resolvidos** na sessão `.agents-work/2026-04-30_backlog-execution/`:
+Os itens abaixo foram **resolvidos** em 30/Abr/2026:
 
 - ✅ **CRÍTICO — Ícones desaparecem no build EAS** → adicionado `expo-font` ao `app.json` plugins
 - ✅ **Dashboard "Total de gastos" não atualiza após OCR** → invalidação de queries `dashboard`/`reports`/`budget` no `confirmMutation.onSuccess`
@@ -22,7 +40,7 @@ Os itens abaixo foram **resolvidos** na sessão `.agents-work/2026-04-30_backlog
 - ✅ **OCR UI — status mais granular durante polling** → mensagens pt-BR diferenciadas para `Pending` ("Aguardando processamento...") e `Processing` ("Processando extrato...")
 - ✅ **CI/CD — upload de resultados de teste como artefatos** → `actions/upload-artifact@v4` com `if: always()` para `unit-test-results`, `integration-test-results`, `e2e-test-results`; `expo-doctor` step (informativo)
 
-**Verificação**: 257/257 testes unitários passam, build .NET limpo, TypeScript compila sem erros.
+**Verificação (na época)**: 257/257 testes de unidade, build .NET limpo, TypeScript compilando sem erros. A contagem atual está na seção de 05/Out/2026.
 
 ---
 
@@ -50,10 +68,6 @@ Os itens abaixo foram **resolvidos** na sessão `.agents-work/2026-04-30_backlog
 - **Status**: Aguardando infraestrutura de e-mail.
 - Link "Esqueci minha senha" na tela de login + fluxo: e-mail → token → tela de nova senha.
 
-### OCR — fallback de edição manual antes de salvar
-- **Status**: Tela de revisão (`OcrReviewScreen`) já permite confirmar/cancelar candidatos. Falta permitir editar **descrição, valor e categoria** dos candidatos antes de confirmar (hoje só categoria).
-- **Ações**: adicionar campos editáveis na linha do candidato; validar localmente; enviar valores editados no `confirmMutation`.
-
 ---
 
 ## Média prioridade
@@ -71,26 +85,25 @@ Os itens abaixo foram **resolvidos** na sessão `.agents-work/2026-04-30_backlog
 - Hoje cada request gera logs no backend mas não há correlação com a sessão mobile.
 - **Ações**: mobile gera `X-Correlation-Id` por request (UUID v4); backend lê e propaga em todos os logs estruturados via `LogContext.PushProperty` ou similar.
 
-### Multi-membros no grupo (família, trisal)
-- **Status**: Bloqueio em `JoinCoupleCommandHandler.cs` linha 42 (`if (couple.Members.Count >= 2) throw COUPLE_FULL`).
-- **Escopo**: arquitetural — afeta domain (`Couple` → `Group`/`Household`?), todos os filtros por `CoupleId`, UI de compartilhamento.
-- **Sugestão**: spike de investigação antes de implementar. Decidir se mantém o nome `Couple` (com membros 1..N) ou renomeia.
+### Gestão de membros do grupo
+- **Status**: um grupo aceita mais de dois membros (ver concluídos de 05/Out/2026), mas não há como **sair do grupo, remover um membro nem trocar o código de convite**.
+- **Também falta**: exibir o código de convite depois da criação. O item "Código do casal" em Config está inativo, embora `GET /couples/me` já devolva o código.
+- **Texto da interface**: o app ainda fala em "casal" e "parceiro"; a tela de rendas tem a seção "Rendas do Parceiro".
 
 ### Participação em múltiplos grupos
 - Hoje um usuário tem `User.CoupleId` único. Permitir N:N exigiria mudança de schema.
-- **Sugestão**: depende da decisão acima (Couple → Group). Implementar junto.
+- **Sugestão**: avaliar junto com a gestão de membros acima.
 
 ---
 
 ## Qualidade e DX
 
 ### Testes E2E mobile (Maestro)
-- **Status**: Hoje só `mobile/tests/e2e/manual-walkthrough.md` (10 cenários manuais). Sem Detox nem Maestro.
-- **Ações**: instalar Maestro (mais leve que Detox para Expo managed); fluxo mínimo: login → criar casal → adicionar manual → ver dashboard atualizar; integrar em CI (job separado, talvez Maestro Cloud).
-- **Estimativa**: sprint completo.
+- **Status**: existem um roteiro manual (`mobile/tests/e2e/manual-walkthrough.md`) e quatro fluxos em YAML em `mobile/tests/e2e/flows/` (abertura, login, navegação entre abas e painel). Eles não rodam no CI.
+- **Ações**: cobrir o fluxo mínimo (login → criar casal → lançar manual → ver o painel atualizar) e integrar ao CI em job separado.
 
 ### Acessibilidade — auditoria completa
-- **Status**: Telas `couple-setup` e `settings` cobertas em Abr/30. Faltam: `login`, `register`, `transactions/index`, `transactions/new`, `dashboard (tabs)/index`, `goals`, `chat`.
+- **Status**: `couple-setup` e `settings` foram cobertas em Abr/30. `login`, `register` e `transactions/new` ainda não têm `accessibilityLabel`; as demais telas têm cobertura parcial.
 - **Ações**: passar em cada `TouchableOpacity` adicionando `accessibilityLabel` + `accessibilityRole`; revisar `TextInput` com `accessibilityHint`; testar com TalkBack.
 - **Suporte a font scaling**: testar Android com tamanho de fonte máximo, ajustar layouts que quebrem.
 
@@ -101,7 +114,8 @@ Os itens abaixo foram **resolvidos** na sessão `.agents-work/2026-04-30_backlog
 ### CI/CD — gates de qualidade
 - **Coverage gate**: enforcar mínimo (ex. 80%) com `coverlet` + threshold; falhar PR se cair.
 - **Mobile EAS build em PR**: com label `build-apk` para opt-in (não em todo PR para economizar quota Expo).
-- **Lint mobile**: ESLint + Prettier check em CI.
+- **Lint mobile**: o script `npm run lint` existe, mas o projeto não tem configuração do ESLint, então ele não roda. Criar a configuração e incluir a checagem no CI.
+- **Testes Jest do app no CI**: hoje o CI só faz a checagem de tipos do app; `npm test` roda apenas localmente.
 
 ---
 
@@ -112,10 +126,10 @@ Os itens abaixo foram **resolvidos** na sessão `.agents-work/2026-04-30_backlog
 - **Opções a avaliar**:
   - **Resend** (plano gratuito 100/dia, API moderna, fácil integração com .NET via HttpClient)
   - **SendGrid** (gratuito 100/dia, integração via NuGet `SendGrid` package)
-  - **Azure Communication Services Email** (pay-as-you-go, integração nativa com Azure App Service)
+  - **Azure Communication Services Email** (pay-as-you-go)
   - **Mailgun** (gratuito limitado)
 - **Critérios**: custo zero/baixo no piloto (≤10 usuários, ~50 e-mails/mês), facilidade .NET 8, configuração via env vars (sem SMTP).
-- **Recomendação técnica**: **Resend** ou **Azure Communication Services** — ambos REST puros, sem dependência de SMTP server.
+- **Recomendação técnica**: **Resend** — REST puro, sem dependência de servidor SMTP.
 
 ### Refresh token automático após mudança de claims
 - **Status**: Funciona — `CreateCoupleCommandHandler` e `JoinCoupleCommandHandler` já re-emitem JWT completo. Não é bug.
@@ -135,7 +149,7 @@ Os itens abaixo foram **resolvidos** na sessão `.agents-work/2026-04-30_backlog
 - **Risco real**: nenhum no piloto (UUID v4 ~2^122 espaço). Em produção considerar retornar sempre 404 (fail-safe default).
 
 ### Padronização de error codes
-- Backend hoje tem códigos em algumas exceptions (`COUPLE_FULL`, `EMAIL_ALREADY_IN_USE`, `INVALID_CREDENTIALS`, `PDF_ENCRYPTED`...) e o mobile mapeia caso a caso.
+- Backend hoje tem códigos em algumas exceptions (`EMAIL_ALREADY_IN_USE`, `INVALID_CREDENTIALS`, `USER_ALREADY_IN_COUPLE`, `PDF_ENCRYPTED`...) e o mobile mapeia caso a caso.
 - **Ações**: criar enum/constantes no backend para evitar typos; documentar todos os códigos em `docs/api-error-codes.md`.
 
 ### Internacionalização (i18n)
@@ -147,8 +161,13 @@ Os itens abaixo foram **resolvidos** na sessão `.agents-work/2026-04-30_backlog
 - **Ações**: integrar Mixpanel/Amplitude/PostHog (free tier) com eventos chave: app_opened, transaction_created (manual/ocr), couple_created, couple_joined, ocr_failed (com errorCode).
 
 ### Backup automático do banco PostgreSQL
-- Verificar se Neon (DB atual) faz backup point-in-time. Se não, configurar backup diário para Azure Storage.
+- Verificar o que o plano do Neon em uso oferece de restauração point-in-time. Se não for suficiente, configurar um backup diário (`pg_dump`) para um armazenamento externo.
 
-### Rate limiting
-- Hoje endpoints públicos (`/auth/login`, `/auth/register`) não têm rate limiting. Vulnerável a brute force / spam de cadastros.
-- **Ações**: middleware ASP.NET Core Rate Limiter (built-in no .NET 8) com 5 tentativas/min por IP em `/auth/*`.
+### Pendências confirmadas no código em 05/Out/2026
+- **`mobile/eas.json` aponta para a hospedagem desativada**: os perfis `preview` e `production` ainda trazem a URL antiga da API. Trocar pela URL do Render antes do próximo build.
+- **Upload aceita imagem que o parser recusa**: `POST /ocr/upload` reconhece JPEG e PNG, mas o parser local só lê PDF e o job termina com `IMAGE_NOT_SUPPORTED`. Recusar já no upload.
+- **Lista de transações sem paginação no app**: a tela pede só a primeira página (20 itens), embora a API pagine e filtre.
+- **"Lembretes de contas"**: a chave existe na tela de alertas e na API, mas nenhuma regra gera esse alerta.
+- **Texto dos alertas**: os alertas de transação grande e de gasto em 30 dias são gerados em inglês; o nome "Saldo baixo" não corresponde à regra (gasto do grupo em 30 dias acima de R$ 3.000).
+- **Orçamento por categoria sem tela**: os endpoints de alocação existem, mas o app não tem como cadastrá-las; os alertas de orçamento dependem delas.
+- **Privacidade**: não há política de privacidade publicada, tela de consentimento, exclusão de conta nem exportação de dados.

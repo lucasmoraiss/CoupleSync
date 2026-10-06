@@ -1,0 +1,54 @@
+# Blueprint do Render (https://render.com/docs/blueprint-spec)
+# Sobe a API do CoupleSync a partir de backend/Dockerfile, no plano gratuito.
+# O banco é um PostgreSQL externo (Neon); a connection string é informada no painel.
+services:
+  - type: web
+    name: couplesync-api
+    runtime: docker
+    plan: free
+    # Região gratuita mais próxima do banco (Neon em São Paulo).
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/live
+    autoDeploy: true
+    envVars:
+      # A imagem escuta em 8080 (ASPNETCORE_URLS no Dockerfile).
+      - key: PORT
+        value: "8080"
+
+      # Formato Npgsql: Host=...;Port=5432;Database=...;Username=...;Password=...;SslMode=Require
+      # Informado no painel; nunca versionado.
+      - key: DATABASE_URL
+        sync: false
+
+      # Segredo de assinatura dos tokens, gerado pelo Render. A API não inicia sem ele.
+      - key: JWT__SECRET
+        generateValue: true
+      - key: JWT__ISSUER
+        value: CoupleSync
+      - key: JWT__AUDIENCE
+        value: CoupleSync.Mobile
+
+      # O contêiner só é alcançável pelo proxy do Render, então o cabeçalho
+      # X-Forwarded-For é confiável. Sem isto o limite de tentativas por IP
+      # trataria todos os clientes como um só.
+      - key: ForwardedHeaders__TrustAllProxies
+        value: "true"
+      # O Render fica atrás do Cloudflare e acrescenta endereços ao X-Forwarded-For; o último
+      # deles muda a cada requisição. O endereço real do cliente vem em CF-Connecting-IP,
+      # preenchido pelo Cloudflare, e é por ele que o limite de tentativas é contado.
+      - key: ForwardedHeaders__ClientIpHeader
+        value: CF-Connecting-IP
+
+      # Leitura de extratos em PDF feita no próprio servidor, sem serviço externo.
+      - key: USE_LOCAL_PDF_PARSER
+        value: "true"
+      - key: Storage__BasePath
+        value: /app/uploads
+
+      # Assistente de IA desligado por padrão. Para ligar: "true" e uma chave em GEMINI_API_KEY.
+      - key: AI_CHAT_ENABLED
+        value: "false"
+      - key: GEMINI_API_KEY
+        sync: false

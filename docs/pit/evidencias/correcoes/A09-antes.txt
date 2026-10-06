@@ -1,0 +1,111 @@
+
+> couplesync@1.0.0 test
+> jest --no-color ingestRequest
+
+FAIL src/modules/integrations/notification-capture/__tests__/ingestRequest.test.ts
+  A09 — corpo enviado ao servidor não leva o texto da notificação
+    × envia somente banco, valor, moeda, data/hora e estabelecimento (18 ms)
+    × o JSON enviado não contém o texto bruto nem nomes de terceiros que estavam na notificação (6 ms)
+    × o evento interpretado não guarda o texto bruto (1 ms)
+    × sem estabelecimento, o campo merchant não é enviado (3 ms)
+
+  ● A09 — corpo enviado ao servidor não leva o texto da notificação › envia somente banco, valor, moeda, data/hora e estabelecimento
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 0
+    + Received  + 1
+
+    @@ -2,6 +2,7 @@
+        "amount": 150,
+        "bank": "Nubank",
+        "currency": "BRL",
+        "eventTimestamp": "2026-10-05T14:30:00.000Z",
+        "merchant": "Mercearia Boa Vista",
+    +   "rawNotificationText": "Pix enviado Pix enviado: R$ 150,00 para Mercearia Boa Vista. Solicitado por Maria Aparecida Souza, CPF ***.123.456-**",
+      }
+
+      17 |     const request = buildIngestRequest(parse('com.nu.production', title, body));
+      18 |
+    > 19 |     expect(request).toEqual({
+         |                     ^
+      20 |       bank: 'Nubank',
+      21 |       amount: 150,
+      22 |       currency: 'BRL',
+
+      at Object.<anonymous> (src/modules/integrations/notification-capture/__tests__/ingestRequest.test.ts:19:21)
+
+  ● A09 — corpo enviado ao servidor não leva o texto da notificação › o JSON enviado não contém o texto bruto nem nomes de terceiros que estavam na notificação
+
+    expect(received).not.toContain(expected) // indexOf
+
+    Expected substring: not "rawNotificationText"
+    Received string:        "{\"bank\":\"Nubank\",\"amount\":150,\"currency\":\"BRL\",\"eventTimestamp\":\"2026-10-05T14:30:00.000Z\",\"merchant\":\"Mercearia Boa Vista\",\"rawNotificationText\":\"Pix enviado Pix enviado: R$ 150,00 para Mercearia Boa Vista. Solicitado por Maria Aparecida Souza, CPF ***.123.456-**\"}"
+
+      29 |     const json = JSON.stringify(buildIngestRequest(parse('com.nu.production', title, body)));
+      30 |
+    > 31 |     expect(json).not.toContain('rawNotificationText');
+         |                      ^
+      32 |     expect(json).not.toContain(body);
+      33 |     expect(json).not.toContain('Maria Aparecida');
+      34 |     expect(json).not.toContain('CPF');
+
+      at Object.<anonymous> (src/modules/integrations/notification-capture/__tests__/ingestRequest.test.ts:31:22)
+
+  ● A09 — corpo enviado ao servidor não leva o texto da notificação › o evento interpretado não guarda o texto bruto
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 0
+    + Received  + 1
+
+    @@ -2,7 +2,8 @@
+        "amount",
+        "bank",
+        "matchedPatternId",
+        "merchant",
+        "packageName",
+    +   "rawText",
+        "receivedAt",
+      ]
+
+      39 |     const event = parse('com.nu.production', title, body);
+      40 |
+    > 41 |     expect(Object.keys(event).sort()).toEqual(
+         |                                       ^
+      42 |       ['amount', 'bank', 'matchedPatternId', 'merchant', 'packageName', 'receivedAt'].sort(),
+      43 |     );
+      44 |     expect(JSON.stringify(event)).not.toContain('Maria Aparecida');
+
+      at Object.<anonymous> (src/modules/integrations/notification-capture/__tests__/ingestRequest.test.ts:41:39)
+
+  ● A09 — corpo enviado ao servidor não leva o texto da notificação › sem estabelecimento, o campo merchant não é enviado
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 0
+    + Received  + 1
+
+      Object {
+        "amount": 120,
+        "bank": "Bradesco",
+        "currency": "BRL",
+        "eventTimestamp": "2026-10-05T14:30:00.000Z",
+    +   "rawNotificationText": "Bradesco Débito de R$ 120,00 em sua conta",
+      }
+
+      48 |     const request = buildIngestRequest(parse('com.bradesco', 'Bradesco', 'Débito de R$ 120,00 em sua conta'));
+      49 |
+    > 50 |     expect(JSON.parse(JSON.stringify(request))).toEqual({
+         |                                                 ^
+      51 |       bank: 'Bradesco',
+      52 |       amount: 120,
+      53 |       currency: 'BRL',
+
+      at Object.<anonymous> (src/modules/integrations/notification-capture/__tests__/ingestRequest.test.ts:50:49)
+
+Test Suites: 1 failed, 1 total
+Tests:       4 failed, 4 total
+Snapshots:   0 total
+Time:        1.806 s
+Ran all test suites matching /ingestRequest/i.

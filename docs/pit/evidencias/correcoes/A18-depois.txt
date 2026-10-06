@@ -1,0 +1,23 @@
+
+> couplesync@1.0.0 test
+> jest src/utils
+
+PASS src/utils/__tests__/format.test.ts
+  monthLabelFromIso
+    √ usa o mês do período em UTC, não o do fuso do aparelho (3 ms)
+    √ aceita data sem hora e com fração de segundo (1 ms)
+    √ devolve texto vazio para valor que não é data
+  getCategoryLabel
+    √ traduz a chave interna para o nome exibido (1 ms)
+    √ reconhece a categoria em qualquer grafia vinda da API (1 ms)
+    √ mantém o texto original quando a categoria não é conhecida
+  memberLabel
+    √ mostra "Você" para o próprio usuário (1 ms)
+    √ mostra o primeiro nome do outro membro
+    √ usa "Membro" quando o nome ainda não foi carregado
+
+Test Suites: 1 passed, 1 total
+Tests:       9 passed, 9 total
+Snapshots:   0 total
+Time:        0.662 s, estimated 1 s
+Ran all test suites matching /src\\utils/i.

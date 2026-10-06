@@ -1,5 +1,5 @@
 // AC-124, AC-126, AC-127: OCR review screen — candidates with checkboxes, edit fields, confirm
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { ocrApiClient, isCoupleRequiredError } from '@/services/apiClient';
-import type { OcrCandidateResponse } from '@/types/api';
+import {
+  buildOcrConfirmRequest,
+  candidateToRow,
+  formatBRLInput,
+  parseBRLInput,
+  validateReviewRows,
+  type ReviewRow,
+} from '@/modules/ocr/confirmRequest';
 import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
@@ -38,18 +45,6 @@ const SUCCESS = colors.success;
 const WARNING = colors.warning;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function parseBRLInput(value: string): number {
-  const digits = value.replace(/[^\d]/g, '');
-  return digits ? Number(digits) : 0;
-}
-
-function formatBRLInput(cents: number): string {
-  return new Intl.NumberFormat('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(cents / 100);
-}
-
 function formatDate(isoDate: string): string {
   const d = new Date(isoDate);
   const day = String(d.getUTCDate()).padStart(2, '0');
@@ -59,29 +54,7 @@ function formatDate(isoDate: string): string {
 }
 
 // ─── Local row state ──────────────────────────────────────────────────────────
-interface CandidateRow {
-  index: number;
-  selected: boolean;
-  description: string;
-  amountCents: number;
-  date: string;
-  confidence: number;
-  duplicateSuspected: boolean;
-  category: string;
-}
-
-function candidateToRow(c: OcrCandidateResponse): CandidateRow {
-  return {
-    index: c.index,
-    selected: true,
-    description: c.description,
-    amountCents: Math.round(c.amount * 100),
-    date: c.date,
-    confidence: c.confidence,
-    duplicateSuspected: c.duplicateSuspected,
-    category: c.suggestedCategory ?? '',
-  };
-}
+// Row shape, BRL helpers and the confirm body live in '@/modules/ocr/confirmRequest' (pure, unit-tested).
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 interface Props {
@@ -91,8 +64,10 @@ interface Props {
 export default function OcrReviewScreen({ uploadId }: Props) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [rows, setRows] = useState<CandidateRow[]>([]);
+  const [rows, setRows] = useState<ReviewRow[]>([]);
   const [successMsg, setSuccessMsg] = useState('');
+  // Field errors are shown only after the first confirm attempt, then update live
+  const [showErrors, setShowErrors] = useState(false);
   const initializedRef = useRef(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -102,7 +77,8 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     retry: 1,
   });
 
-  // Seed editable rows once on first load; guard prevents resetting user edits
+  // Seed editable rows once on first load; guard prevents resetting user edits.
+  // A new uploadId remounts this component (key in app/(main)/ocr-review.tsx), which resets it.
   useEffect(() => {
     if (data && !initializedRef.current) {
       initializedRef.current = true;
@@ -110,14 +86,16 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     }
   }, [data]);
 
+  // Validation of the edited fields (description / amount) of the selected rows
+  const rowErrors = useMemo(
+    () => validateReviewRows(rows, data?.candidates ?? []),
+    [rows, data],
+  );
+
   const confirmMutation = useMutation({
-    mutationFn: () => {
-      const selectedIndices = rows.filter((r) => r.selected).map((r) => r.index);
-      const categoryOverrides = rows
-        .filter((r) => r.selected && r.category.trim().length > 0)
-        .map((r) => ({ index: r.index, category: r.category.trim() }));
-      return ocrApiClient.confirm(uploadId, { selectedIndices, categoryOverrides });
-    },
+    // Sends the user's edits (candidateEdits) along with the selection and category overrides
+    mutationFn: () =>
+      ocrApiClient.confirm(uploadId, buildOcrConfirmRequest(rows, data?.candidates ?? [])),
     onSuccess: (res) => {
       const count = res.data.transactionsCreated;
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -142,9 +120,14 @@ export default function OcrReviewScreen({ uploadId }: Props) {
       toast.warning('Selecione ao menos uma transação para importar.');
       return;
     }
+    if (Object.keys(rowErrors).length > 0) {
+      setShowErrors(true);
+      toast.warning('Corrija os campos destacados antes de importar.');
+      return;
+    }
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     confirmMutation.mutate();
-  }, [rows, confirmMutation]);
+  }, [rows, rowErrors, confirmMutation]);
 
   const toggleAll = useCallback(() => {
     const allSelected = rows.every((r) => r.selected);
@@ -230,7 +213,9 @@ export default function OcrReviewScreen({ uploadId }: Props) {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const errors = showErrors ? rowErrors[row.index] : undefined;
+            return (
             <View
               key={row.index}
               style={[styles.card, row.duplicateSuspected && styles.cardWarning]}
@@ -263,18 +248,21 @@ export default function OcrReviewScreen({ uploadId }: Props) {
 
               {/* Editable description */}
               <TextInput
-                style={styles.input}
+                style={[styles.input, errors?.description ? styles.inputError : null]}
                 value={row.description}
                 onChangeText={(t) => updateDescription(row.index, t)}
                 placeholder="Descrição"
                 placeholderTextColor={MUTED}
               />
+              {errors?.description ? (
+                <Text style={styles.fieldErrorText}>{errors.description}</Text>
+              ) : null}
 
               {/* Editable amount */}
               <View style={styles.amountRow}>
                 <Text style={styles.currencyLabel}>R$</Text>
                 <TextInput
-                  style={[styles.input, styles.amountInput]}
+                  style={[styles.input, styles.amountInput, errors?.amount ? styles.inputError : null]}
                   value={formatBRLInput(row.amountCents)}
                   keyboardType="numeric"
                   onChangeText={(t) => updateAmount(row.index, t)}
@@ -282,6 +270,9 @@ export default function OcrReviewScreen({ uploadId }: Props) {
                   placeholderTextColor={MUTED}
                 />
               </View>
+              {errors?.amount ? (
+                <Text style={styles.fieldErrorText}>{errors.amount}</Text>
+              ) : null}
 
               {/* Category chip — pre-filled from AI suggestion, editable */}
               <View style={styles.categoryRow}>
@@ -296,7 +287,8 @@ export default function OcrReviewScreen({ uploadId }: Props) {
                 />
               </View>
             </View>
-          ))}
+            );
+          })}
           <View style={styles.scrollPadding} />
         </ScrollView>
 
@@ -381,6 +373,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     fontSize: 14,
   },
+  inputError: { borderColor: ERROR },
+  fieldErrorText: { color: ERROR, fontSize: 12, marginTop: -4 },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   currencyLabel: { fontSize: 14, color: MUTED, fontWeight: '600' },
   amountInput: { flex: 1 },

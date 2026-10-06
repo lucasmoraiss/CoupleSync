@@ -16,10 +16,25 @@ export const PREDEFINED_CATEGORIES: readonly CategoryMeta[] = [
   { value: 'OUTROS', label: 'Outros', icon: 'ellipsis-horizontal-circle-outline' },
 ];
 
+// A API devolve a mesma categoria em grafias diferentes ("ALIMENTACAO", "Alimentacao",
+// "Alimentação"); a comparação ignora maiúsculas, acentos e espaços nas pontas.
+function normalizeCategory(value: string): string {
+  return value
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+}
+
+function findCategory(value: string): CategoryMeta | undefined {
+  const key = normalizeCategory(value ?? '');
+  return PREDEFINED_CATEGORIES.find((c) => c.value === key);
+}
+
 export function getCategoryLabel(value: string): string {
-  return PREDEFINED_CATEGORIES.find((c) => c.value === value)?.label ?? value;
+  return findCategory(value)?.label ?? value;
 }
 
 export function getCategoryIcon(value: string): string {
-  return PREDEFINED_CATEGORIES.find((c) => c.value === value)?.icon ?? 'ellipsis-horizontal-circle-outline';
+  return findCategory(value)?.icon ?? 'ellipsis-horizontal-circle-outline';
 }

@@ -1,4 +1,5 @@
 using CoupleSync.Api.Contracts.Budget;
+using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -14,7 +15,8 @@ public sealed class CreateBudgetPlanRequestValidator : AbstractValidator<CreateB
             .WithMessage("Month must be in YYYY-MM format.");
 
         RuleFor(x => x.GrossIncome)
-            .GreaterThanOrEqualTo(0);
+            .GreaterThanOrEqualTo(0)
+            .LessThanOrEqualTo(MoneyRules.MaxAmount);
 
         RuleFor(x => x.Currency)
             .NotEmpty()

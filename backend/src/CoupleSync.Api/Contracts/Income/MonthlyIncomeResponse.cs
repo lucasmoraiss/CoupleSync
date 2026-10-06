@@ -23,4 +23,5 @@ public sealed record MonthlyIncomeResponse(
     IncomeGroupResponse PersonalIncome,
     IncomeGroupResponse? PartnerIncome,
     IncomeGroupResponse SharedIncome,
-    decimal CoupleTotal);
+    decimal CoupleTotal,
+    IReadOnlyList<IncomeGroupResponse> PartnersIncome);

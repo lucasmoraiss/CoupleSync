@@ -117,7 +117,9 @@ public sealed class IncomesController : ControllerBase
         var partner = dto.PartnerIncome is not null ? MapGroupResponse(dto.PartnerIncome) : null;
         var shared = MapGroupResponse(dto.SharedIncome);
 
-        return new MonthlyIncomeResponse(dto.Month, dto.Currency, personal, partner, shared, dto.CoupleTotal);
+        var partners = dto.PartnersIncome.Select(MapGroupResponse).ToList();
+
+        return new MonthlyIncomeResponse(dto.Month, dto.Currency, personal, partner, shared, dto.CoupleTotal, partners);
     }
 
     private static IncomeGroupResponse MapGroupResponse(IncomeGroupDto group)

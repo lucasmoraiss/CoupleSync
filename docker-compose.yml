@@ -1,12 +1,10 @@
-version: "3.9"
-
 services:
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "5000:8080"
+      - "127.0.0.1:5000:8080"
     environment:
       DATABASE_URL: "Host=postgres;Port=5432;Database=couplesync;Username=couplesync;Password=${POSTGRES_PASSWORD:-localdev};SslMode=Disable"
       JWT__SECRET: "${JWT__SECRET}"  # REQUIRED: set in .env or export before running
@@ -26,7 +24,7 @@ services:
   postgres:
     image: postgres:16-alpine
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: couplesync
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-localdev}"

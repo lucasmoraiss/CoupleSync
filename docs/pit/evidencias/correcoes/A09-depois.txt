@@ -1,0 +1,16 @@
+
+> couplesync@1.0.0 test
+> jest --no-color ingestRequest
+
+PASS src/modules/integrations/notification-capture/__tests__/ingestRequest.test.ts
+  A09 — corpo enviado ao servidor não leva o texto da notificação
+    √ envia somente banco, valor, moeda, data/hora e estabelecimento (15 ms)
+    √ o JSON enviado não contém o texto bruto nem nomes de terceiros que estavam na notificação (5 ms)
+    √ o evento interpretado não guarda o texto bruto (1 ms)
+    √ sem estabelecimento, o campo merchant não é enviado (5 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       4 passed, 4 total
+Snapshots:   0 total
+Time:        2.515 s
+Ran all test suites matching /ingestRequest/i.

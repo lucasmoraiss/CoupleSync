@@ -1,0 +1,11 @@
+### Limite de tentativas em produção (Render) — 2026-10-05T23:00:11Z
+### versão publicada: {"status":"healthy","version":"c3c58a2","timestamp":"2026-10-05T23:00:12.1420213Z"}
+### ANTES (commit aad8f84, 05/10/2026 22:3x UTC): 7 logins com senha errada -> 401 401 401 401 401 401 401
+### DEPOIS: 7 logins seguidos com senha errada
+tentativa 1 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP36DSC8A09:0000000E"}
+tentativa 2 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP36DSC8A09:0000000F"}
+tentativa 3 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP36DSC8A09:00000010"}
+tentativa 4 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP36DSC8A09:00000011"}
+tentativa 5 -> HTTP 401  {"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","traceId":"0HNP36DSC8A09:00000012"}
+tentativa 6 -> HTTP 429 retry-after: 60 {"code":"RATE_LIMIT_EXCEEDED","message":"Too many attempts. Please wait a moment and try again.","traceId":"0HNP36DSC8A0
+tentativa 7 -> HTTP 429 retry-after: 60 {"code":"RATE_LIMIT_EXCEEDED","message":"Too many attempts. Please wait a moment and try again.","traceId":"0HNP36DSC8A0

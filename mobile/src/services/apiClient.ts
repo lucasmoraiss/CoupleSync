@@ -1,8 +1,9 @@
-// AC-011: Typed Axios API client with Authorization interceptor and 401 handler
+// AC-011: Typed Axios API client with Authorization interceptor and 401 handler (refresh + retry)
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { router } from 'expo-router';
 import { useSessionStore } from '@/state/sessionStore';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
+import { installAuthRefresh } from './authRefresh';
 import type {
   AuthResponse,
   RefreshResponse,
@@ -52,40 +53,15 @@ const axiosInstance: AxiosInstance = axios.create({
   timeout: 30000,
 });
 
-// Guard against concurrent 401 handling (multiple parallel requests expiring at same time)
-let isHandling401 = false;
-
-// Request interceptor: attach Bearer token from session store
-axiosInstance.interceptors.request.use((config) => {
-  const { accessToken } = useSessionStore.getState();
-  if (accessToken) {
-    config.headers['Authorization'] = `Bearer ${accessToken}`;
-  }
-  return config;
-});
-
-// Response interceptor: on 401 clear session and redirect to login; on 403 COUPLE_REQUIRED show toast
+// Response interceptor: on 403 COUPLE_REQUIRED show toast.
+// Registered BEFORE the auth-refresh interceptor so that a retried request passes through it
+// exactly once (the retry runs the whole chain again from inside the refresh interceptor).
 axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     // Bail immediately for canceled/aborted requests — do not trigger session or toast side effects
     if (axios.isCancel(error)) {
       return Promise.reject(error);
-    }
-    if (error?.response?.status === 401) {
-      const url = error.config?.url ?? '';
-      if (url.includes('/api/v1/auth')) {
-        return Promise.reject(error); // Let auth screens handle their own 401s
-      }
-      if (!isHandling401) {
-        isHandling401 = true;
-        try {
-          await useSessionStore.getState().clearSession();
-          router.replace('/login' as any);
-        } finally {
-          isHandling401 = false;
-        }
-      }
     }
     // AC-609: Surface COUPLE_REQUIRED with dedicated message
     if (
@@ -101,6 +77,33 @@ axiosInstance.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Request interceptor (Bearer token) + 401 handling with refresh-token renewal.
+// The access token lasts 15 min; on the first 401 the session is renewed once via
+// /api/v1/auth/refresh and the original request is retried. See authRefresh.ts.
+installAuthRefresh(axiosInstance, {
+  getTokens: () => {
+    const { accessToken, refreshToken } = useSessionStore.getState();
+    return { accessToken, refreshToken };
+  },
+  // Plain axios (no interceptors): the refresh call must not carry the expired Bearer token
+  // nor re-enter the 401 handling.
+  requestRefresh: async (refreshToken) => {
+    const res = await axios.post<RefreshResponse>(
+      `${BASE_URL}/api/v1/auth/refresh`,
+      { refreshToken },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 30000 },
+    );
+    return res.data;
+  },
+  saveTokens: ({ accessToken, refreshToken }) =>
+    useSessionStore.getState().setTokens(accessToken, refreshToken),
+  onSessionExpired: async () => {
+    await useSessionStore.getState().clearSession();
+    showToastGlobal('Sua sessão expirou. Entre novamente.', 'warning');
+    router.replace('/login' as any);
+  },
+});
 
 /** Returns true when the error is a 403 with code COUPLE_REQUIRED (toast already shown globally). */
 export function isCoupleRequiredError(error: unknown): boolean {
@@ -129,9 +132,7 @@ export const authApiClient = {
 
   register: (data: RegisterRequest): Promise<AxiosResponse<AuthResponse>> =>
     axiosInstance.post<AuthResponse>('/api/v1/auth/register', data),
-
-  refresh: (refreshToken: string): Promise<AxiosResponse<RefreshResponse>> =>
-    axiosInstance.post<RefreshResponse>('/api/v1/auth/refresh', { refreshToken }),
+  // O refresh não é exposto aqui: é chamado só pelo tratamento de 401 (installAuthRefresh acima).
 };
 
 // --- Couple API ---

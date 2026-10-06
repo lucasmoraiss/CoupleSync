@@ -12,9 +12,10 @@ import {
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
-import { dashboardApiClient } from '@/services/apiClient';
+import { dashboardApiClient, coupleApiClient } from '@/services/apiClient';
 import { useSessionStore } from '@/state/sessionStore';
 import { useDashboardStore } from '@/state/dashboardStore';
+import { memberLabel, monthLabelFromIso, type MemberName } from '@/utils/format';
 import { getCategoryLabel, getCategoryIcon } from '@/modules/transactions/categories';
 import type { DashboardResponse } from '@/types/api';
 import { colors } from '@/theme';
@@ -36,11 +37,6 @@ function formatBRL(amount: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount);
 }
 
-function monthLabel(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-}
-
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function TotalExpensesCard({ data }: { data: DashboardResponse }) {
   return (
@@ -55,9 +51,11 @@ function TotalExpensesCard({ data }: { data: DashboardResponse }) {
 function PartnerBreakdownRow({
   data,
   currentUserId,
+  members,
 }: {
   data: DashboardResponse;
   currentUserId: string | null;
+  members: readonly MemberName[] | undefined;
 }) {
   const sorted = [...data.partnerBreakdown].sort((a, b) => (a.userId === currentUserId ? -1 : 0) - (b.userId === currentUserId ? -1 : 0));
   return (
@@ -68,7 +66,7 @@ function PartnerBreakdownRow({
           style={[styles.miniCard, { marginLeft: i > 0 ? 8 : 0 }]}
         >
           <Text style={styles.miniLabel}>
-            {p.userId === currentUserId ? 'Você' : 'Membro'}
+            {memberLabel(p.userId, currentUserId, members)}
           </Text>
           <Text style={styles.miniValue}>{formatBRL(p.totalAmount)}</Text>
         </View>
@@ -114,6 +112,13 @@ export default function DashboardScreen() {
     },
   });
 
+  // Nomes dos membros do grupo, para rotular a divisão dos gastos.
+  const { data: couple } = useQuery({
+    queryKey: ['couple', 'me'],
+    queryFn: async () => (await coupleApiClient.getMyCouple()).data,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const [refreshing, setRefreshing] = React.useState(false);
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -132,9 +137,9 @@ export default function DashboardScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Dashboard</Text>
+            <Text style={styles.greeting}>Painel</Text>
             {data ? (
-              <Text style={styles.subtitle}>{monthLabel(data.periodStart)}</Text>
+              <Text style={styles.subtitle}>{monthLabelFromIso(data.periodStart)}</Text>
             ) : (
               <Text style={styles.subtitle}>Resumo financeiro do casal</Text>
             )}
@@ -163,7 +168,7 @@ export default function DashboardScreen() {
         {data && !isLoading && (
           <>
             <TotalExpensesCard data={data} />
-            <PartnerBreakdownRow data={data} currentUserId={userId} />
+            <PartnerBreakdownRow data={data} currentUserId={userId} members={couple?.members} />
             <CategoryBreakdown data={data} />
           </>
         )}

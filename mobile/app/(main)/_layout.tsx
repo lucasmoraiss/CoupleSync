@@ -76,10 +76,13 @@ export default function MainLayout() {
         },
         tabBarActiveTintColor: colors.primaryLight,
         tabBarInactiveTintColor: colors.textDisabled,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        // Sete abas: sem margem lateral e com letra menor, o rótulo mais longo ("Transações") cabe inteiro.
+        tabBarItemStyle: { paddingHorizontal: 0 },
+        tabBarLabelStyle: { fontSize: 9.5, fontWeight: '600', letterSpacing: -0.2 },
+        tabBarAllowFontScaling: false,
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Dashboard', tabBarLabel: 'Dashboard', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="grid-outline" color={color} size={size} focused={focused} /> }} />
+      <Tabs.Screen name="index" options={{ title: 'Painel', tabBarLabel: 'Painel', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="grid-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="transactions/index" options={{ title: 'Transações', tabBarLabel: 'Transações', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="receipt-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="goals/index" options={{ title: 'Metas', tabBarLabel: 'Metas', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="flag-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="cashflow/index" options={{ title: 'Fluxo', tabBarLabel: 'Fluxo', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="trending-up-outline" color={color} size={size} focused={focused} /> }} />

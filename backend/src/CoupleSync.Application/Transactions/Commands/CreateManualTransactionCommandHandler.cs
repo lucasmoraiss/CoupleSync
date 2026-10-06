@@ -91,17 +91,17 @@ public sealed class CreateManualTransactionCommandHandler
         {
             var nowUtc = _clock.UtcNow;
             var since = nowUtc.AddDays(-30);
-            var settings = await _notificationSettingsRepository.GetByUserIdAsync(cmd.UserId, cmd.CoupleId, ct);
-            if (settings is not null)
+            // No row in notification_settings means the user never changed anything: the defaults
+            // (every alert enabled) apply, exactly as GET /notifications/settings reports them.
+            var settings = await _notificationSettingsRepository.GetByUserIdAsync(cmd.UserId, cmd.CoupleId, ct)
+                ?? NotificationSettings.Create(cmd.UserId, cmd.CoupleId, nowUtc);
+            var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(cmd.CoupleId, since, ct);
+            var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
+                cmd.CoupleId, cmd.UserId, transaction, recentTransactions, settings, nowUtc, ct);
+            if (alertEvents.Count > 0)
             {
-                var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(cmd.CoupleId, since, ct);
-                var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
-                    cmd.CoupleId, cmd.UserId, transaction, recentTransactions, settings, nowUtc, ct);
-                if (alertEvents.Count > 0)
-                {
-                    await _notificationEventRepository.AddRangeAsync(alertEvents, ct);
-                    await _notificationEventRepository.SaveChangesAsync(ct);
-                }
+                await _notificationEventRepository.AddRangeAsync(alertEvents, ct);
+                await _notificationEventRepository.SaveChangesAsync(ct);
             }
         }
         catch (Exception ex)

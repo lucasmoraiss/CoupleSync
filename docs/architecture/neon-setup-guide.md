@@ -1,130 +1,100 @@
-# Neon.tech PostgreSQL Setup Guide
+# Banco de dados no Neon — guia de configuração
 
-This guide explains how to provision a free Neon.tech database for CoupleSync and configure the connection string in local development, CI, and Azure Container Apps.
+Como criar um banco PostgreSQL no Neon para o CoupleSync e informar a conexão à API em desenvolvimento, no CI e na hospedagem (Render).
 
----
-
-## 1. Create a Free Neon Project
-
-1. Go to [https://neon.tech](https://neon.tech) and sign in (GitHub login recommended).
-2. Click **New Project**.
-3. Choose a project name (e.g. `couplesync-pilot`), region closest to your deployment (e.g. `AWS us-east-1`), and PostgreSQL version **16**.
-4. Click **Create Project** — this provisions the serverless endpoint in under a minute.
-5. From the **Connection Details** panel, select your branch (`main`) and copy the **Connection string** in Npgsql/ADO.NET format.
-
-Free-tier limits:
-| Resource | Limit |
-|---|---|
-| Storage | 10 GB |
-| Branches | 10 |
-| Compute (connection) | ~20 simultaneous connections |
-| Idle auto-suspend | 5 minutes of inactivity; wakes in ~500 ms |
+Este guia usa marcadores (`<host-do-neon>`, `<banco>`, `<usuario>`, `<senha>`) no lugar de valores reais. Nunca versione a conexão verdadeira.
 
 ---
 
-## 2. Get the Connection String
+## 1. Criar o projeto
 
-In the Neon console:
+1. Acesse o painel do Neon e entre com a sua conta.
+2. Crie um projeto, escolhendo a região mais próxima de onde a API roda.
+3. Crie (ou use) um banco, por exemplo `couplesync`.
+4. Em **Connection Details**, copie host, banco, usuário e senha.
 
-1. Open your project → **Connection Details** → select **Connection string** → choose **Npgsql (ADO.NET)**.
-2. The string will look like:
-
-```
-Host=ep-cool-name-123456.us-east-2.aws.neon.tech;Port=5432;Database=couplesync;Username=couplesync_owner;Password=<password>;SslMode=Require
-```
-
-> **Note**: Do NOT add `TrustServerCertificate=true` — Neon uses a valid CA-signed certificate and the backend resolver applies the correct SSL and pool settings automatically for `*.neon.tech` hosts.
-
-```
-MaxPoolSize=10;MinPoolSize=1;ConnectionIdleLifetime=240
-```
-
-You do **not** need to add these manually — they are injected at runtime.
+O Neon suspende o banco depois de um período sem conexões e o reativa na conexão seguinte, o que deixa a primeira consulta mais lenta. Consulte o painel do Neon para os limites vigentes do plano gratuito.
 
 ---
 
-## 3. Configure the Connection String
+## 2. Formato da conexão
 
-### Local development (`.env` or user secrets)
+A API lê a variável de ambiente `DATABASE_URL`. O formato recomendado é o de pares:
 
-**Option A — Environment variable (recommended)**
+```
+Host=<host-do-neon>;Port=5432;Database=<banco>;Username=<usuario>;Password=<senha>;SslMode=Require
+```
 
-Set `DATABASE_URL` before running the API:
+Também é aceito o formato URI:
 
-```bash
+```
+postgresql://<usuario>:<senha>@<host-do-neon>/<banco>?sslmode=require
+```
+
+Quando o host contém `neon.tech`, o código (`DatabaseConnectionResolver`) aplica automaticamente:
+
+| Parâmetro | Valor | Motivo |
+|---|---|---|
+| `SslMode` | `Require` | O Neon exige TLS. |
+| `MaxPoolSize` | `10` | Manter folga em relação ao limite de conexões do plano gratuito. |
+| `MinPoolSize` | `1` | Manter uma conexão pronta. |
+| `ConnectionIdleLifetime` | `240` | Devolver conexões ociosas antes de o Neon suspender o banco. |
+
+Não é preciso acrescentar esses parâmetros à mão. Não adicione `TrustServerCertificate=true`: o certificado do Neon é validado normalmente.
+
+---
+
+## 3. Onde configurar
+
+### Desenvolvimento local
+
+```powershell
 # PowerShell
-$env:DATABASE_URL = "Host=ep-cool-name-123456.us-east-2.aws.neon.tech;Port=5432;Database=couplesync;Username=couplesync_owner;Password=<password>;SslMode=Require"
-dotnet run --project backend/src/CoupleSync.Api
+$env:DATABASE_URL = "Host=<host-do-neon>;Port=5432;Database=<banco>;Username=<usuario>;Password=<senha>;SslMode=Require"
+$env:JWT__SECRET = "<chave-de-32-ou-mais-caracteres>"
+dotnet run --project backend/src/CoupleSync.Api --launch-profile http
 ```
 
 ```bash
-# Bash / macOS
-export DATABASE_URL="Host=ep-cool-name-123456.us-east-2.aws.neon.tech;Port=5432;Database=couplesync;Username=couplesync_owner;Password=<password>;SslMode=Require"
-dotnet run --project backend/src/CoupleSync.Api
+# Bash
+export DATABASE_URL="Host=<host-do-neon>;Port=5432;Database=<banco>;Username=<usuario>;Password=<senha>;SslMode=Require"
+export JWT__SECRET="<chave-de-32-ou-mais-caracteres>"
+dotnet run --project backend/src/CoupleSync.Api --launch-profile http
 ```
 
-**Option B — .NET user secrets (never committed)**
+Como alternativa, coloque a conexão em `ConnectionStrings:DefaultConnection` no arquivo `backend/src/CoupleSync.Api/appsettings.Development.json`, que é ignorado pelo Git. `DATABASE_URL`, quando definida, tem precedência.
+
+### Render
+
+No serviço web, em **Environment**, crie a variável `DATABASE_URL` com a conexão e marque-a como secreta. As demais variáveis estão em [docs/deployment/DEPLOY-GUIDE.md](../deployment/DEPLOY-GUIDE.md#33-variáveis-de-ambiente).
+
+### CI
+
+O workflow `ci.yml` não usa o Neon: ele sobe um PostgreSQL 16 como serviço do próprio job e aponta `DATABASE_URL` para ele.
+
+---
+
+## 4. Migrações
+
+A API aplica as migrações pendentes ao iniciar. Depois de configurar `DATABASE_URL` e subir a API, o esquema já está criado; confira com:
 
 ```bash
-cd backend/src/CoupleSync.Api
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=ep-cool-name-123456.us-east-2.aws.neon.tech;Port=5432;Database=couplesync;Username=couplesync_owner;Password=<password>;SslMode=Require"
+curl https://<seu-servico>.onrender.com/health/ready
 ```
 
-### Run migrations against Neon
+Para aplicar à mão, a partir da sua máquina:
 
 ```bash
-DATABASE_URL="<neon-connection-string>" dotnet ef database update \
+DATABASE_URL="Host=<host-do-neon>;Port=5432;Database=<banco>;Username=<usuario>;Password=<senha>;SslMode=Require" \
+  dotnet ef database update \
   --project backend/src/CoupleSync.Infrastructure \
   --startup-project backend/src/CoupleSync.Api
 ```
 
 ---
 
-## 4. Configure in Azure Container Apps
+## 5. Segurança
 
-Set `DATABASE_URL` as a **secret** in your Container App, then mount it as an environment variable. Never put the real connection string in source files.
-
-### Using the Azure CLI
-
-```bash
-# Create the secret
-az containerapp secret set \
-  --name couplesync-api \
-  --resource-group rg-couplesync-pilot \
-  --secrets "database-url=<neon-connection-string>"
-
-# Mount the secret as an environment variable
-az containerapp update \
-  --name couplesync-api \
-  --resource-group rg-couplesync-pilot \
-  --set-env-vars "DATABASE_URL=secretref:database-url"
-```
-
-### Using GitHub Actions (for `deploy.yml`)
-
-Add the connection string to your repository's **GitHub Secrets** as `NEON_DATABASE_URL`, then reference it in the workflow:
-
-```yaml
-- name: Set DATABASE_URL secret in ACA
-  run: |
-    az containerapp secret set \
-      --name couplesync-api \
-      --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
-      --secrets "database-url=${{ secrets.NEON_DATABASE_URL }}"
-```
-
----
-
-## 5. Connection String Reference
-
-| Parameter | Value | Reason |
-|---|---|---|
-| `Host` | `ep-xxx.region.neon.tech` | Neon serverless endpoint |
-| `Port` | `5432` | Standard PostgreSQL |
-| `SslMode` | `Require` | Neon requires TLS |
-| `TrustServerCertificate` | *not set* | Neon uses a valid CA-signed cert; full validation is the secure default |
-| `MaxPoolSize` | `10` | Stay within Neon free-tier ~20 connection cap |
-| `MinPoolSize` | `1` | Keep one connection warm to reduce cold-wake latency |
-| `ConnectionIdleLifetime` | `240` | Return connections to pool before Neon's 5-min idle-suspend (4-min buffer) |
-
-> **Security note**: Never hardcode credentials in source files. Always use environment variables or secrets management. The `PASSWORD` field in appsettings files must always be a placeholder.
+- A conexão real fica só em variáveis de ambiente ou em arquivos ignorados pelo Git.
+- O `appsettings.json` versionado traz `ConnectionStrings:DefaultConnection` vazio.
+- Se a conexão vazar, troque a senha do usuário no painel do Neon e atualize a variável na hospedagem.

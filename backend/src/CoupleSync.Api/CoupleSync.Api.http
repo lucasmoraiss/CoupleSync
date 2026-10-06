@@ -1,6 +1,38 @@
-@CoupleSync.Api_HostAddress = http://localhost:5210
+# Requisicoes de exemplo para a API local (perfil "http" do launchSettings.json).
+# Valores abaixo sao ficticios; nao grave tokens ou senhas reais neste arquivo.
+@CoupleSync.Api_HostAddress = http://localhost:5000
+@accessToken = COLE_AQUI_O_ACCESS_TOKEN
 
-GET {{CoupleSync.Api_HostAddress}}/weatherforecast/
+### Liveness
+GET {{CoupleSync.Api_HostAddress}}/health/live
 Accept: application/json
+
+### Readiness (verifica o banco de dados)
+GET {{CoupleSync.Api_HostAddress}}/health/ready
+Accept: application/json
+
+### Cadastro
+POST {{CoupleSync.Api_HostAddress}}/api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "exemplo@example.com",
+  "name": "Pessoa Exemplo",
+  "password": "SenhaDeExemplo123!"
+}
+
+### Login
+POST {{CoupleSync.Api_HostAddress}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "exemplo@example.com",
+  "password": "SenhaDeExemplo123!"
+}
+
+### Transacoes do casal (exige token de usuario ja vinculado a um casal)
+GET {{CoupleSync.Api_HostAddress}}/api/v1/transactions?page=1&pageSize=20
+Accept: application/json
+Authorization: Bearer {{accessToken}}
 
 ###
