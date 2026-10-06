@@ -79,12 +79,13 @@ public sealed class GetCashFlowQueryHandlerTests
     }
 
     [Fact]
-    public async Task InvalidHorizon_ThrowsArgumentException()
+    public async Task InvalidHorizon_ThrowsBadRequestWithStableCode()
     {
         var repo = new FakeCashFlowRepository();
         var handler = BuildHandler(repo);
 
-        await Assert.ThrowsAsync<ArgumentException>(
+        var ex = await Assert.ThrowsAsync<CoupleSync.Application.Common.Exceptions.BadRequestException>(
             () => handler.HandleAsync(new GetCashFlowQuery(Guid.NewGuid(), 45), CancellationToken.None));
+        Assert.Equal("INVALID_HORIZON", ex.Code);
     }
 }

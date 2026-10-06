@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Domain.Interfaces;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CoupleSync.Infrastructure.Integrations.Gemini;
@@ -12,13 +13,15 @@ public sealed class GeminiChatAdapter : IGeminiAdapter
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly GeminiOptions _options;
+    private readonly ILogger<GeminiChatAdapter> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public GeminiChatAdapter(IHttpClientFactory httpClientFactory, IOptions<GeminiOptions> options)
+    public GeminiChatAdapter(IHttpClientFactory httpClientFactory, IOptions<GeminiOptions> options, ILogger<GeminiChatAdapter> logger)
     {
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
+        _logger = logger;
     }
 
     public async Task<string> SendAsync(
@@ -47,6 +50,9 @@ public sealed class GeminiChatAdapter : IGeminiAdapter
         request.Headers.Add("x-goog-api-key", _options.ApiKey);
         request.Content = JsonContent.Create(requestBody, options: JsonOptions);
         using var response = await client.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+            _logger.LogWarning("Gemini API answered {StatusCode}.", (int)response.StatusCode);
 
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
             throw new ChatRateLimitException("CHAT_RATE_LIMITED", "O assistente de IA atingiu o limite de uso. Tente novamente mais tarde.");

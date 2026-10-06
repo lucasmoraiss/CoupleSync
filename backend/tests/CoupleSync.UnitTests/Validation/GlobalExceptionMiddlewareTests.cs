@@ -1,6 +1,6 @@
 using System.Text.Json;
 using CoupleSync.Api.Middleware;
-using CoupleSync.Application.CashFlow.Queries;
+using CoupleSync.Application.Reports;
 using CoupleSync.Application.Dashboard;
 using CoupleSync.Domain.Entities;
 using CoupleSync.UnitTests.Support;
@@ -63,14 +63,14 @@ public sealed class GlobalExceptionMiddlewareTests
     [Fact]
     public async Task ApplicationArgumentException_Returns400()
     {
-        // The Application layer rejects an unsupported horizon with an ArgumentException (the repository is never reached).
-        var handler = new GetCashFlowQueryHandler(
+        // The Application layer rejects an out-of-range month count with an ArgumentOutOfRangeException (the repository is never reached).
+        var service = new ReportsService(
             null!,
             new FixedDateTimeProvider(new DateTime(2026, 10, 5, 12, 0, 0, DateTimeKind.Utc)));
 
         var (status, body) = await InvokeAsync(async _ =>
         {
-            await handler.HandleAsync(new GetCashFlowQuery(Guid.NewGuid(), 45), CancellationToken.None);
+            await service.GetSpendingByCategoryAsync(Guid.NewGuid(), 0, CancellationToken.None);
         });
 
         Assert.Equal(StatusCodes.Status400BadRequest, status);

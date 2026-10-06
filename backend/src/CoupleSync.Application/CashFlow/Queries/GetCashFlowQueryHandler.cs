@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 
 namespace CoupleSync.Application.CashFlow.Queries;
@@ -16,7 +17,7 @@ public sealed class GetCashFlowQueryHandler
     public async Task<GetCashFlowResult> HandleAsync(GetCashFlowQuery query, CancellationToken cancellationToken)
     {
         if (query.Horizon != 30 && query.Horizon != 90)
-            throw new ArgumentException("O horizonte deve ser 30 ou 90 dias.", nameof(query));
+            throw new BadRequestException("INVALID_HORIZON", "O horizonte deve ser 30 ou 90 dias.");
 
         var nowUtc = _dateTimeProvider.UtcNow;
         var fromUtc = nowUtc.AddDays(-query.Horizon);
