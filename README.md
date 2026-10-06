@@ -107,3 +107,7 @@ O projeto é um piloto acadêmico. As principais limitações, todas detalhadas 
 Este projeto foi desenvolvido com assistência de ferramentas de IA para programação (GitHub Copilot e Claude Code), o que está registrado no histórico de commits. A definição do produto, as decisões de arquitetura, a revisão do código e a responsabilidade pelo resultado são do autor. As instruções usadas com os agentes de IA estão em `.github/agents` e `.github/instructions`.
 
 A revisão de qualidade descrita no laudo também usou IA como ferramenta de inspeção de código e de execução dos roteiros de teste; cada achado citado foi reproduzido no sistema e cada correção tem um teste automatizado que falhava antes e passa depois.
+
+## Licença
+
+Distribuído sob a licença MIT. Veja [LICENSE](LICENSE).
