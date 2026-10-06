@@ -38,7 +38,8 @@ public sealed class AlertPolicyService : IAlertPolicyService
         var events = new List<NotificationEvent>();
 
         // Rule 1: LargeTransaction — single transaction exceeds threshold
-        if (newTransaction.Amount > LargeTransactionThreshold && settings.LargeTransactionEnabled)
+        if (CurrencyRules.IsBrl(newTransaction.Currency)
+            && newTransaction.Amount > LargeTransactionThreshold && settings.LargeTransactionEnabled)
         {
             events.Add(NotificationEvent.Create(
                 coupleId,
@@ -52,7 +53,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
         // Rule 2: LowBalance — total 30-day spend exceeds threshold
         var cutoff = nowUtc.AddDays(-30);
         var thirtyDaySpend = recentTransactions
-            .Where(t => t.EventTimestampUtc >= cutoff)
+            .Where(t => t.EventTimestampUtc >= cutoff && CurrencyRules.IsBrl(t.Currency))
             .Sum(t => t.Amount);
 
         if (thirtyDaySpend > LowBalanceThreshold && settings.LowBalanceEnabled)

@@ -1,5 +1,6 @@
 using CoupleSync.Application.Budget;
 using CoupleSync.Application.Budget.Commands;
+using CoupleSync.Application.Budget.Queries;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Domain.Entities;
 using CoupleSync.UnitTests.Support;
@@ -226,5 +227,20 @@ public sealed class BudgetServiceTests
 
         // 5000 - (1000 + 500 + 1500) = 2000
         Assert.Equal(2000m, gap);
+    }
+
+    [Fact]
+    public void ComputeGap_IgnoresAllocationsInAnotherCurrency_AndIncomeOfANonBrlPlan()
+    {
+        var (service, _, _) = Build();
+        var id = Guid.NewGuid();
+        BudgetAllocationDto Alloc(decimal amount, string currency) => new(Guid.NewGuid(), "LAZER", amount, currency, 0m, amount);
+        BudgetPlanDto Plan(string currency, params BudgetAllocationDto[] allocations) => new(
+            id, id, "2026-04", 5000m, currency, allocations, 0m, FixedNow, FixedNow);
+
+        Assert.Equal(4000m, service.ComputeGap(Plan("BRL", Alloc(1000m, "BRL"), Alloc(900m, "USD"))));
+        Assert.Equal(4000m, service.ComputeGap(Plan("brl", Alloc(1000m, "brl"))));
+        Assert.Equal(0m, service.ComputeGap(Plan("USD")));
+        Assert.Equal(-1000m, service.ComputeGap(Plan("USD", Alloc(1000m, "BRL"))));
     }
 }

@@ -207,7 +207,12 @@ public sealed class BudgetService
 
     /// <summary>Computes budget gap = grossIncome − sum of all allocation amounts.</summary>
     public decimal ComputeGap(BudgetPlanDto plan)
-        => plan.GrossIncome - plan.Allocations.Sum(a => a.AllocatedAmount);
+        => GapInReais(plan.GrossIncome, plan.Currency, plan.Allocations);
+
+    // Only amounts in reais take part: income of a plan in another currency counts as 0 and allocations in another currency are left out.
+    private static decimal GapInReais(decimal grossIncome, string planCurrency, IEnumerable<BudgetAllocationDto> allocations)
+        => (CurrencyRules.IsBrl(planCurrency) ? grossIncome : 0m)
+           - allocations.Where(a => CurrencyRules.IsBrl(a.Currency)).Sum(a => a.AllocatedAmount);
 
     private static (DateTime StartUtc, DateTime EndUtc) ParseMonthWindow(string month)
     {
@@ -228,7 +233,7 @@ public sealed class BudgetService
                 return new BudgetAllocationDto(a.Id, a.Category, a.AllocatedAmount, a.Currency, spent, a.AllocatedAmount - spent);
             })
             .ToList();
-        var gap = plan.GrossIncome - allocations.Sum(a => a.AllocatedAmount);
+        var gap = GapInReais(plan.GrossIncome, plan.Currency, allocations);
         return new BudgetPlanDto(
             plan.Id,
             plan.CoupleId,

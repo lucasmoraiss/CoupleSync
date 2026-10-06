@@ -194,6 +194,22 @@ public sealed class CategoryNormalizationSqlTests : IDisposable
     }
 
     [Fact]
+    public void Migration_NeverSumsAllocationsOfDifferentCurrencies()
+    {
+        InsertPlan(Plan1);
+        InsertAllocation("00000000-0000-0000-0000-000000000b01", Plan1, "Lazer", 10m, "2026-10-01 10:00:00", "BRL");
+        InsertAllocation("00000000-0000-0000-0000-000000000b02", Plan1, "LAZER", 5m, "2026-10-01 10:01:00", "brl");   // same currency once BRL is unified
+        InsertAllocation("00000000-0000-0000-0000-000000000b03", Plan1, "lazer", 100m, "2026-10-01 10:02:00", "USD"); // never merged with BRL
+
+        RunMigration();
+
+        var rows = Query("SELECT category, allocated_amount, currency FROM budget_allocations ORDER BY currency", 3);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(("LAZER", 15m, "BRL"), (rows[0][0]!, decimal.Parse(rows[0][1]!, CultureInfo.InvariantCulture), rows[0][2]!));
+        Assert.Equal(("LAZER", 100m, "USD"), (rows[1][0]!, decimal.Parse(rows[1][1]!, CultureInfo.InvariantCulture), rows[1][2]!));
+    }
+
+    [Fact]
     public void Migration_TieOnCreationTime_StillKeepsExactlyOneRow()
     {
         InsertPlan(Plan1);

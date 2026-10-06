@@ -21,6 +21,13 @@ describe('parseAmountText', () => {
     ['12.5', 12.5],
     ['999.999.999,99', 999_999_999.99],
     ['999999999.99', 999_999_999.99],
+    ['1.234', 1234],
+    ['1.234.567', 1_234_567],
+    ['10.001', 10_001],
+    ['1234,56', 1234.56],
+    ['12,5', 12.5],
+    ['12.50', 12.5],
+    ['0.5', 0.5],
   ])('aceita "%s"', (text, value) => {
     expect(parseAmountText(text)).toEqual({ ok: true, value });
   });
@@ -37,7 +44,7 @@ describe('parseAmountText', () => {
     expect(parseAmountText('-5')).toEqual({ ok: false, message: AMOUNT_MESSAGES.negative });
   });
 
-  it.each(['10,001', '10.001', '10,505', '0,001', '1.234,567'])('rejeita três casas decimais ("%s") sem arredondar', (text) => {
+  it.each(['10,001', '10,505', '0,001', '0.001', '1.234,567', '12.345,678', '1234.567'])('rejeita três casas decimais ("%s") sem arredondar', (text) => {
     expect(parseAmountText(text)).toEqual({ ok: false, message: AMOUNT_MESSAGES.tooManyDecimals });
   });
 

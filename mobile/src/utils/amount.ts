@@ -27,7 +27,8 @@ function decimalPlaces(normalized: string): number {
 
 /**
  * Converte o texto digitado em número. Aceita "42,90", "42.90", "1.234,56", "R$ 42,90".
- * Com vírgula, o ponto é separador de milhar; só com ponto, o ponto é a vírgula decimal ("12.5").
+ * Com vírgula, o ponto é separador de milhar. Só com ponto: ponto seguido de exatamente três dígitos
+ * ("1.234", "1.234.567") é milhar, como em pt-BR; ponto com um ou dois dígitos ("12.5") é decimal.
  * Não arredonda: "10,505" é rejeitado, não vira 10,51.
  */
 export function parseAmountText(raw: string, options: { allowZero?: boolean } = {}): AmountResult {
@@ -35,9 +36,12 @@ export function parseAmountText(raw: string, options: { allowZero?: boolean } = 
   if (cleaned.length === 0) return { ok: false, message: AMOUNT_MESSAGES.invalid };
   if (cleaned.startsWith('-')) return { ok: false, message: AMOUNT_MESSAGES.negative };
 
+  const thousandsOnly = /^[1-9]\d{0,2}(\.\d{3})+$/.test(cleaned);
   const normalized = cleaned.includes(',')
     ? cleaned.replace(/\./g, '').replace(',', '.')
-    : cleaned;
+    : thousandsOnly
+      ? cleaned.replace(/\./g, '')
+      : cleaned;
 
   if (!/^\d+(\.\d+)?$/.test(normalized)) return { ok: false, message: AMOUNT_MESSAGES.invalid };
 

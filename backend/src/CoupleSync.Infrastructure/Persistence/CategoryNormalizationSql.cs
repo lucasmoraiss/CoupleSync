@@ -66,24 +66,35 @@ public static class CategoryNormalizationSql
 
     private static List<string> Build()
     {
-        var statements = new List<string>
+        var statements = new List<string>();
+
+        // Currency: only the spelling of BRL is unified ("brl", " BRL"). Other currencies stay as they are.
+        // Runs first so that "brl" and "BRL" allocations are the same currency when collisions are merged below.
+        foreach (var table in new[] { "transactions", "budget_plans", "budget_allocations", "goals", "income_sources" })
+        {
+            statements.Add(
+                $"UPDATE {table} SET currency = '{BrlCurrency}' " +
+                $"WHERE currency <> '{BrlCurrency}' AND UPPER(TRIM(currency)) = '{BrlCurrency}'");
+        }
+
+        statements.AddRange(new[]
         {
             // transactions and category rules: variants of case/accents converge, the rest becomes OUTROS.
             $"UPDATE transactions SET category = {Normalize("category")} WHERE category <> {Normalize("category")}",
             $"UPDATE category_rules SET category = {Normalize("category")} WHERE category <> {Normalize("category")}",
-        };
+        });
 
         // budget_allocations: allocations of one plan whose categories now collide are summed into one.
         // The survivor of a group is its oldest row (created_at_utc, then id).
         const string sameGroup =
-            "o.budget_plan_id = a.budget_plan_id AND o.id <> a.id AND {0} = {1}";
+            "o.budget_plan_id = a.budget_plan_id AND o.currency = a.currency AND o.id <> a.id AND {0} = {1}";
         var groupMatch = string.Format(sameGroup, Normalize("o.category"), Normalize("a.category"));
         var olderInGroup = $"{groupMatch} AND (o.created_at_utc < a.created_at_utc OR (o.created_at_utc = a.created_at_utc AND o.id < a.id))";
 
         statements.Add(
             "UPDATE budget_allocations AS a SET allocated_amount = (" +
             "SELECT SUM(g.allocated_amount) FROM budget_allocations AS g " +
-            $"WHERE g.budget_plan_id = a.budget_plan_id AND {Normalize("g.category")} = {Normalize("a.category")}) " +
+            $"WHERE g.budget_plan_id = a.budget_plan_id AND g.currency = a.currency AND {Normalize("g.category")} = {Normalize("a.category")}) " +
             $"WHERE EXISTS (SELECT 1 FROM budget_allocations AS o WHERE {groupMatch}) " +
             $"AND NOT EXISTS (SELECT 1 FROM budget_allocations AS o WHERE {olderInGroup})");
 
@@ -93,14 +104,6 @@ public static class CategoryNormalizationSql
 
         statements.Add(
             $"UPDATE budget_allocations SET category = {Normalize("category")} WHERE category <> {Normalize("category")}");
-
-        // Currency: only the spelling of BRL is unified ("brl", " BRL"). Other currencies stay as they are.
-        foreach (var table in new[] { "transactions", "budget_plans", "budget_allocations", "goals", "income_sources" })
-        {
-            statements.Add(
-                $"UPDATE {table} SET currency = '{BrlCurrency}' " +
-                $"WHERE currency <> '{BrlCurrency}' AND UPPER(TRIM(currency)) = '{BrlCurrency}'");
-        }
 
         return statements;
     }
