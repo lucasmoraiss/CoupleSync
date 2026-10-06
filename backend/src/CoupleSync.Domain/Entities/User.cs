@@ -34,6 +34,9 @@ public sealed class User
 
     public bool IsActive { get; private set; }
 
+    /// <summary>True once the user typed the code sent to their e-mail. Existing accounts start false and keep working.</summary>
+    public bool EmailVerified { get; private set; }
+
     public Couple? Couple { get; private set; }
 
     public static User Create(EmailAddress email, string name, string passwordHash, DateTime createdAtUtc)
@@ -70,6 +73,11 @@ public sealed class User
         }
 
         PasswordHash = passwordHash;
+    }
+
+    public void MarkEmailVerified()
+    {
+        EmailVerified = true;
     }
 
     public void LeaveCouple()

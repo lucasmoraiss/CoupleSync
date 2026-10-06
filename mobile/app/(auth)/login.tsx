@@ -129,7 +129,16 @@ export default function LoginScreen() {
             )}
           </TouchableOpacity>
 
-          {/* TODO(future): Forgot password flow — link here to password recovery screen */}
+          <TouchableOpacity
+            style={styles.forgotButton}
+            onPress={() => router.push('/forgot-password' as any)}
+            disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel="Esqueci minha senha"
+          >
+            <Text style={styles.forgotText}>Esqueci minha senha</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.linkButton}
             onPress={() => router.push('/register' as any)}
@@ -211,9 +220,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  forgotButton: {
+    alignItems: 'center',
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  forgotText: {
+    color: colors.primaryLight,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   linkButton: {
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: 8,
     paddingVertical: 8,
   },
   linkText: {

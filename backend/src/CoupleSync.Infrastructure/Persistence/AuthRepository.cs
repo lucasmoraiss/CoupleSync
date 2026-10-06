@@ -88,6 +88,48 @@ public sealed class AuthRepository : IAuthRepository
         return affectedRows > 0;
     }
 
+    public Task<int> RevokeRefreshTokensByUserIdAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return _dbContext.RefreshTokens
+            .Where(x => x.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
+
+    public Task<EmailCode?> FindEmailCodeAsync(Guid userId, string purpose, CancellationToken cancellationToken)
+    {
+        return _dbContext.EmailCodes
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.UserId == userId && x.Purpose == purpose, cancellationToken);
+    }
+
+    public async Task ReplaceEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
+    {
+        await _dbContext.EmailCodes
+            .Where(x => x.UserId == code.UserId && x.Purpose == code.Purpose)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        await _dbContext.EmailCodes.AddAsync(code, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<bool> TryRegisterEmailCodeAttemptAsync(Guid codeId, int maxAttempts, CancellationToken cancellationToken)
+    {
+        var affectedRows = await _dbContext.EmailCodes
+            .Where(x => x.Id == codeId && x.Attempts < maxAttempts)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.Attempts, x => x.Attempts + 1), cancellationToken);
+
+        return affectedRows == 1;
+    }
+
+    public async Task<bool> ConsumeEmailCodeAsync(Guid codeId, CancellationToken cancellationToken)
+    {
+        var affectedRows = await _dbContext.EmailCodes
+            .Where(x => x.Id == codeId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        return affectedRows == 1;
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return _dbContext.SaveChangesAsync(cancellationToken);

@@ -132,6 +132,38 @@ public sealed class RateLimitingIntegrationTests
     }
 
     [Fact]
+    public async Task ForgotAndResetPassword_SixthRequestFromTheSameIp_Returns429_EachRouteWithItsOwnBudget()
+    {
+        await using var factory = new RateLimitWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            // E-mail sending is off in tests: 503 proves the request got past the limiter.
+            var forgot = await client.PostAsJsonAsync("/api/v1/auth/forgot-password", new { Email = "nobody@example.com" });
+            Assert.True(HttpStatusCode.ServiceUnavailable == forgot.StatusCode, $"forgot {attempt}: got {(int)forgot.StatusCode}");
+        }
+
+        var sixth = await client.PostAsJsonAsync("/api/v1/auth/forgot-password", new { Email = "nobody@example.com" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, sixth.StatusCode);
+        Assert.Equal("RATE_LIMIT_EXCEEDED", (await sixth.Content.ReadFromJsonAsync<ErrorDto>())!.Code);
+
+        var reset = await client.PostAsJsonAsync("/api/v1/auth/reset-password",
+            new { Email = "nobody@example.com", Code = "123456", NewPassword = "NovaSenha456" });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, reset.StatusCode);
+
+        for (var attempt = 2; attempt <= 5; attempt++)
+        {
+            await client.PostAsJsonAsync("/api/v1/auth/reset-password",
+                new { Email = "nobody@example.com", Code = "123456", NewPassword = "NovaSenha456" });
+        }
+
+        var sixthReset = await client.PostAsJsonAsync("/api/v1/auth/reset-password",
+            new { Email = "nobody@example.com", Code = "123456", NewPassword = "NovaSenha456" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, sixthReset.StatusCode);
+    }
+
+    [Fact]
     public async Task ChangePassword_SixthAttemptByTheSameUser_Returns429_AndOtherUsersAreNotAffected()
     {
         await using var factory = new RateLimitWebApplicationFactory();

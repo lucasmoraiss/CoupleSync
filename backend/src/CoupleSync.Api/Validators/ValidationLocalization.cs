@@ -20,6 +20,7 @@ public static class ValidationLocalization
         ["CandidateEdits"] = "Transações editadas",
         ["Category"] = "Categoria",
         ["CategoryOverrides"] = "Categorias alteradas",
+        ["Code"] = "Código",
         ["Content"] = "Mensagem",
         ["Currency"] = "Moeda",
         ["CurrentAmount"] = "Valor atual",

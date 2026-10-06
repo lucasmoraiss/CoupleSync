@@ -4,6 +4,12 @@ export interface AuthUserResponse {
   readonly id: string;
   readonly email: string;
   readonly name: string;
+  /** Ausente em servidor antigo. Conta não confirmada continua funcionando por inteiro. */
+  readonly emailVerified?: boolean;
+}
+
+export interface ForgotPasswordResponse {
+  readonly message: string;
 }
 
 export interface AuthResponse {

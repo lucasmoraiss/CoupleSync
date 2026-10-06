@@ -93,6 +93,7 @@ export default function MainLayout() {
       <Tabs.Screen name="settings/alerts" options={{ href: null }} />
       <Tabs.Screen name="settings/group" options={{ href: null }} />
       <Tabs.Screen name="settings/change-password" options={{ href: null }} />
+      <Tabs.Screen name="settings/verify-email" options={{ href: null }} />
       <Tabs.Screen name="ocr-upload" options={{ href: null }} />
       <Tabs.Screen name="ocr-review" options={{ href: null }} />
       <Tabs.Screen name="transactions/new" options={{ href: null }} />

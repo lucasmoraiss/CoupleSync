@@ -7,7 +7,8 @@
 //    refresh token a cada uso; um segundo refresh em paralelo usaria um token já inválido);
 //  - a requisição original é repetida uma única vez com o token novo;
 //  - se o refresh for recusado, ou a repetição devolver 401, a sessão é encerrada;
-//  - rotas /api/v1/auth/* nunca entram nesse ciclo (as telas tratam os próprios 401).
+//  - rotas anônimas de /api/v1/auth/* (login, registro, refresh, recuperação de senha) nunca entram nesse ciclo
+//    (as telas tratam os próprios 401); as de sessão (me, confirm-email, resend-email-verification) entram.
 import type { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 export interface TokenPair {
@@ -33,6 +34,18 @@ export interface AuthRefreshDeps {
 }
 
 const AUTH_ROUTE_PREFIX = '/api/v1/auth';
+
+// Rotas de /auth que exigem sessão e portanto passam pelo ciclo de refresh (um access token vencido não pode
+// derrubar a confirmação de e-mail). As demais (login, registro, refresh, recuperação de senha...) são anônimas.
+const SIGNED_IN_AUTH_ROUTES = [
+  '/api/v1/auth/me',
+  '/api/v1/auth/confirm-email',
+  '/api/v1/auth/resend-email-verification',
+];
+
+function isAnonymousAuthRoute(url: string): boolean {
+  return url.includes(AUTH_ROUTE_PREFIX) && !SIGNED_IN_AUTH_ROUTES.some((route) => url.includes(route));
+}
 
 type RetriableConfig = InternalAxiosRequestConfig & { _retriedAfterRefresh?: boolean };
 
@@ -131,8 +144,8 @@ export function installAuthRefresh(instance: AxiosInstance, deps: AuthRefreshDep
       if (error?.response?.status !== 401 || !config) {
         return Promise.reject(error);
       }
-      if ((config.url ?? '').includes(AUTH_ROUTE_PREFIX)) {
-        return Promise.reject(error); // login/registro/refresh tratam os próprios 401
+      if (isAnonymousAuthRoute(config.url ?? '')) {
+        return Promise.reject(error); // login/registro/refresh/recuperação tratam os próprios 401
       }
 
       // A repetição com o token novo também foi recusada: não há novo ciclo.

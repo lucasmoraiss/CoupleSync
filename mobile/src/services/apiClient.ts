@@ -9,6 +9,8 @@ import { installAuthRefresh } from './authRefresh';
 import { getApiErrorCode } from './apiError';
 import type {
   AuthResponse,
+  AuthUserResponse,
+  ForgotPasswordResponse,
   RefreshResponse,
   CreateCoupleResponse,
   JoinCoupleResponse,
@@ -131,6 +133,12 @@ interface ChangePasswordRequest {
   newPassword: string;
 }
 
+interface ResetPasswordRequest {
+  email: string;
+  code: string;
+  newPassword: string;
+}
+
 interface RegisterRequest {
   email: string;
   password: string;
@@ -150,6 +158,25 @@ export const authApiClient = {
   /** Troca a senha; devolve o novo par de tokens (os refresh tokens dos outros aparelhos deixam de valer). */
   changePassword: (data: ChangePasswordRequest): Promise<AxiosResponse<RefreshResponse>> =>
     axiosInstance.post<RefreshResponse>('/api/v1/auth/change-password', data),
+
+  /** Pede o código de redefinição por e-mail. Resposta igual exista ou não a conta; 503 EMAIL_NOT_CONFIGURED se o envio está desligado. */
+  forgotPassword: (email: string): Promise<AxiosResponse<ForgotPasswordResponse>> =>
+    axiosInstance.post<ForgotPasswordResponse>('/api/v1/auth/forgot-password', { email }),
+
+  /** Define a senha nova com o código do e-mail (204). Todos os aparelhos precisam entrar de novo. */
+  resetPassword: (data: ResetPasswordRequest): Promise<AxiosResponse<void>> =>
+    axiosInstance.post<void>('/api/v1/auth/reset-password', data),
+
+  /** Usuário logado, com `emailVerified`. */
+  getMe: (): Promise<AxiosResponse<AuthUserResponse>> => axiosInstance.get<AuthUserResponse>('/api/v1/auth/me'),
+
+  /** Confirma o e-mail do usuário logado com o código recebido (204). */
+  confirmEmail: (code: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.post<void>('/api/v1/auth/confirm-email', { code }),
+
+  /** Envia um novo código de confirmação (204); o anterior deixa de valer. */
+  resendEmailVerification: (): Promise<AxiosResponse<void>> =>
+    axiosInstance.post<void>('/api/v1/auth/resend-email-verification'),
   // O refresh não é exposto aqui: é chamado só pelo tratamento de 401 (installAuthRefresh acima).
 };
 

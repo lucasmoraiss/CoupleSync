@@ -95,6 +95,42 @@ public sealed class FakeAuthRepository : IAuthRepository
         return Task.FromResult(RefreshTokens.RemoveAll(x => x.TokenHash == tokenHash) > 0);
     }
 
+    public List<EmailCode> EmailCodes { get; } = new();
+
+    public Task<int> RevokeRefreshTokensByUserIdAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(RefreshTokens.RemoveAll(x => x.UserId == userId));
+    }
+
+    public Task<EmailCode?> FindEmailCodeAsync(Guid userId, string purpose, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(EmailCodes.SingleOrDefault(x => x.UserId == userId && x.Purpose == purpose));
+    }
+
+    public Task ReplaceEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
+    {
+        EmailCodes.RemoveAll(x => x.UserId == code.UserId && x.Purpose == code.Purpose);
+        EmailCodes.Add(code);
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> TryRegisterEmailCodeAttemptAsync(Guid codeId, int maxAttempts, CancellationToken cancellationToken)
+    {
+        var code = EmailCodes.SingleOrDefault(x => x.Id == codeId);
+        if (code is null || code.Attempts >= maxAttempts)
+        {
+            return Task.FromResult(false);
+        }
+
+        code.RegisterAttempt();
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> ConsumeEmailCodeAsync(Guid codeId, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(EmailCodes.RemoveAll(x => x.Id == codeId) > 0);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         if (SaveChangesException is not null)

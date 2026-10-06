@@ -4,6 +4,7 @@ using CoupleSync.Application.Common.Options;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CoupleSync.Application.Auth;
@@ -16,6 +17,8 @@ public sealed class RegisterCommandHandler
     private readonly ITokenHasher _tokenHasher;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly JwtOptions _jwtOptions;
+    private readonly EmailCodeFlow _emailCodeFlow;
+    private readonly ILogger<RegisterCommandHandler> _logger;
 
     public RegisterCommandHandler(
         IAuthRepository authRepository,
@@ -23,7 +26,9 @@ public sealed class RegisterCommandHandler
         IJwtTokenService jwtTokenService,
         ITokenHasher tokenHasher,
         IDateTimeProvider dateTimeProvider,
-        IOptions<JwtOptions> jwtOptions)
+        IOptions<JwtOptions> jwtOptions,
+        EmailCodeFlow emailCodeFlow,
+        ILogger<RegisterCommandHandler> logger)
     {
         _authRepository = authRepository;
         _passwordHasher = passwordHasher;
@@ -31,6 +36,8 @@ public sealed class RegisterCommandHandler
         _tokenHasher = tokenHasher;
         _dateTimeProvider = dateTimeProvider;
         _jwtOptions = jwtOptions.Value;
+        _emailCodeFlow = emailCodeFlow;
+        _logger = logger;
     }
 
     public async Task<AuthResult> HandleAsync(RegisterCommand command, CancellationToken cancellationToken)
@@ -66,10 +73,30 @@ public sealed class RegisterCommandHandler
             throw new ConflictException("EMAIL_ALREADY_IN_USE", "Já existe uma conta com esse e-mail.");
         }
 
+        await SendVerificationCodeAsync(user, cancellationToken);
+
         return new AuthResult(
-            new AuthenticatedUserDto(user.Id, user.Email, user.Name),
+            new AuthenticatedUserDto(user.Id, user.Email, user.Name, user.EmailVerified),
             accessToken,
             refreshTokenRaw);
+    }
+
+    /// <summary>Best effort: the account is already saved, so no failure here (e-mail off, provider down, database hiccup) fails the sign-up.</summary>
+    private async Task SendVerificationCodeAsync(User user, CancellationToken cancellationToken)
+    {
+        if (!_emailCodeFlow.IsEmailConfigured)
+        {
+            return;
+        }
+
+        try
+        {
+            await _emailCodeFlow.IssueAsync(user, EmailCodePurpose.EmailVerification, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not send the e-mail confirmation code to user {UserId}.", user.Id);
+        }
     }
 
     private static bool IsUniqueConstraintViolation(DbUpdateException ex)

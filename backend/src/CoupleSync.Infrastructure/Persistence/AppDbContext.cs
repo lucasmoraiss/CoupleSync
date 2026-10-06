@@ -27,6 +27,8 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    public DbSet<EmailCode> EmailCodes => Set<EmailCode>();
+
     public DbSet<TransactionEventIngest> TransactionEventIngests => Set<TransactionEventIngest>();
 
     public DbSet<Transaction> Transactions => Set<Transaction>();
@@ -68,6 +70,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.PasswordHash).HasColumnName("password_hash").HasMaxLength(255).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
             entity.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
+            entity.Property(x => x.EmailVerified).HasColumnName("email_verified").IsRequired().HasDefaultValue(false);
 
             entity.HasIndex(x => x.Email).IsUnique();
             entity.HasIndex(x => x.CoupleId);
@@ -111,6 +114,28 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
             entity.HasIndex(x => x.UserId).IsUnique();
             entity.HasIndex(x => x.TokenHash).IsUnique();
+
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EmailCode>(entity =>
+        {
+            entity.ToTable("email_codes");
+
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(x => x.Purpose).HasColumnName("purpose").HasMaxLength(32).IsRequired();
+            entity.Property(x => x.CodeHash).HasColumnName("code_hash").HasMaxLength(64).IsRequired();
+            entity.Property(x => x.ExpiresAtUtc).HasColumnName("expires_at_utc").IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+            entity.Property(x => x.Attempts).HasColumnName("attempts").IsRequired();
+
+            // One live code per user and purpose: a new request replaces the previous one.
+            entity.HasIndex(x => new { x.UserId, x.Purpose }).IsUnique();
 
             entity.HasOne(x => x.User)
                 .WithMany()

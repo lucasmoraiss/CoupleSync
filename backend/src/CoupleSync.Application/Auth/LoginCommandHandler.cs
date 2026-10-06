@@ -60,7 +60,7 @@ public sealed class LoginCommandHandler
         await _authRepository.SaveChangesAsync(cancellationToken);
 
         return new AuthResult(
-            new AuthenticatedUserDto(user.Id, user.Email, user.Name),
+            new AuthenticatedUserDto(user.Id, user.Email, user.Name, user.EmailVerified),
             accessToken,
             refreshTokenRaw);
     }

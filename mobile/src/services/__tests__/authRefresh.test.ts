@@ -245,6 +245,17 @@ describe('A03 — renovação de sessão no 401', () => {
     expect(h.calls).toHaveLength(2);
   });
 
+  it('as rotas de /auth que exigem sessão (me, confirm-email) renovam o token como qualquer outra', async () => {
+    const h = createHarness();
+
+    const me = await statusOf(h.instance.get('/api/v1/auth/me'));
+    const confirm = await statusOf(h.instance.post('/api/v1/auth/confirm-email', { code: '123456' }));
+
+    expect([me, confirm]).toEqual(['ok', 'ok']);
+    expect(h.requestRefresh).toHaveBeenCalledTimes(1); // o segundo já saiu com o token renovado
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+  });
+
   it('sem refresh token guardado, encerra a sessão sem chamar o refresh', async () => {
     const h = createHarness({ session: { accessToken: 'access-1', refreshToken: null } });
 

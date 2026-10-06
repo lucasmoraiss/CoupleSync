@@ -17,6 +17,10 @@ public static class RateLimitPolicies
     public const string CoupleJoin = "couple-join";
     public const string AuthChangePassword = "auth-change-password";
     public const string AuthLogout = "auth-logout";
+    public const string AuthForgotPassword = "auth-forgot-password";
+    public const string AuthResetPassword = "auth-reset-password";
+    public const string AuthConfirmEmail = "auth-confirm-email";
+    public const string AuthResendEmailVerification = "auth-resend-email-verification";
 }
 
 /// <summary>Bound to the <c>RateLimiting</c> configuration section (env: <c>RATELIMITING__AUTH__PERMITLIMIT</c> etc.).</summary>
@@ -68,6 +72,20 @@ public static class RateLimitingSetup
                 var key = string.IsNullOrWhiteSpace(userId) ? $"ip:{GetClientIp(context)}" : $"user:{userId}";
                 return CreatePartition($"change-password:{key}", GetOptions(context).Auth);
             });
+
+            // Password reset: per client IP, one bucket per route (the per-address cap lives in CodeRequestThrottle).
+            limiter.AddPolicy(RateLimitPolicies.AuthForgotPassword, context =>
+                CreatePartition($"forgot-password:ip:{GetClientIp(context)}", GetOptions(context).Auth));
+
+            limiter.AddPolicy(RateLimitPolicies.AuthResetPassword, context =>
+                CreatePartition($"reset-password:ip:{GetClientIp(context)}", GetOptions(context).Auth));
+
+            // E-mail confirmation belongs to the signed-in user: per user, falling back to the IP.
+            limiter.AddPolicy(RateLimitPolicies.AuthConfirmEmail, context =>
+                CreatePartition($"confirm-email:{UserOrIpKey(context)}", GetOptions(context).Auth));
+
+            limiter.AddPolicy(RateLimitPolicies.AuthResendEmailVerification, context =>
+                CreatePartition($"resend-email-verification:{UserOrIpKey(context)}", GetOptions(context).Auth));
 
             limiter.AddPolicy(RateLimitPolicies.CoupleJoin, context =>
             {
@@ -135,6 +153,12 @@ public static class RateLimitingSetup
             options.KnownProxies.Clear();
             options.KnownNetworks.Clear();
         }
+    }
+
+    private static string UserOrIpKey(HttpContext context)
+    {
+        var userId = context.User.FindFirstValue("user_id");
+        return string.IsNullOrWhiteSpace(userId) ? $"ip:{GetClientIp(context)}" : $"user:{userId}";
     }
 
     private static RateLimitingOptions GetOptions(HttpContext context)
