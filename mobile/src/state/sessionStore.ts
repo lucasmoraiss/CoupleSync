@@ -23,6 +23,8 @@ interface SessionActions {
   setAccessTokenAndCouple: (accessToken: string, coupleId: string) => Promise<void>;
   /** Replace the token pair after a refresh, keeping userId and coupleId. No-op if there is no session. */
   setTokens: (accessToken: string, refreshToken: string) => Promise<void>;
+  /** After leaving the group: store the group-less token pair and forget the group. */
+  leaveCouple: (accessToken: string, refreshToken: string) => Promise<void>;
   clearSession: () => Promise<void>;
   hydrateFromStore: () => Promise<void>;
 }
@@ -76,6 +78,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       coupleId: state.coupleId,
     }));
     set({ accessToken, refreshToken });
+  },
+
+  leaveCouple: async (accessToken: string, refreshToken: string) => {
+    const state = get();
+    if (!state.userId) return;
+    await SecureStore.setItemAsync(SECURE_STORE_KEY, JSON.stringify({
+      accessToken,
+      refreshToken,
+      userId: state.userId,
+      coupleId: null,
+    }));
+    set({ accessToken, refreshToken, coupleId: null });
   },
 
   clearSession: async () => {

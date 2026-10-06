@@ -9,7 +9,6 @@ public sealed class JoinCoupleRequestValidator : AbstractValidator<JoinCoupleReq
     {
         RuleFor(x => x.JoinCode)
             .NotEmpty()
-            .Length(6)
-            .Matches("^[A-Za-z0-9]{6}$");
+            .Matches("^([A-Za-z0-9]{6}|[A-Za-z0-9]{8})$");
     }
 }

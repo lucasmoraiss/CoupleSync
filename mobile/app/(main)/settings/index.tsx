@@ -43,9 +43,14 @@ export default function SettingsScreen() {
           <Text style={styles.menuArrow}>›</Text>
         </TouchableOpacity>
         <View style={styles.divider} />
-        <TouchableOpacity style={[styles.menuItem, styles.menuItemDisabled]} accessibilityLabel="Código do casal" accessibilityRole="button">
-          <Text style={[styles.menuText, styles.menuTextMuted]}>Código do casal</Text>
-          {/* V1: couple code shown on couple-setup screen; deep-link not yet implemented */}
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => router.push('/(main)/settings/group' as any)}
+          accessibilityLabel="Abrir o grupo: membros e código de convite"
+          accessibilityRole="button"
+        >
+          <Text style={styles.menuText}>Grupo e código de convite</Text>
+          <Text style={styles.menuArrow}>›</Text>
         </TouchableOpacity>
         <View style={styles.divider} />
         <TouchableOpacity style={styles.menuItem} onPress={handleLogout} accessibilityLabel="Sair da conta" accessibilityRole="button">
@@ -63,9 +68,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '700', color: colors.text },
   section: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
   menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 18 },
-  menuItemDisabled: { opacity: 0.45 },
   menuText: { fontSize: 16, color: colors.text, fontWeight: '500' },
-  menuTextMuted: { color: colors.textDisabled },
   menuArrow: { fontSize: 22, color: colors.textDisabled },
   divider: { height: 1, backgroundColor: colors.border, marginHorizontal: 20 },
 });

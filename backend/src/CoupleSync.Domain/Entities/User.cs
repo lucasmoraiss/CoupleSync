@@ -61,4 +61,10 @@ public sealed class User
         CoupleId = coupleId;
         CoupleJoinedAtUtc = coupleJoinedAtUtc;
     }
+
+    public void LeaveCouple()
+    {
+        CoupleId = null;
+        CoupleJoinedAtUtc = null;
+    }
 }

@@ -11,6 +11,8 @@ import type {
   CreateCoupleResponse,
   JoinCoupleResponse,
   GetCoupleMeResponse,
+  LeaveCoupleResponse,
+  RegenerateJoinCodeResponse,
   GoalDto,
   GetGoalsResponse,
   GoalsProgressSummaryResponse,
@@ -148,6 +150,18 @@ export const coupleApiClient = {
 
   getMyCouple: (): Promise<AxiosResponse<GetCoupleMeResponse>> =>
     axiosInstance.get<GetCoupleMeResponse>('/api/v1/couples/me'),
+
+  /** Sai do grupo; devolve um par de tokens sem grupo (o refresh token antigo deixa de valer). */
+  leave: (): Promise<AxiosResponse<LeaveCoupleResponse>> =>
+    axiosInstance.post<LeaveCoupleResponse>('/api/v1/couples/leave'),
+
+  /** Só o dono. O membro removido perde o acesso na hora. */
+  removeMember: (memberUserId: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.delete<void>(`/api/v1/couples/members/${memberUserId}`),
+
+  /** Só o dono. O código anterior deixa de valer na hora. */
+  regenerateJoinCode: (): Promise<AxiosResponse<RegenerateJoinCodeResponse>> =>
+    axiosInstance.post<RegenerateJoinCodeResponse>('/api/v1/couples/join-code'),
 };
 
 // --- Dashboard API ---

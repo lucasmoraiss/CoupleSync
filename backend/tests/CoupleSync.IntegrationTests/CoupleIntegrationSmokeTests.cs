@@ -42,7 +42,7 @@ public sealed class CoupleIntegrationSmokeTests
         var payload = await response.Content.ReadFromJsonAsync<CreateCoupleDto>();
         Assert.NotNull(payload);
         Assert.NotEqual(Guid.Empty, payload!.CoupleId);
-        Assert.Equal(6, payload.JoinCode.Length);
+        Assert.Equal(8, payload.JoinCode.Length);
     }
 
     [Fact]
@@ -201,7 +201,7 @@ public sealed class CoupleIntegrationSmokeTests
         var mePayload = await meResponse.Content.ReadFromJsonAsync<GetCoupleMeDto>();
         Assert.NotNull(mePayload);
         Assert.NotEqual(Guid.Empty, mePayload!.CoupleId);
-        Assert.Equal(6, mePayload.JoinCode.Length);
+        Assert.Equal(8, mePayload.JoinCode.Length);
         Assert.True(mePayload.Members.Count >= 2);
     }
 

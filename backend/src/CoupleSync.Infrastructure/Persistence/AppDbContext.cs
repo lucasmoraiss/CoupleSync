@@ -84,7 +84,9 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id");
-            entity.Property(x => x.JoinCode).HasColumnName("join_code").HasMaxLength(6).IsRequired();
+            entity.Property(x => x.JoinCode).HasColumnName("join_code").HasMaxLength(8).IsRequired();
+            entity.Property(x => x.JoinCodeExpiresAtUtc).HasColumnName("join_code_expires_at_utc").IsRequired();
+            entity.Property(x => x.OwnerUserId).HasColumnName("owner_user_id");
             entity.Property(x => x.Status)
                 .HasColumnName("status")
                 .HasConversion<string>()

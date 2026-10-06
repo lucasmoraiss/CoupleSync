@@ -50,6 +50,15 @@ public sealed class JoinCoupleCommandHandler
         }
 
         var now = _dateTimeProvider.UtcNow;
+
+        if (couple.IsJoinCodeExpired(now))
+        {
+            throw new AppException(
+                "JOIN_CODE_EXPIRED",
+                "Esse código de convite venceu. Peça um código novo a quem criou o grupo.",
+                410);
+        }
+
         couple.AddMember(user, now);
         await _coupleRepository.SaveChangesAsync(cancellationToken);
 

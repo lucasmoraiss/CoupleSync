@@ -4,4 +4,6 @@ public sealed record GetCoupleMeResult(
     Guid CoupleId,
     string JoinCode,
     DateTime CreatedAtUtc,
-    IReadOnlyCollection<CoupleMemberDto> Members);
+    IReadOnlyCollection<CoupleMemberDto> Members,
+    Guid? OwnerUserId,
+    DateTime JoinCodeExpiresAtUtc);

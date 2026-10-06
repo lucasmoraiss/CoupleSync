@@ -8,6 +8,10 @@ public sealed class FakeCoupleRepository : ICoupleRepository
 
     public List<CoupleSync.Domain.Entities.Couple> Couples { get; } = new();
 
+    public List<(Guid UserId, Guid CoupleId)> StoppedDeliveries { get; } = new();
+
+    public List<Guid> RevokedRefreshTokenUserIds { get; } = new();
+
     public int SaveChangesCalls { get; private set; }
 
     public Exception? SaveChangesException { get; set; }
@@ -31,6 +35,18 @@ public sealed class FakeCoupleRepository : ICoupleRepository
     public Task<bool> JoinCodeExistsAsync(string joinCode, CancellationToken cancellationToken)
     {
         return Task.FromResult(Couples.Any(c => c.JoinCode == joinCode));
+    }
+
+    public Task StopDeliveriesToMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken)
+    {
+        StoppedDeliveries.Add((userId, coupleId));
+        return Task.CompletedTask;
+    }
+
+    public Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        RevokedRefreshTokenUserIds.Add(userId);
+        return Task.CompletedTask;
     }
 
     public Task AddCoupleAsync(CoupleSync.Domain.Entities.Couple couple, CancellationToken cancellationToken)

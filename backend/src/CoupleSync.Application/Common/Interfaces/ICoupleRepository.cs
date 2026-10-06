@@ -13,6 +13,15 @@ public interface ICoupleRepository
 
     Task<bool> JoinCodeExistsAsync(string joinCode, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Stops everything addressed to the user on behalf of the group: deletes the user's device tokens for it
+    /// and fails the alerts still pending for them. Applied on the next <see cref="SaveChangesAsync"/>.
+    /// </summary>
+    Task StopDeliveriesToMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken);
+
+    /// <summary>Deletes the user's refresh token so the session cannot be renewed. Applied on the next <see cref="SaveChangesAsync"/>.</summary>
+    Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken);
+
     Task AddCoupleAsync(CoupleEntityType couple, CancellationToken cancellationToken);
 
     Task SaveChangesAsync(CancellationToken cancellationToken);

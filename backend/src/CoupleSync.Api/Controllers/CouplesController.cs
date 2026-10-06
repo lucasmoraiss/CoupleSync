@@ -17,12 +17,21 @@ public sealed class CouplesController : ControllerBase
     private readonly CreateCoupleCommandHandler _createCoupleHandler;
     private readonly JoinCoupleCommandHandler _joinCoupleHandler;
     private readonly GetCoupleMeQueryHandler _getCoupleMeHandler;
+    private readonly LeaveCoupleCommandHandler _leaveCoupleHandler;
+    private readonly RemoveCoupleMemberCommandHandler _removeMemberHandler;
+    private readonly RegenerateJoinCodeCommandHandler _regenerateJoinCodeHandler;
 
     public CouplesController(
         CreateCoupleCommandHandler createCoupleHandler,
         JoinCoupleCommandHandler joinCoupleHandler,
-        GetCoupleMeQueryHandler getCoupleMeHandler)
+        GetCoupleMeQueryHandler getCoupleMeHandler,
+        LeaveCoupleCommandHandler leaveCoupleHandler,
+        RemoveCoupleMemberCommandHandler removeMemberHandler,
+        RegenerateJoinCodeCommandHandler regenerateJoinCodeHandler)
     {
+        _leaveCoupleHandler = leaveCoupleHandler;
+        _removeMemberHandler = removeMemberHandler;
+        _regenerateJoinCodeHandler = regenerateJoinCodeHandler;
         _createCoupleHandler = createCoupleHandler;
         _joinCoupleHandler = joinCoupleHandler;
         _getCoupleMeHandler = getCoupleMeHandler;
@@ -71,7 +80,51 @@ public sealed class CouplesController : ControllerBase
             result.CoupleId,
             result.JoinCode,
             result.CreatedAtUtc,
-            result.Members.Select(ToMemberResponse).ToArray()));
+            result.Members.Select(ToMemberResponse).ToArray(),
+            result.OwnerUserId,
+            result.JoinCodeExpiresAtUtc));
+    }
+
+    [HttpPost("leave")]
+    [ProducesResponseType(typeof(LeaveCoupleResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<LeaveCoupleResponse>> Leave(CancellationToken cancellationToken)
+    {
+        var result = await _leaveCoupleHandler.HandleAsync(
+            new LeaveCoupleCommand(GetAuthenticatedUserId()),
+            cancellationToken);
+
+        return Ok(new LeaveCoupleResponse(result.AccessToken, result.RefreshToken));
+    }
+
+    [HttpDelete("members/{memberUserId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RemoveMember(Guid memberUserId, CancellationToken cancellationToken)
+    {
+        await _removeMemberHandler.HandleAsync(
+            new RemoveCoupleMemberCommand(GetAuthenticatedUserId(), memberUserId),
+            cancellationToken);
+
+        return NoContent();
+    }
+
+    [HttpPost("join-code")]
+    [ProducesResponseType(typeof(RegenerateJoinCodeResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RegenerateJoinCodeResponse>> RegenerateJoinCode(CancellationToken cancellationToken)
+    {
+        var result = await _regenerateJoinCodeHandler.HandleAsync(
+            new RegenerateJoinCodeCommand(GetAuthenticatedUserId()),
+            cancellationToken);
+
+        return Ok(new RegenerateJoinCodeResponse(result.JoinCode, result.JoinCodeExpiresAtUtc));
     }
 
     private Guid GetAuthenticatedUserId()

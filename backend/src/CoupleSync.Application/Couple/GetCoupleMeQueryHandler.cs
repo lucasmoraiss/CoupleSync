@@ -34,9 +34,11 @@ public sealed class GetCoupleMeQueryHandler
         }
 
         var members = couple.Members
+            .OrderBy(member => member.CoupleJoinedAtUtc ?? member.CreatedAtUtc)
+            .ThenBy(member => member.Id)
             .Select(member => new CoupleMemberDto(member.Id, member.Name, member.Email))
             .ToArray();
 
-        return new GetCoupleMeResult(couple.Id, couple.JoinCode, couple.CreatedAtUtc, members);
+        return new GetCoupleMeResult(couple.Id, couple.JoinCode, couple.CreatedAtUtc, members, couple.OwnerUserId, couple.JoinCodeExpiresAtUtc);
     }
 }

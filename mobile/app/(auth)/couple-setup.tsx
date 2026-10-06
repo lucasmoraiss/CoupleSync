@@ -134,12 +134,12 @@ export default function CoupleSetupScreen() {
           <View style={styles.form}>
             <TextInput
               style={styles.codeInput}
-              placeholder="XXXXXX"
+              placeholder="XXXXXXXX"
               placeholderTextColor={colors.placeholder}
               value={joinCode}
               onChangeText={setJoinCode}
               autoCapitalize="characters"
-              maxLength={6}
+              maxLength={8}
               editable={!loading}
               textAlign="center"
             />

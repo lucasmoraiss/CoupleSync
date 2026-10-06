@@ -35,6 +35,20 @@ export interface GetCoupleMeResponse {
   readonly joinCode: string;
   readonly createdAtUtc: string;
   readonly members: readonly CoupleMemberResponse[];
+  /** Quem criou (ou herdou) o grupo; só ele remove membros e gera novo código. Ausente em servidor antigo. */
+  readonly ownerUserId?: string | null;
+  /** Fim da validade do código de convite (UTC). Ausente em servidor antigo. */
+  readonly joinCodeExpiresAtUtc?: string;
+}
+
+export interface LeaveCoupleResponse {
+  readonly accessToken: string;
+  readonly refreshToken: string;
+}
+
+export interface RegenerateJoinCodeResponse {
+  readonly joinCode: string;
+  readonly joinCodeExpiresAtUtc: string;
 }
 
 export interface GoalDto {

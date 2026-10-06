@@ -40,6 +40,34 @@ public sealed class CoupleRepository : ICoupleRepository
         return _dbContext.Couples.AnyAsync(x => x.JoinCode == normalizedJoinCode, cancellationToken);
     }
 
+    public async Task StopDeliveriesToMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken)
+    {
+        // The query filters follow the caller's couple claim, which may not be this couple's (a leaver whose
+        // token is stale): bypass them and state the couple explicitly.
+        var deviceTokens = await _dbContext.DeviceTokens
+            .IgnoreQueryFilters()
+            .Where(d => d.UserId == userId && d.CoupleId == coupleId)
+            .ToListAsync(cancellationToken);
+        _dbContext.DeviceTokens.RemoveRange(deviceTokens);
+
+        var pendingAlerts = await _dbContext.NotificationEvents
+            .IgnoreQueryFilters()
+            .Where(e => e.UserId == userId && e.CoupleId == coupleId && e.Status == "Pending")
+            .ToListAsync(cancellationToken);
+        foreach (var alert in pendingAlerts)
+        {
+            alert.MarkFailed();
+        }
+    }
+
+    public async Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var refreshTokens = await _dbContext.RefreshTokens
+            .Where(r => r.UserId == userId)
+            .ToListAsync(cancellationToken);
+        _dbContext.RefreshTokens.RemoveRange(refreshTokens);
+    }
+
     public async Task AddCoupleAsync(Couple couple, CancellationToken cancellationToken)
     {
         await _dbContext.Couples.AddAsync(couple, cancellationToken);
