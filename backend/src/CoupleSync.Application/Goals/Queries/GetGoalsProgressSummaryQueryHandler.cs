@@ -5,10 +5,12 @@ namespace CoupleSync.Application.Goals.Queries;
 public sealed class GetGoalsProgressSummaryQueryHandler
 {
     private readonly IGoalRepository _repository;
+    private readonly GoalProgressReader _progressReader;
 
-    public GetGoalsProgressSummaryQueryHandler(IGoalRepository repository)
+    public GetGoalsProgressSummaryQueryHandler(IGoalRepository repository, GoalProgressReader progressReader)
     {
         _repository = repository;
+        _progressReader = progressReader;
     }
 
     public async Task<GetGoalsProgressSummaryResult> HandleAsync(
@@ -17,21 +19,22 @@ public sealed class GetGoalsProgressSummaryQueryHandler
     {
         var (_, goals) = await _repository.GetPagedAsync(query.CoupleId, includeArchived: false, cancellationToken);
 
+        var progress = await _progressReader.ReadAsync(query.CoupleId, goals.ToList(), cancellationToken);
+
         var items = goals
             .Select(g =>
             {
-                var progress = g.TargetAmount > 0
-                    ? Math.Min(g.CurrentAmount / g.TargetAmount * 100m, 100m)
-                    : 0m;
-
+                var p = progress[g.Id];
                 return new GoalProgressSummaryItem(
                     g.Id,
                     g.Title,
                     g.TargetAmount,
-                    g.CurrentAmount,
-                    Math.Round(progress, 1),
-                    g.CurrentAmount >= g.TargetAmount,
-                    g.Deadline);
+                    p.TotalAmount,
+                    p.ProgressPercent,
+                    p.IsAchieved,
+                    g.Deadline,
+                    p.ManualAmount,
+                    p.LinkedAmount);
             })
             .ToList();
 

@@ -43,12 +43,19 @@ export interface GoalDto {
   readonly title: string;
   readonly description: string | null;
   readonly targetAmount: number;
+  /** Progresso unificado: valor guardado manualmente + transações vinculadas. */
   readonly currentAmount: number;
   readonly currency: string;
   readonly deadline: string;
   readonly status: string;
   readonly createdAtUtc: string;
   readonly updatedAtUtc: string;
+  /** Parte guardada manualmente (ausente em servidor antigo: currentAmount já era só o manual). */
+  readonly manualAmount?: number;
+  /** Parte vinda das transações vinculadas. */
+  readonly linkedAmount?: number;
+  readonly progressPercent?: number;
+  readonly isAchieved?: boolean;
 }
 
 export interface GoalProgressSummaryItem {
@@ -59,6 +66,8 @@ export interface GoalProgressSummaryItem {
   readonly progressPercent: number;
   readonly isAchieved: boolean;
   readonly deadline: string;
+  readonly manualAmount?: number;
+  readonly linkedAmount?: number;
 }
 
 export interface GoalsProgressSummaryResponse {

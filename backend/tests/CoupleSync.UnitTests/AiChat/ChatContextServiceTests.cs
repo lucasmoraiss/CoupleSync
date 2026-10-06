@@ -20,7 +20,7 @@ public sealed class ChatContextServiceTests
         var txRepo = new FakeTransactionRepository();
         var goalRepo = new FakeGoalRepository();
         var budgetService = new BudgetService(budgetRepo, txRepo, dt);
-        var svc = new ChatContextService(budgetService, txRepo, goalRepo, dt);
+        var svc = new ChatContextService(budgetService, txRepo, goalRepo, new CoupleSync.Application.Goals.GoalProgressReader(txRepo), dt);
         return (svc, budgetRepo, txRepo, goalRepo);
     }
 
@@ -136,6 +136,33 @@ public sealed class ChatContextServiceTests
             Assert.Contains("Metas do casal", prompt);
             Assert.Contains("Viagem Europa", prompt);
             Assert.Contains("R$5.000,00", prompt);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = savedCulture;
+        }
+    }
+
+    [Fact]
+    public async Task BuildsSystemPrompt_GoalProgress_IsManualPlusLinkedTransactions()
+    {
+        var (svc, _, txRepo, goalRepo) = Build();
+        var coupleId = Guid.NewGuid();
+
+        var goal = Goal.Create(coupleId, Guid.NewGuid(), "Viagem", null, 1000m, "BRL", FixedNow.AddMonths(4), FixedNow.AddDays(-10));
+        goal.UpdateCurrentAmount(200m, FixedNow);
+        goalRepo.Goals.Add(goal);
+        var tx = Transaction.Create(coupleId, Guid.NewGuid(), "fp-g", "NUBANK", 300m, "BRL", FixedNow.AddDays(-2),
+            "Guardado", null, "Outros", Guid.NewGuid(), FixedNow);
+        tx.LinkToGoal(goal.Id);
+        txRepo.Transactions.Add(tx);
+
+        var savedCulture = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("pt-BR");
+        try
+        {
+            var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+            Assert.Contains("progresso R$500,00 (50%)", prompt);
         }
         finally
         {

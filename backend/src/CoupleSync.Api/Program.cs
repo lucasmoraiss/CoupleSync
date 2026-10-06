@@ -69,6 +69,7 @@ builder.Services.AddScoped<GetGoalByIdQueryHandler>();
 builder.Services.AddScoped<GetGoalProgressQueryHandler>();
 builder.Services.AddScoped<GetGoalsProgressSummaryQueryHandler>();
 builder.Services.AddScoped<IGoalProgressService, GoalProgressService>();
+builder.Services.AddScoped<GoalProgressReader>();
 builder.Services.AddScoped<GetCashFlowQueryHandler>();
 builder.Services.AddScoped<RegisterDeviceTokenCommandHandler>();
 builder.Services.AddScoped<UpdateNotificationSettingsCommandHandler>();

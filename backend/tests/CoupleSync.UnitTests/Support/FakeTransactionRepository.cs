@@ -84,6 +84,15 @@ public sealed class FakeTransactionRepository : ITransactionRepository
         return Task.FromResult(result);
     }
 
+    public Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(Guid coupleId, IReadOnlyCollection<Guid> goalIds, CancellationToken ct)
+    {
+        var result = Transactions
+            .Where(t => t.CoupleId == coupleId && t.GoalId.HasValue && goalIds.Contains(t.GoalId.Value) && t.Currency == "BRL")
+            .GroupBy(t => t.GoalId!.Value)
+            .ToDictionary(g => g.Key, g => g.Sum(t => t.Amount));
+        return Task.FromResult(result);
+    }
+
     public Task<IReadOnlyList<Transaction>> GetRecentByCoupleAsync(Guid coupleId, DateTime since, CancellationToken ct)
     {
         var result = Transactions

@@ -155,7 +155,7 @@ public sealed class GoalsController : ControllerBase
         }
 
         var result = await _updateHandler.HandleAsync(
-            new UpdateGoalCommand(id, coupleId, request.Title, request.Description, request.TargetAmount, request.CurrentAmount, deadline),
+            new UpdateGoalCommand(id, coupleId, request.Title, request.Description, request.TargetAmount, request.CurrentAmount, deadline, request.ManualAmount),
             cancellationToken);
 
         return Ok(MapToResponse(result));
@@ -212,13 +212,16 @@ public sealed class GoalsController : ControllerBase
             result.ProgressPercent,
             result.IsAchieved,
             result.DaysRemaining,
-            result.Status.ToString()));
+            result.Status.ToString(),
+            result.ManualAmount,
+            result.LinkedAmount));
     }
 
     private static GoalResponse MapToResponse(Application.Goals.Queries.GoalDto g)
         => new(g.Id, g.CreatedByUserId, g.Title, g.Description,
                g.TargetAmount, g.CurrentAmount, g.Currency, g.Deadline, g.Status.ToString(),
-               g.CreatedAtUtc, g.UpdatedAtUtc);
+               g.CreatedAtUtc, g.UpdatedAtUtc,
+               g.ManualAmount, g.LinkedAmount, g.ProgressPercent, g.IsAchieved);
 
     private Guid GetAuthenticatedCoupleId()
     {

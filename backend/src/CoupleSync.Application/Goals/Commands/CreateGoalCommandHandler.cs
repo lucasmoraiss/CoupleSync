@@ -32,17 +32,7 @@ public sealed class CreateGoalCommandHandler
         await _repository.AddAsync(goal, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
 
-        return new GoalDto(
-            goal.Id,
-            goal.CreatedByUserId,
-            goal.Title,
-            goal.Description,
-            goal.TargetAmount,
-            goal.CurrentAmount,
-            goal.Currency,
-            goal.Deadline,
-            goal.Status,
-            goal.CreatedAtUtc,
-            goal.UpdatedAtUtc);
+        // A brand-new goal has no linked transactions yet.
+        return GoalDto.From(goal, GoalProgressBreakdown.From(goal, 0m));
     }
 }

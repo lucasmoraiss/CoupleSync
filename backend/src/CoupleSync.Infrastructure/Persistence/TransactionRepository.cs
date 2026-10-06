@@ -87,6 +87,25 @@ public sealed class TransactionRepository : ITransactionRepository
             .ToListAsync(ct);
     }
 
+    public async Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(
+        Guid coupleId,
+        IReadOnlyCollection<Guid> goalIds,
+        CancellationToken ct)
+    {
+        // Materialise before grouping: SQLite cannot translate Sum(decimal) to SQL.
+        var rows = await _dbContext.Transactions
+            .Where(t => t.CoupleId == coupleId
+                        && t.GoalId != null
+                        && goalIds.Contains(t.GoalId.Value)
+                        && t.Currency == CurrencyRules.Brl)
+            .Select(t => new { GoalId = t.GoalId!.Value, t.Amount })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(r => r.GoalId)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.Amount));
+    }
+
     public async Task<IReadOnlyList<Transaction>> GetRecentByCoupleAsync(Guid coupleId, DateTime since, CancellationToken ct)
     {
         return await _dbContext.Transactions

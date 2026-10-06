@@ -2,6 +2,7 @@ using CoupleSync.Domain.ValueObjects;
 using System.Text;
 using CoupleSync.Application.Budget;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Application.Goals;
 using CoupleSync.Domain.Entities;
 
 namespace CoupleSync.Application.AiChat;
@@ -11,17 +12,20 @@ public sealed class ChatContextService
     private readonly BudgetService _budgetService;
     private readonly ITransactionRepository _transactionRepository;
     private readonly IGoalRepository _goalRepository;
+    private readonly GoalProgressReader _goalProgressReader;
     private readonly IDateTimeProvider _dateTimeProvider;
 
     public ChatContextService(
         BudgetService budgetService,
         ITransactionRepository transactionRepository,
         IGoalRepository goalRepository,
+        GoalProgressReader goalProgressReader,
         IDateTimeProvider dateTimeProvider)
     {
         _budgetService = budgetService;
         _transactionRepository = transactionRepository;
         _goalRepository = goalRepository;
+        _goalProgressReader = goalProgressReader;
         _dateTimeProvider = dateTimeProvider;
     }
 
@@ -68,13 +72,12 @@ public sealed class ChatContextService
         if (activeGoals.Count > 0)
         {
             sb.AppendLine("Metas do casal:");
+            var goalProgress = await _goalProgressReader.ReadAsync(coupleId, activeGoals, ct);
             foreach (var goal in activeGoals)
             {
-                var goalTxns = await _transactionRepository.GetByGoalIdAsync(goal.Id, coupleId, ct);
-                var progress = goalTxns.Where(t => CurrencyRules.IsBrl(t.Currency)).Sum(t => t.Amount);
-                var percent = goal.TargetAmount > 0
-                    ? Math.Clamp(progress / goal.TargetAmount * 100m, 0m, 100m)
-                    : 0m;
+                var breakdown = goalProgress[goal.Id];
+                var progress = breakdown.TotalAmount;
+                var percent = breakdown.ProgressPercent;
                 var deadlineStr = goal.Deadline != default
                     ? goal.Deadline.ToString("dd/MM/yyyy")
                     : "sem prazo definido";
@@ -83,7 +86,7 @@ public sealed class ChatContextService
                     .Replace("\n", string.Empty)
                     .Trim();
                 if (safeTitle.Length > 100) safeTitle = safeTitle[..100];
-                sb.AppendLine($"  - {safeTitle}: alvo R${goal.TargetAmount:N2}, progresso R${progress:N2} ({percent:F0}%), prazo {deadlineStr}");
+                sb.AppendLine($"  - {safeTitle}: alvo R${goal.TargetAmount:N2}, progresso R${progress:N2} ({Math.Floor(percent):F0}%), prazo {deadlineStr}");
             }
         }
 

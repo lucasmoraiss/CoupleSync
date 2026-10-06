@@ -380,6 +380,9 @@ internal sealed class FakeTransactionRepository : ITransactionRepository
     public Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<Transaction>>([]);
 
+    public Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(Guid coupleId, IReadOnlyCollection<Guid> goalIds, CancellationToken ct)
+        => Task.FromResult(new Dictionary<Guid, decimal>());
+
     public Task<IReadOnlyList<Transaction>> GetRecentByCoupleAsync(Guid coupleId, DateTime since, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<Transaction>>([]);
 

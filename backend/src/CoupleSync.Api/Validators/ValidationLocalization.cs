@@ -23,6 +23,7 @@ public static class ValidationLocalization
         ["Content"] = "Mensagem",
         ["Currency"] = "Moeda",
         ["CurrentAmount"] = "Valor atual",
+        ["ManualAmount"] = "Valor guardado",
         ["Deadline"] = "Prazo",
         ["Description"] = "Descrição",
         ["Email"] = "E-mail",

@@ -329,6 +329,9 @@ public sealed class OcrProcessingServiceTests
         public Task<IReadOnlyList<CoupleSync.Domain.Entities.Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<CoupleSync.Domain.Entities.Transaction>>([]);
 
+        public Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(Guid coupleId, IReadOnlyCollection<Guid> goalIds, CancellationToken ct) =>
+            Task.FromResult(new Dictionary<Guid, decimal>());
+
         public Task<IReadOnlyList<CoupleSync.Domain.Entities.Transaction>> GetRecentByCoupleAsync(Guid coupleId, DateTime since, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<CoupleSync.Domain.Entities.Transaction>>([]);
 

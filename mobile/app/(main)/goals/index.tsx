@@ -29,6 +29,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
 import { amountCentsError, centsFromDigits } from '@/utils/amount';
+import { isDeadlineBeforeToday } from '@/utils/goalDeadline';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -91,7 +92,7 @@ function formatBRLInput(cents: number): string {
 }
 
 function isDeadlinePast(dateStr: string): boolean {
-  return new Date(dateStr) < new Date();
+  return isDeadlineBeforeToday(dateStr);
 }
 
 // ─── Goal form state ──────────────────────────────────────────────────────────
@@ -99,7 +100,8 @@ interface GoalFormState {
   title: string;
   description: string;
   amountCents: number; // stored as cents for input control
-  currentAmountCents: number; // current progress amount in cents
+  manualAmountCents: number; // manually saved amount in cents (the transactions part is read-only)
+  linkedAmount: number; // sum of linked transactions, shown for context only
   deadlineInput: string; // DD/MM/YYYY
 }
 
@@ -107,16 +109,27 @@ const EMPTY_FORM: GoalFormState = {
   title: '',
   description: '',
   amountCents: 0,
-  currentAmountCents: 0,
+  manualAmountCents: 0,
+  linkedAmount: 0,
   deadlineInput: '',
 };
+
+/** Valor guardado manualmente (servidor antigo não manda o campo: currentAmount era só o manual). */
+function manualAmountOf(goal: GoalDto): number {
+  return goal.manualAmount ?? goal.currentAmount;
+}
+
+function linkedAmountOf(goal: GoalDto): number {
+  return goal.linkedAmount ?? 0;
+}
 
 function formFromGoal(goal: GoalDto): GoalFormState {
   return {
     title: goal.title,
     description: goal.description ?? '',
     amountCents: Math.round(goal.targetAmount * 100),
-    currentAmountCents: Math.round(goal.currentAmount * 100),
+    manualAmountCents: Math.round(manualAmountOf(goal) * 100),
+    linkedAmount: linkedAmountOf(goal),
     deadlineInput: toInputDate(goal.deadline),
   };
 }
@@ -161,15 +174,15 @@ function GoalFormModal({
 
   const titleError = !form.title.trim() ? 'Título é obrigatório' : null;
   const amountError = amountCentsError(form.amountCents);
-  const currentAmountError = amountCentsError(form.currentAmountCents, { allowZero: true });
+  const manualAmountError = amountCentsError(form.manualAmountCents, { allowZero: true });
   const deadlineError = (() => {
     const iso = parseDateInput(form.deadlineInput);
     if (!iso) return 'Data inválida (DD/MM/AAAA)';
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    if (new Date(iso) < today) return 'O prazo deve ser hoje ou uma data futura';
+    // "Hoje" é o dia de Brasília, o mesmo que o servidor usa.
+    if (isDeadlineBeforeToday(iso)) return 'O prazo deve ser hoje ou uma data futura';
     return null;
   })();
-  const isValid = !titleError && !amountError && !currentAmountError && !deadlineError;
+  const isValid = !titleError && !amountError && !manualAmountError && !deadlineError;
 
   return (
     <Modal
@@ -242,22 +255,27 @@ function GoalFormModal({
               <Text style={styles.fieldError}>{amountError}</Text>
             )}
 
-            {/* Current amount (progress) */}
+            {/* Manually saved amount (the progress also counts linked transactions) */}
             {mode === 'edit' && (
               <>
-                <Text style={styles.fieldLabel}>Valor atual (R$)</Text>
+                <Text style={styles.fieldLabel}>Guardado manualmente (R$)</Text>
                 <TextInput
                   style={styles.input}
-                  value={form.currentAmountCents > 0 ? formatBRLInput(form.currentAmountCents) : ''}
+                  value={form.manualAmountCents > 0 ? formatBRLInput(form.manualAmountCents) : ''}
                   onChangeText={(raw) => {
-                    setForm((f) => ({ ...f, currentAmountCents: centsFromDigits(raw) }));
+                    setForm((f) => ({ ...f, manualAmountCents: centsFromDigits(raw) }));
                   }}
                   placeholder="0,00"
                   placeholderTextColor={MUTED}
                   keyboardType="numeric"
                   editable={!isSaving}
-                  accessibilityLabel="Valor atual da meta"
+                  accessibilityLabel="Valor guardado manualmente na meta"
                 />
+                {form.linkedAmount > 0 && (
+                  <Text style={styles.fieldHint}>
+                    Mais {formatBRL(form.linkedAmount)} de transações vinculadas, somados automaticamente.
+                  </Text>
+                )}
               </>
             )}
 
@@ -309,10 +327,13 @@ interface GoalCardProps {
 
 function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
   const isPast = isDeadlinePast(goal.deadline);
-  const progressPercent = goal.targetAmount > 0
+  // Tudo vem do servidor (mesma conta em todas as telas); o cálculo local só cobre servidor antigo.
+  const progressPercent = goal.progressPercent ?? (goal.targetAmount > 0
     ? Math.min(100, (goal.currentAmount / goal.targetAmount) * 100)
-    : 0;
-  const isAchieved = progressPercent >= 100;
+    : 0);
+  const isAchieved = goal.isAchieved ?? goal.currentAmount >= goal.targetAmount;
+  const manualAmount = manualAmountOf(goal);
+  const linkedAmount = linkedAmountOf(goal);
 
   return (
     <View style={styles.card} accessibilityLabel={`Meta: ${goal.title}`}>
@@ -343,7 +364,10 @@ function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
         <View style={[styles.progressBarFill, { width: `${progressPercent}%` as any }]} />
       </View>
       <Text style={styles.progressText}>
-        {formatBRL(goal.currentAmount)} / {formatBRL(goal.targetAmount)} ({progressPercent.toFixed(0)}%)
+        {formatBRL(goal.currentAmount)} / {formatBRL(goal.targetAmount)} ({Math.floor(progressPercent)}%)
+      </Text>
+      <Text style={styles.progressBreakdown}>
+        Guardado manualmente: {formatBRL(manualAmount)} · Por transações: {formatBRL(linkedAmount)}
       </Text>
 
       {/* Amount + deadline */}
@@ -438,7 +462,7 @@ export default function GoalsScreen() {
         title: form.title.trim(),
         description: form.description.trim() || undefined,
         targetAmount: form.amountCents / 100,
-        currentAmount: form.currentAmountCents / 100,
+        manualAmount: form.manualAmountCents / 100,
         deadline: isoDeadline,
       });
     },
@@ -641,7 +665,8 @@ const styles = StyleSheet.create({
   // Progress bar
   progressBarBg: { height: 6, backgroundColor: BORDER, borderRadius: 3, marginBottom: 4 },
   progressBarFill: { height: 6, backgroundColor: SUCCESS, borderRadius: 3 },
-  progressText: { fontSize: 12, color: MUTED, marginBottom: 12 },
+  progressText: { fontSize: 12, color: MUTED, marginBottom: 4 },
+  progressBreakdown: { fontSize: 11, color: MUTED, marginBottom: 12 },
 
   // Status badge
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99 },
@@ -748,6 +773,7 @@ const styles = StyleSheet.create({
   },
   inputMultiline: { minHeight: 80, textAlignVertical: 'top' },
   fieldError: { fontSize: 12, color: ERROR, marginTop: 4 },
+  fieldHint: { fontSize: 12, color: MUTED, marginTop: 4 },
   saveBtn: {
     backgroundColor: PRIMARY,
     borderRadius: 12,

@@ -1,4 +1,5 @@
 using CoupleSync.Domain.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Domain.Entities;
 
@@ -71,7 +72,7 @@ public sealed class Goal : ICoupleScoped
         if (deadline.Kind == DateTimeKind.Unspecified)
             deadline = DateTime.SpecifyKind(deadline, DateTimeKind.Utc);
 
-        if (deadline.Date < createdAtUtc.Date)
+        if (deadline.Date < BrazilTime.ToLocal(createdAtUtc).Date)
             throw new ArgumentException("O prazo não pode estar no passado.", nameof(deadline));
 
         if (description is not null && description.Length > 512)
@@ -108,7 +109,7 @@ public sealed class Goal : ICoupleScoped
             var d = deadline.Value;
             if (d.Kind == DateTimeKind.Unspecified)
                 d = DateTime.SpecifyKind(d, DateTimeKind.Utc);
-            if (d.Date < nowUtc.Date)
+            if (d.Date < BrazilTime.ToLocal(nowUtc).Date)
                 throw new ArgumentException("O prazo não pode estar no passado.", nameof(deadline));
             Deadline = d;
         }

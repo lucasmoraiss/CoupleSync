@@ -20,7 +20,7 @@ public sealed class GeminiChatServiceTests
         var txRepo = new FakeTransactionRepository();
         var goalRepo = new FakeGoalRepository();
         var budgetService = new BudgetService(budgetRepo, txRepo, dt);
-        var contextService = new ChatContextService(budgetService, txRepo, goalRepo, dt);
+        var contextService = new ChatContextService(budgetService, txRepo, goalRepo, new CoupleSync.Application.Goals.GoalProgressReader(txRepo), dt);
 
         return new GeminiChatService(
             adapter ?? new FakeGeminiAdapter("OK"),

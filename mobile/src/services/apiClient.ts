@@ -223,7 +223,8 @@ interface UpdateGoalRequest {
   title?: string;
   description?: string;
   targetAmount?: number;
-  currentAmount?: number;
+  /** Valor guardado manualmente (o `currentAmount` legado é o total e não deve mais ser enviado). */
+  manualAmount?: number;
   deadline?: string;
 }
 

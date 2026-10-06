@@ -1,4 +1,5 @@
 using CoupleSync.Application.Common.Exceptions;
+using CoupleSync.Application.Goals;
 using CoupleSync.Application.Goals.Commands;
 using CoupleSync.Domain.Entities;
 using CoupleSync.UnitTests.Support;
@@ -17,18 +18,20 @@ public sealed class GoalCommandHandlerTests
         return (new CreateGoalCommandHandler(repo, dt), repo);
     }
 
-    private static (UpdateGoalCommandHandler, FakeGoalRepository) BuildUpdateHandler()
+    private static (UpdateGoalCommandHandler, FakeGoalRepository) BuildUpdateHandler(FakeTransactionRepository? txRepo = null)
     {
+        txRepo ??= new FakeTransactionRepository();
         var repo = new FakeGoalRepository();
         var dt = new FixedDateTimeProvider(FixedNow);
-        return (new UpdateGoalCommandHandler(repo, dt), repo);
+        return (new UpdateGoalCommandHandler(repo, new GoalProgressReader(txRepo), dt), repo);
     }
 
     private static (ArchiveGoalCommandHandler, FakeGoalRepository) BuildArchiveHandler()
     {
+        var txRepo = new FakeTransactionRepository();
         var repo = new FakeGoalRepository();
         var dt = new FixedDateTimeProvider(FixedNow);
-        return (new ArchiveGoalCommandHandler(repo, dt), repo);
+        return (new ArchiveGoalCommandHandler(repo, new GoalProgressReader(txRepo), dt), repo);
     }
 
     private static Goal SeedGoal(FakeGoalRepository repo, Guid coupleId)
@@ -109,6 +112,20 @@ public sealed class GoalCommandHandlerTests
                 CancellationToken.None));
     }
 
+    [Fact]
+    public void Goal_DeadlineToday_UsesTheBrasiliaDay_NotTheUtcDay()
+    {
+        var nowUtc = new DateTime(2026, 10, 16, 1, 0, 0, DateTimeKind.Utc); // 15/10 22:00 em Brasília
+        var deadline = new DateTime(2026, 10, 15, 12, 0, 0, DateTimeKind.Utc);
+
+        var goal = Goal.Create(Guid.NewGuid(), Guid.NewGuid(), "Meta", null, 100m, "BRL", deadline, nowUtc);
+        goal.Update(null, null, null, deadline, nowUtc);
+
+        Assert.Equal(deadline, goal.Deadline);
+        Assert.Throws<ArgumentException>(() =>
+            Goal.Create(Guid.NewGuid(), Guid.NewGuid(), "Meta", null, 100m, "BRL", deadline.AddDays(-1), nowUtc));
+    }
+
     // ── UpdateGoal ─────────────────────────────────────────────────────────
 
     [Fact]
@@ -142,6 +159,52 @@ public sealed class GoalCommandHandlerTests
         Assert.Equal(originalTitle, result.Title);
         Assert.Equal(originalAmount, result.TargetAmount);
         Assert.Equal("Updated desc", result.Description);
+    }
+
+    [Fact]
+    public async Task UpdateGoal_ManualAmount_SetsOnlyTheManualPart_AndReturnsUnifiedTotal()
+    {
+        var txRepo = new FakeTransactionRepository();
+        var (handler, repo) = BuildUpdateHandler(txRepo);
+        var coupleId = Guid.NewGuid();
+        var goal = SeedGoal(repo, coupleId);
+        txRepo.Transactions.Add(LinkedTx(coupleId, goal.Id, 300m));
+
+        var result = await handler.HandleAsync(
+            new UpdateGoalCommand(goal.Id, coupleId, null, null, null, null, null, ManualAmount: 200m),
+            CancellationToken.None);
+
+        Assert.Equal(200m, goal.CurrentAmount);
+        Assert.Equal(200m, result.ManualAmount);
+        Assert.Equal(300m, result.LinkedAmount);
+        Assert.Equal(500m, result.CurrentAmount);
+    }
+
+    [Fact]
+    public async Task UpdateGoal_LegacyCurrentAmount_IsTheDesiredTotal_SoLinkedTransactionsAreNotCountedTwice()
+    {
+        var txRepo = new FakeTransactionRepository();
+        var (handler, repo) = BuildUpdateHandler(txRepo);
+        var coupleId = Guid.NewGuid();
+        var goal = SeedGoal(repo, coupleId);
+        goal.UpdateCurrentAmount(200m, FixedNow);
+        txRepo.Transactions.Add(LinkedTx(coupleId, goal.Id, 300m));
+
+        // App instalado: mostra 500 (200 + 300), o usuário só muda o título e reenvia o 500.
+        var result = await handler.HandleAsync(
+            new UpdateGoalCommand(goal.Id, coupleId, "Novo", null, null, 500m, null),
+            CancellationToken.None);
+
+        Assert.Equal(200m, goal.CurrentAmount);
+        Assert.Equal(500m, result.CurrentAmount);
+    }
+
+    private static Transaction LinkedTx(Guid coupleId, Guid goalId, decimal amount)
+    {
+        var tx = Transaction.Create(coupleId, Guid.NewGuid(), Guid.NewGuid().ToString("N"), "NUBANK", amount, "BRL",
+            FixedNow.AddDays(-1), null, null, "Outros", Guid.NewGuid(), FixedNow);
+        tx.LinkToGoal(goalId);
+        return tx;
     }
 
     [Fact]

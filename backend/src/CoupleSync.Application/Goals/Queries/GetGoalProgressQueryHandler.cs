@@ -1,24 +1,23 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
-using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Application.Goals.Queries;
 
 public sealed class GetGoalProgressQueryHandler
 {
     private readonly IGoalRepository _goalRepository;
-    private readonly ITransactionRepository _transactionRepository;
+    private readonly GoalProgressReader _progressReader;
     private readonly IGoalProgressService _progressService;
     private readonly IDateTimeProvider _dateTimeProvider;
 
     public GetGoalProgressQueryHandler(
         IGoalRepository goalRepository,
-        ITransactionRepository transactionRepository,
+        GoalProgressReader progressReader,
         IGoalProgressService progressService,
         IDateTimeProvider dateTimeProvider)
     {
         _goalRepository = goalRepository;
-        _transactionRepository = transactionRepository;
+        _progressReader = progressReader;
         _progressService = progressService;
         _dateTimeProvider = dateTimeProvider;
     }
@@ -30,9 +29,8 @@ public sealed class GetGoalProgressQueryHandler
         if (goal is null)
             throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
-        var transactions = await _transactionRepository.GetByGoalIdAsync(query.GoalId, query.CoupleId, ct);
-        var contributedAmount = transactions.Where(t => CurrencyRules.IsBrl(t.Currency)).Sum(t => t.Amount);
+        var progress = await _progressReader.ReadAsync(goal, ct);
 
-        return _progressService.Compute(goal, contributedAmount, _dateTimeProvider.UtcNow);
+        return _progressService.Compute(goal, progress.LinkedAmount, _dateTimeProvider.UtcNow);
     }
 }

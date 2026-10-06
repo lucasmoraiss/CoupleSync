@@ -6,10 +6,12 @@ namespace CoupleSync.Application.Goals.Queries;
 public sealed class GetGoalByIdQueryHandler
 {
     private readonly IGoalRepository _repository;
+    private readonly GoalProgressReader _progressReader;
 
-    public GetGoalByIdQueryHandler(IGoalRepository repository)
+    public GetGoalByIdQueryHandler(IGoalRepository repository, GoalProgressReader progressReader)
     {
         _repository = repository;
+        _progressReader = progressReader;
     }
 
     public async Task<GoalDto> HandleAsync(GetGoalByIdQuery query, CancellationToken cancellationToken)
@@ -19,17 +21,6 @@ public sealed class GetGoalByIdQueryHandler
         if (goal is null)
             throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
-        return new GoalDto(
-            goal.Id,
-            goal.CreatedByUserId,
-            goal.Title,
-            goal.Description,
-            goal.TargetAmount,
-            goal.CurrentAmount,
-            goal.Currency,
-            goal.Deadline,
-            goal.Status,
-            goal.CreatedAtUtc,
-            goal.UpdatedAtUtc);
+        return GoalDto.From(goal, await _progressReader.ReadAsync(goal, cancellationToken));
     }
 }

@@ -1,5 +1,6 @@
 using CoupleSync.Api.Contracts.Goals;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -25,7 +26,7 @@ public sealed class CreateGoalRequestValidator : AbstractValidator<CreateGoalReq
         RuleFor(x => x.Currency).BrlCurrency();
 
         RuleFor(x => x.Deadline)
-            .Must(d => d.Date >= _dateTimeProvider.UtcNow.Date)
+            .Must(d => d.Date >= BrazilTime.ToLocal(_dateTimeProvider.UtcNow).Date)
             .WithMessage("O prazo deve ser hoje ou uma data futura.");
     }
 }
