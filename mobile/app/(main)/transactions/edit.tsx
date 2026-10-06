@@ -35,6 +35,7 @@ export default function EditTransactionScreen() {
     id: string;
     amount: string;
     description?: string;
+    merchant?: string;
     category: string;
     eventTimestampUtc: string;
   }>();
@@ -44,6 +45,7 @@ export default function EditTransactionScreen() {
   const original = {
     amount: Number(params.amount),
     description: params.description ?? '',
+    merchant: params.merchant ?? '',
     category: toCategoryKey(params.category ?? '') ?? params.category ?? '',
     eventTimestampUtc: params.eventTimestampUtc ?? new Date().toISOString(),
   };
@@ -51,6 +53,7 @@ export default function EditTransactionScreen() {
   const originalTime = formatBrazilTime(original.eventTimestampUtc);
 
   const [amountText, setAmountText] = useState(formatAmountText(original.amount));
+  const [merchant, setMerchant] = useState(original.merchant);
   const [description, setDescription] = useState(original.description);
   const [dateText, setDateText] = useState(originalDate);
   const [timeText, setTimeText] = useState(originalTime);
@@ -66,6 +69,8 @@ export default function EditTransactionScreen() {
       return;
     }
     if (parsed.value !== original.amount) body.amount = parsed.value;
+
+    if (merchant.trim() !== original.merchant.trim()) body.merchant = merchant.trim();
 
     if (description.trim() !== original.description.trim()) body.description = description.trim();
 
@@ -130,6 +135,17 @@ export default function EditTransactionScreen() {
             value={amountText}
             onChangeText={setAmountText}
             editable={!submitting}
+          />
+
+          <Text style={styles.label}>Estabelecimento</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ex: Pão de Açúcar"
+            placeholderTextColor={colors.placeholder}
+            value={merchant}
+            onChangeText={setMerchant}
+            editable={!submitting}
+            maxLength={512}
           />
 
           <Text style={styles.label}>Descrição</Text>

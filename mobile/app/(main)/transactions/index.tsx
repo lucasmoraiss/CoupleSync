@@ -26,6 +26,7 @@ import {
   toCategoryKey,
 } from '@/modules/transactions/categories';
 import { useCategories } from '@/modules/transactions/useCategories';
+import { getTransactionSubtitle, getTransactionTitle } from '@/modules/transactions/display';
 import {
   TRANSACTIONS_PAGE_SIZE,
   flattenTransactionPages,
@@ -113,7 +114,8 @@ function TransactionRow({
   onEdit: (item: TransactionResponse) => void;
   onDelete: (item: TransactionResponse) => void;
 }) {
-  const label = item.merchant ?? item.description ?? item.bank;
+  const label = getTransactionTitle(item);
+  const subtitle = getTransactionSubtitle(item);
   const authorLabel = getDisplayAuthorName(item, currentUserId);
   const sourceBadge = getSourceBadge(item.source);
   return (
@@ -131,6 +133,11 @@ function TransactionRow({
         <Text style={styles.txTitle} numberOfLines={1}>
           {label}
         </Text>
+        {subtitle && (
+          <Text style={styles.txSubtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        )}
         <View style={styles.txMetaRow}>
           <Text style={styles.txCategory}>{getCategoryLabel(item.category)}</Text>
           <View style={[styles.sourceBadge, { backgroundColor: sourceBadge.bg }]}>
@@ -181,7 +188,7 @@ function CategoryPickerModal({
 }) {
   const categories = useCategories();
   if (!transaction) return null;
-  const label = transaction.merchant ?? transaction.description ?? transaction.bank;
+  const label = getTransactionTitle(transaction);
   const currentKey = toCategoryKey(transaction.category);
   return (
     <Modal
@@ -234,9 +241,9 @@ function CategoryPickerModal({
             style={styles.cancelBtn}
             onPress={() => onEdit(transaction)}
             disabled={isUpdating}
-            accessibilityLabel="Editar valor, descrição e data da transação"
+            accessibilityLabel="Editar transação"
           >
-            <Text style={[styles.cancelText, { color: PRIMARY }]}>Editar valor, descrição e data</Text>
+            <Text style={[styles.cancelText, { color: PRIMARY }]}>Editar transação</Text>
           </TouchableOpacity>
 
           {/* Cancel */}
@@ -341,6 +348,7 @@ export default function TransactionsScreen() {
         id: item.id,
         amount: String(item.amount),
         description: item.description ?? '',
+        merchant: item.merchant ?? '',
         category: item.category,
         eventTimestampUtc: item.eventTimestampUtc,
       },
@@ -368,7 +376,7 @@ export default function TransactionsScreen() {
 
   const handleLongPress = useCallback(
     (item: TransactionResponse) => {
-      const label = item.merchant ?? item.description ?? item.bank;
+      const label = getTransactionTitle(item);
       Alert.alert(
         'Excluir transação',
         `Tem certeza que deseja excluir esta transação?\n\n${label} — ${formatBRL(item.amount)}`,
@@ -560,6 +568,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   txDetails: { flex: 1, marginRight: 8 },
+  txSubtitle: { fontSize: 12, color: MUTED, marginTop: 1 },
   txTitle: { fontSize: 14, fontWeight: '600', color: TEXT },
   txMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 6 },
   txCategory: { fontSize: 12, color: MUTED },

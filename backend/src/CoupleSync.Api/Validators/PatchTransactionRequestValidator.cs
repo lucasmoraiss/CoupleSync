@@ -11,7 +11,7 @@ public sealed class PatchTransactionRequestValidator : AbstractValidator<PatchTr
     public PatchTransactionRequestValidator()
     {
         RuleFor(x => x)
-            .Must(x => x.Amount is not null || x.Description is not null || x.EventTimestampUtc is not null || x.Category is not null)
+            .Must(x => x.Amount is not null || x.Description is not null || x.EventTimestampUtc is not null || x.Category is not null || x.Merchant is not null)
             .WithName("Request")
             .WithMessage("Informe pelo menos um campo para atualizar.");
 
@@ -20,6 +20,10 @@ public sealed class PatchTransactionRequestValidator : AbstractValidator<PatchTr
         RuleFor(x => x.Description)
             .MaximumLength(512)
             .When(x => x.Description is not null);
+
+        RuleFor(x => x.Merchant)
+            .MaximumLength(512)
+            .When(x => x.Merchant is not null);
 
         RuleFor(x => x.EventTimestampUtc)
             .Must(d => d!.Value >= EarliestDate)

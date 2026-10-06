@@ -57,7 +57,7 @@ public sealed class UpdateTransactionCommandHandler
         var previousAmount = transaction.Amount;
         var changesSpending = command.Amount.HasValue || command.EventTimestampUtc.HasValue || category is not null;
 
-        transaction.Edit(command.Amount, command.Description, command.EventTimestampUtc, category);
+        transaction.Edit(command.Amount, command.Description, command.EventTimestampUtc, category, command.Merchant);
         await _repository.SaveChangesAsync(ct);
 
         if (changesSpending)

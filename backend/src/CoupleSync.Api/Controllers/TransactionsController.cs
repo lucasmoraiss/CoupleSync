@@ -133,7 +133,7 @@ public sealed class TransactionsController : ControllerBase
             eventTs = DateTime.SpecifyKind(eventTs.Value, DateTimeKind.Utc);
 
         var transaction = await _updateHandler.HandleAsync(
-            new UpdateTransactionCommand(id, coupleId, request.Amount, request.Description, eventTs, request.Category),
+            new UpdateTransactionCommand(id, coupleId, request.Amount, request.Description, eventTs, request.Category, request.Merchant),
             cancellationToken);
 
         var authorName = transaction.UserId == GetAuthenticatedUserId() ? GetAuthenticatedUserName() : "Desconhecido";

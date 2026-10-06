@@ -57,6 +57,7 @@ public sealed class TransactionRepository : ITransactionRepository
 
         var items = await query
             .OrderByDescending(t => t.EventTimestampUtc)
+            .ThenByDescending(t => t.Id) // imports share timestamps: without a tie-breaker pages can skip or repeat rows
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);

@@ -86,17 +86,20 @@ public sealed class Transaction : ICoupleScoped
     /// Edits the user-facing fields. The fingerprint and the ingest event are never touched, so a transaction
     /// that came from an import keeps the identity the duplicate detection knows it by.
     /// </summary>
-    public void Edit(decimal? amount, string? description, DateTime? eventTimestampUtc, string? category)
+    public void Edit(decimal? amount, string? description, DateTime? eventTimestampUtc, string? category, string? merchant = null)
     {
         if (amount is <= 0)
             throw new ArgumentException("O valor deve ser maior que zero.", nameof(amount));
         if (description is { Length: > 512 })
             throw new ArgumentException("A descrição deve ter no máximo 512 caracteres.", nameof(description));
+        if (merchant is { Length: > 512 })
+            throw new ArgumentException("O estabelecimento deve ter no máximo 512 caracteres.", nameof(merchant));
         if (category is not null)
             UpdateCategory(category);
 
         if (amount.HasValue) Amount = amount.Value;
         if (description is not null) Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        if (merchant is not null) Merchant = string.IsNullOrWhiteSpace(merchant) ? null : merchant.Trim();
         if (eventTimestampUtc.HasValue) EventTimestampUtc = eventTimestampUtc.Value;
     }
 

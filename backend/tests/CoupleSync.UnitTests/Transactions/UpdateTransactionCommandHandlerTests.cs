@@ -145,6 +145,46 @@ public sealed class UpdateTransactionCommandHandlerTests
     }
 
     [Fact]
+    public async Task Edit_Merchant_ChangesItAndKeepsTheFingerprint()
+    {
+        var f = new Fixture();
+        var tx = await f.AddAsync(100m);
+
+        await f.Handler.HandleAsync(
+            new UpdateTransactionCommand(tx.Id, f.Kit.CoupleId, null, null, null, null, "  Loja Nova "), CancellationToken.None);
+
+        Assert.Equal("Loja Nova", tx.Merchant);
+        Assert.Equal("imported-fingerprint", tx.Fingerprint);
+        Assert.Equal(100m, tx.Amount);
+    }
+
+    [Fact]
+    public async Task Edit_EmptyMerchant_ClearsIt()
+    {
+        var f = new Fixture();
+        var tx = await f.AddAsync(100m);
+
+        await f.Handler.HandleAsync(
+            new UpdateTransactionCommand(tx.Id, f.Kit.CoupleId, null, null, null, null, " "), CancellationToken.None);
+
+        Assert.Null(tx.Merchant);
+    }
+
+    [Fact]
+    public async Task Edit_OfATransactionOutsideTheCurrentBrasiliaMonth_EvaluatesNoAlerts()
+    {
+        var f = new Fixture();
+        var tx = await f.AddAsync(100m);
+
+        // Large amount, but the (new) date is in March: nothing about the current month changes.
+        await f.Handler.HandleAsync(
+            new UpdateTransactionCommand(tx.Id, f.Kit.CoupleId, 900m, null, new DateTime(2026, 3, 10, 15, 0, 0, DateTimeKind.Utc), null),
+            CancellationToken.None);
+
+        Assert.Empty(f.Kit.Events.Events);
+    }
+
+    [Fact]
     public async Task Edit_DescriptionOnly_EvaluatesNoAlerts()
     {
         var f = new Fixture();

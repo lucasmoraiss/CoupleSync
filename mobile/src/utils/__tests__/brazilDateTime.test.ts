@@ -32,6 +32,15 @@ describe('parseBrazilDateTime', () => {
     }
   });
 
+  it('fim de mês à noite em Brasília já é o mês seguinte em UTC, e volta certo', () => {
+    const result = parseBrazilDateTime('31/10/2026', '23:30');
+    expect(result).toEqual({ ok: true, iso: '2026-11-01T02:30:00.000Z' });
+    if (result.ok) {
+      expect(formatBrazilDate(result.iso)).toBe('31/10/2026');
+      expect(formatBrazilTime(result.iso)).toBe('23:30');
+    }
+  });
+
   it('aceita dia e mês com um dígito', () => {
     expect(parseBrazilDateTime('5/3/2026', '9:00').ok).toBe(true);
   });

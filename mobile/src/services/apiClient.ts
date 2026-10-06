@@ -208,6 +208,7 @@ export const transactionsApiClient = {
 export interface UpdateTransactionBody {
   amount?: number;
   description?: string;
+  merchant?: string;
   /** Instante UTC (ISO) da data/hora de Brasília escolhida. */
   eventTimestampUtc?: string;
   category?: string;

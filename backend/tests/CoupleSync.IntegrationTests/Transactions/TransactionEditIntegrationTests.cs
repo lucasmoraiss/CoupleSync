@@ -135,6 +135,82 @@ public sealed class TransactionEditIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task Patch_Merchant_IsStored_AndKeepsTheFingerprintOfAnImportedTransaction()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await LoginNewCoupleAsync(client);
+        var ingest = new
+        {
+            Bank = "NUBANK",
+            Amount = 20m,
+            Currency = "BRL",
+            EventTimestamp = DateTime.UtcNow.AddMinutes(-5),
+            Description = "Compra",
+            Merchant = "Loja Velha",
+            RawNotificationText = "Nubank: R$20,00 at Loja Velha",
+        };
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/v1/integrations/events", ingest)).StatusCode);
+        var list = await client.GetFromJsonAsync<JsonElement>("/api/v1/transactions", Json);
+        var id = list.GetProperty("items").EnumerateArray().Single().GetProperty("id").GetGuid();
+
+        var response = await client.PatchAsJsonAsync($"/api/v1/transactions/{id}", new { Merchant = "Loja Nova" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.Equal("Loja Nova", body.GetProperty("merchant").GetString());
+        await client.PostAsJsonAsync("/api/v1/integrations/events", ingest);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tx = Assert.Single(await db.Transactions.IgnoreQueryFilters().ToListAsync());
+        Assert.Equal("Loja Nova", tx.Merchant);
+    }
+
+    [Fact]
+    public async Task Patch_MerchantTooLong_Returns400()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await LoginNewCoupleAsync(client);
+        var id = await CreateManualAsync(client, 50m);
+
+        var response = await client.PatchAsJsonAsync($"/api/v1/transactions/{id}", new { Merchant = new string('x', 513) });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task List_WithIdenticalTimestamps_PagesWithoutSkippingOrRepeatingRows()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await LoginNewCoupleAsync(client);
+        var sameInstant = DateTime.UtcNow.AddHours(-1);
+        for (var i = 0; i < 7; i++)
+        {
+            var created = await client.PostAsJsonAsync("/api/v1/transactions", new
+            {
+                Amount = 10m + i, Currency = "BRL", Category = "Alimentação", EventTimestampUtc = sameInstant,
+            });
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        }
+
+        var seen = new List<Guid>();
+        for (var page = 1; page <= 4; page++)
+        {
+            var result = await client.GetFromJsonAsync<JsonElement>($"/api/v1/transactions?page={page}&pageSize=2", Json);
+            seen.AddRange(result.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("id").GetGuid()));
+        }
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var expected = await db.Transactions.IgnoreQueryFilters()
+            .OrderByDescending(t => t.EventTimestampUtc).ThenByDescending(t => t.Id)
+            .Select(t => t.Id).ToListAsync();
+        Assert.Equal(expected, seen);
+    }
+
     private static async Task<Guid> CreateManualAsync(HttpClient client, decimal amount)
     {
         var response = await client.PostAsJsonAsync("/api/v1/transactions", new
