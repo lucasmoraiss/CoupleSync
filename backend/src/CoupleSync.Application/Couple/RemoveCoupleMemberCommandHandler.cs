@@ -3,10 +3,11 @@ using CoupleSync.Application.Common.Interfaces;
 
 namespace CoupleSync.Application.Couples;
 
-public sealed record RemoveCoupleMemberCommand(Guid RequesterUserId, Guid MemberUserId);
+/// <param name="CoupleId">The group of the requester's token (null when the token has none).</param>
+public sealed record RemoveCoupleMemberCommand(Guid RequesterUserId, Guid MemberUserId, Guid? CoupleId);
 
 /// <summary>
-/// The owner removes another member from the group that is the owner's active one. The group stops sending
+/// The owner removes another member from the group of the owner's token. The group stops sending
 /// the removed member alerts and their access token is refused there by the membership check as soon as this
 /// commits. When it was the member's active group, they are left with NO active group (never moved to another
 /// one by someone else's action) and their refresh token is revoked, so they sign in again and choose.
@@ -29,6 +30,16 @@ public sealed class RemoveCoupleMemberCommandHandler
 
     public async Task HandleAsync(RemoveCoupleMemberCommand command, CancellationToken cancellationToken)
     {
+        var coupleId = command.CoupleId
+            ?? throw new NotFoundException("COUPLE_NOT_FOUND", "Você não está em nenhum grupo no momento.");
+
+        // Authorised before anything is locked: only the group's owner may make the server lock another
+        // user's row. Checked again below, after the locks, because ownership may change while waiting.
+        if (!await _membership.IsOwnerAsync(command.RequesterUserId, coupleId, cancellationToken))
+        {
+            throw new ForbiddenException("NOT_COUPLE_OWNER", "Só quem criou o grupo pode remover membros.");
+        }
+
         // Locks the member being removed (their memberships and active group change), then the group.
         await using var change = await _coupleRepository.BeginMembershipChangeAsync(command.MemberUserId, cancellationToken);
         var requester = await _coupleRepository.FindUserByIdAsync(command.RequesterUserId, cancellationToken);
@@ -38,12 +49,6 @@ public sealed class RemoveCoupleMemberCommandHandler
             throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        if (!requester.ActiveCoupleId.HasValue)
-        {
-            throw new NotFoundException("COUPLE_NOT_FOUND", "Você não está em nenhum grupo no momento.");
-        }
-
-        var coupleId = requester.ActiveCoupleId.Value;
         await change.LockCoupleAsync(coupleId, cancellationToken);
 
         if (!await _membership.IsOwnerAsync(requester.Id, coupleId, cancellationToken))

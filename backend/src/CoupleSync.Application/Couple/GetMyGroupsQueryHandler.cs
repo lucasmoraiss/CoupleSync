@@ -4,7 +4,8 @@ using CoupleSync.Domain.Entities;
 
 namespace CoupleSync.Application.Couples;
 
-public sealed record GetMyGroupsQuery(Guid UserId);
+/// <param name="CurrentCoupleId">The group of the caller's token (null when the token has none).</param>
+public sealed record GetMyGroupsQuery(Guid UserId, Guid? CurrentCoupleId);
 
 public sealed record MyGroupDto(
     Guid CoupleId,
@@ -37,8 +38,9 @@ public sealed class GetMyGroupsQueryHandler
 
         var groups = await _coupleRepository.GetGroupsOfUserAsync(user.Id, cancellationToken);
 
-        // An active pointer to a group the user is no longer in is not reported as active.
-        var activeCoupleId = groups.Any(g => g.CoupleId == user.ActiveCoupleId) ? user.ActiveCoupleId : null;
+        // "Active" is the group this caller is working in, i.e. the one in their token (the one every data route
+        // answers for), and only while they still belong to it.
+        var activeCoupleId = groups.Any(g => g.CoupleId == query.CurrentCoupleId) ? query.CurrentCoupleId : null;
 
         var items = groups
             .Select(g => new MyGroupDto(

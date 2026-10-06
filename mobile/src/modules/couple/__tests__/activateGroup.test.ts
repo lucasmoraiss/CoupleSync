@@ -70,6 +70,23 @@ describe('activateGroup (ordem)', () => {
   });
 });
 
+describe('ficar sem grupo ativo (saiu do último grupo)', () => {
+  it('limpa tudo mas NÃO remonta as telas: sem grupo não há o que buscar, e a busca só mostraria um aviso de erro', async () => {
+    const steps: string[] = [];
+    const deps: ActivateGroupDeps = {
+      dropPendingCaptures: () => void steps.push('drop'),
+      saveSession: async () => void steps.push('session'),
+      cancelQueries: async () => void steps.push('cancel'),
+      clearGroupData: () => void steps.push('clear'),
+      remountScreens: () => void steps.push('remount'),
+    };
+
+    await activateGroup({ accessToken: 'access-0', refreshToken: 'refresh-0', coupleId: null }, deps);
+
+    expect(steps).toEqual(['drop', 'session', 'cancel', 'clear']);
+  });
+});
+
 describe('troca de grupo com as peças reais do app', () => {
   it('uma tela montada passa a mostrar só o grupo novo, buscado com o token novo', async () => {
     const client = createAppQueryClient();

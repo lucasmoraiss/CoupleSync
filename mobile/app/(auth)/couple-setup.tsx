@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -14,8 +14,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { coupleApiClient } from '@/services/apiClient';
 import { getApiErrorMessage } from '@/services/apiError';
 import { applyGroupSession } from '@/modules/couple/groupSession';
+import { useSessionStore } from '@/state/sessionStore';
 import { useMyGroups } from '@/modules/couple/useMyGroups';
-import { canAddGroup, groupCountText } from '@/modules/couple/groups';
+import { canAddGroup, groupChangeNotice, groupCountText } from '@/modules/couple/groups';
+import { isCaptureAllowedNow } from '@/modules/privacy/consentStore';
+import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { GroupList } from '@/components/GroupSwitcher';
 import { colors } from '@/theme';
 
@@ -32,12 +35,40 @@ export default function CoupleSetupScreen() {
   const hasGroups = (myGroups?.groups.length ?? 0) > 0;
   const mayAdd = canAddGroup(myGroups);
 
+  // O aparelho não sabe de grupo nenhum, mas o token pode já ser de um grupo válido (ex.: o app foi fechado antes
+  // de guardar o grupo depois do login). O servidor responde pelo grupo do token; se houver, é só seguir nele.
+  const sessionCoupleId = useSessionStore((state) => state.coupleId);
+  useEffect(() => {
+    if (sessionCoupleId) return;
+    let cancelled = false;
+    coupleApiClient
+      .getMyCouple()
+      .then(async ({ data }) => {
+        if (cancelled) return;
+        await useSessionStore.getState().setCoupleId(data.coupleId);
+        if (!cancelled) router.replace('/' as any);
+      })
+      .catch(() => undefined); // sem grupo no token: a pessoa escolhe, cria ou entra em um
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionCoupleId]);
+
+  // Quem já tinha grupo e passa a outro (criado ou no qual entrou) é avisado uma vez de que, com a captura ligada,
+  // as próximas notificações bancárias vão para o grupo novo. No primeiro grupo não há o que avisar.
+  const announceGroupChange = () => {
+    if (hasGroups && isCaptureAllowedNow()) {
+      showToastGlobal(groupChangeNotice(undefined, true), 'success', 6000);
+    }
+  };
+
   const handleCreate = async () => {
     setLoading(true);
     try {
       const { data } = await coupleApiClient.create();
       // O grupo novo passa a ser o ativo: guarda o token dele e esquece o que era do grupo anterior, se havia.
       await applyGroupSession({ accessToken: data.accessToken, refreshToken: data.refreshToken, coupleId: data.coupleId });
+      announceGroupChange();
       setCreatedCode(data.joinCode);
       setMode('create');
     } catch (err: any) {
@@ -58,6 +89,7 @@ export default function CoupleSetupScreen() {
       const { data } = await coupleApiClient.join({ joinCode: joinCode.trim().toUpperCase() });
       // O grupo em que entrou passa a ser o ativo: guarda o token dele e esquece o que era do grupo anterior.
       await applyGroupSession({ accessToken: data.accessToken, refreshToken: data.refreshToken, coupleId: data.coupleId });
+      announceGroupChange();
       router.replace('/' as any);
     } catch (err: any) {
       Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao entrar no casal. Tente novamente.'));

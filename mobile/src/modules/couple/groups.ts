@@ -78,3 +78,40 @@ export type AfterLeave = 'home' | 'setup';
 export function destinationAfterLeave(activeCoupleId: string | null | undefined): AfterLeave {
   return activeCoupleId ? 'home' : 'setup';
 }
+
+/** O seletor do painel só aparece para quem tem mais de um grupo: com um grupo só, o painel fica como sempre foi. */
+export function shouldShowGroupPill(response: MyGroupsResponse | null | undefined): boolean {
+  return !!response && response.groups.length > 1 && activeGroupOf(response) !== null;
+}
+
+/**
+ * Aviso mostrado uma vez, no momento em que o grupo ativo muda. Com a captura de notificações ligada, diz também
+ * para onde as próximas notificações bancárias vão (é o efeito da troca que o usuário não vê na tela).
+ */
+export function groupChangeNotice(groupName: string | null | undefined, captureOn: boolean): string {
+  if (!groupName) {
+    return captureOn
+      ? 'Você mudou de grupo. As notificações bancárias capturadas a partir de agora vão para o grupo ativo.'
+      : 'Você mudou de grupo.';
+  }
+  return captureOn
+    ? `Grupo ativo: ${groupName}. As notificações bancárias capturadas a partir de agora vão para este grupo.`
+    : `Grupo ativo: ${groupName}`;
+}
+
+export type MainAreaGate = 'wait' | 'login' | 'group-setup' | 'app';
+
+/**
+ * O que a área principal (abas com dados do grupo) faz: sem grupo ativo nenhuma tela de dados é montada, então
+ * nenhuma consulta de grupo sai com um token sem grupo.
+ */
+export function mainAreaGate(state: {
+  readonly hydrated: boolean;
+  readonly accessToken: string | null;
+  readonly coupleId: string | null;
+}): MainAreaGate {
+  if (!state.hydrated) return 'wait';
+  if (!state.accessToken) return 'login';
+  if (!state.coupleId) return 'group-setup';
+  return 'app';
+}

@@ -7,7 +7,10 @@ import {
   groupAccessibilityLabel,
   groupCountText,
   groupRoleText,
+  groupChangeNotice,
   leaveFollowUpText,
+  mainAreaGate,
+  shouldShowGroupPill,
 } from '../groups';
 import type { MyGroupResponse, MyGroupsResponse } from '@/types/api';
 
@@ -104,5 +107,57 @@ describe('sair de um grupo', () => {
     expect(destinationAfterLeave('g-own')).toBe('home');
     expect(destinationAfterLeave(null)).toBe('setup');
     expect(destinationAfterLeave(undefined)).toBe('setup');
+  });
+});
+
+describe('shouldShowGroupPill (seletor no painel)', () => {
+  it('quem tem um grupo só não vê o seletor: o painel fica como sempre foi', () => {
+    expect(shouldShowGroupPill(one)).toBe(false);
+  });
+
+  it('aparece a partir do segundo grupo', () => {
+    expect(shouldShowGroupPill(three)).toBe(true);
+  });
+
+  it('não aparece sem a lista ou sem grupo ativo', () => {
+    expect(shouldShowGroupPill(undefined)).toBe(false);
+    expect(shouldShowGroupPill({ ...three, activeCoupleId: null })).toBe(false);
+  });
+});
+
+describe('groupChangeNotice (aviso no momento em que o grupo ativo muda)', () => {
+  it('com a captura ligada avisa para onde as próximas notificações bancárias vão', () => {
+    expect(groupChangeNotice('Grupo com Bruno', true)).toBe(
+      'Grupo ativo: Grupo com Bruno. As notificações bancárias capturadas a partir de agora vão para este grupo.',
+    );
+  });
+
+  it('com a captura desligada só diz qual é o grupo ativo', () => {
+    expect(groupChangeNotice('Grupo com Bruno', false)).toBe('Grupo ativo: Grupo com Bruno');
+  });
+
+  it('sem saber o nome do grupo o aviso continua correto', () => {
+    expect(groupChangeNotice(undefined, true)).toBe(
+      'Você mudou de grupo. As notificações bancárias capturadas a partir de agora vão para o grupo ativo.',
+    );
+    expect(groupChangeNotice(undefined, false)).toBe('Você mudou de grupo.');
+  });
+});
+
+describe('mainAreaGate (as telas com dados do grupo só existem com um grupo ativo)', () => {
+  it('espera a sessão ser lida', () => {
+    expect(mainAreaGate({ hydrated: false, accessToken: 'a', coupleId: 'g' })).toBe('wait');
+  });
+
+  it('sem sessão vai para o login', () => {
+    expect(mainAreaGate({ hydrated: true, accessToken: null, coupleId: null })).toBe('login');
+  });
+
+  it('com sessão mas sem grupo ativo vai escolher ou criar um grupo, sem montar tela nenhuma de dados', () => {
+    expect(mainAreaGate({ hydrated: true, accessToken: 'a', coupleId: null })).toBe('group-setup');
+  });
+
+  it('com sessão e grupo ativo mostra o app', () => {
+    expect(mainAreaGate({ hydrated: true, accessToken: 'a', coupleId: 'g' })).toBe('app');
   });
 });

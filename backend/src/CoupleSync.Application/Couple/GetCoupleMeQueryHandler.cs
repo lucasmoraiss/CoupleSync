@@ -21,14 +21,14 @@ public sealed class GetCoupleMeQueryHandler
             throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        if (!user.ActiveCoupleId.HasValue)
+        if (!query.CoupleId.HasValue)
         {
             throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");
         }
 
-        var couple = await _coupleRepository.FindByIdWithMembersAsync(user.ActiveCoupleId.Value, cancellationToken);
+        var couple = await _coupleRepository.FindByIdWithMembersAsync(query.CoupleId.Value, cancellationToken);
 
-        // The active group is only a pointer: the group is shown to its members and to nobody else.
+        // The token only says which group the caller is working in: it is shown to its members and to nobody else.
         if (couple is null || !couple.HasMember(user.Id))
         {
             throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");

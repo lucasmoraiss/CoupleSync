@@ -5,8 +5,11 @@ using Microsoft.Extensions.Options;
 
 namespace CoupleSync.Application.Couples;
 
-/// <param name="CoupleId">The group to leave; null means the user's active group.</param>
-public sealed record LeaveCoupleCommand(Guid UserId, Guid? CoupleId = null);
+/// <param name="CoupleId">
+/// The group to leave: the one named in the route, or the group of the caller's token. Never the stored active
+/// group: a token issued before a switch elsewhere must leave the group its holder is looking at.
+/// </param>
+public sealed record LeaveCoupleCommand(Guid UserId, Guid? CoupleId);
 
 /// <summary>
 /// Fresh tokens for the user (the old refresh token no longer works) and the group that is active now:
@@ -54,7 +57,7 @@ public sealed class LeaveCoupleCommandHandler
             throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        var coupleId = command.CoupleId ?? user.ActiveCoupleId
+        var coupleId = command.CoupleId
             ?? throw new NotFoundException("COUPLE_NOT_FOUND", "Você não está em nenhum grupo no momento.");
 
         // Members are read after the lock, so two members leaving at once each see the other's exit: exactly one

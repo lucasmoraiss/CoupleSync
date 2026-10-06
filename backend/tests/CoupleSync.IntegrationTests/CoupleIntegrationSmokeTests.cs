@@ -200,6 +200,8 @@ public sealed class CoupleIntegrationSmokeTests
         var joinResponse = await clientB.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = created!.JoinCode });
         Assert.Equal(HttpStatusCode.OK, joinResponse.StatusCode);
 
+        // As the app does: from here on it uses the token that came with the creation (the one that names the group).
+        clientA.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", created.AccessToken);
         var meResponse = await clientA.GetAsync("/api/v1/couples/me");
         Assert.Equal(HttpStatusCode.OK, meResponse.StatusCode);
 
@@ -227,7 +229,7 @@ public sealed class CoupleIntegrationSmokeTests
 
     private sealed record AuthUserDto(Guid Id, string Email, string Name);
 
-    private sealed record CreateCoupleDto(Guid CoupleId, string JoinCode);
+    private sealed record CreateCoupleDto(Guid CoupleId, string JoinCode, string AccessToken = "");
 
     private sealed record JoinCoupleDto(Guid CoupleId, IReadOnlyCollection<CoupleMemberDto> Members);
 

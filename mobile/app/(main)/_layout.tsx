@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { useAnimatedStyle, withSpring, useSharedValue } from 'react-native-reanimated';
 import { useSessionStore } from '@/state/sessionStore';
 import { useGroupEpoch } from '@/state/groupEpoch';
+import { mainAreaGate } from '@/modules/couple/groups';
 import { useCaptureConsentSync } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
 import { registerPushToken } from '@/services/pushTokenService';
 import { colors } from '@/theme';
@@ -30,6 +31,7 @@ function AnimatedTabIcon({ name, color, size, focused }: { name: IoniconsName; c
 
 export default function MainLayout() {
   const accessToken = useSessionStore((s) => s.accessToken);
+  const coupleId = useSessionStore((s) => s.coupleId);
   // Muda a cada troca de grupo: todas as telas são remontadas e buscam os dados do grupo novo.
   const groupEpoch = useGroupEpoch((s) => s.epoch);
   const [hydrated, setHydrated] = useState(false);
@@ -39,23 +41,28 @@ export default function MainLayout() {
     setHydrated(true);
   }, []);
 
+  // Sem sessão: login. Com sessão mas sem grupo ativo (saiu do último grupo, foi removido): escolher ou criar um
+  // grupo. Nos dois casos nenhuma aba é montada, então nenhuma consulta de dados do grupo sai sem grupo.
+  const gate = mainAreaGate({ hydrated, accessToken, coupleId });
   useEffect(() => {
-    if (hydrated && !accessToken) {
+    if (gate === 'login') {
       router.replace('/login' as any);
+    } else if (gate === 'group-setup') {
+      router.replace('/(auth)/couple-setup' as any);
     }
-  }, [hydrated, accessToken]);
+  }, [gate]);
 
   // Captura de notificações só com o aceite do usuário (consentimento por usuário; ver useCaptureConsentSync).
   useCaptureConsentSync();
 
   // AC-007: Register FCM device token once authenticated
   useEffect(() => {
-    if (hydrated && accessToken) {
+    if (gate === 'app') {
       registerPushToken();
     }
-  }, [hydrated, accessToken]);
+  }, [gate]);
 
-  if (!hydrated || !accessToken) {
+  if (gate !== 'app') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator />

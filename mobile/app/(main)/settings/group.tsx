@@ -22,7 +22,8 @@ import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { GroupList } from '@/components/GroupSwitcher';
 import { applyGroupSession } from '@/modules/couple/groupSession';
 import { useMyGroups } from '@/modules/couple/useMyGroups';
-import { activeGroupOf, destinationAfterLeave, leaveFollowUpText } from '@/modules/couple/groups';
+import { activeGroupOf, destinationAfterLeave, groupChangeNotice, leaveFollowUpText } from '@/modules/couple/groups';
+import { isCaptureAllowedNow } from '@/modules/privacy/consentStore';
 import { describeJoinCodeValidity, isGroupOwner } from '@/modules/couple/group';
 import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
@@ -84,7 +85,7 @@ export default function GroupScreen() {
       });
       if (destinationAfterLeave(result.activeCoupleId) === 'home') {
         const next = myGroups?.groups.find((g) => g.coupleId === result.activeCoupleId);
-        showToastGlobal(next ? `Você saiu do grupo. Grupo ativo: ${next.name}` : 'Você saiu do grupo.', 'success');
+        showToastGlobal(`Você saiu do grupo. ${groupChangeNotice(next?.name, isCaptureAllowedNow())}`, 'success', 6000);
         router.replace('/' as any);
       } else {
         router.replace('/(auth)/couple-setup' as any);

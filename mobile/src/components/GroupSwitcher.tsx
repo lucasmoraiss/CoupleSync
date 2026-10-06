@@ -10,14 +10,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { coupleApiClient } from '@/services/apiClient';
 import { getApiErrorMessage } from '@/services/apiError';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
+import { isCaptureAllowedNow } from '@/modules/privacy/consentStore';
 import { applyGroupSession } from '@/modules/couple/groupSession';
 import { useMyGroups } from '@/modules/couple/useMyGroups';
 import {
   activeGroupOf,
   canAddGroup,
   groupAccessibilityLabel,
+  groupChangeNotice,
   groupCountText,
   groupRoleText,
+  shouldShowGroupPill,
 } from '@/modules/couple/groups';
 import { colors } from '@/theme';
 import type { MyGroupResponse } from '@/types/api';
@@ -32,7 +35,8 @@ function useSwitchGroup(onSwitched?: () => void) {
     },
     onSuccess: (group) => {
       onSwitched?.();
-      showToastGlobal(`Grupo ativo: ${group.name}`, 'success');
+      // Dito uma vez, na hora da troca: com a captura ligada, as próximas notificações bancárias vão para este grupo.
+      showToastGlobal(groupChangeNotice(group.name, isCaptureAllowedNow()), 'success', 6000);
       router.replace('/' as any);
     },
     onError: (err) => Alert.alert('Erro', getApiErrorMessage(err, 'Não foi possível trocar de grupo.')),
@@ -103,8 +107,9 @@ export function GroupSwitcher() {
   const [open, setOpen] = useState(false);
   const active = activeGroupOf(data);
 
-  // Sem a lista (servidor antigo, sem rede) ou sem grupo ativo não há o que mostrar aqui.
-  if (!data || !active) return null;
+  // Só para quem tem mais de um grupo: com um grupo só o painel fica como sempre foi (criar ou entrar em outro
+  // grupo fica na tela do grupo, em Configurações).
+  if (!shouldShowGroupPill(data) || !active) return null;
 
   return (
     <>

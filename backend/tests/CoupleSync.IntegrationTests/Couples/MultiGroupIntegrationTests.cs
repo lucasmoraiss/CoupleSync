@@ -550,6 +550,77 @@ public sealed class MultiGroupIntegrationTests
         }
     }
 
+    /// <summary>
+    /// A token issued before a switch (a second device, or a switch whose answer was lost) still names the old
+    /// group. Every group action taken with it must act on the group that token shows, never on the one that
+    /// became active elsewhere.
+    /// </summary>
+    [Fact]
+    public async Task ATokenIssuedBeforeASwitch_ActsOnItsOwnGroup_NotOnTheOneThatBecameActiveElsewhere()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        var ana = await RegisterAsync(factory, "Ana");
+        var shown = await CreateGroupAsync(ana);          // the group this "device" keeps showing
+        var bruno = await RegisterAsync(factory, "Bruno");
+        await JoinAsync(bruno, shown);
+        var staleToken = ana.AccessToken;                 // claim: shown
+        var elsewhere = await CreateGroupAsync(ana);      // another device: Ana alone in a new group, now the active one
+        var carla = await RegisterAsync(factory, "Carla");
+        await JoinAsync(carla, elsewhere);
+        using var device = factory.CreateClient();
+        device.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", staleToken);
+
+        var me = await device.GetFromJsonAsync<JsonElement>("/api/v1/couples/me", Json);
+        Assert.Equal(shown.Id, me.GetProperty("coupleId").GetGuid());
+        var groups = await device.GetFromJsonAsync<JsonElement>("/api/v1/couples", Json);
+        Assert.Equal(shown.Id, groups.GetProperty("activeCoupleId").GetGuid());
+
+        var renewed = await device.PostAsJsonAsync("/api/v1/couples/join-code", new { });
+        Assert.Equal(HttpStatusCode.OK, renewed.StatusCode);
+        var newCode = (await renewed.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("joinCode").GetString()!;
+
+        // Carla is in the other group: removing "a member" from the screen of this group cannot touch her.
+        Assert.Equal(HttpStatusCode.NotFound, (await device.DeleteAsync($"/api/v1/couples/members/{carla.UserId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await device.DeleteAsync($"/api/v1/couples/members/{bruno.UserId}")).StatusCode);
+
+        var leave = await device.PostAsJsonAsync("/api/v1/couples/leave", new { });
+        Assert.Equal(HttpStatusCode.OK, leave.StatusCode);
+        // She left the group the token named; the group active elsewhere is untouched and stays active.
+        Assert.Equal(elsewhere.Id, (await leave.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("activeCoupleId").GetGuid());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Empty(await db.CoupleMembers.Where(m => m.CoupleId == shown.Id).ToListAsync());
+        Assert.Equal(
+            new[] { ana.UserId, carla.UserId }.Order(),
+            (await db.CoupleMembers.Where(m => m.CoupleId == elsewhere.Id).Select(m => m.UserId).ToListAsync()).Order());
+        var groupsById = await db.Couples.ToDictionaryAsync(c => c.Id);
+        Assert.Equal(newCode, groupsById[shown.Id].JoinCode);
+        Assert.Equal(elsewhere.Code, groupsById[elsewhere.Id].JoinCode);
+        Assert.Equal(ana.UserId, groupsById[elsewhere.Id].OwnerUserId);
+        Assert.Equal(elsewhere.Id, (await db.Users.SingleAsync(u => u.Id == ana.UserId)).ActiveCoupleId);
+    }
+
+    [Fact]
+    public async Task ATokenWithoutAGroup_GetsNotFoundOnTheGroupActions_EvenIfAGroupBecameActiveElsewhere()
+    {
+        await using var factory = new TransactionWebApplicationFactory();
+        var ana = await RegisterAsync(factory, "Ana");
+        var groupless = ana.AccessToken;                  // issued at sign-up: no group claim
+        var group = await CreateGroupAsync(ana);
+        using var device = factory.CreateClient();
+        device.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", groupless);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await device.GetAsync("/api/v1/couples/me")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await device.PostAsJsonAsync("/api/v1/couples/join-code", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await device.DeleteAsync($"/api/v1/couples/members/{Guid.NewGuid()}")).StatusCode);
+        var leave = await device.PostAsJsonAsync("/api/v1/couples/leave", new { });
+        Assert.Equal(HttpStatusCode.NotFound, leave.StatusCode);
+        Assert.Equal("COUPLE_NOT_FOUND", await CodeOf(leave));
+
+        Assert.Equal([group.Id], GroupIdsOf(await MyGroupsAsync(ana)));
+    }
+
     [Fact]
     public async Task MembershipRows_MirrorTheGroupsOwnerAndMembers()
     {

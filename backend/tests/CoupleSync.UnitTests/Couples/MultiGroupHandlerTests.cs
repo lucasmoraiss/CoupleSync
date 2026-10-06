@@ -112,7 +112,7 @@ public sealed class MultiGroupHandlerTests
     [Fact]
     public async Task Leave_TheActiveGroup_ActivatesTheOldestRemainingGroup_AndKeepsTheDevicesUnderIt()
     {
-        var result = await Leave.HandleAsync(new LeaveCoupleCommand(_ana.Id), default);
+        var result = await Leave.HandleAsync(new LeaveCoupleCommand(_ana.Id, _shared.Id), default);
 
         Assert.False(_shared.HasMember(_ana.Id));
         Assert.Equal(_anas.Id, result.ActiveCoupleId);
@@ -154,7 +154,7 @@ public sealed class MultiGroupHandlerTests
     [Fact]
     public async Task Remove_FromTheMembersActiveGroup_LeavesThemWithNoActiveGroup_EvenWithOtherGroups()
     {
-        await Remove.HandleAsync(new RemoveCoupleMemberCommand(_bruno.Id, _ana.Id), default);
+        await Remove.HandleAsync(new RemoveCoupleMemberCommand(_bruno.Id, _ana.Id, _shared.Id), default);
 
         Assert.False(_shared.HasMember(_ana.Id));
         Assert.True(_anas.HasMember(_ana.Id));
@@ -170,7 +170,7 @@ public sealed class MultiGroupHandlerTests
     {
         _ana.SetActiveCouple(_anas.Id, T0);
 
-        await Remove.HandleAsync(new RemoveCoupleMemberCommand(_bruno.Id, _ana.Id), default);
+        await Remove.HandleAsync(new RemoveCoupleMemberCommand(_bruno.Id, _ana.Id, _shared.Id), default);
 
         Assert.False(_shared.HasMember(_ana.Id));
         Assert.Equal(_anas.Id, _ana.ActiveCoupleId);
@@ -179,14 +179,24 @@ public sealed class MultiGroupHandlerTests
     }
 
     [Fact]
-    public async Task Remove_ActsOnTheOwnersActiveGroupOnly()
+    public async Task Remove_ActsOnTheGroupOfTheToken_WhereOwningAnotherGroupGivesNoRights()
     {
-        // Ana owns her own group, but her active group is the shared one, where she is not the owner.
+        // Ana owns her own group, but her token is for the shared one, where she is not the owner.
         var ex = await Assert.ThrowsAsync<ForbiddenException>(
-            () => Remove.HandleAsync(new RemoveCoupleMemberCommand(_ana.Id, _bruno.Id), default));
+            () => Remove.HandleAsync(new RemoveCoupleMemberCommand(_ana.Id, _bruno.Id, _shared.Id), default));
 
         Assert.Equal("NOT_COUPLE_OWNER", ex.Code);
         Assert.True(_shared.HasMember(_bruno.Id));
+    }
+
+    [Fact]
+    public async Task Remove_ByNonOwner_IsRefusedBeforeAnyoneIsLocked()
+    {
+        var ex = await Assert.ThrowsAsync<ForbiddenException>(
+            () => Remove.HandleAsync(new RemoveCoupleMemberCommand(_ana.Id, _bruno.Id, _shared.Id), default));
+
+        Assert.Equal("NOT_COUPLE_OWNER", ex.Code);
+        Assert.Empty(_couples.Steps); // no transaction, no lock on the other user's row
     }
 
     [Fact]
@@ -243,14 +253,14 @@ public sealed class MultiGroupHandlerTests
     }
 
     [Fact]
-    public async Task MyGroups_ReturnsOnlyTheUsersGroups_OldestFirst_AndIgnoresAStaleActivePointer()
+    public async Task MyGroups_ReturnsOnlyTheUsersGroups_OldestFirst_AndTheActiveOneIsTheTokensGroup()
     {
         var brunos = Couple.Create("BRUNO123", T0);
         brunos.AddMember(_bruno, T0);
         _couples.Couples.Add(brunos);
         var handler = new GetMyGroupsQueryHandler(_couples);
 
-        var result = await handler.HandleAsync(new GetMyGroupsQuery(_ana.Id), default);
+        var result = await handler.HandleAsync(new GetMyGroupsQuery(_ana.Id, _shared.Id), default);
 
         Assert.Equal([_anas.Id, _shared.Id], result.Groups.Select(g => g.CoupleId));
         Assert.Equal(_shared.Id, result.ActiveCoupleId);
@@ -258,24 +268,33 @@ public sealed class MultiGroupHandlerTests
         Assert.Equal([true, false], result.Groups.Select(g => g.IsOwner));
         Assert.Equal(User.MaxGroups, result.MaxGroups);
 
-        _ana.SetActiveCouple(brunos.Id, T0); // a pointer to a group she is not in grants and shows nothing
-        var stale = await handler.HandleAsync(new GetMyGroupsQuery(_ana.Id), default);
+        // A token for another group of hers (issued before a switch elsewhere): that one is the active one here,
+        // whatever the stored active group says.
+        var other = await handler.HandleAsync(new GetMyGroupsQuery(_ana.Id, _anas.Id), default);
+        Assert.Equal(_anas.Id, other.ActiveCoupleId);
+        Assert.Equal([true, false], other.Groups.Select(g => g.IsActive));
+
+        // A token naming a group she is not in grants and shows nothing.
+        var stale = await handler.HandleAsync(new GetMyGroupsQuery(_ana.Id, brunos.Id), default);
         Assert.Null(stale.ActiveCoupleId);
         Assert.DoesNotContain(stale.Groups, g => g.CoupleId == brunos.Id);
         Assert.DoesNotContain(stale.Groups, g => g.IsActive);
     }
 
     [Fact]
-    public async Task CoupleMe_WithAnActivePointerToAGroupTheUserIsNotIn_IsNotFound()
+    public async Task CoupleMe_ForATokenGroupTheUserIsNotIn_IsNotFound_AndForTheirOwnShowsThatGroup()
     {
         var brunos = Couple.Create("BRUNO123", T0);
         brunos.AddMember(_bruno, T0);
         _couples.Couples.Add(brunos);
-        _ana.SetActiveCouple(brunos.Id, T0);
 
         var ex = await Assert.ThrowsAsync<NotFoundException>(
-            () => new GetCoupleMeQueryHandler(_couples).HandleAsync(new GetCoupleMeQuery(_ana.Id), default));
+            () => new GetCoupleMeQueryHandler(_couples).HandleAsync(new GetCoupleMeQuery(_ana.Id, brunos.Id), default));
         Assert.Equal("COUPLE_NOT_FOUND", ex.Code);
+
+        // The stored active group is the shared one; a token for her own group shows her own group.
+        var own = await new GetCoupleMeQueryHandler(_couples).HandleAsync(new GetCoupleMeQuery(_ana.Id, _anas.Id), default);
+        Assert.Equal(_anas.Id, own.CoupleId);
     }
 
     [Theory]

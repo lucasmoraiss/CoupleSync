@@ -50,7 +50,7 @@ public sealed class CouplesController : ControllerBase
     public async Task<ActionResult<MyGroupsResponse>> MyGroups(CancellationToken cancellationToken)
     {
         var result = await _getMyGroupsHandler.HandleAsync(
-            new GetMyGroupsQuery(GetAuthenticatedUserId()),
+            new GetMyGroupsQuery(GetAuthenticatedUserId(), GetTokenCoupleId()),
             cancellationToken);
 
         return Ok(new MyGroupsResponse(
@@ -118,7 +118,7 @@ public sealed class CouplesController : ControllerBase
     public async Task<ActionResult<GetCoupleMeResponse>> Me(CancellationToken cancellationToken)
     {
         var result = await _getCoupleMeHandler.HandleAsync(
-            new GetCoupleMeQuery(GetAuthenticatedUserId()),
+            new GetCoupleMeQuery(GetAuthenticatedUserId(), GetTokenCoupleId()),
             cancellationToken);
 
         return Ok(new GetCoupleMeResponse(
@@ -137,13 +137,13 @@ public sealed class CouplesController : ControllerBase
     public async Task<ActionResult<LeaveCoupleResponse>> Leave(CancellationToken cancellationToken)
     {
         var result = await _leaveCoupleHandler.HandleAsync(
-            new LeaveCoupleCommand(GetAuthenticatedUserId()),
+            new LeaveCoupleCommand(GetAuthenticatedUserId(), GetTokenCoupleId()),
             cancellationToken);
 
         return Ok(new LeaveCoupleResponse(result.AccessToken, result.RefreshToken, result.ActiveCoupleId));
     }
 
-    /// <summary>Leaves one specific group of the caller's (the route above leaves the active one).</summary>
+    /// <summary>Leaves one specific group of the caller's (the route above leaves the group of the caller's token).</summary>
     [HttpPost("{coupleId:guid}/leave")]
     [ProducesResponseType(typeof(LeaveCoupleResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -166,7 +166,7 @@ public sealed class CouplesController : ControllerBase
     public async Task<IActionResult> RemoveMember(Guid memberUserId, CancellationToken cancellationToken)
     {
         await _removeMemberHandler.HandleAsync(
-            new RemoveCoupleMemberCommand(GetAuthenticatedUserId(), memberUserId),
+            new RemoveCoupleMemberCommand(GetAuthenticatedUserId(), memberUserId, GetTokenCoupleId()),
             cancellationToken);
 
         return NoContent();
@@ -180,7 +180,7 @@ public sealed class CouplesController : ControllerBase
     public async Task<ActionResult<RegenerateJoinCodeResponse>> RegenerateJoinCode(CancellationToken cancellationToken)
     {
         var result = await _regenerateJoinCodeHandler.HandleAsync(
-            new RegenerateJoinCodeCommand(GetAuthenticatedUserId()),
+            new RegenerateJoinCodeCommand(GetAuthenticatedUserId(), GetTokenCoupleId()),
             cancellationToken);
 
         return Ok(new RegenerateJoinCodeResponse(result.JoinCode, result.JoinCodeExpiresAtUtc));
@@ -196,6 +196,16 @@ public sealed class CouplesController : ControllerBase
         }
 
         return userId;
+    }
+
+    /// <summary>
+    /// The group this request is about: the one in the caller's token, exactly as on the data routes (null when the
+    /// token has none). The handlers confirm it against the membership table. The stored active group is never
+    /// used here: it may already be another one (a switch made on another device).
+    /// </summary>
+    private Guid? GetTokenCoupleId()
+    {
+        return Guid.TryParse(User.FindFirstValue("couple_id"), out var coupleId) ? coupleId : null;
     }
 
     private static CoupleMemberResponse ToMemberResponse(CoupleMemberDto member)

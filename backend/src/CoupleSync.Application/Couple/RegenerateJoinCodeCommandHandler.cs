@@ -3,7 +3,8 @@ using CoupleSync.Application.Common.Interfaces;
 
 namespace CoupleSync.Application.Couples;
 
-public sealed record RegenerateJoinCodeCommand(Guid UserId);
+/// <param name="CoupleId">The group of the caller's token (null when the token has none).</param>
+public sealed record RegenerateJoinCodeCommand(Guid UserId, Guid? CoupleId);
 
 public sealed record RegenerateJoinCodeResult(string JoinCode, DateTime JoinCodeExpiresAtUtc);
 
@@ -39,12 +40,8 @@ public sealed class RegenerateJoinCodeCommandHandler
             throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        if (!user.ActiveCoupleId.HasValue)
-        {
-            throw new NotFoundException("COUPLE_NOT_FOUND", "Você não está em nenhum grupo no momento.");
-        }
-
-        var coupleId = user.ActiveCoupleId.Value;
+        var coupleId = command.CoupleId
+            ?? throw new NotFoundException("COUPLE_NOT_FOUND", "Você não está em nenhum grupo no momento.");
 
         // Ownership is read after the lock: an owner whose exit is being committed no longer renews the code
         // (otherwise an emptied group could end with a valid code).

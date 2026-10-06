@@ -1,5 +1,4 @@
 using CoupleSync.Application.Auth;
-using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 
@@ -26,18 +25,5 @@ internal static class SessionTokens
             RefreshToken.CreateForUser(user.Id, tokenHasher.Hash(refreshTokenRaw), now.AddDays(refreshTokenTtlDays), now),
             cancellationToken);
         return (accessToken, refreshTokenRaw);
-    }
-}
-
-internal static class GroupLimit
-{
-    public static void EnsureRoomForOneMore(int currentGroupCount)
-    {
-        if (currentGroupCount >= User.MaxGroups)
-        {
-            throw new ConflictException(
-                "GROUP_LIMIT_REACHED",
-                $"Você já participa de {User.MaxGroups} grupos, que é o máximo. Saia de um deles para entrar em outro.");
-        }
     }
 }

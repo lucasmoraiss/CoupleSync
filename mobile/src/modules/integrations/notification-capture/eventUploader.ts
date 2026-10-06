@@ -2,6 +2,7 @@
 // Uses the existing axiosInstance (auth interceptor already attached).
 import axiosInstance from '@/services/apiClient';
 import { registerUserDataCleaner } from '@/state/userData';
+import { getSessionEpoch, useSessionStore } from '@/state/sessionStore';
 import { isCaptureAllowedNow } from '@/modules/privacy/consentStore';
 import { classifyNotification } from './notificationParser';
 import { buildIngestRequest, type IngestNotificationEventRequest } from './ingestRequest';
@@ -19,8 +20,32 @@ export interface RawNotificationEvent {
 // ── Retry queue entry ────────────────────────────────────────────────────────
 interface QueueEntry {
   request: IngestNotificationEventRequest;
+  /** Grupo e sessão em que a notificação foi capturada: só é reenviada enquanto forem os mesmos. */
+  binding: CaptureBinding;
   attempts: number;
   nextRetryAt: number;
+}
+
+/**
+ * A quem pertence uma notificação capturada: o grupo ativo e a sessão daquele instante. O servidor lança o evento
+ * no grupo do token que acompanha o envio; por isso um evento capturado com o grupo A ativo nunca pode ser enviado
+ * depois que o grupo ativo (ou o usuário) mudou. A época da sessão sobe em login, logout e troca de grupo; renovar
+ * o token não a altera.
+ */
+interface CaptureBinding {
+  readonly coupleId: string;
+  readonly sessionEpoch: number;
+}
+
+/** O vínculo de agora, ou null quando não há grupo ativo (nada é capturado sem grupo). */
+function currentBinding(): CaptureBinding | null {
+  const { coupleId } = useSessionStore.getState();
+  return coupleId ? { coupleId, sessionEpoch: getSessionEpoch() } : null;
+}
+
+function stillBound(binding: CaptureBinding): boolean {
+  const now = currentBinding();
+  return now !== null && now.coupleId === binding.coupleId && now.sessionEpoch === binding.sessionEpoch;
 }
 
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000] as const;
@@ -50,6 +75,9 @@ async function flushQueue(): Promise<void> {
     return;
   }
 
+  // O grupo ativo (ou a sessão) mudou desde a captura: esses eventos são descartados, nunca enviados ao grupo novo.
+  retryQueue = retryQueue.filter((e) => stillBound(e.binding));
+
   const generation = queueGeneration;
   const now = Date.now();
   const due = retryQueue.filter((e) => e.nextRetryAt <= now);
@@ -62,6 +90,7 @@ async function flushQueue(): Promise<void> {
         await postEvent(entry.request);
         // Success — entry dropped from queue
       } catch {
+        if (!stillBound(entry.binding)) return; // o grupo mudou durante o envio: não volta para a fila
         const nextAttempt = entry.attempts + 1;
         if (nextAttempt >= MAX_ATTEMPTS) {
           // Exhausted retries — drop silently; integration status endpoint on backend
@@ -71,6 +100,7 @@ async function flushQueue(): Promise<void> {
         const delayMs = RETRY_DELAYS_MS[Math.min(entry.attempts, RETRY_DELAYS_MS.length - 1)];
         still.push({
           request: entry.request,
+          binding: entry.binding,
           attempts: nextAttempt,
           nextRetryAt: Date.now() + delayMs,
         });
@@ -115,6 +145,13 @@ export async function handleRawNotificationEvent(
     return false; // Not an expense — nothing leaves the device
   }
 
+  // Lido aqui, no instante da captura e sem nenhuma espera antes do envio: o token que acompanha a requisição é o
+  // deste mesmo grupo. Sem grupo ativo não há onde lançar.
+  const binding = currentBinding();
+  if (!binding) {
+    return false;
+  }
+
   const request = buildIngestRequest(decision.event);
   const generation = queueGeneration;
 
@@ -123,10 +160,12 @@ export async function handleRawNotificationEvent(
     return true;
   } catch {
     if (generation !== queueGeneration) return true; // saiu da conta durante o envio: não enfileira
+    if (!stillBound(binding)) return true; // o grupo mudou durante o envio: não enfileira para o grupo novo
     // Enqueue for retry (AC-009)
     const delayMs = RETRY_DELAYS_MS[0];
     retryQueue.push({
       request,
+      binding,
       attempts: 1,
       nextRetryAt: Date.now() + delayMs,
     });
@@ -161,14 +200,18 @@ export function getPendingRetryCount(): number {
  */
 export async function uploadEvent(request: IngestNotificationEventRequest): Promise<void> {
   if (!isCaptureAllowedNow()) return;
+  const binding = currentBinding();
+  if (!binding) return;
   const generation = queueGeneration;
   try {
     await postEvent(request);
   } catch {
     if (generation !== queueGeneration) return; // saiu da conta durante o envio
+    if (!stillBound(binding)) return; // o grupo mudou durante o envio
     const delayMs = RETRY_DELAYS_MS[0];
     retryQueue.push({
       request,
+      binding,
       attempts: 1,
       nextRetryAt: Date.now() + delayMs,
     });

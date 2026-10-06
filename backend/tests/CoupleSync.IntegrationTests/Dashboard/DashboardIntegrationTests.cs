@@ -165,9 +165,8 @@ public sealed class DashboardIntegrationTests
         var createCouple = await client.PostAsJsonAsync("/api/v1/couples", new { });
         Assert.Equal(HttpStatusCode.Created, createCouple.StatusCode);
 
-        // Get couple join code
-        var coupleResp = await client.GetAsync("/api/v1/couples/me");
-        var coupleData = await coupleResp.Content.ReadFromJsonAsync<CoupleResponseDto>();
+        // The join code comes with the creation (the sign-up token names no group, so /couples/me would not show one).
+        var coupleData = await createCouple.Content.ReadFromJsonAsync<CoupleResponseDto>();
 
         // Re-login partner A to get token with couple_id
         client.DefaultRequestHeaders.Authorization = null;

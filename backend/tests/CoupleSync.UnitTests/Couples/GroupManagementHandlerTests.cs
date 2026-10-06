@@ -52,7 +52,7 @@ public sealed class GroupManagementHandlerTests
     [Fact]
     public async Task Leave_DetachesUser_ReplacesRefreshToken_AndStopsDeliveries()
     {
-        var result = await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_member.Id), default);
+        var result = await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_member.Id, _group.Id), default);
 
         Assert.Null(_member.ActiveCoupleId);
         Assert.False(_group.HasMember(_member.Id));
@@ -67,7 +67,7 @@ public sealed class GroupManagementHandlerTests
     [Fact]
     public async Task Leave_WhenOwner_PassesOwnershipToOldestRemaining()
     {
-        await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_owner.Id), default);
+        await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_owner.Id, _group.Id), default);
 
         Assert.Equal(_member.Id, _group.OwnerUserId);
     }
@@ -79,7 +79,7 @@ public sealed class GroupManagementHandlerTests
         _couples.Users.Add(loner);
 
         var ex = await Assert.ThrowsAsync<NotFoundException>(
-            () => LeaveHandler(T0).HandleAsync(new LeaveCoupleCommand(loner.Id), default));
+            () => LeaveHandler(T0).HandleAsync(new LeaveCoupleCommand(loner.Id, null), default));
         Assert.Equal("COUPLE_NOT_FOUND", ex.Code);
     }
 
@@ -88,7 +88,7 @@ public sealed class GroupManagementHandlerTests
     [Fact]
     public async Task Remove_ByOwner_DetachesMember_RevokesRefreshToken_AndStopsDeliveries()
     {
-        await RemoveHandler(T0.AddDays(2)).HandleAsync(new RemoveCoupleMemberCommand(_owner.Id, _member.Id), default);
+        await RemoveHandler(T0.AddDays(2)).HandleAsync(new RemoveCoupleMemberCommand(_owner.Id, _member.Id, _group.Id), default);
 
         Assert.Null(_member.ActiveCoupleId);
         Assert.Equal([_member.Id], _couples.RevokedRefreshTokenUserIds);
@@ -100,7 +100,7 @@ public sealed class GroupManagementHandlerTests
     public async Task Remove_ByNonOwner_IsForbidden_AndChangesNothing()
     {
         var ex = await Assert.ThrowsAsync<ForbiddenException>(
-            () => RemoveHandler(T0).HandleAsync(new RemoveCoupleMemberCommand(_member.Id, _owner.Id), default));
+            () => RemoveHandler(T0).HandleAsync(new RemoveCoupleMemberCommand(_member.Id, _owner.Id, _group.Id), default));
 
         Assert.Equal("NOT_COUPLE_OWNER", ex.Code);
         Assert.Equal(_group.Id, _owner.ActiveCoupleId);
@@ -111,7 +111,7 @@ public sealed class GroupManagementHandlerTests
     public async Task Remove_Self_IsRejected()
     {
         var ex = await Assert.ThrowsAsync<BadRequestException>(
-            () => RemoveHandler(T0).HandleAsync(new RemoveCoupleMemberCommand(_owner.Id, _owner.Id), default));
+            () => RemoveHandler(T0).HandleAsync(new RemoveCoupleMemberCommand(_owner.Id, _owner.Id, _group.Id), default));
         Assert.Equal("CANNOT_REMOVE_SELF", ex.Code);
     }
 
@@ -122,7 +122,7 @@ public sealed class GroupManagementHandlerTests
         _couples.Users.Add(stranger);
 
         var ex = await Assert.ThrowsAsync<NotFoundException>(
-            () => RemoveHandler(T0).HandleAsync(new RemoveCoupleMemberCommand(_owner.Id, stranger.Id), default));
+            () => RemoveHandler(T0).HandleAsync(new RemoveCoupleMemberCommand(_owner.Id, stranger.Id, _group.Id), default));
         Assert.Equal("MEMBER_NOT_FOUND", ex.Code);
     }
 
@@ -133,7 +133,7 @@ public sealed class GroupManagementHandlerTests
     {
         var now = T0.AddDays(3);
 
-        var result = await RegenerateHandler(now).HandleAsync(new RegenerateJoinCodeCommand(_owner.Id), default);
+        var result = await RegenerateHandler(now).HandleAsync(new RegenerateJoinCodeCommand(_owner.Id, _group.Id), default);
 
         Assert.Equal("NEWCODE8", result.JoinCode);
         Assert.Equal(now.AddDays(7), result.JoinCodeExpiresAtUtc);
@@ -145,7 +145,7 @@ public sealed class GroupManagementHandlerTests
     public async Task Regenerate_ByNonOwner_IsForbidden_AndKeepsTheCode()
     {
         var ex = await Assert.ThrowsAsync<ForbiddenException>(
-            () => RegenerateHandler(T0).HandleAsync(new RegenerateJoinCodeCommand(_member.Id), default));
+            () => RegenerateHandler(T0).HandleAsync(new RegenerateJoinCodeCommand(_member.Id, _group.Id), default));
 
         Assert.Equal("NOT_COUPLE_OWNER", ex.Code);
         Assert.Equal("ABC123", _group.JoinCode);
@@ -183,7 +183,7 @@ public sealed class GroupManagementHandlerTests
     [Fact]
     public async Task Join_WithRenewedCode_OldCodeIsGone()
     {
-        await RegenerateHandler(T0.AddDays(1)).HandleAsync(new RegenerateJoinCodeCommand(_owner.Id), default);
+        await RegenerateHandler(T0.AddDays(1)).HandleAsync(new RegenerateJoinCodeCommand(_owner.Id, _group.Id), default);
         var joiner = NewUser("joiner");
         _couples.Users.Add(joiner);
 
@@ -198,8 +198,8 @@ public sealed class GroupManagementHandlerTests
     [Fact]
     public async Task Join_AfterEveryoneLeft_IsRefusedBecauseCodeIsExpired()
     {
-        await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_member.Id), default);
-        await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_owner.Id), default);
+        await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_member.Id, _group.Id), default);
+        await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_owner.Id, _group.Id), default);
         var joiner = NewUser("joiner");
         _couples.Users.Add(joiner);
 

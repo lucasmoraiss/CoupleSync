@@ -29,12 +29,15 @@ export interface ActivateGroupDeps {
  * 2. A sessão passa para o grupo novo.
  * 3. Só então as consultas em andamento são canceladas e o cache é esvaziado: uma resposta pedida com o token
  *    do grupo anterior não entra no cache depois da limpeza, e nada é buscado de novo com o token antigo.
- * 4. As telas são remontadas por último, com o cache vazio e o token novo.
+ * 4. As telas são remontadas por último, com o cache vazio e o token novo. Só quando há um grupo novo: quem ficou
+ *    sem grupo ativo vai para a escolha de grupo, e remontar as telas de dados só as faria buscar sem grupo.
  */
 export async function activateGroup(session: GroupSession, deps: ActivateGroupDeps): Promise<void> {
   deps.dropPendingCaptures();
   await deps.saveSession(session);
   await deps.cancelQueries();
   deps.clearGroupData();
-  deps.remountScreens();
+  if (session.coupleId) {
+    deps.remountScreens();
+  }
 }
