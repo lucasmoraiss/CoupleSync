@@ -76,7 +76,9 @@ export default function MainLayout() {
         },
         tabBarActiveTintColor: colors.primaryLight,
         tabBarInactiveTintColor: colors.textDisabled,
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
+        // Sete abas: sem margem lateral e com letra menor, o rótulo mais longo ("Transações") cabe inteiro.
+        tabBarItemStyle: { paddingHorizontal: 0 },
+        tabBarLabelStyle: { fontSize: 9.5, fontWeight: '600', letterSpacing: -0.2 },
         tabBarAllowFontScaling: false,
       }}
     >
