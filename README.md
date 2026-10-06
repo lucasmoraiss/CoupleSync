@@ -32,7 +32,7 @@ flowchart LR
 | API | C#, .NET 8, ASP.NET Core, Entity Framework Core, FluentValidation | [`backend`](backend/README.md) |
 | Aplicativo | TypeScript, React Native 0.76, Expo SDK 52, TanStack Query, Zustand | [`mobile`](mobile/README.md) |
 | Banco | PostgreSQL 16 | migrations em `backend/src/CoupleSync.Infrastructure/Migrations` |
-| Testes | xUnit (592 testes), Jest (102 testes) | `backend/tests`, `mobile/src/**/__tests__` |
+| Testes | xUnit (592 testes), Jest (111 testes) | `backend/tests`, `mobile/src/**/__tests__` |
 | Entrega | Docker, GitHub Actions, Render, Neon | `backend/Dockerfile`, `.github/workflows`, `render.yaml` |
 
 A API é um monólito modular em quatro projetos (`Domain`, `Application`, `Infrastructure`, `Api`). Os detalhes, a correspondência com o padrão MVC e as decisões estão em [Arquitetura](docs/pit/05-arquitetura.md) e nos [ADRs](docs/adr/README.md).
@@ -71,7 +71,7 @@ dotnet test backend/CoupleSync.sln      # API: 592 testes, cerca de 1 minuto
 
 cd mobile
 npm ci
-npm test                                # aplicativo: 102 testes
+npm test                                # aplicativo: 111 testes
 npx tsc --noEmit                        # verificação de tipos
 ```
 

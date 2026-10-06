@@ -17,7 +17,7 @@ Itens resolvidos e conferidos no código nesta data:
 - ✅ **Chave JWT fora do `appsettings.json`** → o valor versionado é vazio e a API não inicia sem `JWT__SECRET` com 32 caracteres ou mais (`JwtSecretGuard`).
 - ✅ **Captura de notificações — só despesas, sem texto bruto** → apenas compras, pagamentos e Pix enviados viram transação; o app envia banco, valor, moeda, data/hora e estabelecimento, e não envia o texto da notificação.
 - ✅ **Renovação automática de sessão no app** → no primeiro 401 o cliente chama `POST /auth/refresh` uma vez e repete a requisição (`mobile/src/services/authRefresh.ts`).
-- ✅ **Testes de unidade no app** → `npm test` (Jest) cobre o parser de notificações, o corpo enviado ao servidor, a confirmação do extrato e a renovação de sessão (102 testes).
+- ✅ **Testes de unidade no app** → `npm test` (Jest) cobre o parser de notificações, o corpo enviado ao servidor, a confirmação do extrato e a renovação de sessão (111 testes).
 
 **Verificação**: a suíte do back-end tem 592 testes (411 de unidade, 180 de integração, 1 de ponta a ponta), todos passando em 05/Out/2026.
 

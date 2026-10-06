@@ -15,6 +15,7 @@ Neste projeto as duas atividades usam meios diferentes:
 | Verificação | Revisão de código completa, em cinco frentes (segurança, arquitetura e dados, testes, aplicativo, infraestrutura) | [Laudo de qualidade](08-laudo-de-qualidade.md), seção de método |
 | Verificação | Compilação com tipagem estrita no aplicativo e análise estática na integração contínua | `.github/workflows/ci.yml` |
 | Validação | Cinco sessões de teste exploratório contra o sistema em execução, com 642 casos, repetidas depois das correções | [Laudo de qualidade](08-laudo-de-qualidade.md) |
+| Validação | Execução do aplicativo (APK) em emulador Android, conectado à API publicada, percorrendo todas as telas | [Laudo de qualidade](08-laudo-de-qualidade.md), [capturas de tela](06-ihc-ux.md) |
 | Validação | Roteiro manual no aparelho para cada correção do aplicativo | [Laudo de qualidade](08-laudo-de-qualidade.md), anexo |
 
 ## 7.2 O Modelo V aplicado ao projeto
@@ -27,7 +28,7 @@ flowchart TB
     A["Análise<br/><i>03-casos-de-uso.md</i>"]
     Q["Arquitetura<br/><i>05-arquitetura.md</i>"]
     C["Código"]
-    TU["Teste unitário<br/><i>411 testes de API + 102 do aplicativo</i>"]
+    TU["Teste unitário<br/><i>411 testes de API + 111 do aplicativo</i>"]
     TI["Teste de integração<br/><i>180 testes pela camada HTTP</i>"]
     TS["Teste de sistema<br/><i>fluxo completo + 5 sessões exploratórias</i>"]
     TA["Teste de aceitação<br/><i>roteiro no aparelho, por requisito</i>"]
@@ -83,14 +84,14 @@ Os testes da API não precisam de banco instalado nem de rede: o banco é substi
 
 ## 7.5 Inventário dos testes
 
-Situação em 05/10/2026, depois do ciclo de correções: **592 testes na API e 102 no aplicativo, todos aprovados.**
+Situação em 05/10/2026, depois do ciclo de correções: **592 testes na API e 111 no aplicativo, todos aprovados.**
 
 | Projeto | Testes | Duração |
 |---|---|---|
 | `CoupleSync.UnitTests` | 411 | 1 s |
 | `CoupleSync.IntegrationTests` | 180 | 50 s |
 | `CoupleSync.E2ETests` (fluxo completo em processo) | 1 | 4 s |
-| Aplicativo (Jest, 5 suítes) | 102 | 2 s |
+| Aplicativo (Jest, 6 suítes) | 111 | 2 s |
 
 ### Cobertura da API
 
@@ -106,7 +107,7 @@ Medida com Coverlet, unindo os três projetos de teste e excluindo o código ger
 
 Antes do ciclo de correções a cobertura era de 77,9% das linhas e 63,5% dos ramos, com 458 testes.
 
-O aplicativo não tem medição de cobertura: os testes cobrem a lógica extraída para módulos puros (renovação de sessão, leitura de notificações, montagem das requisições), não as telas.
+O aplicativo não tem medição de cobertura: os testes cobrem a lógica extraída para módulos puros (renovação de sessão, leitura de notificações, montagem das requisições, formatação de rótulos), não as telas.
 
 ## 7.6 Matriz de rastreabilidade
 
@@ -152,6 +153,6 @@ Estas limitações estão registradas no laudo de qualidade e precisam ser lidas
 
 1. **Os testes de integração rodam em SQLite, e a produção usa PostgreSQL.** As migrations não são executadas por nenhum teste, e consultas com caminho próprio para PostgreSQL (totais do painel e dos relatórios) só são exercitadas nas sessões exploratórias. Alguns defeitos corrigidos neste ciclo só se manifestavam no PostgreSQL; para eles, a evidência de "antes" é o log da sessão exploratória, não um teste automatizado falhando.
 2. **O teste chamado "E2E" roda dentro do processo de teste.** Ele percorre o fluxo completo pela camada HTTP, mas não envolve o aplicativo nem o banco real.
-3. **O aplicativo não foi testado de forma automatizada em aparelho.** Os quatro fluxos Maestro existentes cobrem só abertura, entrada e navegação, e o de entrada depende de identificadores que as telas ainda não têm.
+3. **O aplicativo não tem teste automatizado de interface.** Ele foi executado em emulador, com as telas percorridas por roteiro de toques, mas isso não se repete a cada alteração. Os quatro fluxos Maestro existentes cobrem só abertura, entrada e navegação, e o de entrada depende de identificadores que as telas ainda não têm. A captura de notificações bancárias não pôde ser exercitada no emulador, porque depende de notificações vindas do aplicativo de um banco.
 4. **Os leitores de notificação e de extrato foram testados com textos e arquivos sintéticos**, não com dados reais de cada banco.
 5. **Não há teste de carga nem de concorrência**, coerente com o porte do piloto.

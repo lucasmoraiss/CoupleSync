@@ -122,7 +122,7 @@ npx expo run:android
 ### 3.4 Testes e checagem de tipos
 
 ```powershell
-npm test            # Jest: 102 testes de lógica pura
+npm test            # Jest: 111 testes de lógica pura
 npx tsc --noEmit    # checagem de tipos, a mesma do CI
 ```
 

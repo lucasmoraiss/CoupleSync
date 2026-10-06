@@ -6,7 +6,7 @@
 |---|---|
 | **Sistema** | CoupleSync — API (.NET 8) e aplicativo Android (React Native) |
 | **Versão avaliada** | commit `98e3f64` (início do ciclo) |
-| **Versão após as correções** | commit `c3c58a2` (código), publicada em <https://couplesync-api.onrender.com> |
+| **Versão após as correções** | API: commit `c3c58a2`, publicada em <https://couplesync-api.onrender.com>; aplicativo: commit `bfd8dce` |
 | **Período** | 5 de outubro de 2026 |
 | **Responsável** | Lucas Henrique Morais Salomão |
 | **Ambiente** | API e PostgreSQL 16 em contêineres Docker locais; testes automatizados com .NET SDK e Node.js na máquina de desenvolvimento; verificação final na API publicada (Render e Neon) |
@@ -35,16 +35,18 @@ A avaliação combinou verificação e validação, nesta ordem.
 
 **6. Verificação em produção.** Depois de publicada, a API foi conferida no ambiente real: saúde, conexão com o banco, autenticação e limite de tentativas. Essa etapa encontrou um erro que nenhum teste local revelava (A17).
 
+**7. Execução do aplicativo.** O APK foi instalado em um emulador Android 14 e conectado à API publicada, com contas de demonstração e dados fictícios. Todas as telas foram percorridas por roteiro de toques, incluindo lançamento manual, troca de categoria, exclusão, importação de extrato com correção de valores e edição de meta. Essa etapa encontrou defeitos visuais que os testes de lógica não mostravam (A18).
+
 A revisão de código e a execução dos roteiros foram feitas com apoio de ferramentas de IA para programação, sob condução do autor. Os arquivos de teste da importação de extrato são PDFs sintéticos, com dados inventados.
 
-**Limite do método.** O aplicativo não foi executado em aparelho nesta avaliação. As correções do aplicativo foram verificadas por testes unitários da lógica, pela verificação de tipos e pela leitura do código; o roteiro para conferi-las no aparelho está no anexo.
+**Limite do método.** O aplicativo foi executado em emulador, não em um aparelho físico. A captura de notificações bancárias (A06, A09 e A16) não pôde ser exercitada ali, porque depende de notificações vindas do aplicativo de um banco: essas três correções foram verificadas por testes unitários e leitura do código. O roteiro para conferi-las em um aparelho está no anexo.
 
 ## 8.3 Resumo em números
 
 | Indicador | Antes | Depois |
 |---|---|---|
 | Testes automatizados da API | 458 (456 com conteúdo) | 592 |
-| Testes automatizados do aplicativo | 0 | 102 |
+| Testes automatizados do aplicativo | 0 | 111 |
 | Testes reprovados | 0 | 0 |
 | Cobertura de linhas da API, sem migrations | 77,9% | 84,0% |
 | Cobertura de ramos da API, sem migrations | 63,5% | 68,6% |
@@ -57,9 +59,9 @@ A revisão de código e a execução dos roteiros foram feitas com apoio de ferr
 |---|---|---|
 | Crítica | 1 | 0 |
 | Alta | 10 | 7 |
-| Média | 6 | 13 |
+| Média | 7 | 13 |
 | Baixa | 0 | 1 |
-| **Total** | **17** | **21** |
+| **Total** | **18** | **21** |
 
 Critério de severidade: **crítica**, falha de segurança explorável ou perda de dados; **alta**, função principal quebrada ou resultado errado apresentado como certo; **média**, função secundária, mensagem enganosa ou proteção ausente; **baixa**, cosmético ou de baixo impacto.
 
@@ -86,6 +88,7 @@ O que a avaliação encontrou de sólido: isolamento entre grupos correto em tod
 | A15 | Um arquivo de teste continha trechos de uma fatura real do autor | Média | Revisão de código | Substituídos por dados inventados | `a8f42da` |
 | A16 | Toda notificação do Itaú e do C6 era recusada pelo servidor: o aplicativo enviava "Itaú" e "C6 Bank", e a API só aceitava "ITAU" e "C6" | Alta | Encontrado durante a correção do A09 | O aplicativo envia o nome que a API aceita | `27873ee` |
 | A17 | Em produção, o limite de tentativas do A05 não disparava: atrás do Cloudflare, a API contava as tentativas pelo endereço do proxy, que muda a cada requisição | Média | Verificação em produção | A API identifica o cliente pelo cabeçalho que a CDN preenche com o endereço real, aceito só quando a origem é um proxy confiável | `c3c58a2` |
+| A18 | Defeitos visuais no aplicativo em execução: o painel mostrava "setembro de 2026" durante outubro (o início do período, em UTC, era convertido para o fuso do aparelho); relatórios e fluxo de caixa mostravam a chave interna da categoria ("ALIMENTACAO"); o centro do gráfico ficava branco; rótulos das abas eram cortados; o outro membro aparecia como "Membro" | Média | Execução do aplicativo em emulador | Mês lido em UTC; nome da categoria e do membro em todas as telas; gráfico e abas ajustados | `a2b8555` `bfd8dce` |
 
 Fora da tabela, por não serem erros de funcionamento: remoção de um framework de terceiros do repositório e reunião dos registros de decisão (`98e3f64`); remoção do fluxo de implantação que apontava para um serviço desativado (`ea9df05`); remoção de arquivos de modelo sem uso (`ba83f0c`); correção da documentação que descrevia funções inexistentes.
 
@@ -112,6 +115,7 @@ Para cada correção há dois arquivos: a execução do teste antes (falhando) e
 | A13 | 4 reprovados, 2 aprovados | 6 aprovados |
 | A16 | 2 reprovados, 3 aprovados | 5 aprovados |
 | A17 | 3 reprovados, 1 aprovado | 4 aprovados |
+| A18 | 5 reprovados, 4 aprovados | 9 aprovados |
 
 Os testes que já passavam antes são os casos de controle de cada conjunto (por exemplo, no A06, as compras que já eram reconhecidas). A10 e A15 não têm teste próprio: o primeiro é mudança só de tela e o segundo é troca de dados de teste.
 
@@ -184,6 +188,17 @@ tentativa 7 -> HTTP 429 retry-after: 60 {"code":"RATE_LIMIT_EXCEEDED", ...}
 
 O teste automatizado que reproduz o cenário mantém o mesmo cliente e muda o endereço do proxy a cada requisição.
 
+### A18 — mês do painel no aplicativo em execução
+
+```text
+Data do aparelho: 5 de outubro de 2026, fuso de Brasília.  Início do período devolvido pela API: 2026-10-01T00:00:00Z
+
+Antes:   rótulo do painel "setembro de 2026"
+Depois:  rótulo do painel "outubro de 2026"
+```
+
+As telas depois da correção estão nas [capturas do documento de interface](06-ihc-ux.md#capturas-de-tela).
+
 ### A07 — entrada inválida (sessões 2, 3 e 5)
 
 | Caso | Requisição | Antes | Depois |
@@ -255,7 +270,7 @@ Passed!  - Failed: 0, Passed: 411, Skipped: 0, Total: 411 - CoupleSync.UnitTests
 Passed!  - Failed: 0, Passed:   1, Skipped: 0, Total:   1 - CoupleSync.E2ETests.dll
 Passed!  - Failed: 0, Passed: 180, Skipped: 0, Total: 180 - CoupleSync.IntegrationTests.dll
 
-Aplicativo:  Test Suites: 5 passed, 5 total    Tests: 102 passed, 102 total
+Aplicativo:  Test Suites: 6 passed, 6 total    Tests: 111 passed, 111 total
              tsc --noEmit: sem erros
 ```
 
@@ -311,7 +326,7 @@ Erros e limitações encontrados e não corrigidos neste ciclo, por prioridade o
 
 O sistema atende ao que se propõe para um piloto: formar um grupo, registrar despesas por três caminhos, acompanhar rendas e metas, e manter os dados de cada grupo isolados. A base é sólida no que é mais difícil de consertar depois: isolamento entre grupos, tratamento de valores monetários, autenticação e uma suíte de testes que cobre 84,0% das linhas da API.
 
-A avaliação encontrou 38 problemas. Dezessete foram corrigidos, entre eles o único crítico (uma chave no repositório) e dez de severidade alta, todos com teste automatizado que falhava antes e passa depois. Um deles só apareceu com o sistema publicado, o que mostra o valor de verificar no ambiente real e não só no de desenvolvimento. As cinco sessões de teste, repetidas contra a versão corrigida, não produziram nenhum erro interno, contra 34 na versão avaliada.
+A avaliação encontrou 39 problemas. Dezoito foram corrigidos, entre eles o único crítico (uma chave no repositório) e dez de severidade alta, todos com teste automatizado que falhava antes e passa depois. Dois deles só apareceram com o sistema publicado e o aplicativo em execução, o que mostra o valor de verificar no ambiente real e não só no de desenvolvimento. As cinco sessões de teste, repetidas contra a versão corrigida, não produziram nenhum erro interno, contra 34 na versão avaliada.
 
 Restam 21 pendências. As que mais limitam o uso real são a impossibilidade de sair de um grupo ou trocar o código de convite, a leitura de extratos restrita a um banco, e a ausência dos itens de privacidade exigidos para distribuição pública. Nenhuma delas impede a demonstração do sistema, e todas estão documentadas.
 

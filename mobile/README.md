@@ -68,7 +68,7 @@ O script `npm run lint` está declarado no `package.json`, mas **não funciona**
 
 ### Testes
 
-`npm test` roda 102 testes em 5 arquivos, todos de lógica pura: interpretação de notificações, montagem do corpo enviado ao servidor, montagem da confirmação do extrato e renovação de sessão. Telas e componentes não têm teste automatizado. Há um roteiro de teste manual em `tests/e2e/manual-walkthrough.md`.
+`npm test` roda 111 testes em 5 arquivos, todos de lógica pura: interpretação de notificações, montagem do corpo enviado ao servidor, montagem da confirmação do extrato e renovação de sessão. Telas e componentes não têm teste automatizado. Há um roteiro de teste manual em `tests/e2e/manual-walkthrough.md`.
 
 ## Variáveis de ambiente
 

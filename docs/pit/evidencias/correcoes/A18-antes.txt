@@ -1,0 +1,109 @@
+# Comportamento anterior das telas, com o fuso do aparelho em America/Sao_Paulo
+
+> couplesync@1.0.0 test
+> jest src/utils
+
+FAIL src/utils/__tests__/format.test.ts
+  monthLabelFromIso
+    × usa o mês do período em UTC, não o do fuso do aparelho (23 ms)
+    × aceita data sem hora e com fração de segundo (1 ms)
+    × devolve texto vazio para valor que não é data (1 ms)
+  getCategoryLabel
+    √ traduz a chave interna para o nome exibido (1 ms)
+    × reconhece a categoria em qualquer grafia vinda da API
+    √ mantém o texto original quando a categoria não é conhecida
+  memberLabel
+    √ mostra "Você" para o próprio usuário
+    × mostra o primeiro nome do outro membro (1 ms)
+    √ usa "Membro" quando o nome ainda não foi carregado
+
+  ● monthLabelFromIso › usa o mês do período em UTC, não o do fuso do aparelho
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "outubro de 2026"
+    Received: "setembro de 2026"
+
+    [0m [90m  6 |[39m     [90m// O servidor devolve o início do mês em UTC. Em Brasília (UTC-3) esse instante ainda é[39m
+     [90m  7 |[39m     [90m// 30 de setembro às 21h, e o rótulo saía "setembro de 2026" durante todo o mês de outubro.[39m
+    [31m[1m>[22m[39m[90m  8 |[39m     expect(monthLabelFromIso([32m'2026-10-01T00:00:00Z'[39m))[33m.[39mtoBe([32m'outubro de 2026'[39m)[33m;[39m
+     [90m    |[39m                                                       [31m[1m^[22m[39m
+     [90m  9 |[39m   })[33m;[39m
+     [90m 10 |[39m
+     [90m 11 |[39m   it([32m'aceita data sem hora e com fração de segundo'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (src/utils/__tests__/format.test.ts:8:55)
+
+  ● monthLabelFromIso › aceita data sem hora e com fração de segundo
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "janeiro de 2026"
+    Received: "dezembro de 2025"
+
+    [0m [90m 10 |[39m
+     [90m 11 |[39m   it([32m'aceita data sem hora e com fração de segundo'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 12 |[39m     expect(monthLabelFromIso([32m'2026-01-01'[39m))[33m.[39mtoBe([32m'janeiro de 2026'[39m)[33m;[39m
+     [90m    |[39m                                             [31m[1m^[22m[39m
+     [90m 13 |[39m     expect(monthLabelFromIso([32m'2026-12-01T00:00:00.000Z'[39m))[33m.[39mtoBe([32m'dezembro de 2026'[39m)[33m;[39m
+     [90m 14 |[39m   })[33m;[39m
+     [90m 15 |[39m[0m
+
+      at Object.<anonymous> (src/utils/__tests__/format.test.ts:12:45)
+
+  ● monthLabelFromIso › devolve texto vazio para valor que não é data
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: ""
+    Received: "Invalid Date"
+
+    [0m [90m 15 |[39m
+     [90m 16 |[39m   it([32m'devolve texto vazio para valor que não é data'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 17 |[39m     expect(monthLabelFromIso([32m''[39m))[33m.[39mtoBe([32m''[39m)[33m;[39m
+     [90m    |[39m                                   [31m[1m^[22m[39m
+     [90m 18 |[39m     expect(monthLabelFromIso([32m'abc'[39m))[33m.[39mtoBe([32m''[39m)[33m;[39m
+     [90m 19 |[39m     expect(monthLabelFromIso([32m'2026-13-01T00:00:00Z'[39m))[33m.[39mtoBe([32m''[39m)[33m;[39m
+     [90m 20 |[39m   })[33m;[39m[0m
+
+      at Object.<anonymous> (src/utils/__tests__/format.test.ts:17:35)
+
+  ● getCategoryLabel › reconhece a categoria em qualquer grafia vinda da API
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "Alimentação"
+    Received: "Alimentacao"
+
+    [0m [90m 29 |[39m   it([32m'reconhece a categoria em qualquer grafia vinda da API'[39m[33m,[39m () [33m=>[39m {
+     [90m 30 |[39m     [90m// O fluxo de caixa devolve "Alimentacao" e "Saude"; a classificação automática, "Alimentação".[39m
+    [31m[1m>[22m[39m[90m 31 |[39m     expect(getCategoryLabel([32m'Alimentacao'[39m))[33m.[39mtoBe([32m'Alimentação'[39m)[33m;[39m
+     [90m    |[39m                                             [31m[1m^[22m[39m
+     [90m 32 |[39m     expect(getCategoryLabel([32m'Saude'[39m))[33m.[39mtoBe([32m'Saúde'[39m)[33m;[39m
+     [90m 33 |[39m     expect(getCategoryLabel([32m'alimentação'[39m))[33m.[39mtoBe([32m'Alimentação'[39m)[33m;[39m
+     [90m 34 |[39m     expect(getCategoryLabel([32m' Transporte '[39m))[33m.[39mtoBe([32m'Transporte'[39m)[33m;[39m[0m
+
+      at Object.<anonymous> (src/utils/__tests__/format.test.ts:31:45)
+
+  ● memberLabel › mostra o primeiro nome do outro membro
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "Bruno"
+    Received: "Membro"
+
+    [0m [90m 52 |[39m
+     [90m 53 |[39m   it([32m'mostra o primeiro nome do outro membro'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 54 |[39m     expect(memberLabel([32m'u2'[39m[33m,[39m [32m'u1'[39m[33m,[39m membros))[33m.[39mtoBe([32m'Bruno'[39m)[33m;[39m
+     [90m    |[39m                                              [31m[1m^[22m[39m
+     [90m 55 |[39m   })[33m;[39m
+     [90m 56 |[39m
+     [90m 57 |[39m   it([32m'usa "Membro" quando o nome ainda não foi carregado'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (src/utils/__tests__/format.test.ts:54:46)
+
+Test Suites: 1 failed, 1 total
+Tests:       5 failed, 4 passed, 9 total
+Snapshots:   0 total
+Time:        0.696 s, estimated 1 s
+Ran all test suites matching /src\\utils/i.

@@ -22,6 +22,7 @@ Para cada erro corrigido há um par de arquivos com a saída do teste automatiza
 | `A13-*` | Total de rendas em grupo de três |
 | `A16-*` | Nome de banco recusado pela API |
 | `A17-*` | Limite de tentativas atrás de CDN; `A17-producao.log` é a verificação na API publicada |
+| `A18-*` | Rótulos do aplicativo: mês do painel, nome de categoria e de membro |
 
 ## `sessoes/` — sessões de teste exploratório
 

@@ -119,7 +119,7 @@ Situação: **Atendido** (implementado e coberto por teste), **Parcial** (implem
 | RNF10 | Usabilidade | Uma despesa manual é lançada com um único campo obrigatório | Tela de nova transação | Atendido |
 | RNF11 | Usabilidade | Interface e mensagens ao usuário em português do Brasil | Revisão das telas | Parcial: mensagens de erro vindas do servidor estão em inglês |
 | RNF12 | Acessibilidade | Texto com contraste mínimo de 4,5:1 e elementos com rótulo para leitor de tela | Revisão do tema e das telas | Parcial (ver [IHC e UX](06-ihc-ux.md)) |
-| RNF13 | Manutenibilidade | Toda regra de negócio tem teste automatizado executado a cada alteração | Integração contínua | Atendido: 592 testes na API e 102 no aplicativo |
+| RNF13 | Manutenibilidade | Toda regra de negócio tem teste automatizado executado a cada alteração | Integração contínua | Atendido: 592 testes na API e 111 no aplicativo |
 | RNF14 | Manutenibilidade | Toda mudança no banco é uma migration versionada | Diretório de migrations; verificação de modelo pendente | Atendido |
 | RNF15 | Portabilidade | A API roda em qualquer ambiente com Docker | `backend/Dockerfile`, `docker-compose.yml` | Atendido |
 | RNF16 | Privacidade | O aplicativo envia ao servidor só os dados necessários para registrar a despesa | Teste do corpo enviado | Atendido para a captura de notificações |
