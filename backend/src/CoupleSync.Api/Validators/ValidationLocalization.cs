@@ -50,9 +50,28 @@ public static class ValidationLocalization
     public static string LabelFor(string propertyName)
         => FieldLabels.TryGetValue(propertyName, out var label) ? label : propertyName;
 
+    /// <summary>
+    /// FluentValidation picks its built-in translation by the NAME of this culture and uses nothing else of it.
+    /// <c>new CultureInfo("pt-BR")</c> throws when the host has no culture data (globalization-invariant mode,
+    /// e.g. a minimal Alpine container), which once kept the API from starting. This object carries the name
+    /// over the invariant culture data, so the messages are Portuguese on every host.
+    /// </summary>
+    private static readonly CultureInfo MessageLanguage = new PortugueseMessagesCulture();
+
+    private sealed class PortugueseMessagesCulture : CultureInfo
+    {
+        public PortugueseMessagesCulture() : base(string.Empty)
+        {
+        }
+
+        public override string Name => "pt-BR";
+
+        public override CultureInfo Parent => InvariantCulture;
+    }
+
     public static void Configure()
     {
-        ValidatorOptions.Global.LanguageManager.Culture = new CultureInfo("pt-BR");
+        ValidatorOptions.Global.LanguageManager.Culture = MessageLanguage;
         ValidatorOptions.Global.DisplayNameResolver = (_, member, _) =>
             member is null ? null : LabelFor(member.Name);
     }

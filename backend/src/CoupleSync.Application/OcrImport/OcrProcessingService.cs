@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -166,7 +167,7 @@ public sealed class OcrProcessingService
             {
                 var dateStr = vDate.GetString();
                 if (!string.IsNullOrEmpty(dateStr)
-                    && DateTime.TryParse(dateStr, out var parsed))
+                    && DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
                 {
                     transactionDate = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
                 }
@@ -244,7 +245,9 @@ public sealed class OcrProcessingService
     {
         // The first occurrence keeps the original format so that transactions imported before the
         // ordinal existed are still recognised as duplicates on re-import.
-        var normalized = $"{coupleId}|{date:yyyy-MM-dd}|{amount:F2}|{description.ToLowerInvariant().Trim()}";
+        // Invariant on purpose: the hash is stored, so it must not change with the host culture.
+        var normalized = string.Create(CultureInfo.InvariantCulture,
+            $"{coupleId}|{date:yyyy-MM-dd}|{amount:F2}|{description.ToLowerInvariant().Trim()}");
         if (occurrence > 1)
             normalized += $"|#{occurrence}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
@@ -269,7 +272,7 @@ public sealed class OcrProcessingService
 
             DateTime date = DateTime.UtcNow;
             if (tx.TryGetProperty("date", out var dateEl)
-                && DateTime.TryParse(dateEl.GetString(), out var parsedDate))
+                && DateTime.TryParse(dateEl.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
             {
                 date = DateTime.SpecifyKind(parsedDate, DateTimeKind.Utc);
             }

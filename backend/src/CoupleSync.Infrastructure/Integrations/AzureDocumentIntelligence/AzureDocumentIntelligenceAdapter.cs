@@ -178,7 +178,7 @@ public sealed class AzureDocumentIntelligenceAdapter : IOcrProvider
                                     }
                                 }
                             },
-                            TransactionDate = new { valueDate = DateTime.UtcNow.ToString("yyyy-MM-dd") }
+                            TransactionDate = new { valueDate = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) }
                         }
                     }
                 }

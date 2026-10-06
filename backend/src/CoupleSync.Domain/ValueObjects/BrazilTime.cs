@@ -22,7 +22,8 @@ public static class BrazilTime
         }
 
         // Minimal containers (e.g. Alpine without tzdata) have no zone database. Brazil has had
-        // no daylight saving time since 2019, so a fixed UTC-3 is exact for current data.
+        // no daylight saving time since 2019-02-17, so a fixed UTC-3 is exact from then on (a test compares
+        // both paths hour by hour); only older dates can differ by the daylight-saving hour.
         return TimeZoneInfo.CreateCustomTimeZone(IanaId, TimeSpan.FromHours(-3), IanaId, IanaId);
     }
 
@@ -33,10 +34,18 @@ public static class BrazilTime
         return TimeZoneInfo.ConvertTimeFromUtc(asUtc, Zone);
     }
 
-    /// <summary>The UTC instant of a Brasília wall-clock time.</summary>
+    /// <summary>
+    /// The UTC instant of a Brasília wall-clock time. Total: a time that never existed (the hour skipped when
+    /// daylight saving started, e.g. 2018-11-04 00:00, which only happens with a real zone database) maps to the
+    /// instant the standard offset gives it — the first instant of that day for a skipped midnight — instead of
+    /// throwing. A time that happened twice (the hour repeated when it ended) is the standard-time one.
+    /// </summary>
     public static DateTime ToUtc(DateTime local)
     {
         var unspecified = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        if (Zone.IsInvalidTime(unspecified))
+            return DateTime.SpecifyKind(unspecified - Zone.BaseUtcOffset, DateTimeKind.Utc);
+
         return DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeToUtc(unspecified, Zone), DateTimeKind.Utc);
     }
 

@@ -12,23 +12,6 @@ namespace CoupleSync.Infrastructure.Persistence;
 /// </summary>
 public static class CategoryNormalizationSql
 {
-    // (accented, plain) pairs, lower and upper case, plus the combining marks of decomposed text.
-    private static readonly (string From, string To)[] AccentFolds =
-    [
-        ("á", "a"), ("à", "a"), ("â", "a"), ("ã", "a"), ("ä", "a"),
-        ("Á", "A"), ("À", "A"), ("Â", "A"), ("Ã", "A"), ("Ä", "A"),
-        ("é", "e"), ("è", "e"), ("ê", "e"), ("ë", "e"),
-        ("É", "E"), ("È", "E"), ("Ê", "E"), ("Ë", "E"),
-        ("í", "i"), ("ì", "i"), ("î", "i"), ("ï", "i"),
-        ("Í", "I"), ("Ì", "I"), ("Î", "I"), ("Ï", "I"),
-        ("ó", "o"), ("ò", "o"), ("ô", "o"), ("õ", "o"), ("ö", "o"),
-        ("Ó", "O"), ("Ò", "O"), ("Ô", "O"), ("Õ", "O"), ("Ö", "O"),
-        ("ú", "u"), ("ù", "u"), ("û", "u"), ("ü", "u"),
-        ("Ú", "U"), ("Ù", "U"), ("Û", "U"), ("Ü", "U"),
-        ("ç", "c"), ("Ç", "C"), ("ñ", "n"), ("Ñ", "N"),
-        ("̀", ""), ("́", ""), ("̂", ""), ("̃", ""), ("̈", ""), ("̧", ""),
-    ];
-
     // SQLite refuses REPLACE calls nested ~50 deep ("parser stack overflow"), so the chain is cut into
     // layers of at most this many calls, each one a derived table over the previous one.
     private const int ReplacesPerLayer = 12;
@@ -37,7 +20,7 @@ public static class CategoryNormalizationSql
     public static string Fold(string column)
     {
         var source = $"(SELECT {column} AS v)";
-        foreach (var layer in AccentFolds.Chunk(ReplacesPerLayer))
+        foreach (var layer in AccentFolding.Pairs.Chunk(ReplacesPerLayer))
         {
             var expression = "v";
             foreach (var (from, to) in layer)

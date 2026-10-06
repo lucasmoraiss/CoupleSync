@@ -1,6 +1,3 @@
-using System.Globalization;
-using System.Text;
-
 namespace CoupleSync.Domain.ValueObjects;
 
 /// <summary>A canonical category: the stored key and the Portuguese label shown to users.</summary>
@@ -29,19 +26,13 @@ public static class TransactionCategories
 
     private static readonly HashSet<string> Keys = All.Select(c => c.Key).ToHashSet(StringComparer.Ordinal);
 
-    /// <summary>Lower-level fold shared with the data migration: trim, drop accents, upper case.</summary>
+    /// <summary>
+    /// Lower-level fold shared with the data migration: trim, drop accents, upper case. Uses the explicit
+    /// <see cref="AccentFolding"/> table, never Unicode normalization, so the answer is the same with or
+    /// without ICU on the host.
+    /// </summary>
     public static string Fold(string value)
-    {
-        var decomposed = value.Trim().Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder(decomposed.Length);
-        foreach (var ch in decomposed)
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark)
-                sb.Append(ch);
-        }
-
-        return sb.ToString().Normalize(NormalizationForm.FormC).ToUpperInvariant();
-    }
+        => AccentFolding.RemoveAccents(value.Trim()).ToUpperInvariant();
 
     /// <summary>The canonical key for the input, or null when it matches no category.</summary>
     public static string? TryNormalize(string? value)

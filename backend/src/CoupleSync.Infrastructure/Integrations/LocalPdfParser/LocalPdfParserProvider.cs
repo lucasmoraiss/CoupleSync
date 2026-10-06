@@ -79,7 +79,7 @@ public sealed class LocalPdfParserProvider : IOcrProvider
             BankName: parser.BankName,
             Transactions: transactions
                 .Select(t => new LocalPdfTransaction(
-                    Date: t.Date.ToString("yyyy-MM-dd"),
+                    Date: t.Date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
                     Description: t.Description,
                     Amount: t.Amount,
                     Type: t.Type.ToString()))

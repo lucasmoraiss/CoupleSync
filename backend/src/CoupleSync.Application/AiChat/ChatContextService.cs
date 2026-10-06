@@ -1,4 +1,5 @@
 using CoupleSync.Domain.ValueObjects;
+using System.Globalization;
 using System.Text;
 using CoupleSync.Application.Budget;
 using CoupleSync.Application.Common.Interfaces;
@@ -41,17 +42,17 @@ public sealed class ChatContextService
         var sb = new StringBuilder();
         sb.AppendLine("Você é um assistente financeiro do CoupleSync, um aplicativo de finanças para casais.");
         sb.AppendLine("Responda de forma clara, objetiva e sem julgamentos sobre as finanças do casal.");
-        sb.AppendLine($"Data de hoje: {now:dd/MM/yyyy}");
+        sb.AppendLine($"Data de hoje: {BrDate(now)}");
 
         if (budget is not null)
         {
-            sb.AppendLine($"Renda bruta mensal: R${budget.GrossIncome:N2}");
-            sb.AppendLine($"Saldo livre (orçamento): R${budget.BudgetGap:N2}");
+            sb.AppendLine($"Renda bruta mensal: {BrlFormat.Format(budget.GrossIncome)}");
+            sb.AppendLine($"Saldo livre (orçamento): {BrlFormat.Format(budget.BudgetGap)}");
             if (budget.Allocations.Count > 0)
             {
                 sb.AppendLine("Alocações do orçamento:");
                 foreach (var a in budget.Allocations)
-                    sb.AppendLine($"  - {a.Category}: alocado R${a.AllocatedAmount:N2}, gasto R${a.ActualSpent:N2}, restante R${a.Remaining:N2}");
+                    sb.AppendLine($"  - {a.Category}: alocado {BrlFormat.Format(a.AllocatedAmount)}, gasto {BrlFormat.Format(a.ActualSpent)}, restante {BrlFormat.Format(a.Remaining)}");
             }
         }
 
@@ -65,7 +66,7 @@ public sealed class ChatContextService
         {
             sb.AppendLine("Gastos por categoria nos últimos 30 dias:");
             foreach (var ct_ in categoryTotals)
-                sb.AppendLine($"  - {TransactionCategories.Label(ct_.Cat)}: R${ct_.Total:N2}");
+                sb.AppendLine($"  - {TransactionCategories.Label(ct_.Cat)}: {BrlFormat.Format(ct_.Total)}");
         }
 
         var activeGoals = goals.Where(g => g.Status == GoalStatus.Active).ToList();
@@ -79,14 +80,14 @@ public sealed class ChatContextService
                 var progress = breakdown.TotalAmount;
                 var percent = breakdown.ProgressPercent;
                 var deadlineStr = goal.Deadline != default
-                    ? goal.Deadline.ToString("dd/MM/yyyy")
+                    ? BrDate(goal.Deadline)
                     : "sem prazo definido";
                 var safeTitle = goal.Title
                     .Replace("\r", string.Empty)
                     .Replace("\n", string.Empty)
                     .Trim();
                 if (safeTitle.Length > 100) safeTitle = safeTitle[..100];
-                sb.AppendLine($"  - {safeTitle}: alvo R${goal.TargetAmount:N2}, progresso R${progress:N2} ({Math.Floor(percent):F0}%), prazo {deadlineStr}");
+                sb.AppendLine($"  - {safeTitle}: alvo {BrlFormat.Format(goal.TargetAmount)}, progresso {BrlFormat.Format(progress)} ({(long)Math.Floor(percent)}%), prazo {deadlineStr}");
             }
         }
 
@@ -94,4 +95,7 @@ public sealed class ChatContextService
 
         return sb.ToString();
     }
+
+    // Fixed dd/MM/yyyy: with a named format the "/" would follow the host culture.
+    private static string BrDate(DateTime date) => date.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
 }

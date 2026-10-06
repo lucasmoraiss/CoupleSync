@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using CoupleSync.Application.Common.Interfaces;
@@ -15,7 +16,8 @@ public sealed class TransactionFingerprintGenerator : IFingerprintGenerator
     public static string GenerateStatic(Guid coupleId, string bank, decimal amount,
         string currency, DateTime eventTimestamp, string? merchant)
     {
-        var normalized = $"{coupleId}|{bank.Trim().ToUpperInvariant()}|{amount:F2}|{currency.Trim().ToUpperInvariant()}|{eventTimestamp:O}|{(merchant ?? "").Trim().ToUpperInvariant()}";
+        // Invariant on purpose: the hash is stored, so "12.50" must never become "12,50" with the host culture.
+        var normalized = string.Create(CultureInfo.InvariantCulture, $"{coupleId}|{bank.Trim().ToUpperInvariant()}|{amount:F2}|{currency.Trim().ToUpperInvariant()}|{eventTimestamp:O}|{(merchant ?? "").Trim().ToUpperInvariant()}");
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }

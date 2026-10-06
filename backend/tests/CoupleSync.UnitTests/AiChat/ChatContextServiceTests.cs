@@ -34,11 +34,11 @@ public sealed class ChatContextServiceTests
         budgetRepo.Plans.Add(plan);
 
         var savedCulture = CultureInfo.CurrentCulture;
-        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("pt-BR");
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         try
         {
             var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
-            Assert.Contains("R$5.000,00", prompt);
+            Assert.Contains("R$ 5.000,00", prompt);
             Assert.Contains("Renda bruta mensal", prompt);
         }
         finally
@@ -129,13 +129,13 @@ public sealed class ChatContextServiceTests
         goalRepo.Goals.Add(goal);
 
         var savedCulture = CultureInfo.CurrentCulture;
-        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("pt-BR");
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         try
         {
             var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
             Assert.Contains("Metas do casal", prompt);
             Assert.Contains("Viagem Europa", prompt);
-            Assert.Contains("R$5.000,00", prompt);
+            Assert.Contains("R$ 5.000,00", prompt);
         }
         finally
         {
@@ -158,11 +158,11 @@ public sealed class ChatContextServiceTests
         txRepo.Transactions.Add(tx);
 
         var savedCulture = CultureInfo.CurrentCulture;
-        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("pt-BR");
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         try
         {
             var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
-            Assert.Contains("progresso R$500,00 (50%)", prompt);
+            Assert.Contains("progresso R$ 500,00 (50%)", prompt);
         }
         finally
         {

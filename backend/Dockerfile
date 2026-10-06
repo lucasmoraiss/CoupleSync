@@ -21,6 +21,13 @@ RUN dotnet publish src/CoupleSync.Api/CoupleSync.Api.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS runtime
 WORKDIR /app
 
+# Culture and time-zone data. The alpine image ships without ICU and turns globalization-invariant mode on;
+# in that mode named cultures do not exist and Unicode normalization does nothing. The API is written not to
+# depend on either (see CoupleSync.InvariantGlobalizationTests), and the image carries the real data anyway:
+# icu-libs + icu-data-full for cultures, tzdata for America/Sao_Paulo.
+RUN apk add --no-cache icu-libs icu-data-full tzdata
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+
 # Create non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
