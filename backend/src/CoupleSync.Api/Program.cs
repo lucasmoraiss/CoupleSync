@@ -52,7 +52,6 @@ builder.Services.AddScoped<RefreshTokenCommandHandler>();
 builder.Services.AddScoped<LogoutCommandHandler>();
 builder.Services.AddScoped<ChangePasswordCommandHandler>();
 builder.Services.AddScoped<EmailCodeFlow>();
-builder.Services.AddSingleton<CodeRequestThrottle>();
 builder.Services.AddScoped<RequestPasswordResetCommandHandler>();
 builder.Services.AddScoped<ResetPasswordCommandHandler>();
 builder.Services.AddScoped<ConfirmEmailCommandHandler>();

@@ -28,7 +28,9 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                     code_hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     expires_at_utc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     created_at_utc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    attempts = table.Column<int>(type: "integer", nullable: false)
+                    attempts = table.Column<int>(type: "integer", nullable: false),
+                    issue_window_started_at_utc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    issue_count = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {

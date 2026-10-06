@@ -87,6 +87,17 @@ public sealed class PasswordResetAndEmailVerificationTests
     private static Task<HttpResponseMessage> Reset(HttpClient client, string email, string code, string newPassword = "NovaSenha456") =>
         client.PostAsJsonAsync("/api/v1/auth/reset-password", new { Email = email, Code = code, NewPassword = newPassword });
 
+    // test hosts never reach the real provider
+
+    [Fact]
+    public async Task TestHosts_NeverHaveEmailConfigured_EvenWhenTheMachineHasEmailSettings()
+    {
+        // Run with Email__Provider=brevo, Email__ApiKey and Email__FromAddress exported: a test host must still be "off".
+        await using var factory = new TransactionWebApplicationFactory();
+
+        Assert.False(factory.Services.GetRequiredService<IEmailSender>().IsConfigured);
+    }
+
     // not configured
 
     [Fact]
@@ -329,5 +340,79 @@ public sealed class PasswordResetAndEmailVerificationTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/auth/confirm-email", new { Code = "123456" })).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsync("/api/v1/auth/resend-email-verification", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/auth/me")).StatusCode);
+    }
+
+    // the production send path (real queue + worker + Brevo client) against a stub handler: still no real e-mail
+
+    private sealed class BrevoStub : HttpMessageHandler
+    {
+        public HttpStatusCode Status { get; set; } = HttpStatusCode.Created;
+
+        public List<string> Bodies { get; } = new();
+
+        public SemaphoreSlim Handled { get; } = new(0);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal("https://api.brevo.com/v3/smtp/email", request.RequestUri!.ToString());
+            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            lock (Bodies) Bodies.Add(body);
+            Handled.Release();
+            return new HttpResponseMessage(Status);
+        }
+
+        public string LastCode() => Regex.Match(JsonDocument.Parse(Bodies.Last()).RootElement.GetProperty("textContent").GetString()!, @"\b\d{6}\b").Value;
+    }
+
+    private static WebApplicationFactory<Program> WithBrevoStub(TransactionWebApplicationFactory factory, BrevoStub stub) =>
+        factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Email:Provider"] = "brevo",
+                ["Email:ApiKey"] = "stub-key",
+                ["Email:FromAddress"] = "no-reply@couplesync.app",
+                ["RateLimiting:Auth:PermitLimit"] = "100"
+            }));
+            builder.ConfigureTestServices(services =>
+                services.AddHttpClient<CoupleSync.Infrastructure.Integrations.Email.BrevoEmailClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() => stub));
+        });
+
+    [Fact]
+    public async Task ProductionSendPath_DeliversTheCodeThroughTheQueueAndTheBrevoClient()
+    {
+        await using var baseFactory = new TransactionWebApplicationFactory();
+        var stub = new BrevoStub();
+        await using var factory = WithBrevoStub(baseFactory, stub);
+        using var client = factory.CreateClient();
+
+        var user = await RegisterAsync(client);
+        Assert.True(await stub.Handled.WaitAsync(TimeSpan.FromSeconds(10)), "the sign-up code never reached the Brevo client");
+        await Forgot(client, user.Email);
+        Assert.True(await stub.Handled.WaitAsync(TimeSpan.FromSeconds(10)), "the reset code never reached the Brevo client");
+
+        var reset = await Reset(client, user.Email, stub.LastCode());
+        Assert.Equal(HttpStatusCode.NoContent, reset.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProductionSendPath_WhenBrevoFails_RequestsStillSucceed_AndLaterSendsStillWork()
+    {
+        await using var baseFactory = new TransactionWebApplicationFactory();
+        var stub = new BrevoStub { Status = HttpStatusCode.InternalServerError };
+        await using var factory = WithBrevoStub(baseFactory, stub);
+        using var client = factory.CreateClient();
+
+        var user = await RegisterAsync(client); // 201 although the provider answers 500
+        Assert.True(await stub.Handled.WaitAsync(TimeSpan.FromSeconds(10)));
+        var forgot = await Forgot(client, user.Email);
+        Assert.Equal(HttpStatusCode.OK, forgot.StatusCode);
+        Assert.True(await stub.Handled.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        stub.Status = HttpStatusCode.Created; // the worker survived the failures
+        await Forgot(client, user.Email);
+        Assert.True(await stub.Handled.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(HttpStatusCode.NoContent, (await Reset(client, user.Email, stub.LastCode())).StatusCode);
     }
 }

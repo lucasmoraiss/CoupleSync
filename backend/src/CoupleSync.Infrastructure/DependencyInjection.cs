@@ -57,13 +57,8 @@ public static class DependencyInjection
         services.AddSingleton<INotificationEventSanitizer, NotificationEventSanitizer>();
         services.AddSingleton<IFingerprintGenerator, TransactionFingerprintGenerator>();
 
-        // E-mail (Brevo over HTTPS). Without Email__* configured IEmailSender.IsConfigured is false and the e-mail routes answer 503.
-        services.Configure<EmailOptions>(configuration.GetSection(EmailOptions.SectionName));
         services.AddSingleton<IVerificationCodeService, VerificationCodeService>();
-        services.AddHttpClient<BrevoEmailClient>(c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddSingleton<QueuedEmailSender>();
-        services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<QueuedEmailSender>());
-        services.AddHostedService<EmailDispatchService>();
+        services.AddEmailSending(configuration);
 
         services.Configure<FcmOptions>(configuration.GetSection("Fcm"));
         services.AddSingleton<IFcmAdapter, FcmAdapter>();

@@ -43,8 +43,17 @@ const SIGNED_IN_AUTH_ROUTES = [
   '/api/v1/auth/resend-email-verification',
 ];
 
+/** Só o caminho da requisição (sem origem, query string, fragmento nem barra final), para comparar caminhos exatos. */
+function pathOf(url: string): string {
+  return url
+    .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+/i, '')
+    .split(/[?#]/)[0]
+    .replace(/\/+$/, '');
+}
+
 function isAnonymousAuthRoute(url: string): boolean {
-  return url.includes(AUTH_ROUTE_PREFIX) && !SIGNED_IN_AUTH_ROUTES.some((route) => url.includes(route));
+  if (!url.includes(AUTH_ROUTE_PREFIX)) return false;
+  return !SIGNED_IN_AUTH_ROUTES.includes(pathOf(url));
 }
 
 type RetriableConfig = InternalAxiosRequestConfig & { _retriedAfterRefresh?: boolean };

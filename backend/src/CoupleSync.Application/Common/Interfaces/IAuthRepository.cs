@@ -34,8 +34,15 @@ public interface IAuthRepository
 
     Task<EmailCode?> FindEmailCodeAsync(Guid userId, string purpose, CancellationToken cancellationToken);
 
-    /// <summary>Stores the code as the only live one for its user and purpose, dropping the previous one. Saves immediately.</summary>
-    Task ReplaceEmailCodeAsync(EmailCode code, CancellationToken cancellationToken);
+    /// <summary>The live code of the user for the purpose, tracked so it can be re-issued in place; null when none.</summary>
+    Task<EmailCode?> FindEmailCodeForUpdateAsync(Guid userId, string purpose, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Saves a new code, or the changes made to one returned by <see cref="FindEmailCodeForUpdateAsync"/>. Throws
+    /// <see cref="Microsoft.EntityFrameworkCore.DbUpdateException"/> when a concurrent request inserted the same
+    /// (user, purpose) first; the failed entity is detached so the caller can read again and retry.
+    /// </summary>
+    Task StoreEmailCodeAsync(EmailCode code, CancellationToken cancellationToken);
 
     /// <summary>
     /// Spends one verification attempt on the code, atomically. False when the attempts are already used up
@@ -45,6 +52,12 @@ public interface IAuthRepository
 
     /// <summary>Deletes the code. True for exactly one caller, so a code can be used only once even under concurrency.</summary>
     Task<bool> ConsumeEmailCodeAsync(Guid codeId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Runs the action in one database transaction: everything it saves, deletes or updates is committed together, or
+    /// (when it throws) rolled back together. Joins the current transaction if there already is one.
+    /// </summary>
+    Task ExecuteInTransactionAsync(Func<Task> action, CancellationToken cancellationToken);
 
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

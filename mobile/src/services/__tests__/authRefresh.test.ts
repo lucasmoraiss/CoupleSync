@@ -256,6 +256,27 @@ describe('A03 — renovação de sessão no 401', () => {
     expect(h.onSessionExpired).not.toHaveBeenCalled();
   });
 
+  it('só os caminhos exatos de sessão renovam o token: um /auth/me-qualquer-coisa futuro continua anônimo', async () => {
+    const h = createHarness();
+
+    const lookalike = await statusOf(h.instance.get('/api/v1/auth/me-outra-rota'));
+    const nested = await statusOf(h.instance.get('/api/v1/auth/me/extra'));
+
+    expect([lookalike, nested]).toEqual([401, 401]);
+    expect(h.requestRefresh).not.toHaveBeenCalled();
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+  });
+
+  it('com query string ou URL absoluta, o caminho exato de sessão ainda renova o token', async () => {
+    const h = createHarness();
+
+    const withQuery = await statusOf(h.instance.get('/api/v1/auth/me?x=1'));
+    const absolute = await statusOf(h.instance.get('http://api.test/api/v1/auth/me'));
+
+    expect([withQuery, absolute]).toEqual(['ok', 'ok']);
+    expect(h.requestRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it('sem refresh token guardado, encerra a sessão sem chamar o refresh', async () => {
     const h = createHarness({ session: { accessToken: 'access-1', refreshToken: null } });
 

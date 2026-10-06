@@ -26,6 +26,8 @@ public sealed class EmailCode
         CodeHash = codeHash;
         ExpiresAtUtc = expiresAtUtc;
         CreatedAtUtc = createdAtUtc;
+        IssueWindowStartedAtUtc = createdAtUtc;
+        IssueCount = 1;
     }
 
     public Guid Id { get; private set; }
@@ -43,6 +45,12 @@ public sealed class EmailCode
     /// <summary>Verification attempts already spent on this code (right or wrong).</summary>
     public int Attempts { get; private set; }
 
+    /// <summary>Start of the current hour-long window in which codes of this purpose were e-mailed to the user.</summary>
+    public DateTime IssueWindowStartedAtUtc { get; private set; }
+
+    /// <summary>Codes e-mailed in the current window. Kept in the database so a restart does not grant a fresh budget.</summary>
+    public int IssueCount { get; private set; }
+
     public User? User { get; private set; }
 
     public static EmailCode Create(Guid userId, string purpose, string codeHash, DateTime expiresAtUtc, DateTime createdAtUtc)
@@ -58,6 +66,34 @@ public sealed class EmailCode
         }
 
         return new EmailCode(userId, purpose, codeHash, expiresAtUtc, createdAtUtc);
+    }
+
+    /// <summary>True when another code in the current window would exceed <paramref name="maxPerWindow"/>.</summary>
+    public bool HasReachedIssueLimit(DateTime now, int maxPerWindow, TimeSpan window) =>
+        now - IssueWindowStartedAtUtc < window && IssueCount >= maxPerWindow;
+
+    /// <summary>Replaces the live code in place (the previous one stops working, attempts start over) and counts the issue.</summary>
+    public void Reissue(string codeHash, DateTime expiresAtUtc, DateTime now, TimeSpan window)
+    {
+        if (string.IsNullOrWhiteSpace(codeHash))
+        {
+            throw new ArgumentException("O código é obrigatório.", nameof(codeHash));
+        }
+
+        if (now - IssueWindowStartedAtUtc >= window)
+        {
+            IssueWindowStartedAtUtc = now;
+            IssueCount = 1;
+        }
+        else
+        {
+            IssueCount++;
+        }
+
+        CodeHash = codeHash;
+        ExpiresAtUtc = expiresAtUtc;
+        CreatedAtUtc = now;
+        Attempts = 0;
     }
 
     public bool IsExpired(DateTime now) => ExpiresAtUtc <= now;

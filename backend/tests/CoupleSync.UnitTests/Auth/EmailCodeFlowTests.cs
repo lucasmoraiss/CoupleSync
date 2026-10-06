@@ -163,16 +163,16 @@ public sealed class EmailCodeFlowTests
     {
         var rig = new Rig();
 
-        for (var i = 0; i < CodeRequestThrottle.MaxRequestsPerWindow + 3; i++)
+        for (var i = 0; i < EmailCodeFlow.MaxCodesPerWindow + 3; i++)
         {
             await rig.RequestResetAsync();
         }
 
-        Assert.Equal(CodeRequestThrottle.MaxRequestsPerWindow, rig.Sender.Sent.Count);
+        Assert.Equal(EmailCodeFlow.MaxCodesPerWindow, rig.Sender.Sent.Count);
 
-        rig.Clock.UtcNow = Start.Add(CodeRequestThrottle.Window).AddSeconds(1);
+        rig.Clock.UtcNow = Start.Add(EmailCodeFlow.IssueWindow).AddSeconds(1);
         await rig.RequestResetAsync();
-        Assert.Equal(CodeRequestThrottle.MaxRequestsPerWindow + 1, rig.Sender.Sent.Count);
+        Assert.Equal(EmailCodeFlow.MaxCodesPerWindow + 1, rig.Sender.Sent.Count);
     }
 
     // reset
@@ -384,7 +384,7 @@ public sealed class EmailCodeFlowTests
     public async Task Resend_OverTheCap_Answers429_ForTheOwnAccount()
     {
         var rig = new Rig();
-        for (var i = 0; i < CodeRequestThrottle.MaxRequestsPerWindow; i++)
+        for (var i = 0; i < EmailCodeFlow.MaxCodesPerWindow; i++)
         {
             await rig.Resend.HandleAsync(new ResendEmailVerificationCommand(rig.User.Id), CancellationToken.None);
         }
@@ -462,23 +462,5 @@ public sealed class EmailCodeFlowTests
         Assert.False(string.IsNullOrEmpty(second.AccessToken));
         Assert.Empty(off.Sender.Sent);
         Assert.Contains(failing.Repository.Users, u => u.Email == "bia@example.com");
-    }
-
-    // throttle
-
-    [Fact]
-    public void Throttle_IsPerPurposeAndAddress_AndCaseInsensitive()
-    {
-        var clock = new MutableDateTimeProvider(Start);
-        var throttle = new CodeRequestThrottle(clock);
-
-        for (var i = 0; i < CodeRequestThrottle.MaxRequestsPerWindow; i++)
-        {
-            Assert.True(throttle.TryAcquire(EmailCodePurpose.PasswordReset, "Ana@Example.com"));
-        }
-
-        Assert.False(throttle.TryAcquire(EmailCodePurpose.PasswordReset, "ana@example.com"));
-        Assert.True(throttle.TryAcquire(EmailCodePurpose.EmailVerification, "ana@example.com"));
-        Assert.True(throttle.TryAcquire(EmailCodePurpose.PasswordReset, "bia@example.com"));
     }
 }

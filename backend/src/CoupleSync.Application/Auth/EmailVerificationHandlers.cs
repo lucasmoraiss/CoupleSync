@@ -37,10 +37,14 @@ public sealed class ConfirmEmailCommandHandler
             return;
         }
 
-        await _flow.VerifyAndConsumeAsync(user, EmailCodePurpose.EmailVerification, command.Code, cancellationToken);
+        var verified = await _flow.VerifyAsync(user, EmailCodePurpose.EmailVerification, command.Code, cancellationToken);
 
-        user.MarkEmailVerified();
-        await _authRepository.SaveChangesAsync(cancellationToken);
+        await _authRepository.ExecuteInTransactionAsync(async () =>
+        {
+            await _flow.ConsumeAsync(verified, cancellationToken);
+            user.MarkEmailVerified();
+            await _authRepository.SaveChangesAsync(cancellationToken);
+        }, cancellationToken);
     }
 }
 
@@ -71,7 +75,7 @@ public sealed class ResendEmailVerificationCommandHandler
             return;
         }
 
-        if (!await _flow.IssueAsync(user, EmailCodePurpose.EmailVerification, cancellationToken))
+        if (await _flow.IssueAsync(user, EmailCodePurpose.EmailVerification, cancellationToken) == CodeIssueOutcome.Throttled)
         {
             throw new AppException(
                 "RATE_LIMIT_EXCEEDED",

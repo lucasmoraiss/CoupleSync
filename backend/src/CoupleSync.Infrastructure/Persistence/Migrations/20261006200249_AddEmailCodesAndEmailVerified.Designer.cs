@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CoupleSync.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261006194152_AddEmailCodesAndEmailVerified")]
+    [Migration("20261006200249_AddEmailCodesAndEmailVerified")]
     partial class AddEmailCodesAndEmailVerified
     {
         /// <inheritdoc />
@@ -254,6 +254,14 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at_utc");
+
+                    b.Property<int>("IssueCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("issue_count");
+
+                    b.Property<DateTime>("IssueWindowStartedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("issue_window_started_at_utc");
 
                     b.Property<string>("Purpose")
                         .IsRequired()

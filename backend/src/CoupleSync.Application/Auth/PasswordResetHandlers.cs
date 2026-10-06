@@ -12,8 +12,10 @@ public sealed record ResetPasswordCommand(string Email, string Code, string NewP
 /// <summary>
 /// Asks for a password-reset code. Answers the same (no error, no content) whether or not the account exists, whether
 /// or not the request cap was hit and whether or not the provider accepted the e-mail. The only distinct answer is the
-/// 503 for "e-mail not configured", which says nothing about any account. An unknown address still spends the
-/// code-generation and hashing work, and the e-mail is handed to a background queue, so timing does not reveal it either.
+/// 503 for "e-mail not configured", which says nothing about any account. The e-mail itself is handed to a background
+/// queue, so the response does not wait for the provider. Response time is NOT guaranteed identical: a known account
+/// also does a database write that an unknown one skips (the unknown path only does the code hashing), so the
+/// difference is small but not eliminated.
 /// </summary>
 public sealed class RequestPasswordResetCommandHandler
 {
@@ -85,10 +87,17 @@ public sealed class ResetPasswordCommandHandler
             user = null;
         }
 
-        await _flow.VerifyAndConsumeAsync(user, EmailCodePurpose.PasswordReset, command.Code, cancellationToken);
+        var verified = await _flow.VerifyAsync(user, EmailCodePurpose.PasswordReset, command.Code, cancellationToken);
 
-        user!.ChangePasswordHash(_passwordHasher.HashPassword(command.NewPassword));
-        await _authRepository.SaveChangesAsync(cancellationToken);
-        await _authRepository.RevokeRefreshTokensByUserIdAsync(user.Id, cancellationToken);
+        // All or nothing: the code is consumed, the password saved and every session revoked together. If anything
+        // fails the transaction rolls back, so the password never changes while an old refresh token survives.
+        var newHash = _passwordHasher.HashPassword(command.NewPassword);
+        await _authRepository.ExecuteInTransactionAsync(async () =>
+        {
+            await _flow.ConsumeAsync(verified, cancellationToken);
+            user!.ChangePasswordHash(newHash);
+            await _authRepository.SaveChangesAsync(cancellationToken);
+            await _authRepository.RevokeRefreshTokensByUserIdAsync(user.Id, cancellationToken);
+        }, cancellationToken);
     }
 }

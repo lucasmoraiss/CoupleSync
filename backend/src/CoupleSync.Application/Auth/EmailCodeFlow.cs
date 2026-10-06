@@ -11,10 +11,19 @@ namespace CoupleSync.Application.Auth;
 /// the previous one of the same purpose) and e-mail it, and verify a typed code (counted attempts, expiry,
 /// constant-time comparison, single use).
 /// </summary>
+public enum CodeIssueOutcome
+{
+    Sent,
+    Throttled,
+    Raced
+}
+
 public sealed class EmailCodeFlow
 {
     public const int CodeValidMinutes = 15;
     public const int MaxAttempts = 5;
+    public const int MaxCodesPerWindow = 5;
+    public static readonly TimeSpan IssueWindow = TimeSpan.FromHours(1);
 
     public const string InvalidCodeMessage = "Código inválido ou expirado. Solicite um novo código.";
 
@@ -22,7 +31,6 @@ public sealed class EmailCodeFlow
     private readonly IVerificationCodeService _codes;
     private readonly IEmailSender _emailSender;
     private readonly IDateTimeProvider _dateTimeProvider;
-    private readonly CodeRequestThrottle _throttle;
     private readonly ILogger<EmailCodeFlow> _logger;
 
     public EmailCodeFlow(
@@ -30,14 +38,12 @@ public sealed class EmailCodeFlow
         IVerificationCodeService codes,
         IEmailSender emailSender,
         IDateTimeProvider dateTimeProvider,
-        CodeRequestThrottle throttle,
         ILogger<EmailCodeFlow> logger)
     {
         _authRepository = authRepository;
         _codes = codes;
         _emailSender = emailSender;
         _dateTimeProvider = dateTimeProvider;
-        _throttle = throttle;
         _logger = logger;
     }
 
@@ -56,36 +62,59 @@ public sealed class EmailCodeFlow
     }
 
     /// <summary>
-    /// Creates a new code, invalidating the previous one, and e-mails it. False when nothing was sent because the
-    /// address hit its request cap or a concurrent request already issued one. A provider failure is logged and
-    /// swallowed: callers answer the same way whether or not the e-mail went out.
+    /// Creates a new code (invalidating the previous one) and e-mails it. The cap (<see cref="MaxCodesPerWindow"/> per
+    /// hour per user and purpose) is kept in the database next to the code, so a restart does not grant a fresh budget.
+    /// A provider failure is logged and swallowed: callers answer the same way whether or not the e-mail went out.
     /// </summary>
-    public async Task<bool> IssueAsync(User user, string purpose, CancellationToken cancellationToken)
+    public async Task<CodeIssueOutcome> IssueAsync(User user, string purpose, CancellationToken cancellationToken)
     {
-        if (!_throttle.TryAcquire(purpose, user.Email))
+        // Two requests can race on the unique (user, purpose) index: the loser re-reads and retries once.
+        for (var attempt = 1; attempt <= 2; attempt++)
         {
-            _logger.LogInformation("Code request for user {UserId} ({Purpose}) skipped: request cap reached.", user.Id, purpose);
-            return false;
+            var now = _dateTimeProvider.UtcNow;
+            var code = _codes.Generate();
+            var hash = _codes.Hash(user.Id, purpose, code);
+
+            var existing = await _authRepository.FindEmailCodeForUpdateAsync(user.Id, purpose, cancellationToken);
+            EmailCode entity;
+            if (existing is null)
+            {
+                entity = EmailCode.Create(user.Id, purpose, hash, now.AddMinutes(CodeValidMinutes), now);
+            }
+            else if (existing.HasReachedIssueLimit(now, MaxCodesPerWindow, IssueWindow))
+            {
+                _logger.LogInformation("Code request for user {UserId} ({Purpose}) skipped: request cap reached.", user.Id, purpose);
+                return CodeIssueOutcome.Throttled;
+            }
+            else
+            {
+                existing.Reissue(hash, now.AddMinutes(CodeValidMinutes), now, IssueWindow);
+                entity = existing;
+            }
+
+            try
+            {
+                await _authRepository.StoreEmailCodeAsync(entity, cancellationToken);
+            }
+            catch (DbUpdateException ex)
+            {
+                _logger.LogWarning(ex, "Could not store the {Purpose} code for user {UserId} (attempt {Attempt}).", purpose, user.Id, attempt);
+                continue;
+            }
+
+            await SendAsync(user, purpose, code, cancellationToken);
+            return CodeIssueOutcome.Sent;
         }
 
-        var now = _dateTimeProvider.UtcNow;
-        var code = _codes.Generate();
-        var entity = EmailCode.Create(user.Id, purpose, _codes.Hash(user.Id, purpose, code), now.AddMinutes(CodeValidMinutes), now);
+        // Another request stored a code for this user at the same moment; that one was e-mailed.
+        return CodeIssueOutcome.Raced;
+    }
 
-        try
-        {
-            await _authRepository.ReplaceEmailCodeAsync(entity, cancellationToken);
-        }
-        catch (DbUpdateException ex)
-        {
-            // Two requests for the same user raced on the unique (user, purpose) index; the other one's code is the live one.
-            _logger.LogWarning(ex, "Could not store the {Purpose} code for user {UserId}.", purpose, user.Id);
-            return false;
-        }
-
+    private async Task SendAsync(User user, string purpose, string code, CancellationToken cancellationToken)
+    {
         var message = purpose == EmailCodePurpose.PasswordReset
-            ? EmailTemplates.PasswordReset(user.Email, user.Name, code, CodeValidMinutes)
-            : EmailTemplates.EmailVerification(user.Email, user.Name, code, CodeValidMinutes);
+            ? EmailTemplates.PasswordReset(user.Email, code, CodeValidMinutes)
+            : EmailTemplates.EmailVerification(user.Email, code, CodeValidMinutes);
 
         try
         {
@@ -95,15 +124,15 @@ public sealed class EmailCodeFlow
         {
             _logger.LogWarning(ex, "Sending the {Purpose} e-mail for user {UserId} failed.", purpose, user.Id);
         }
-
-        return true;
     }
 
     /// <summary>
-    /// Checks a typed code and consumes it. Every failure (unknown user, no code, expired, attempts used up, wrong
-    /// code) throws the same INVALID_CODE error and spends comparable work, so the answer reveals nothing about the account.
+    /// Checks a typed code and spends one attempt (counted before comparing, atomically). Every failure (unknown user, no
+    /// code, expired, attempts used up, wrong code) throws the same INVALID_CODE error. An unknown user or missing code still
+    /// does one comparison, which only narrows the timing difference with a real code. Returns the code so the caller can
+    /// consume it together with whatever it unlocks (see <see cref="ConsumeAsync"/>).
     /// </summary>
-    public async Task VerifyAndConsumeAsync(User? user, string purpose, string code, CancellationToken cancellationToken)
+    public async Task<EmailCode> VerifyAsync(User? user, string purpose, string code, CancellationToken cancellationToken)
     {
         var typed = (code ?? string.Empty).Trim();
 
@@ -131,7 +160,16 @@ public sealed class EmailCodeFlow
             throw InvalidCode();
         }
 
-        if (!await _authRepository.ConsumeEmailCodeAsync(stored.Id, cancellationToken))
+        return stored;
+    }
+
+    /// <summary>
+    /// Deletes a verified code; succeeds for exactly one caller, so a code is single use even under concurrency. Call it
+    /// inside the same transaction as the change it unlocks, so a failure rolls the consumption back too.
+    /// </summary>
+    public async Task ConsumeAsync(EmailCode code, CancellationToken cancellationToken)
+    {
+        if (!await _authRepository.ConsumeEmailCodeAsync(code.Id, cancellationToken))
         {
             throw InvalidCode();
         }

@@ -97,8 +97,43 @@ public sealed class FakeAuthRepository : IAuthRepository
 
     public List<EmailCode> EmailCodes { get; } = new();
 
+    public Exception? RevokeRefreshTokensFailure { get; set; }
+
+    /// <summary>How many of the next code stores fail like a lost insert race (unique index on user + purpose).</summary>
+    public int FailNextCodeStores { get; set; }
+
+    public async Task ExecuteInTransactionAsync(Func<Task> action, CancellationToken cancellationToken)
+    {
+        var users = Users.Select(u => (User: u, u.PasswordHash, u.EmailVerified)).ToList();
+        var codes = EmailCodes.ToList();
+        var tokens = RefreshTokens.ToList();
+        try
+        {
+            await action();
+        }
+        catch
+        {
+            foreach (var (user, hash, verified) in users)
+            {
+                user.ChangePasswordHash(hash);
+                typeof(User).GetProperty(nameof(User.EmailVerified))!.SetValue(user, verified);
+            }
+
+            EmailCodes.Clear();
+            EmailCodes.AddRange(codes);
+            RefreshTokens.Clear();
+            RefreshTokens.AddRange(tokens);
+            throw;
+        }
+    }
+
     public Task<int> RevokeRefreshTokensByUserIdAsync(Guid userId, CancellationToken cancellationToken)
     {
+        if (RevokeRefreshTokensFailure is not null)
+        {
+            throw RevokeRefreshTokensFailure;
+        }
+
         return Task.FromResult(RefreshTokens.RemoveAll(x => x.UserId == userId));
     }
 
@@ -107,10 +142,24 @@ public sealed class FakeAuthRepository : IAuthRepository
         return Task.FromResult(EmailCodes.SingleOrDefault(x => x.UserId == userId && x.Purpose == purpose));
     }
 
-    public Task ReplaceEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
+    public Task<EmailCode?> FindEmailCodeForUpdateAsync(Guid userId, string purpose, CancellationToken cancellationToken)
     {
-        EmailCodes.RemoveAll(x => x.UserId == code.UserId && x.Purpose == code.Purpose);
-        EmailCodes.Add(code);
+        return Task.FromResult(EmailCodes.SingleOrDefault(x => x.UserId == userId && x.Purpose == purpose));
+    }
+
+    public Task StoreEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
+    {
+        if (FailNextCodeStores > 0)
+        {
+            FailNextCodeStores--;
+            throw new Microsoft.EntityFrameworkCore.DbUpdateException("duplicate key value violates unique constraint 23505");
+        }
+
+        if (!EmailCodes.Contains(code))
+        {
+            EmailCodes.Add(code);
+        }
+
         return Task.CompletedTask;
     }
 

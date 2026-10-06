@@ -102,14 +102,29 @@ public sealed class AuthRepository : IAuthRepository
             .SingleOrDefaultAsync(x => x.UserId == userId && x.Purpose == purpose, cancellationToken);
     }
 
-    public async Task ReplaceEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
+    public Task<EmailCode?> FindEmailCodeForUpdateAsync(Guid userId, string purpose, CancellationToken cancellationToken)
     {
-        await _dbContext.EmailCodes
-            .Where(x => x.UserId == code.UserId && x.Purpose == code.Purpose)
-            .ExecuteDeleteAsync(cancellationToken);
+        return _dbContext.EmailCodes
+            .SingleOrDefaultAsync(x => x.UserId == userId && x.Purpose == purpose, cancellationToken);
+    }
 
-        await _dbContext.EmailCodes.AddAsync(code, cancellationToken);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+    public async Task StoreEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
+    {
+        var entry = _dbContext.Entry(code);
+        if (entry.State == EntityState.Detached)
+        {
+            _dbContext.EmailCodes.Add(code);
+        }
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            entry.State = EntityState.Detached;
+            throw;
+        }
     }
 
     public async Task<bool> TryRegisterEmailCodeAttemptAsync(Guid codeId, int maxAttempts, CancellationToken cancellationToken)
@@ -128,6 +143,19 @@ public sealed class AuthRepository : IAuthRepository
             .ExecuteDeleteAsync(cancellationToken);
 
         return affectedRows == 1;
+    }
+
+    public async Task ExecuteInTransactionAsync(Func<Task> action, CancellationToken cancellationToken)
+    {
+        if (_dbContext.Database.CurrentTransaction is not null)
+        {
+            await action();
+            return;
+        }
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await action(); // an exception skips the commit; disposing the transaction rolls everything back
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)

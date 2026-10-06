@@ -47,6 +47,6 @@ public static class EmailTestKit
     public static VerificationCodeService NewCodeService() =>
         new(Options.Create(new JwtOptions { Secret = "this-is-a-secure-test-secret-with-32chars" }));
 
-    public static EmailCodeFlow NewFlow(FakeAuthRepository repository, InMemoryEmailSender sender, IDateTimeProvider clock, CodeRequestThrottle? throttle = null) =>
-        new(repository, NewCodeService(), sender, clock, throttle ?? new CodeRequestThrottle(clock), NullLogger<EmailCodeFlow>.Instance);
+    public static EmailCodeFlow NewFlow(FakeAuthRepository repository, InMemoryEmailSender sender, IDateTimeProvider clock) =>
+        new(repository, NewCodeService(), sender, clock, NullLogger<EmailCodeFlow>.Instance);
 }

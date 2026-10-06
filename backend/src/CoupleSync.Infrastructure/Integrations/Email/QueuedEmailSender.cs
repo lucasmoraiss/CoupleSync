@@ -9,32 +9,34 @@ using Microsoft.Extensions.Options;
 namespace CoupleSync.Infrastructure.Integrations.Email;
 
 /// <summary>
-/// Production <see cref="IEmailSender"/>: puts the message on a queue and returns at once, so a request takes the same
-/// time whether or not an e-mail goes out (an unknown address in the password-reset route must not be slower or
-/// faster than a known one) and a slow or failing provider never delays or breaks a request.
+/// Production <see cref="IEmailSender"/>: puts the message on a queue and returns at once, so a request never waits for
+/// the provider (the largest timing difference between a known and an unknown address) and a slow or failing provider
+/// never delays or breaks a request. It does not make response times identical.
 /// When no provider is configured <see cref="IsConfigured"/> is false and nothing is queued.
 /// </summary>
 public sealed class QueuedEmailSender : IEmailSender
 {
-    private readonly Channel<EmailMessage> _channel = Channel.CreateBounded<EmailMessage>(
-        new BoundedChannelOptions(200) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
-
+    private readonly Channel<EmailMessage> _channel;
     private readonly EmailOptions _options;
     private readonly ILogger<QueuedEmailSender> _logger;
 
-    public QueuedEmailSender(IOptions<EmailOptions> options, ILogger<QueuedEmailSender> logger)
+    public QueuedEmailSender(IOptions<EmailOptions> options, ILogger<QueuedEmailSender> logger, int capacity = 200)
     {
         _options = options.Value;
         _logger = logger;
+        _channel = Channel.CreateBounded<EmailMessage>(
+            new BoundedChannelOptions(capacity) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true },
+            // With DropWrite, TryWrite still returns true when it drops: only this callback sees the loss.
+            _ => _logger.LogWarning("E-mail queue is full; a message was dropped."));
     }
 
     public bool IsConfigured => _options.IsConfigured;
 
     public Task SendAsync(EmailMessage message, CancellationToken cancellationToken)
     {
-        if (IsConfigured && !_channel.Writer.TryWrite(message))
+        if (IsConfigured)
         {
-            _logger.LogWarning("E-mail queue is full; a message was dropped.");
+            _channel.Writer.TryWrite(message);
         }
 
         return Task.CompletedTask;

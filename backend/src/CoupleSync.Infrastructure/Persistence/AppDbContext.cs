@@ -133,6 +133,8 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.ExpiresAtUtc).HasColumnName("expires_at_utc").IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
             entity.Property(x => x.Attempts).HasColumnName("attempts").IsRequired();
+            entity.Property(x => x.IssueWindowStartedAtUtc).HasColumnName("issue_window_started_at_utc").IsRequired();
+            entity.Property(x => x.IssueCount).HasColumnName("issue_count").IsRequired();
 
             // One live code per user and purpose: a new request replaces the previous one.
             entity.HasIndex(x => new { x.UserId, x.Purpose }).IsUnique();
