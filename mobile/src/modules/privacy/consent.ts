@@ -12,6 +12,8 @@ export interface CaptureConsent {
   readonly acceptedAt: string | null;
   /** Quando o usuário respondeu pela última vez (aceitou, recusou ou desligou). null = nunca foi perguntado. */
   readonly decidedAt: string | null;
+  /** Quando a tela de consentimento foi aberta sozinha pelo app (uma vez); depois disso só pelas Configurações. */
+  readonly promptShownAt: string | null;
   /** Interruptor das configurações. Só vale ligado se houve aceite. */
   readonly enabled: boolean;
 }
@@ -29,7 +31,7 @@ export interface ConsentRecord {
 
 export const EMPTY_CONSENT: ConsentRecord = {
   version: CONSENT_VERSION,
-  capture: { acceptedAt: null, decidedAt: null, enabled: false },
+  capture: { acceptedAt: null, decidedAt: null, promptShownAt: null, enabled: false },
   aiChat: { acceptedAt: null, declinedAt: null },
 };
 
@@ -49,6 +51,7 @@ export function parseConsent(raw: string | null | undefined): ConsentRecord {
       capture: {
         acceptedAt,
         decidedAt: isoOrNull(data.capture?.decidedAt),
+        promptShownAt: isoOrNull(data.capture?.promptShownAt),
         // Ligado sem data de aceite não vale: nunca captura sem consentimento registrado.
         enabled: acceptedAt !== null && data.capture?.enabled === true,
       },
@@ -80,11 +83,11 @@ export function isAiChatAllowed(record: ConsentRecord): boolean {
  * leitura de notificações concedida) e ainda não respondeu. Quem nunca ligou a captura vê a tela só ao tentar ligar.
  */
 export function shouldPromptCaptureConsent(record: ConsentRecord, listenerPermissionGranted: boolean): boolean {
-  return listenerPermissionGranted && record.capture.decidedAt === null;
+  return listenerPermissionGranted && record.capture.decidedAt === null && record.capture.promptShownAt === null;
 }
 
 export function acceptCapture(record: ConsentRecord, nowIso: string): ConsentRecord {
-  return { ...record, capture: { acceptedAt: nowIso, decidedAt: nowIso, enabled: true } };
+  return { ...record, capture: { ...record.capture, acceptedAt: nowIso, decidedAt: nowIso, enabled: true } };
 }
 
 /** Recusa (ou desliga): mantém a data do aceite anterior, se houve, como histórico, mas desliga. */
@@ -96,6 +99,11 @@ export function declineCapture(record: ConsentRecord, nowIso: string): ConsentRe
 export function setCaptureEnabled(record: ConsentRecord, enabled: boolean, nowIso: string): ConsentRecord {
   if (enabled && record.capture.acceptedAt === null) return record;
   return { ...record, capture: { ...record.capture, decidedAt: nowIso, enabled } };
+}
+
+/** A tela foi aberta sozinha: não abre de novo na próxima abertura do app, mesmo que o usuário saia sem responder. */
+export function markCapturePromptShown(record: ConsentRecord, nowIso: string): ConsentRecord {
+  return { ...record, capture: { ...record.capture, promptShownAt: nowIso } };
 }
 
 export function acceptAiChat(record: ConsentRecord, nowIso: string): ConsentRecord {

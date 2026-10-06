@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Common.Options;
@@ -68,7 +69,7 @@ public sealed class RegisterCommandHandler
         {
             await _authRepository.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
         {
             throw new ConflictException("EMAIL_ALREADY_IN_USE", "Já existe uma conta com esse e-mail.");
         }
@@ -99,10 +100,4 @@ public sealed class RegisterCommandHandler
         }
     }
 
-    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
-    {
-        var message = ex.InnerException?.Message ?? ex.Message;
-        return message.Contains("23505", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("duplicate", StringComparison.OrdinalIgnoreCase);
-    }
 }

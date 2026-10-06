@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common;
 using CoupleSync.Application.Common.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,7 +24,7 @@ public sealed class RegisterDeviceTokenCommandHandler
         {
             await UpsertAndSaveAsync(command, now, cancellationToken);
         }
-        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
         {
             // Two registrations of the same token (or user) raced and the other one won the unique index.
             // Redo once from a clean state: the second pass sees the winner's row and updates it instead.
@@ -38,11 +39,4 @@ public sealed class RegisterDeviceTokenCommandHandler
         await _repository.SaveChangesAsync(cancellationToken);
     }
 
-    private static bool IsUniqueViolation(DbUpdateException ex)
-    {
-        var message = ex.InnerException?.Message ?? ex.Message;
-        return message.Contains("23505", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("UNIQUE constraint", StringComparison.OrdinalIgnoreCase);
-    }
 }

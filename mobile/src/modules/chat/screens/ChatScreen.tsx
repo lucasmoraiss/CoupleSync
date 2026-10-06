@@ -25,6 +25,14 @@ import { useConsentStore } from '@/modules/privacy/consentStore';
 
 /** SEG-10: primeira abertura do chat: aviso de envio ao Google Gemini, com aceitar / não usar. */
 function AiChatDisclosure({ declined }: { declined: boolean }) {
+  const [failed, setFailed] = useState(false);
+  // Só considera feito se a resposta foi registrada; senão fica na tela e avisa.
+  const answer = async (accept: boolean) => {
+    setFailed(false);
+    const store = useConsentStore.getState();
+    const saved = accept ? await store.acceptAiChat() : await store.declineAiChat();
+    if (!saved) setFailed(true);
+  };
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.disclosureContent}>
@@ -35,9 +43,14 @@ function AiChatDisclosure({ declined }: { declined: boolean }) {
         <TextSections sections={AI_CHAT_SECTIONS} />
       </ScrollView>
       <View style={styles.disclosureActions}>
+        {failed && (
+          <Text style={styles.disclosureError} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+            Não foi possível registrar a sua resposta. Tente novamente.
+          </Text>
+        )}
         <TouchableOpacity
           style={styles.acceptBtn}
-          onPress={() => void useConsentStore.getState().acceptAiChat()}
+          onPress={() => void answer(true)}
           accessibilityRole="button"
           accessibilityLabel="Aceitar e usar o Chat IA. Meus dados financeiros serão enviados ao Google Gemini."
         >
@@ -46,7 +59,7 @@ function AiChatDisclosure({ declined }: { declined: boolean }) {
         {!declined && (
           <TouchableOpacity
             style={styles.declineBtn}
-            onPress={() => void useConsentStore.getState().declineAiChat()}
+            onPress={() => void answer(false)}
             accessibilityRole="button"
             accessibilityLabel="Não usar o Chat IA"
           >
@@ -199,6 +212,7 @@ function ChatConversation() {
 const styles = StyleSheet.create({
   disclosureContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.lg },
   disclosureTitle: { fontSize: typography.fontSize.xxl, fontWeight: typography.fontWeight.semibold, color: colors.text, marginBottom: spacing.md },
+  disclosureError: { color: colors.errorLight, fontSize: typography.fontSize.md, textAlign: 'center' },
   disclosureNote: { fontSize: typography.fontSize.md, color: colors.warning, marginBottom: spacing.md },
   disclosureActions: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, paddingTop: spacing.sm, gap: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
   acceptBtn: { minHeight: 48, borderRadius: borderRadius.lg, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },

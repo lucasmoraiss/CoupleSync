@@ -5,6 +5,7 @@ import {
   declineAiChat,
   declineCapture,
   formatConsentDate,
+  markCapturePromptShown,
   isAiChatAllowed,
   isCaptureAllowed,
   parseConsent,
@@ -50,6 +51,12 @@ describe('tela de consentimento para quem já usa a captura', () => {
   });
   it('não aparece sem a permissão de ler notificações', () => {
     expect(shouldPromptCaptureConsent(EMPTY_CONSENT, false)).toBe(false);
+  });
+  it('não reaparece depois de mostrada, mesmo sem resposta', () => {
+    const shown = markCapturePromptShown(EMPTY_CONSENT, NOW);
+    expect(shown.capture.promptShownAt).toBe(NOW);
+    expect(shouldPromptCaptureConsent(shown, true)).toBe(false);
+    expect(parseConsent(serializeConsent(shown)).capture.promptShownAt).toBe(NOW);
   });
   it.each([
     ['aceitou', acceptCapture(EMPTY_CONSENT, NOW)],

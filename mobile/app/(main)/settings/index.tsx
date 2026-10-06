@@ -19,7 +19,9 @@ export default function SettingsScreen() {
       router.push('/(main)/settings/capture-consent' as any);
       return;
     }
-    void useConsentStore.getState().setCaptureEnabled(value);
+    void useConsentStore.getState().setCaptureEnabled(value).then((saved) => {
+      if (!saved) Alert.alert('Não foi possível salvar', 'Tente novamente.');
+    });
   };
 
   const handleLogout = async () => {

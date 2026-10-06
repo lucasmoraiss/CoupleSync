@@ -19,6 +19,7 @@ jest.mock('@/services/apiClient', () => ({
 }));
 
 import { getPendingRetryCount, handleRawNotificationEvent } from '../eventUploader';
+import * as SecureStore from 'expo-secure-store';
 import { clearUserData } from '@/state/userData';
 import { useSessionStore } from '@/state/sessionStore';
 import { consentStorageKey, useConsentStore } from '@/modules/privacy/consentStore';
@@ -133,4 +134,52 @@ describe('porta de consentimento da captura', () => {
       jest.useRealTimers();
     }
   });
+
+describe('aceitar e recusar informam se gravaram', () => {
+  it('sem registro carregado (ou sem usuário) devolve false e não muda nada', async () => {
+    expect(await useConsentStore.getState().acceptCapture()).toBe(false);
+    await useSessionStore.getState().setSession('a', 'r', 'user-1', 'couple-1'); // sessão sem load()
+    expect(await useConsentStore.getState().acceptAiChat()).toBe(false);
+    expect(await useConsentStore.getState().declineCapture()).toBe(false);
+    expect(useConsentStore.getState().record.capture.acceptedAt).toBeNull();
+  });
+
+  it('com registro carregado devolve true', async () => {
+    await signIn('user-1');
+    expect(await useConsentStore.getState().acceptCapture()).toBe(true);
+    expect(await useConsentStore.getState().acceptAiChat()).toBe(true);
+  });
+
+  it('se a gravação falha, desfaz o aceite em memória e devolve false', async () => {
+    await signIn('user-1');
+    (SecureStore.setItemAsync as jest.Mock).mockRejectedValueOnce(new Error('keystore'));
+
+    expect(await useConsentStore.getState().acceptCapture()).toBe(false);
+
+    expect(useConsentStore.getState().record.capture.acceptedAt).toBeNull();
+    expect(await handleRawNotificationEvent(PURCHASE)).toBe(false);
+  });
+
+  it('a sessão trocar durante a gravação não deixa o aceite valer para o outro usuário', async () => {
+    await signIn('user-1');
+    let release!: () => void;
+    (SecureStore.setItemAsync as jest.Mock).mockImplementationOnce(
+      (key: string, value: string) =>
+        new Promise<void>((resolve) => {
+          release = () => {
+            secureStore[key] = value;
+            resolve();
+          };
+        }),
+    );
+    const pending = useConsentStore.getState().acceptCapture();
+    await clearUserData();
+    await signIn('user-2');
+    release();
+    await pending;
+
+    expect(useConsentStore.getState().record.capture.acceptedAt).toBeNull();
+    expect(await handleRawNotificationEvent(PURCHASE)).toBe(false);
+  });
+});
 });

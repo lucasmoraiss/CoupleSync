@@ -5,6 +5,7 @@ package com.couplesync.app
 import android.content.ComponentName
 import android.content.Intent
 import android.provider.Settings
+import com.facebook.react.bridge.LifecycleEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -37,8 +38,23 @@ class NotificationBridgeModule(private val reactContext: ReactApplicationContext
             }
         }
 
-        // Flush events buffered while the bridge was inactive (NFR-001: no title/body logged)
-        // Safe to emit unconditionally: init guarantees a valid ReactApplicationContext
+        // Flush events buffered while the bridge was inactive (NFR-001: no title/body logged).
+        flushBuffered()
+
+        // Um evento re-bufferizado porque o React ainda não estava ativo só sairia na próxima criação do módulo.
+        // Ao voltar ao primeiro plano (React ativo) o que estiver em espera é entregue.
+        reactContext.addLifecycleEventListener(object : LifecycleEventListener {
+            override fun onHostResume() = flushBuffered()
+            override fun onHostPause() {}
+            override fun onHostDestroy() {}
+        })
+    }
+
+    /**
+     * Entrega ao JS o que estava em espera; se o React continua inativo, o evento volta ao buffer
+     * (limite de 50 mantido pelo próprio buffer; direto no buffer, sem passar pelo listener: sem recursão).
+     */
+    private fun flushBuffered() {
         NotificationEventBus.flush { packageName, title, body, timestampMs ->
             if (reactContext.hasActiveReactInstance()) {
                 val params = WritableNativeMap().apply {
@@ -81,6 +97,8 @@ class NotificationBridgeModule(private val reactContext: ReactApplicationContext
     @ReactMethod
     fun setCaptureEnabled(enabled: Boolean) {
         NotificationEventBus.setCaptureEnabled(reactContext, enabled)
+        // O JS acabou de ligar a captura (e já escuta): entrega o que ficou em espera.
+        if (enabled) flushBuffered()
     }
 
     /**

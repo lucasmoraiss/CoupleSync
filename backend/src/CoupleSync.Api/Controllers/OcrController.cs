@@ -37,7 +37,7 @@ public sealed class OcrController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status413RequestEntityTooLarge)]
     [ProducesResponseType(StatusCodes.Status415UnsupportedMediaType)]
-    public async Task<ActionResult<UploadResponse>> Upload(IFormFile file, CancellationToken ct)
+    public async Task<ActionResult<UploadResponse>> Upload(IFormFile file, CancellationToken ct, [FromForm] bool aiCategorizationConsent = false)
     {
         if (file is null || file.Length == 0)
             throw new BadRequestException("FILE_REQUIRED", "Envie um arquivo.");
@@ -59,7 +59,7 @@ public sealed class OcrController : ControllerBase
         var userId = GetAuthenticatedUserId();
 
         var uploadId = await _importJobService.UploadAsync(
-            coupleId, userId, fileStream, detectedMime, ct, file.FileName);
+            coupleId, userId, fileStream, detectedMime, ct, file.FileName, aiCategorizationConsent);
 
         return Ok(new UploadResponse(uploadId));
     }

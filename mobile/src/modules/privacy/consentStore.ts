@@ -17,6 +17,7 @@ import {
   declineCapture,
   isAiChatAllowed,
   isCaptureAllowed,
+  markCapturePromptShown,
   parseConsent,
   serializeConsent,
   setCaptureEnabled,
@@ -41,12 +42,17 @@ interface ConsentState {
 interface ConsentActions {
   /** Lê o registro do usuário (chamado ao entrar/abrir o app logado). */
   load: (userId: string) => Promise<void>;
-  acceptCapture: () => Promise<void>;
-  declineCapture: () => Promise<void>;
+  /**
+   * As ações abaixo devolvem true só se o registro foi trocado E gravado. False (sem registro carregado, sessão de
+   * outro usuário ou falha ao gravar) significa que NADA mudou: a tela deve ficar e avisar.
+   */
+  acceptCapture: () => Promise<boolean>;
+  declineCapture: () => Promise<boolean>;
+  markCapturePromptShown: () => Promise<boolean>;
   /** Interruptor das configurações. Sem aceite anterior não liga (a tela de consentimento deve ser mostrada). */
-  setCaptureEnabled: (enabled: boolean) => Promise<void>;
-  acceptAiChat: () => Promise<void>;
-  declineAiChat: () => Promise<void>;
+  setCaptureEnabled: (enabled: boolean) => Promise<boolean>;
+  acceptAiChat: () => Promise<boolean>;
+  declineAiChat: () => Promise<boolean>;
   reset: () => void;
 }
 
@@ -54,16 +60,19 @@ const INITIAL: ConsentState = { userId: null, loaded: false, record: EMPTY_CONSE
 
 export const useConsentStore = create<ConsentState & ConsentActions>((set, get) => {
   /** Troca o registro em memória na hora (síncrono) e só então grava; a gravação vai para a chave do dono do registro. */
-  async function update(change: (record: ConsentRecord, nowIso: string) => ConsentRecord): Promise<void> {
+  async function update(change: (record: ConsentRecord, nowIso: string) => ConsentRecord): Promise<boolean> {
     const { userId, loaded, record } = get();
-    if (!userId || !loaded) return;
+    if (!userId || !loaded || userId !== useSessionStore.getState().userId) return false;
     const next = change(record, new Date().toISOString());
-    if (next === record) return;
+    if (next === record) return true; // nada a mudar (ex.: ligar sem aceite anterior): o chamador confere o estado
     set({ record: next });
     try {
       await SecureStore.setItemAsync(consentStorageKey(userId), serializeConsent(next));
+      return true;
     } catch {
-      // Não gravou: vale na sessão atual; na próxima abertura o usuário será perguntado de novo (falha segura).
+      // Não gravou: desfaz, para a tela não dizer que aceitou algo que não ficou registrado.
+      if (get().userId === userId && get().record === next) set({ record });
+      return false;
     }
   }
 
@@ -86,6 +95,7 @@ export const useConsentStore = create<ConsentState & ConsentActions>((set, get) 
 
     acceptCapture: () => update((r, now) => acceptCapture(r, now)),
     declineCapture: () => update((r, now) => declineCapture(r, now)),
+    markCapturePromptShown: () => update((r, now) => markCapturePromptShown(r, now)),
     setCaptureEnabled: (enabled) => update((r, now) => setCaptureEnabled(r, enabled, now)),
     acceptAiChat: () => update((r, now) => acceptAiChat(r, now)),
     declineAiChat: () => update((r, now) => declineAiChat(r, now)),

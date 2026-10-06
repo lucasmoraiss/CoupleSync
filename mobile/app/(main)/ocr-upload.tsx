@@ -1,6 +1,8 @@
 // AC-121, AC-129, AC-130: OCR upload screen — PDF file picker + status polling.
 // Only PDF is offered: the server's default parser handles digital PDF statements only and
 // rejects images (IMAGE_NOT_SUPPORTED), so camera and image selection are not exposed.
+import { appendAiConsent } from '@/modules/ocr/uploadForm';
+import { isAiChatAllowedNow } from '@/modules/privacy/consentStore';
 import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback, useRef } from 'react';
 import {
@@ -191,6 +193,7 @@ export default function OcrUploadScreen() {
         type: PDF_MIME_TYPE,
         name: fileName,
       } as any);
+      appendAiConsent(formData, isAiChatAllowedNow());
 
       try {
         const res = await ocrApiClient.upload(formData, controller.signal);

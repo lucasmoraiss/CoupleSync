@@ -99,7 +99,37 @@ public sealed class GetIntegrationStatusQueryHandlerTests
         Assert.Equal(1, result.TotalRejected);
         Assert.NotNull(result.LastErrorAtUtc);
         Assert.Equal("Parser failed", result.LastErrorMessage);
-        Assert.Equal("Revise o erro do último evento rejeitado: Parser failed", result.RecoveryHint);
+        Assert.Equal("O último evento enviado foi rejeitado. Confira se a notificação do banco é uma compra comum.", result.RecoveryHint);
+    }
+
+    [Fact]
+    public async Task HandleAsync_RejectedWithPortugueseValidationError_ReturnsValidationRecoveryHint()
+    {
+        var repo = new FakeNotificationCaptureRepository();
+        var now = new DateTime(2026, 4, 14, 10, 0, 0, DateTimeKind.Utc);
+        var handler = BuildHandler(repo, new FixedDateTimeProvider(now));
+
+        repo.IngestEvents.Add(CreateEvent(IngestStatus.Accepted, now.AddHours(-2)));
+        repo.IngestEvents.Add(CreateEvent(IngestStatus.Rejected, now.AddHours(-1), "Falha de validação: valor"));
+
+        var result = await handler.HandleAsync(new GetIntegrationStatusQuery(CoupleId), CancellationToken.None);
+
+        Assert.Equal("Verifique o formato das notificações enviadas pelo aplicativo do banco.", result.RecoveryHint);
+    }
+
+    [Fact]
+    public async Task HandleAsync_RecoveryHint_NeverEchoesTheRawServerMessage()
+    {
+        var repo = new FakeNotificationCaptureRepository();
+        var now = new DateTime(2026, 4, 14, 10, 0, 0, DateTimeKind.Utc);
+        var handler = BuildHandler(repo, new FixedDateTimeProvider(now));
+
+        repo.IngestEvents.Add(CreateEvent(IngestStatus.Accepted, now.AddHours(-2)));
+        repo.IngestEvents.Add(CreateEvent(IngestStatus.Rejected, now.AddHours(-1), "NullReference in parser"));
+
+        var result = await handler.HandleAsync(new GetIntegrationStatusQuery(CoupleId), CancellationToken.None);
+
+        Assert.DoesNotContain("NullReference", result.RecoveryHint);
     }
 
     [Fact]

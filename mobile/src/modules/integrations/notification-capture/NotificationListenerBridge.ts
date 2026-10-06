@@ -2,6 +2,7 @@
 // Receives raw notification events via DeviceEventEmitter and forwards them to the
 // event uploader pipeline. Android-only; no-ops on other platforms.
 import { DeviceEventEmitter, NativeModules, Platform } from 'react-native';
+import { registerUserDataCleaner } from '@/state/userData';
 import { handleRawNotificationEvent, type RawNotificationEvent } from './eventUploader';
 
 // ── Native module contract (implemented in NotificationBridgeModule.kt) ──────
@@ -64,6 +65,9 @@ export function setNativeCaptureEnabled(enabled: boolean): void {
     // O porteiro do JS continua valendo.
   }
 }
+
+// Sair da conta (ou sessão expirada) deixa o serviço nativo desligado: sem usuário, nada de ler notificações.
+registerUserDataCleaner(() => setNativeCaptureEnabled(false));
 
 /**
  * Start listening for notification events from the Kotlin service.

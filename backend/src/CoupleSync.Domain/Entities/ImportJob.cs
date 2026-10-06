@@ -57,6 +57,12 @@ public sealed class ImportJob : ICoupleScoped
     /// </summary>
     public string? LineStatesJson { get; private set; }
 
+    /// <summary>
+    /// The uploader had accepted the AI disclosure when sending the file. Only then may the statement lines'
+    /// descriptions be sent to Gemini for categorization. False for every job created before this existed.
+    /// </summary>
+    public bool AiCategorizationConsent { get; private set; }
+
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
@@ -66,7 +72,8 @@ public sealed class ImportJob : ICoupleScoped
         string storagePath,
         string fileMimeType,
         DateTime createdAtUtc,
-        string? sourceFileName = null)
+        string? sourceFileName = null,
+        bool aiCategorizationConsent = false)
     {
         if (string.IsNullOrWhiteSpace(storagePath))
             throw new ArgumentException("O caminho do arquivo é obrigatório.", nameof(storagePath));
@@ -79,6 +86,7 @@ public sealed class ImportJob : ICoupleScoped
 
         var job = new ImportJob(Guid.NewGuid(), coupleId, userId, storagePath, fileMimeType, createdAtUtc);
         job.SourceFileName = NormalizeFileName(sourceFileName);
+        job.AiCategorizationConsent = aiCategorizationConsent;
         return job;
     }
 

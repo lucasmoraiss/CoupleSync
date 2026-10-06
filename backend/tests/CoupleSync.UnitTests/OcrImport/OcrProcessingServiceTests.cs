@@ -343,4 +343,53 @@ public sealed class OcrProcessingServiceTests
 
         public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
     }
+
+    // ─── Gemini categorization needs the uploader's consent ──────────────────
+
+    private sealed class SpyClassifier : CoupleSync.Application.Common.Interfaces.ICategoryClassifier
+    {
+        public List<string> Seen { get; } = new();
+
+        public Task<string?> SuggestCategoryAsync(string description, IReadOnlyList<string> categories, CancellationToken ct)
+        {
+            Seen.Add(description);
+            return Task.FromResult<string?>("Alimentação");
+        }
+    }
+
+    [Fact]
+    public async Task ParseAndDeduplicateAsync_WithoutAiConsent_NeverSendsDescriptionsToTheClassifier()
+    {
+        var spy = new SpyClassifier();
+        var service = new OcrProcessingService(new FakeTransactionRepository(existingFingerprints: []), spy, new FakeBudgetRepository());
+        var json = BuildReceiptJson(new[] { new { Description = "Padaria Sol", Amount = 10m, Currency = "BRL" } }, transactionDate: "2025-06-01");
+
+        var result = await service.ParseAndDeduplicateAsync(CoupleId, json, CancellationToken.None);
+
+        Assert.Empty(spy.Seen);
+        Assert.Null(result[0].SuggestedCategory);
+    }
+
+    [Fact]
+    public async Task ParseAndDeduplicateAsync_WithAiConsent_UsesTheClassifier()
+    {
+        var spy = new SpyClassifier();
+        var service = new OcrProcessingService(new FakeTransactionRepository(existingFingerprints: []), spy, new FakeBudgetRepository());
+        var json = BuildReceiptJson(new[] { new { Description = "Padaria Sol", Amount = 10m, Currency = "BRL" } }, transactionDate: "2025-06-01");
+
+        var result = await service.ParseAndDeduplicateAsync(CoupleId, json, CancellationToken.None, aiCategorizationConsent: true);
+
+        Assert.Single(spy.Seen);
+        Assert.NotNull(result[0].SuggestedCategory);
+    }
+
+    [Fact]
+    public void ImportJob_RecordsTheUploadersAiConsent_DefaultFalse()
+    {
+        var now = new DateTime(2026, 10, 6, 0, 0, 0, DateTimeKind.Utc);
+        var without = CoupleSync.Domain.Entities.ImportJob.Create(CoupleId, Guid.NewGuid(), "p", "application/pdf", now);
+        var with = CoupleSync.Domain.Entities.ImportJob.Create(CoupleId, Guid.NewGuid(), "p", "application/pdf", now, null, aiCategorizationConsent: true);
+        Assert.False(without.AiCategorizationConsent);
+        Assert.True(with.AiCategorizationConsent);
+    }
 }

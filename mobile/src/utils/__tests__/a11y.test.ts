@@ -1,4 +1,4 @@
-import { describeProgress, describeSlices, hitSlopFor, spokenAmountLabel, spokenBRL } from '../a11y';
+import { describeProgress, describeSlices, spokenBRL } from '../a11y';
 
 describe('spokenBRL', () => {
   it.each([
@@ -33,13 +33,6 @@ describe('spokenBRL', () => {
   });
 });
 
-describe('spokenAmountLabel', () => {
-  it('junta rótulo e valor', () => {
-    expect(spokenAmountLabel('Saldo', 100)).toBe('Saldo: 100 reais');
-    expect(spokenAmountLabel('Saldo', null)).toBe('Saldo');
-  });
-});
-
 describe('describeSlices', () => {
   it('resume o gráfico com total e percentuais', () => {
     expect(
@@ -67,13 +60,5 @@ describe('describeProgress', () => {
   it('limita o percentual a 0–100 e inclui os valores', () => {
     expect(describeProgress('Meta casa', 40, 400, 1000)).toBe('Meta casa: 40% concluída, 400 reais de 1000 reais.');
     expect(describeProgress('Meta casa', 140)).toBe('Meta casa: 100% concluída.');
-  });
-});
-
-describe('hitSlopFor', () => {
-  it('completa até 44 dp', () => {
-    expect(hitSlopFor(24)).toEqual({ top: 10, bottom: 10, left: 10, right: 10 });
-    expect(hitSlopFor(44)).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
-    expect(hitSlopFor(60)).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
   });
 });

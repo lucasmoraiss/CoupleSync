@@ -9,6 +9,13 @@ export interface TextSection {
 /** Aplicativos cujas notificações a captura lê. Mantenha alinhado a notification-patterns.json e ao serviço nativo. */
 export const CAPTURE_APPS: readonly string[] = ['Nubank', 'Itaú', 'Inter', 'C6 Bank', 'Bradesco'];
 
+/**
+ * !!! TEMPORÁRIO !!! Contato para pedir a exclusão dos dados. Hoje é só uma descrição neutra (nenhum e-mail foi
+ * definido). O responsável pelo app deve trocar por um contato real (ex.: um e-mail) ANTES de abrir o teste a mais
+ * pessoas. É o único lugar onde esse contato aparece.
+ */
+export const PRIVACY_CONTACT = 'a pessoa responsável pelo app que te convidou para o teste do CoupleSync';
+
 export const CAPTURE_CONSENT_TITLE = 'Captura de notificações bancárias';
 
 export const CAPTURE_CONSENT_SECTIONS: readonly TextSection[] = [
@@ -35,7 +42,7 @@ export const CAPTURE_CONSENT_SECTIONS: readonly TextSection[] = [
   {
     title: 'Você decide',
     paragraphs: [
-      'Dá para desligar quando quiser em Configurações. Desligar interrompe o envio na hora. A data do seu aceite fica registrada nas Configurações.',
+      'Dá para desligar quando quiser em Configurações. Desligar interrompe o envio na hora. A data do seu aceite fica registrada nas Configurações. Nada é enviado nem guardado sem o seu aceite.',
     ],
   },
 ];
@@ -48,11 +55,12 @@ export const AI_CHAT_SECTIONS: readonly TextSection[] = [
     paragraphs: [
       'Ao enviar uma pergunta, o app manda ao Google Gemini a sua mensagem e, como contexto, a renda, o orçamento, os gastos e as metas do grupo.',
       'Sem isso a IA não consegue responder sobre as suas finanças.',
+      'Se você aceitar, as descrições das linhas dos extratos que você importar também podem ser enviadas ao Google Gemini para sugerir a categoria de cada uma. Isso só acontece quando o servidor está com a IA ligada.',
     ],
   },
   {
     title: 'Se você não aceitar',
-    paragraphs: ['O Chat IA fica desativado e nada é enviado. O restante do app funciona normalmente.'],
+    paragraphs: ['O Chat IA fica desativado, nenhuma descrição de extrato vai ao Gemini e nada é enviado. O restante do app funciona normalmente.'],
   },
 ];
 
@@ -62,9 +70,9 @@ export const PRIVACY_SECTIONS: readonly TextSection[] = [
   {
     title: 'Dados que o CoupleSync coleta',
     paragraphs: [
-      'Conta: nome, e-mail e senha (guardada de forma irreversível, nunca em texto aberto).',
+      'Conta: nome, e-mail e senha (a senha é guardada de forma irreversível, nunca em texto aberto).',
       'Finanças que você informa: transações, rendas, orçamento, metas e categorias.',
-      'Importação de extratos: as imagens ou PDFs que você envia são lidos para extrair as transações.',
+      'Importação de extratos: o PDF que você envia é lido no servidor para extrair as transações e é apagado depois de processado.',
       'Captura de notificações (só se você aceitar): banco, valor, estabelecimento e data e hora das compras. O texto das notificações não é enviado.',
       'Alertas: o código do seu aparelho para enviar notificações do app (push).',
     ],
@@ -72,22 +80,25 @@ export const PRIVACY_SECTIONS: readonly TextSection[] = [
   {
     title: 'Onde ficam',
     paragraphs: [
-      'No servidor do CoupleSync, em banco de dados protegido por acesso restrito.',
-      'No seu celular ficam a sessão (em armazenamento seguro do Android) e as suas respostas de consentimento. Ao sair da conta, os dados da conta somem do aparelho.',
+      'No servidor do CoupleSync, em banco de dados com acesso restrito.',
+      'No seu celular ficam a sessão (em armazenamento seguro do Android) e as suas respostas de consentimento. Ao sair da conta, a sessão e os dados do app somem do aparelho; só as respostas de consentimento ficam guardadas para esta conta.',
     ],
   },
   {
     title: 'Com quem são compartilhados',
     paragraphs: [
       'Com os membros do seu grupo: eles veem as transações, rendas, orçamento e metas do grupo.',
-      'Com o Google Gemini, somente quando você aceita usar o Chat IA: a sua pergunta e os dados financeiros do grupo, para gerar a resposta.',
-      'Não vendemos nem compartilhamos seus dados com anunciantes.',
+      'Com o Google Gemini, somente depois que você aceita o aviso do Chat IA e somente quando o servidor está com a IA ligada: a sua pergunta e os dados financeiros do grupo (chat) e as descrições das linhas dos extratos importados (categorização).',
+      'Com o Google Firebase Cloud Messaging, que entrega as notificações push do app ao seu aparelho (recebe o código do aparelho e o texto do alerta).',
+      'Com os provedores de hospedagem e de banco de dados em que o servidor roda, que guardam os dados em nome do CoupleSync.',
+      'Dependendo da configuração do servidor, o PDF do extrato pode ser lido pelo Azure Document Intelligence (Microsoft); por padrão a leitura é feita no próprio servidor.',
+      'O app não tem publicidade e não envia dados a anunciantes.',
     ],
   },
   {
     title: 'Como pedir a exclusão',
     paragraphs: [
-      'Peça a exclusão da sua conta e dos seus dados a quem te convidou para o teste do CoupleSync (a pessoa responsável pelo app), informando o e-mail da conta. Você pode apagar transações, metas e rendas direto no app e sair do grupo a qualquer momento.',
+      `Peça a exclusão da sua conta e dos seus dados a ${PRIVACY_CONTACT}, informando o e-mail da conta. O app ainda não tem um botão para excluir a conta. Você pode apagar transações, metas e rendas direto no app e sair do grupo a qualquer momento.`,
     ],
   },
 ];

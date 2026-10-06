@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common;
 using System.Text.Json;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
@@ -53,7 +54,8 @@ public sealed class ImportJobService
         Stream fileStream,
         string detectedMimeType,
         CancellationToken ct,
-        string? fileName = null)
+        string? fileName = null,
+        bool aiCategorizationConsent = false)
     {
         var uploadId = Guid.NewGuid();
         var storagePath = await _storageAdapter.UploadAsync(
@@ -65,7 +67,8 @@ public sealed class ImportJobService
             storagePath,
             detectedMimeType,
             _dateTimeProvider.UtcNow,
-            fileName);
+            fileName,
+            aiCategorizationConsent);
 
         await _repository.AddAsync(job, ct);
         await _repository.SaveChangesAsync(ct);
@@ -335,7 +338,7 @@ public sealed class ImportJobService
                 "OCR_CONFIRM_CONFLICT",
                 "Esta importação foi alterada por outra requisição. Atualize e tente novamente.");
         }
-        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        catch (DbUpdateException ex) when (ex.IsUniqueViolation())
         {
             // Two confirmations raced past the duplicate check; the unique index on
             // (couple_id, fingerprint) let only one of them through.
@@ -393,12 +396,6 @@ public sealed class ImportJobService
         return result;
     }
 
-    private static bool IsUniqueViolation(DbUpdateException ex)
-    {
-        var message = ex.InnerException?.Message ?? ex.Message;
-        return message.Contains("23505", StringComparison.Ordinal)
-            || message.Contains("unique", StringComparison.OrdinalIgnoreCase);
-    }
 }
 
 /// <summary>User correction for one selected candidate; null fields keep the value read from the statement.</summary>

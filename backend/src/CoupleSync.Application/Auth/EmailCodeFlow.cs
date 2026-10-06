@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
@@ -92,7 +93,7 @@ public sealed class EmailCodeFlow
                 {
                     await _authRepository.AddEmailCodeAsync(EmailCode.Create(user.Id, purpose, hash, expires, now), cancellationToken);
                 }
-                catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+                catch (DbUpdateException ex) when (ex.IsUniqueViolation())
                 {
                     _logger.LogInformation("Lost the insert race for the {Purpose} code of user {UserId} (attempt {Attempt}).", purpose, user.Id, attempt);
                     continue;
@@ -122,13 +123,6 @@ public sealed class EmailCodeFlow
         }
     }
 
-    private static bool IsUniqueViolation(DbUpdateException ex)
-    {
-        var message = ex.InnerException?.Message ?? ex.Message;
-        return message.Contains("23505", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("UNIQUE constraint", StringComparison.OrdinalIgnoreCase);
-    }
 
     private async Task SendAsync(User user, string purpose, string code, CancellationToken cancellationToken)
     {

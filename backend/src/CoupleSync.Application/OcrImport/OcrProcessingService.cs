@@ -36,7 +36,8 @@ public sealed class OcrProcessingService
     public async Task<IReadOnlyList<OcrCandidate>> ParseAndDeduplicateAsync(
         Guid coupleId,
         string rawOcrJson,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool aiCategorizationConsent = false)
     {
         var candidates = ParseCandidates(rawOcrJson);
 
@@ -73,7 +74,9 @@ public sealed class OcrProcessingService
             c.DuplicateSuspected = await _transactionRepository.FingerprintExistsAsync(c.Fingerprint, coupleId, ct);
         }
 
-        await ClassifyCandidatesAsync(coupleId, candidates, ct);
+        // Descriptions only go to the AI classifier (Gemini) when the uploader accepted the AI disclosure.
+        if (aiCategorizationConsent)
+            await ClassifyCandidatesAsync(coupleId, candidates, ct);
 
         candidates.AddRange(credits);
         return candidates;

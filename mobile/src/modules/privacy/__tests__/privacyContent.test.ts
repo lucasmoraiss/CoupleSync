@@ -4,6 +4,7 @@ import {
   AI_CHAT_SECTIONS,
   CAPTURE_APPS,
   CAPTURE_CONSENT_SECTIONS,
+  PRIVACY_CONTACT,
   PRIVACY_SECTIONS,
 } from '../privacyContent';
 
@@ -53,5 +54,26 @@ describe('textos de privacidade', () => {
     };
     expect(Object.keys(byApp).sort()).toEqual([...CAPTURE_APPS].sort());
     expect(packages.sort()).toEqual(Object.values(byApp).flat().sort());
+  });
+
+  it('cita todos os destinatários que o código pode usar, e o Azure só como condicional', () => {
+    const text = flat(PRIVACY_SECTIONS);
+    expect(text).toContain('Google Gemini');
+    expect(text).toContain('Firebase Cloud Messaging');
+    expect(text).toContain('hospedagem');
+    expect(text).toMatch(/Dependendo da configuração do servidor.*Azure Document Intelligence/);
+  });
+
+  it('não promete imagens: o app envia só PDF', () => {
+    expect(flat(PRIVACY_SECTIONS)).not.toMatch(/imagens?/i);
+  });
+
+  it('o contato de exclusão vem de uma constante única', () => {
+    expect(flat(PRIVACY_SECTIONS)).toContain(PRIVACY_CONTACT);
+    expect(PRIVACY_CONTACT).not.toMatch(/@/); // nenhum e-mail inventado
+  });
+
+  it('o aviso do chat informa que descrições de extratos podem ir ao Gemini após o aceite', () => {
+    expect(flat(AI_CHAT_SECTIONS)).toMatch(/descrições das linhas dos extratos/);
   });
 });

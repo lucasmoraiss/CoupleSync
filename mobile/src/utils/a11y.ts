@@ -1,14 +1,5 @@
 // Acessibilidade: textos para leitores de tela (TalkBack). Lógica pura, coberta por testes em __tests__/a11y.test.ts.
 
-/** Tamanho mínimo de alvo de toque (dp) recomendado pelo Android/WCAG. */
-export const MIN_TOUCH_TARGET = 44;
-
-/** Aumenta a área de toque de botões pequenos sem mudar o desenho (usar em hitSlop). */
-export function hitSlopFor(size: number): { top: number; bottom: number; left: number; right: number } {
-  const extra = Math.max(0, Math.ceil((MIN_TOUCH_TARGET - size) / 2));
-  return { top: extra, bottom: extra, left: extra, right: extra };
-}
-
 /**
  * Valor em reais por extenso para o leitor de tela: "1234 reais e 50 centavos", "1 real", "50 centavos",
  * "zero reais", "menos 10 reais". Sem separador de milhar de propósito: "1.234" costuma ser lido como "1 ponto 234".
@@ -27,12 +18,6 @@ export function spokenBRL(value: number | null | undefined): string {
   if (cents === 0) return `${sign}${reaisText}`;
   if (reais === 0) return `${sign}${centsText}`;
   return `${sign}${reaisText} e ${centsText}`;
-}
-
-/** "Meta tal: 500 reais de 1000 reais" etc. — junta o rótulo e o valor por extenso. */
-export function spokenAmountLabel(label: string, value: number | null | undefined): string {
-  const spoken = spokenBRL(value);
-  return spoken ? `${label}: ${spoken}` : label;
 }
 
 export interface ChartSlice {

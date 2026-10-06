@@ -243,7 +243,8 @@ function ReportsScreenInner() {
               <Text style={styles.cardTitle} accessibilityRole="header">Gastos mensais</Text>
 
               {hasTrendsData ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} accessible accessibilityRole="image" accessibilityLabel={barSummary}>
+                <View accessible accessibilityRole="image" accessibilityLabel={barSummary}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   <BarChart
                     data={barData}
                     barWidth={28}
@@ -262,6 +263,7 @@ function ReportsScreenInner() {
                     width={Math.max(barData.length * 44, 280)}
                   />
                 </ScrollView>
+                </View>
               ) : (
                 <EmptyState />
               )}

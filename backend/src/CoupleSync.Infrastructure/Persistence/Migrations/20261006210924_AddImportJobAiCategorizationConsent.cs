@@ -1,0 +1,29 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace CoupleSync.Infrastructure.Persistence.Migrations
+{
+    /// <inheritdoc />
+    public partial class AddImportJobAiCategorizationConsent : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AddColumn<bool>(
+                name: "AiCategorizationConsent",
+                table: "import_jobs",
+                type: "boolean",
+                nullable: false,
+                defaultValue: false);
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropColumn(
+                name: "AiCategorizationConsent",
+                table: "import_jobs");
+        }
+    }
+}

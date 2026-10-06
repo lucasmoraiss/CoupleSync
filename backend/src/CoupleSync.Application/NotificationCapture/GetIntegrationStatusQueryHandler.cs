@@ -72,7 +72,8 @@ public sealed class GetIntegrationStatusQueryHandler
 
         if (lastRejected is not null && lastRejected.ErrorMessage is not null)
         {
-            return $"Revise o erro do último evento rejeitado: {lastRejected.ErrorMessage}";
+            // The stored message may be in English (or technical): never echo it into a user-facing hint.
+            return "O último evento enviado foi rejeitado. Confira se a notificação do banco é uma compra comum.";
         }
 
         return null;

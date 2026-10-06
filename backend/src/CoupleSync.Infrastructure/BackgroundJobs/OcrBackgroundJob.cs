@@ -115,7 +115,7 @@ public sealed class OcrBackgroundJob : BackgroundService
 
                 var rawOcrJson = await ocrProvider.AnalyzeAsync(job.StoragePath, job.FileMimeType, ct);
 
-                var candidates = await ocrProcessingService.ParseAndDeduplicateAsync(job.CoupleId, rawOcrJson, ct);
+                var candidates = await ocrProcessingService.ParseAndDeduplicateAsync(job.CoupleId, rawOcrJson, ct, job.AiCategorizationConsent);
                 var candidatesJson = OcrProcessingService.SerializeCandidates(candidates);
 
                 job.MarkReady(candidatesJson, dateTimeProvider.UtcNow);
