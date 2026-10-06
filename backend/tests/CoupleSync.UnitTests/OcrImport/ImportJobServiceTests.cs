@@ -234,6 +234,26 @@ public sealed class ImportJobServiceTests
 
     [Fact]
     [Trait("Category", "AutoCategorization")]
+    public async Task ConfirmCandidatesAsync_UnknownFreeTextOverride_BecomesOutros_InsteadOfFailing()
+    {
+        var svc = BuildService(out var repo, out var txnRepo);
+        var stream = new MemoryStream(JpegBytes);
+        var id = await svc.UploadAsync(CoupleId, UserId, stream, "image/jpeg", CancellationToken.None);
+
+        var job = repo.Jobs[0];
+        job.MarkProcessing(FixedNow);
+        job.MarkReady(BuildCandidatesJson(2, suggestedCategory: "Alimentação"), FixedNow);
+
+        // The installed app lets the user type any text for the category.
+        var overrides = new Dictionary<int, string> { { 0, "Mercado" }, { 1, " transporte " } };
+        var created = await svc.ConfirmCandidatesAsync(id, CoupleId, UserId, [0, 1], overrides, CancellationToken.None);
+
+        Assert.Equal("OUTROS", created!.Created[0].Category);
+        Assert.Equal("TRANSPORTE", created.Created[1].Category);
+    }
+
+    [Fact]
+    [Trait("Category", "AutoCategorization")]
     public async Task ConfirmCandidatesAsync_CategoryOverrideTakesPrecedence_OverSuggestedCategory()
     {
         var svc = BuildService(out var repo, out var txnRepo);

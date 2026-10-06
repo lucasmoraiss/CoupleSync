@@ -20,7 +20,11 @@ public sealed class ConfirmRequestValidator : AbstractValidator<ConfirmRequest>
         RuleForEach(x => x.CategoryOverrides)
             .ChildRules(o =>
             {
-                o.RuleFor(x => x.Category).CanonicalCategory();
+                // Import confirm stays lenient (unknown text is stored as OUTROS): only presence and length are checked.
+                o.RuleFor(x => x.Category)
+                    .Must(c => !string.IsNullOrWhiteSpace(c))
+                    .WithMessage("A categoria é obrigatória.")
+                    .MaximumLength(64);
             })
             .When(x => x.CategoryOverrides is not null && x.CategoryOverrides.All(o => o is not null));
 

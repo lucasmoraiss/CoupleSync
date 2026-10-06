@@ -165,8 +165,8 @@ public sealed class ImportJobService
             if (categoryOverrides is not null && categoryOverrides.TryGetValue(candidate.Index, out var userCategory)
                 && !string.IsNullOrWhiteSpace(userCategory))
             {
-                category = TransactionCategories.TryNormalize(userCategory)
-                    ?? throw new BadRequestException("INVALID_CATEGORY", TransactionCategories.InvalidMessage);
+                // The installed app has a free-text category field here: unknown text becomes OUTROS, not a 400.
+                category = TransactionCategories.NormalizeOrOther(userCategory);
             }
             else if (!string.IsNullOrWhiteSpace(candidate.SuggestedCategory))
             {

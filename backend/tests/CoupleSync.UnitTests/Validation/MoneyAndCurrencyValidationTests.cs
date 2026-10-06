@@ -151,9 +151,16 @@ public sealed class MoneyAndCurrencyValidationTests
             .Validate(new PatchTransactionCategoryRequest(category)).IsValid);
         Assert.Equal(valid, new ReplaceAllocationsRequestValidator()
             .Validate(new ReplaceAllocationsRequest([new AllocationItemRequest(category, 10m, "BRL")])).IsValid);
-        Assert.Equal(valid, new ConfirmRequestValidator()
-            .Validate(new ConfirmRequest([0], [new OcrCategoryOverride(0, category)], null)).IsValid);
     }
+
+    [Theory]
+    [InlineData("Mercado", true)]
+    [InlineData("Alimentação", true)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    public void ImportConfirm_AcceptsAnyNonBlankCategoryText(string category, bool valid)
+        => Assert.Equal(valid, new ConfirmRequestValidator()
+            .Validate(new ConfirmRequest([0], [new OcrCategoryOverride(0, category)], null)).IsValid);
 
     [Fact]
     public void RejectedCategory_ReportsTheAcceptedList()
