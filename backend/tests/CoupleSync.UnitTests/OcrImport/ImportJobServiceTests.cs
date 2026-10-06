@@ -335,6 +335,10 @@ internal sealed class FakeImportJobRepository : IImportJobRepository
 
     public Task<IReadOnlyList<ImportJob>> GetPendingAsync(int limit, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<ImportJob>>(Jobs.Where(j => j.Status == ImportJobStatus.Pending).Take(limit).ToList());
+
+    public Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ImportJob>>(
+            Jobs.Where(j => j.Status == ImportJobStatus.Processing && j.UpdatedAtUtc <= cutoffUtc).Take(limit).ToList());
 }
 
 internal sealed class FakeDateTimeProvider : IDateTimeProvider

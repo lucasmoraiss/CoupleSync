@@ -27,6 +27,21 @@ public sealed class OcrBackgroundJob : BackgroundService
     {
         _logger.LogInformation("OcrBackgroundJob started.");
 
+        // The API sleeps and restarts on the free tier; a job that was Processing at that moment would
+        // never be picked up again, so it is failed (with a clear error) as soon as the worker starts.
+        try
+        {
+            await RecoverStuckJobsAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not recover import jobs stuck in Processing at startup.");
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -53,6 +68,22 @@ public sealed class OcrBackgroundJob : BackgroundService
         }
 
         _logger.LogInformation("OcrBackgroundJob stopped.");
+    }
+
+    /// <summary>Fails import jobs left in Processing beyond the timeout. Public so it can be unit-tested.</summary>
+    public async Task<int> RecoverStuckJobsAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var recovery = new ImportJobRecovery(
+            scope.ServiceProvider.GetRequiredService<IImportJobRepository>(),
+            scope.ServiceProvider.GetRequiredService<IStorageAdapter>(),
+            scope.ServiceProvider.GetRequiredService<IDateTimeProvider>(),
+            _logger);
+
+        var recovered = await recovery.RecoverAllAsync(ct);
+        if (recovered > 0)
+            _logger.LogWarning("{Count} import job(s) stuck in Processing were marked as failed.", recovered);
+        return recovered;
     }
 
     /// <summary>Runs one polling pass over the pending jobs. Public so the pass can be unit-tested.</summary>

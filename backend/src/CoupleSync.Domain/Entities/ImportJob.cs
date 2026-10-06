@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CoupleSync.Domain.Interfaces;
 
 namespace CoupleSync.Domain.Entities;
@@ -45,6 +46,13 @@ public sealed class ImportJob : ICoupleScoped
     public string? ErrorMessage { get; private set; }
     public DateTime? QuotaResetDate { get; private set; }
     public int RetryCount { get; private set; }
+
+    /// <summary>
+    /// Per-line outcome of the review, as JSON {"index":"Confirmed"|"Discarded"}. A line that is absent is
+    /// still pending. Null for jobs that never had a partial confirmation (all existing jobs).
+    /// </summary>
+    public string? LineStatesJson { get; private set; }
+
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
@@ -112,6 +120,44 @@ public sealed class ImportJob : ICoupleScoped
         ErrorCode = null;
         ErrorMessage = null;
         UpdatedAtUtc = NormalizeUtc(nowUtc);
+    }
+
+    /// <summary>Outcome of one statement line; lines never touched are <see cref="ImportLineState.Pending"/>.</summary>
+    public ImportLineState GetLineState(int index)
+        => ReadLineStates().TryGetValue(index, out var state) ? state : ImportLineState.Pending;
+
+    public void SetLineState(int index, ImportLineState state, DateTime nowUtc)
+    {
+        var states = ReadLineStates();
+        if (state == ImportLineState.Pending)
+            states.Remove(index);
+        else
+            states[index] = state;
+
+        LineStatesJson = states.Count == 0
+            ? null
+            : JsonSerializer.Serialize(states.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value.ToString()));
+        UpdatedAtUtc = NormalizeUtc(nowUtc);
+    }
+
+    /// <summary>True when the job has been in Processing since before <paramref name="nowUtc"/> minus <paramref name="timeout"/>.</summary>
+    public bool IsStuckProcessing(DateTime nowUtc, TimeSpan timeout)
+        => Status == ImportJobStatus.Processing && UpdatedAtUtc <= NormalizeUtc(nowUtc) - timeout;
+
+    private Dictionary<int, ImportLineState> ReadLineStates()
+    {
+        var result = new Dictionary<int, ImportLineState>();
+        if (string.IsNullOrWhiteSpace(LineStatesJson))
+            return result;
+
+        var raw = JsonSerializer.Deserialize<Dictionary<string, string>>(LineStatesJson) ?? new();
+        foreach (var (key, value) in raw)
+        {
+            if (int.TryParse(key, out var index) && Enum.TryParse<ImportLineState>(value, out var state))
+                result[index] = state;
+        }
+
+        return result;
     }
 
     public bool CanRetry(int maxRetries) => RetryCount < maxRetries;

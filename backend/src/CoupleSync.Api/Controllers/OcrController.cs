@@ -102,15 +102,22 @@ public sealed class OcrController : ControllerBase
     public async Task<ActionResult<OcrResultsResponse>> GetResults(Guid uploadId, CancellationToken ct)
     {
         var coupleId = GetAuthenticatedCoupleId();
-        var candidates = await _importJobService.GetCandidatesAsync(uploadId, coupleId, ct);
-        if (candidates is null)
+        var review = await _importJobService.GetReviewAsync(uploadId, coupleId, ct);
+        if (review is null)
             throw new NotFoundException("OCR_JOB_NOT_FOUND", "Importação não encontrada.");
 
         var response = new OcrResultsResponse(
-            candidates.Select(c => new OcrCandidateResponse(
-                c.Index, c.Date, c.Description, c.Amount,
-                c.Currency, c.Confidence, c.DuplicateSuspected,
-                c.SuggestedCategory is null ? null : TransactionCategories.NormalizeOrOther(c.SuggestedCategory))).ToList());
+            review.Lines.Select(l =>
+            {
+                var c = l.Candidate;
+                return new OcrCandidateResponse(
+                    c.Index, c.Date, c.Description, c.Amount,
+                    c.Currency, c.Confidence, c.DuplicateSuspected,
+                    c.SuggestedCategory is null ? null : TransactionCategories.NormalizeOrOther(c.SuggestedCategory),
+                    l.State.ToString());
+            }).ToList(),
+            review.Credits.Select(c => new OcrCreditResponse(c.Date, c.Description, c.Amount, c.Currency)).ToList(),
+            review.Credits.Count);
 
         return Ok(response);
     }
@@ -133,11 +140,12 @@ public sealed class OcrController : ControllerBase
             .ToDictionary(e => e.Index, e => new CandidateEdit(e.Description, e.Amount));
 
         var created = await _importJobService.ConfirmCandidatesAsync(
-            uploadId, coupleId, userId, request.SelectedIndices, overrides, ct, edits);
+            uploadId, coupleId, userId, request.SelectedIndices, overrides, ct, edits,
+            request.KeepJobOpen, request.DiscardedIndices);
 
         if (created is null)
             throw new NotFoundException("OCR_JOB_NOT_FOUND", "Importação não encontrada.");
 
-        return Ok(new ConfirmResponse(created.Created.Count, created.DuplicatesSkipped));
+        return Ok(new ConfirmResponse(created.Created.Count, created.DuplicatesSkipped, created.RemainingLines));
     }
 }

@@ -29,4 +29,11 @@ public sealed class ImportJobRepository : IImportJobRepository
             .OrderBy(j => j.CreatedAtUtc)
             .Take(limit)
             .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct)
+        => await _dbContext.ImportJobs
+            .Where(j => j.Status == ImportJobStatus.Processing && j.UpdatedAtUtc <= cutoffUtc)
+            .OrderBy(j => j.UpdatedAtUtc)
+            .Take(limit)
+            .ToListAsync(ct);
 }

@@ -305,10 +305,22 @@ export interface OcrCandidateResponse {
   readonly confidence: number;
   readonly duplicateSuspected: boolean;
   readonly suggestedCategory?: string;
+  /** O que já aconteceu com a linha; a API antiga não envia (tudo pendente). */
+  readonly lineState?: 'Pending' | 'Confirmed' | 'Discarded';
+}
+
+/** Entrada (crédito) do extrato: aparece na revisão só como informação, nunca é importada. */
+export interface OcrCreditResponse {
+  readonly date: string;
+  readonly description: string;
+  readonly amount: number;
+  readonly currency: string;
 }
 
 export interface OcrResultsResponse {
   readonly candidates: readonly OcrCandidateResponse[];
+  readonly credits?: readonly OcrCreditResponse[];
+  readonly creditsCount?: number;
 }
 
 export interface OcrCategoryOverride {

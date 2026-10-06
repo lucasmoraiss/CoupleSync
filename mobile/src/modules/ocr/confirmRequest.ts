@@ -143,3 +143,37 @@ export function buildOcrConfirmRequest(
     ...(candidateEdits.length > 0 ? { candidateEdits } : {}),
   };
 }
+
+// ─── Estado da revisão por importação (MOB-06) ───────────────────────────────
+
+/** Linhas da revisão de UMA importação (uploadId); `seeded` diz se já foram montadas a partir da API. */
+export interface ReviewSession {
+  readonly uploadId: string;
+  readonly rows: ReviewRow[];
+  readonly seeded: boolean;
+}
+
+export function emptyReviewSession(uploadId: string): ReviewSession {
+  return { uploadId, rows: [], seeded: false };
+}
+
+/**
+ * Estado que vale para o uploadId atual: se o guardado é de outra importação, volta vazio.
+ * Assim a tela nunca mostra (nem confirma) linhas da importação anterior.
+ */
+export function sessionFor(session: ReviewSession, uploadId: string): ReviewSession {
+  return session.uploadId === uploadId ? session : emptyReviewSession(uploadId);
+}
+
+/** Linhas a revisar: só as que ainda estão pendentes (as já confirmadas ou descartadas não voltam). */
+export function seedReviewRows(candidates: readonly OcrCandidateResponse[]): ReviewRow[] {
+  return candidates
+    .filter((c) => (c.lineState ?? 'Pending') === 'Pending')
+    .map(candidateToRow);
+}
+
+/** "3 entradas não importadas"; vazio quando não há entradas. */
+export function creditsLabel(count: number): string {
+  if (count <= 0) return '';
+  return count === 1 ? '1 entrada não importada' : `${count} entradas não importadas`;
+}

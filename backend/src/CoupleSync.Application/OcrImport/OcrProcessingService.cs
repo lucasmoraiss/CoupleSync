@@ -40,18 +40,22 @@ public sealed class OcrProcessingService
     {
         var candidates = ParseCandidates(rawOcrJson);
 
-        // Filter out Credit-type transactions (bill payments, not purchases)
-        candidates.RemoveAll(c => c.Type == TransactionType.Credit);
-
         foreach (var c in candidates)
         {
             c.Description = SanitizeDescription(c.Description);
             c.Amount = Math.Abs(c.Amount);
         }
 
-        // Re-index after filtering
+        // Credits (entradas, bill payments) are kept so the review can say they were not imported, but
+        // they are never importable: they get no fingerprint, no category, and come after every debit so
+        // the debit indices stay 0..n-1 exactly as before.
+        var credits = candidates.Where(c => c.Type == TransactionType.Credit).ToList();
+        candidates.RemoveAll(c => c.Type == TransactionType.Credit);
+
         for (int i = 0; i < candidates.Count; i++)
             candidates[i].Index = i;
+        for (int i = 0; i < credits.Count; i++)
+            credits[i].Index = candidates.Count + i;
 
         // Identical lines inside one statement are distinct purchases (e.g. two rides of the same
         // price on the same day). The n-th repetition gets an occurrence ordinal in its fingerprint;
@@ -71,6 +75,7 @@ public sealed class OcrProcessingService
 
         await ClassifyCandidatesAsync(coupleId, candidates, ct);
 
+        candidates.AddRange(credits);
         return candidates;
     }
 

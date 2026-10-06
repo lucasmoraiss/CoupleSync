@@ -379,6 +379,7 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.ErrorMessage).HasColumnName("error_message").HasMaxLength(512);
             entity.Property(x => x.QuotaResetDate).HasColumnName("quota_reset_date");
             entity.Property(x => x.RetryCount).HasColumnName("retry_count").HasDefaultValue(0).IsRequired();
+            entity.Property(x => x.LineStatesJson).HasColumnName("line_states_json").HasColumnType("text");
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
 

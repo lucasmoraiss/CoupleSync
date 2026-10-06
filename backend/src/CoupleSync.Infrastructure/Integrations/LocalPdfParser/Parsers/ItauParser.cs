@@ -17,9 +17,12 @@ public sealed class ItauParser : IBankStatementParser
         @"Itaú Unibanco|itau\.com\.br|ITAÚ|Itau",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // Captures: short date (DD/MM), description, amount with optional trailing minus
+    // Captures: short date (DD/MM), description, amount with optional trailing minus.
+    // A page may arrive as a single line with the next date glued to the amount ("61,30-09/09 ..."): the
+    // amount ends at whitespace, at the end of the line or right where the next date starts. A full date
+    // (DD/MM/YYYY) in a header is not a transaction date.
     private static readonly Regex TransactionPattern = new(
-        @"(\d{2}/\d{2})\s+(.+?)\s+([\d\.]+,\d{2})(-?)\s*$",
+        @"(\d{2}/\d{2})(?![\d/])\s+(.+?)\s+([\d\.]+,\d{2})(-?)(?=\s|$|\d{2}/\d{2}(?![\d/]))",
         RegexOptions.Compiled | RegexOptions.Multiline);
 
     public bool CanParse(string extractedText) => IdentifierPattern.IsMatch(extractedText);

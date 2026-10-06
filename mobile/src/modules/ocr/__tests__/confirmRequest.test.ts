@@ -2,8 +2,11 @@ import type { OcrCandidateResponse } from '@/types/api';
 import {
   buildOcrConfirmRequest,
   candidateToRow,
+  creditsLabel,
   formatBRLInput,
   parseBRLInput,
+  seedReviewRows,
+  sessionFor,
   validateReviewRows,
   type ReviewRow,
 } from '../confirmRequest';
@@ -149,5 +152,47 @@ describe('A04 — validação das linhas antes de enviar', () => {
     expect(
       validateReviewRows(rowsWith({ 2: { selected: false, description: '', amountCents: 0 } }), CANDIDATES),
     ).toEqual({});
+  });
+});
+
+describe('MOB-06 — estado da revisão acompanha o uploadId', () => {
+  it('estado de outra importação não é reaproveitado', () => {
+    const previous = {
+      uploadId: 'upload-A',
+      rows: CANDIDATES.map(candidateToRow),
+      seeded: true,
+    };
+
+    const current = sessionFor(previous, 'upload-B');
+
+    expect(current.uploadId).toBe('upload-B');
+    expect(current.rows).toEqual([]);
+    expect(current.seeded).toBe(false);
+  });
+
+  it('mesmo uploadId mantém as linhas e edições', () => {
+    const previous = { uploadId: 'upload-A', rows: rowsWith({ 0: { description: 'Editada' } }), seeded: true };
+
+    expect(sessionFor(previous, 'upload-A')).toBe(previous);
+  });
+
+  it('só as linhas pendentes entram na revisão', () => {
+    const rows = seedReviewRows([
+      { ...candidate(0, 'JA IMPORTADA', 10), lineState: 'Confirmed' },
+      { ...candidate(1, 'DESCARTADA', 20), lineState: 'Discarded' },
+      { ...candidate(2, 'PENDENTE', 30), lineState: 'Pending' },
+      candidate(3, 'API ANTIGA SEM ESTADO', 40),
+    ]);
+
+    expect(rows.map((r) => r.index)).toEqual([2, 3]);
+    expect(rows.every((r) => r.selected)).toBe(true);
+  });
+});
+
+describe('S5 5.58 — entradas informadas, nunca importadas', () => {
+  it('conta no singular e no plural', () => {
+    expect(creditsLabel(0)).toBe('');
+    expect(creditsLabel(1)).toBe('1 entrada não importada');
+    expect(creditsLabel(3)).toBe('3 entradas não importadas');
   });
 });

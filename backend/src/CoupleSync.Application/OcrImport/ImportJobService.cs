@@ -21,6 +21,7 @@ public sealed class ImportJobService
     private readonly IAlertPolicyService _alertPolicyService;
     private readonly INotificationEventRepository _notificationEventRepository;
     private readonly ILogger<ImportJobService> _logger;
+    private readonly ImportJobRecovery _recovery;
 
     public ImportJobService(
         IImportJobRepository repository,
@@ -40,6 +41,7 @@ public sealed class ImportJobService
         _alertPolicyService = alertPolicyService;
         _notificationEventRepository = notificationEventRepository;
         _logger = logger;
+        _recovery = new ImportJobRecovery(repository, storageAdapter, dateTimeProvider, logger);
     }
 
     /// <summary>
@@ -71,9 +73,15 @@ public sealed class ImportJobService
 
     /// <summary>
     /// Returns the ImportJob for the given uploadId scoped to coupleId, or null if not found.
+    /// A job abandoned in Processing (restart, crash) is failed here, so the app stops waiting for it.
     /// </summary>
-    public Task<ImportJob?> GetJobAsync(Guid uploadId, Guid coupleId, CancellationToken ct)
-        => _repository.GetByIdAsync(uploadId, coupleId, ct);
+    public async Task<ImportJob?> GetJobAsync(Guid uploadId, Guid coupleId, CancellationToken ct)
+    {
+        var job = await _repository.GetByIdAsync(uploadId, coupleId, ct);
+        if (job is not null)
+            await _recovery.FailIfStuckAsync(job, ct);
+        return job;
+    }
 
     /// <summary>
     /// Returns the parsed OCR candidates when status is Ready.
@@ -99,6 +107,25 @@ public sealed class ImportJobService
     }
 
     /// <summary>
+    /// Candidates of a Ready job together with the review state of each line.
+    /// Returns null if the job does not belong to coupleId; same conflicts as <see cref="GetCandidatesAsync"/>.
+    /// </summary>
+    public async Task<ImportReview?> GetReviewAsync(Guid uploadId, Guid coupleId, CancellationToken ct)
+    {
+        var candidates = await GetCandidatesAsync(uploadId, coupleId, ct);
+        if (candidates is null) return null;
+
+        var job = await _repository.GetByIdAsync(uploadId, coupleId, ct);
+        var lines = candidates
+            .Where(c => c.Type != TransactionType.Credit)
+            .Select(c => new ImportReviewLine(c, job!.GetLineState(c.Index)))
+            .ToList();
+        var credits = candidates.Where(c => c.Type == TransactionType.Credit).ToList();
+
+        return new ImportReview(lines, credits);
+    }
+
+    /// <summary>
     /// Creates <see cref="Transaction"/> records for the selected OCR candidate indices.
     /// Returns null if the job does not belong to coupleId (caller should return 404).
     /// </summary>
@@ -109,9 +136,13 @@ public sealed class ImportJobService
         IReadOnlyList<int> selectedIndices,
         IReadOnlyDictionary<int, string>? categoryOverrides,
         CancellationToken ct,
-        IReadOnlyDictionary<int, CandidateEdit>? candidateEdits = null)
+        IReadOnlyDictionary<int, CandidateEdit>? candidateEdits = null,
+        bool keepJobOpen = false,
+        IReadOnlyList<int>? discardedIndices = null)
     {
-        if (selectedIndices is null || selectedIndices.Count == 0)
+        selectedIndices ??= [];
+        discardedIndices ??= [];
+        if (selectedIndices.Count == 0 && discardedIndices.Count == 0)
             throw new UnprocessableEntityException("INVALID_SELECTION", "Selecione pelo menos uma transação.");
 
         var candidates = await GetCandidatesAsync(uploadId, coupleId, ct);
@@ -121,11 +152,25 @@ public sealed class ImportJobService
         // candidates reachable instead of silently confirming an empty import.
         var byIndex = candidates.ToDictionary(c => c.Index);
         var requested = selectedIndices.Distinct().ToList();
-        var unknown = requested.Where(i => !byIndex.ContainsKey(i)).ToList();
+        var discarded = discardedIndices.Distinct().ToList();
+        var unknown = requested.Concat(discarded).Where(i => !byIndex.ContainsKey(i)).ToList();
         if (unknown.Count > 0)
             throw new UnprocessableEntityException(
                 "INVALID_SELECTION",
                 $"Transação selecionada não existe nesta importação: {string.Join(", ", unknown)}.");
+
+        // Credits (entradas) are listed for information only: they never become transactions.
+        var credits = requested.Concat(discarded).Where(i => byIndex[i].Type == TransactionType.Credit).ToList();
+        if (credits.Count > 0)
+            throw new UnprocessableEntityException(
+                "INVALID_SELECTION",
+                $"Entradas não são importadas como despesa: {string.Join(", ", credits)}.");
+
+        var both = requested.Intersect(discarded).ToList();
+        if (both.Count > 0)
+            throw new UnprocessableEntityException(
+                "INVALID_SELECTION",
+                $"Transação não pode ser importada e descartada ao mesmo tempo: {string.Join(", ", both)}.");
 
         // Edits may only target lines that are part of this confirmation.
         if (candidateEdits is not null)
@@ -137,8 +182,11 @@ public sealed class ImportJobService
                     $"Transação editada não está entre as selecionadas: {string.Join(", ", strayEdits)}.");
         }
 
-        var fingerprints = ResolveFingerprints(coupleId, candidates);
+        var debits = candidates.Where(c => c.Type != TransactionType.Credit).ToList();
+        var fingerprints = ResolveFingerprints(coupleId, debits);
         var selected = requested.OrderBy(i => i).Select(i => byIndex[i]).ToList();
+        var settled = new List<int>();
+        var job = (await _repository.GetByIdAsync(uploadId, coupleId, ct))!;
 
         var ingests = new List<TransactionEventIngest>();
         var created = new List<Transaction>();
@@ -147,6 +195,13 @@ public sealed class ImportJobService
 
         foreach (var candidate in selected)
         {
+            // Line confirmed by an earlier (partial) confirmation: never stored twice.
+            if (job.GetLineState(candidate.Index) == ImportLineState.Confirmed)
+            {
+                duplicatesSkipped++;
+                continue;
+            }
+
             var fingerprint = fingerprints[candidate.Index];
 
             // The fingerprint always comes from the line as read from the statement, never from the
@@ -155,6 +210,7 @@ public sealed class ImportJobService
             if (await _transactionRepository.FingerprintExistsAsync(fingerprint, coupleId, ct))
             {
                 duplicatesSkipped++;
+                settled.Add(candidate.Index);
                 continue;
             }
 
@@ -209,11 +265,12 @@ public sealed class ImportJobService
                 source: TransactionSource.OcrImport);
 
             created.Add(txn);
+            settled.Add(candidate.Index);
         }
 
-        // The job goes to Confirmed in the same unit of work as the inserts (repositories share the
-        // scoped DbContext), so a failed insert never leaves a half-confirmed import behind.
-        var job = await _repository.GetByIdAsync(uploadId, coupleId, ct);
+        // Line states and the job status change in the same unit of work as the inserts (repositories
+        // share the scoped DbContext), so a failed insert never leaves a half-confirmed import behind.
+        var remaining = 0;
 
         try
         {
@@ -223,7 +280,23 @@ public sealed class ImportJobService
                 await _transactionRepository.AddTransactionsRangeAsync(created, ct);
             }
 
-            job!.MarkConfirmed(now);
+            foreach (var index in settled)
+                job.SetLineState(index, ImportLineState.Confirmed, now);
+            foreach (var index in discarded)
+                job.SetLineState(index, ImportLineState.Discarded, now);
+
+            // Without keepJobOpen (the app's single confirm call) whatever was not selected is dropped
+            // and the job closes. With it, the lines left over can be confirmed or discarded later.
+            if (!keepJobOpen)
+            {
+                foreach (var line in debits.Where(c => job.GetLineState(c.Index) == ImportLineState.Pending))
+                    job.SetLineState(line.Index, ImportLineState.Discarded, now);
+            }
+
+            remaining = debits.Count(c => job.GetLineState(c.Index) == ImportLineState.Pending);
+            if (remaining == 0)
+                job.MarkConfirmed(now);
+
             await _transactionRepository.SaveChangesAsync(ct);
             await _repository.SaveChangesAsync(ct);
         }
@@ -258,7 +331,7 @@ public sealed class ImportJobService
             _logger.LogWarning(ex, "Alert policy evaluation failed for couple {CoupleId}", coupleId);
         }
 
-        return new ConfirmCandidatesResult(created, duplicatesSkipped);
+        return new ConfirmCandidatesResult(created, duplicatesSkipped, remaining);
     }
 
     /// <summary>
@@ -297,4 +370,10 @@ public sealed class ImportJobService
 public sealed record CandidateEdit(string? Description, decimal? Amount);
 
 /// <summary>Outcome of confirming an import: what was stored and how many lines were skipped as already imported.</summary>
-public sealed record ConfirmCandidatesResult(IReadOnlyList<Transaction> Created, int DuplicatesSkipped);
+public sealed record ConfirmCandidatesResult(IReadOnlyList<Transaction> Created, int DuplicatesSkipped, int RemainingLines = 0);
+
+/// <summary>A debit line of the review with what already happened to it.</summary>
+public sealed record ImportReviewLine(OcrCandidate Candidate, ImportLineState State);
+
+/// <summary>What the review screen shows: confirmable debit lines plus the credits that are only listed.</summary>
+public sealed record ImportReview(IReadOnlyList<ImportReviewLine> Lines, IReadOnlyList<OcrCandidate> Credits);

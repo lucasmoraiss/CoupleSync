@@ -101,6 +101,10 @@ export default function OcrUploadScreen() {
             errorMessage = 'Nenhuma transação encontrada. Verifique se o PDF é um extrato bancário válido.';
           } else if (errorCode === 'BANK_FORMAT_UNKNOWN') {
             errorMessage = 'Formato do banco não reconhecido. Tente um extrato de outro banco ou cadastre as transações manualmente.';
+          } else if (errorCode === 'PDF_TOO_MANY_PAGES') {
+            errorMessage = 'O PDF tem páginas demais (o limite é 50). Envie apenas o período que deseja importar.';
+          } else if (errorCode === 'PDF_TIMEOUT' || errorCode === 'PROCESSING_TIMEOUT') {
+            errorMessage = 'A leitura do extrato demorou demais e foi interrompida. Envie o arquivo novamente.';
           } else {
             errorMessage = 'Falha no processamento. Tente novamente.';
           }

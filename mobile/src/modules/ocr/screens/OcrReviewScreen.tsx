@@ -1,6 +1,6 @@
 // AC-124, AC-126, AC-127: OCR review screen — candidates with checkboxes, edit fields, confirm
 import { getApiErrorMessage } from '@/services/apiError';
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,11 +20,15 @@ import * as Haptics from 'expo-haptics';
 import { ocrApiClient, isCoupleRequiredError } from '@/services/apiClient';
 import {
   buildOcrConfirmRequest,
-  candidateToRow,
+  creditsLabel,
+  emptyReviewSession,
   formatBRLInput,
   parseBRLInput,
+  seedReviewRows,
+  sessionFor,
   validateReviewRows,
   type ReviewRow,
+  type ReviewSession,
 } from '@/modules/ocr/confirmRequest';
 import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
@@ -67,11 +71,29 @@ export default function OcrReviewScreen({ uploadId }: Props) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const categories = useCategories();
-  const [rows, setRows] = useState<ReviewRow[]>([]);
+  // The rows belong to one import: sessionFor() drops them as soon as the uploadId changes, so a screen
+  // that stays mounted can never show (or confirm) the lines of the previous import.
+  const [storedSession, setStoredSession] = useState<ReviewSession>(() => emptyReviewSession(uploadId));
+  const session = sessionFor(storedSession, uploadId);
+  const rows = session.rows;
   const [successMsg, setSuccessMsg] = useState('');
   // Field errors are shown only after the first confirm attempt, then update live
   const [showErrors, setShowErrors] = useState(false);
-  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    setSuccessMsg('');
+    setShowErrors(false);
+  }, [uploadId]);
+
+  const setRows = useCallback(
+    (update: (previous: ReviewRow[]) => ReviewRow[]) => {
+      setStoredSession((previous) => {
+        const base = sessionFor(previous, uploadId);
+        return { ...base, rows: update(base.rows) };
+      });
+    },
+    [uploadId],
+  );
 
   const { data, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['ocr-results', uploadId],
@@ -80,14 +102,14 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     retry: 1,
   });
 
-  // Seed editable rows once on first load; guard prevents resetting user edits.
-  // A new uploadId remounts this component (key in app/(main)/ocr-review.tsx), which resets it.
+  // Seed editable rows once per import; the guard keeps the user's edits on later renders.
   useEffect(() => {
-    if (data && !initializedRef.current) {
-      initializedRef.current = true;
-      setRows(data.candidates.map(candidateToRow));
+    if (data && !session.seeded) {
+      setStoredSession({ uploadId, rows: seedReviewRows(data.candidates), seeded: true });
     }
-  }, [data]);
+  }, [data, session.seeded, uploadId]);
+
+  const creditsCount = data?.creditsCount ?? data?.credits?.length ?? 0;
 
   // Validation of the edited fields (description / amount) of the selected rows
   const rowErrors = useMemo(
@@ -135,33 +157,33 @@ export default function OcrReviewScreen({ uploadId }: Props) {
   const toggleAll = useCallback(() => {
     const allSelected = rows.every((r) => r.selected);
     setRows((prev) => prev.map((r) => ({ ...r, selected: !allSelected })));
-  }, [rows]);
+  }, [rows, setRows]);
 
   const toggleRow = useCallback((index: number) => {
     setRows((prev) =>
       prev.map((r) => (r.index === index ? { ...r, selected: !r.selected } : r))
     );
-  }, []);
+  }, [setRows]);
 
   const updateDescription = useCallback((index: number, text: string) => {
     setRows((prev) =>
       prev.map((r) => (r.index === index ? { ...r, description: text } : r))
     );
-  }, []);
+  }, [setRows]);
 
   const updateAmount = useCallback((index: number, raw: string) => {
     const cents = parseBRLInput(raw);
     setRows((prev) =>
       prev.map((r) => (r.index === index ? { ...r, amountCents: cents } : r))
     );
-  }, []);
+  }, [setRows]);
 
   // Tocar na categoria escolhida de novo a limpa (a API usa "Outros" quando não há categoria).
   const updateCategory = useCallback((index: number, key: string) => {
     setRows((prev) =>
       prev.map((r) => (r.index === index ? { ...r, category: r.category === key ? '' : key } : r))
     );
-  }, []);
+  }, [setRows]);
 
   const allSelected = rows.length > 0 && rows.every((r) => r.selected);
 
@@ -304,15 +326,48 @@ export default function OcrReviewScreen({ uploadId }: Props) {
             </View>
             );
           })}
+          {rows.length === 0 ? (
+            <Text style={styles.emptyText}>Nenhuma despesa para importar neste extrato.</Text>
+          ) : null}
+
+          {/* Entradas (créditos): só informação. Nunca são importadas nem viram despesa. */}
+          {creditsCount > 0 ? (
+            <View style={styles.creditsCard}>
+              <View style={styles.creditsHeader}>
+                <Ionicons name="arrow-down-circle-outline" size={16} color={MUTED} />
+                <Text style={styles.creditsTitle}>{creditsLabel(creditsCount)}</Text>
+              </View>
+              <Text style={styles.creditsHint}>
+                Entradas não são despesas e ficam de fora da importação.
+              </Text>
+              {(data?.credits ?? []).map((credit, i) => (
+                <View key={`${credit.date}-${i}`} style={styles.creditRow}>
+                  <View style={styles.flex}>
+                    <Text style={styles.creditDescription} numberOfLines={1}>
+                      {credit.description}
+                    </Text>
+                    <Text style={styles.creditDate}>{formatDate(credit.date)}</Text>
+                  </View>
+                  <View style={styles.creditBadge}>
+                    <Text style={styles.creditBadgeText}>Entrada</Text>
+                  </View>
+                  <Text style={styles.creditAmount}>{`R$ ${formatBRLInput(Math.round(credit.amount * 100))}`}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
           <View style={styles.scrollPadding} />
         </ScrollView>
 
         {/* Confirm button */}
         <View style={styles.footer}>
           <TouchableOpacity
-            style={[styles.confirmBtn, confirmMutation.isPending && styles.confirmBtnDisabled]}
+            style={[
+              styles.confirmBtn,
+              (confirmMutation.isPending || rows.length === 0) && styles.confirmBtnDisabled,
+            ]}
             onPress={handleConfirm}
-            disabled={confirmMutation.isPending}
+            disabled={confirmMutation.isPending || rows.length === 0}
           >
             {confirmMutation.isPending ? (
               <ActivityIndicator color={TEXT} size="small" />
@@ -421,4 +476,29 @@ const styles = StyleSheet.create({
   mutedText: { color: MUTED, fontSize: 14 },
   errorText: { color: ERROR, fontSize: 14 },
   scrollPadding: { height: 24 },
+  emptyText: { color: MUTED, fontSize: 14, textAlign: 'center', paddingVertical: 24 },
+  creditsCard: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+    gap: 8,
+    opacity: 0.85,
+  },
+  creditsHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  creditsTitle: { fontSize: 14, fontWeight: '700', color: TEXT },
+  creditsHint: { fontSize: 12, color: MUTED },
+  creditRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  creditDescription: { fontSize: 13, color: TEXT },
+  creditDate: { fontSize: 11, color: MUTED },
+  creditBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: SUCCESS,
+  },
+  creditBadgeText: { fontSize: 11, color: SUCCESS, fontWeight: '600' },
+  creditAmount: { fontSize: 13, color: MUTED },
 });

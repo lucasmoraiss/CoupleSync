@@ -18,8 +18,10 @@ public sealed class BancoBrasilParser : IBankStatementParser
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // Captures: date, description (non-greedy), amount (no R$ prefix in BB statements), D/C indicator
+    // A page may arrive as a single line with the next date glued to the D/C letter ("34,60 D08/09/2026"),
+    // so the indicator only must not continue into a word, and the description never swallows a date.
     private static readonly Regex TransactionPattern = new(
-        @"(\d{2}/\d{2}/\d{4})\s+(.+?)\s+([\d\.]+,\d{2})\s+([DC])\b",
+        @"(\d{2}/\d{2}/\d{4})\s+((?:(?!\d{2}/\d{2}/\d{4}).)+?)\s+([\d\.]+,\d{2})\s+([DC])(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.Multiline);
 
     public bool CanParse(string extractedText) => IdentifierPattern.IsMatch(extractedText);

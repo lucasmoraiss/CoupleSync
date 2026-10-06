@@ -17,9 +17,12 @@ public sealed class NubankParser : IBankStatementParser
         @"Nu Pagamentos|nubank\.com\.br|NUBANK",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // Captures: date (DD/MM/YYYY), description (non-greedy), amount (optional minus + optional R$ + digits)
+    // Captures: date (DD/MM/YYYY), description (non-greedy), amount (optional minus + optional R$ + digits).
+    // PdfPig may hand a whole page over as a single line, with the next date glued to the previous amount
+    // ("-R$ 58,2006/09/2026 ..."): so the description never runs into another date, and the amount ends at
+    // whitespace, at the end of the line or right where the next date starts.
     private static readonly Regex TransactionPattern = new(
-        @"(\d{2}/\d{2}/\d{4})\s+(.+?)\s+([+-]?\s*R?\$?\s*[\d\.]+,\d{2})\s*$",
+        @"(\d{2}/\d{2}/\d{4})\s+((?:(?!\d{2}/\d{2}/\d{4}).)+?)\s+([+-]?\s*R?\$?\s*[\d\.]+,\d{2})(?=\s|$|\d{2}/\d{2}/\d{4})",
         RegexOptions.Compiled | RegexOptions.Multiline);
 
     public bool CanParse(string extractedText) => IdentifierPattern.IsMatch(extractedText);
