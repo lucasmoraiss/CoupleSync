@@ -170,6 +170,12 @@ public sealed class MultiGroupIntegrationTests
 
         // Bruno is not in Ana's own group and sees nothing of it.
         Assert.Equal([brunos.Id], GroupIdsOf(await MyGroupsAsync(bruno)));
+
+        // The member who was already there is told (saved after the membership committed).
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var told = await db.NotificationEvents.IgnoreQueryFilters().SingleAsync(e => e.AlertType == "PartnerJoined");
+        Assert.Equal((brunos.Id, bruno.UserId), (told.CoupleId, told.UserId));
     }
 
     [Fact]

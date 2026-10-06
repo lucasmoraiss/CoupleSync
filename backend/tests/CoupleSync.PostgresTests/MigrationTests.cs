@@ -382,6 +382,9 @@ public sealed class MigrationTests
             var join = await newcomer.Client.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = "ABANDON1" });
             Assert.Equal(HttpStatusCode.Gone, join.StatusCode);
             Assert.Equal(HttpStatusCode.OK, (await newcomer.Client.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = "STRAY123" })).StatusCode);
+            // The join's own transaction is over when the group's oldest member is told about it.
+            Assert.Equal(1, await database.ScalarAsync<long>(
+                $"SELECT count(*) FROM notification_events WHERE alert_type = 'PartnerJoined' AND couple_id = '{strayOwner}' AND user_id = '{q}'"));
         }
 
         // A second group's preferences fit next to the first; then the way back keeps one row per user and the active group.
