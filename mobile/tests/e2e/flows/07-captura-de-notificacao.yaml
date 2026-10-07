@@ -1,0 +1,38 @@
+# Captura de notificação bancária, primeira parte: conta e grupo novos e o aceite do consentimento.
+#
+# Este fluxo não roda sozinho: quem o conduz é scripts/app-e2e-run-flows.sh, porque o Maestro não executa adb.
+#   1. o script apaga os dados do app e concede o "Acesso às notificações" ao leitor do CoupleSync
+#      (adb shell cmd notification allow_listener com.couplesync.app/com.couplesync.app.NotificationCaptureService);
+#   2. ESTE fluxo cria a conta e o grupo e aceita o consentimento da captura;
+#   3. o script publica a notificação de exemplo pelo app de teste (mobile/tests/e2e/notification-stub/);
+#   4. o fluxo partes/07-conferir-transacao-capturada.yaml confere que a transação apareceu.
+#
+# Por isso o app é aberto SEM apagar os dados e sem ser encerrado: o acesso concedido no passo 1 já está valendo.
+appId: com.couplesync.app
+name: 07 - Captura de notificação (consentimento)
+---
+- evalScript: ${output.email = 'e2e-07-' + Date.now() + '@example.com'}
+- launchApp:
+    clearState: false
+    stopApp: false
+- runFlow:
+    file: comum/criar-conta.yaml
+    env:
+      NOME: Helena Teste
+      EMAIL: ${output.email}
+- runFlow: comum/criar-grupo.yaml
+- tapOn: "Ir para o Painel"
+
+# Com o acesso do Android já concedido e nenhuma resposta registrada, o app abre sozinho, uma única vez, a tela
+# de consentimento ao chegar à área principal (useCaptureConsentSync).
+- extendedWaitUntil:
+    visible: "Aceitar e ligar a captura de notificações"
+    timeout: 60000
+- assertVisible: "Leia antes de ligar. Nada é enviado nem guardado sem o seu aceite."
+- tapOn: "Aceitar e ligar a captura de notificações"
+
+# O aceite leva às Configurações, onde a captura aparece ligada.
+- extendedWaitUntil:
+    visible: "Aceita em .* Ligada\\."
+    timeout: 30000
+- assertVisible: "Sair da conta"

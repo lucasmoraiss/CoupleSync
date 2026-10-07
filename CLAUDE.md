@@ -35,6 +35,7 @@ Publicar só o app: `/publicar-app`. Papéis em `.claude/agents/`. Guia do dono:
 | Imagem (quando `backend/` muda) | `docker build --file backend/Dockerfile --tag couplesync-api:smoke backend/`, depois `scripts/api-image-smoke-test.sh couplesync-api:smoke` e de novo com `SMOKE_FORCE_INVARIANT=1` |
 | App | em `mobile/`: `npx tsc --noEmit` e `npm test` |
 | Dependência do app mudou | `expo prebuild` de verdade numa cópia temporária fora do repositório (ver armadilha 8) |
+| Telas do app (emulador) | no CI, a cada PR: job **"App E2E"** (`.github/workflows/app-e2e.yml`) constrói o APK de teste e roda os fluxos Maestro de `mobile/tests/e2e/flows/` contra a imagem da API com PostgreSQL descartável |
 
 CI: `.github/workflows/ci.yml`, um único job **"Build & Test"** (nome da verificação obrigatória — não renomear,
 não dividir em outros jobs).
@@ -122,7 +123,7 @@ não dividir em outros jobs).
 - O pedido da issue está atendido, nada além dele, com teste que falhou antes e passa agora.
 - Todas as verificações acima verdes na ponta do branch, saída sem avisos novos; nenhuma suíte pulada.
 - `revisor` aprovou o diff inteiro, `revisor-final` deu "pode publicar" para um commit exato, e foi esse
-  commit que passou em "Build & Test" e entrou em `main`. Não há outra revisão: nem no GitHub, nem em aparelho.
+  commit que passou em "Build & Test" e em "App E2E" e entrou em `main`. Não há outra revisão: nem no GitHub, nem em aparelho.
 - Em produção: `/health` mostra o commit do merge; OTA/APK publicados quando o tipo da mudança exige.
 - A issue foi comentada com o que foi publicado e **o que ficou sem verificação**, e só então fechada.
   O que só um aparelho mostra foi para a issue de checkpoint do dono (rótulo `checkpoint`); ninguém espera por ele.

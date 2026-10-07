@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Test double used only by the "App E2E" workflow, on a throwaway emulator. It is NOT a bank app and is never
+  published: it has one screen-less activity that posts one made-up notification.
+
+  The application id is the one of a bank app on purpose: the CoupleSync notification reader
+  (mobile/android-native/.../NotificationCaptureService.kt) only reads notifications whose source package is in
+  its list of supported banks, and a notification posted with `adb shell cmd notification post` comes from
+  com.android.shell, which is ignored. Built by scripts/app-e2e-notification-stub.sh.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.nu.production"
+    android:versionCode="1"
+    android:versionName="e2e-stub">
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application android:label="CoupleSync E2E stub" android:hasCode="true">
+        <activity
+            android:name="com.couplesync.e2estub.PostNotificationActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+    </application>
+</manifest>

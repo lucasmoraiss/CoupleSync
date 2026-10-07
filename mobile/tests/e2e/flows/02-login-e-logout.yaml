@@ -1,0 +1,49 @@
+# Sair da conta (confirmando o diálogo), entrar de novo, fechar e reabrir o app e continuar logado.
+appId: com.couplesync.app
+name: 02 - Login e logout
+env:
+  SENHA: SenhaSegura123
+---
+- evalScript: ${output.email = 'e2e-02-' + Date.now() + '@example.com'}
+- runFlow:
+    file: comum/conta-com-grupo-no-painel.yaml
+    env:
+      NOME: Bia Teste
+      EMAIL: ${output.email}
+
+# Sair: aba Configurações, "Sair da conta", e o botão "Sair" do diálogo (o título do diálogo também é "Sair").
+- tapOn: "Configurações"
+- extendedWaitUntil:
+    visible: "Sair da conta"
+    timeout: 30000
+- tapOn: "Sair da conta"
+- extendedWaitUntil:
+    visible: "Deseja realmente sair da conta.*"
+    timeout: 15000
+- tapOn:
+    id: "android:id/button1"
+    text: "Sair"
+- extendedWaitUntil:
+    visible: "Esqueci minha senha"
+    timeout: 30000
+- assertNotVisible: "Sair da conta"
+
+# Entrar de novo com a mesma conta.
+- tapOn: "seu@email.com"
+- inputText: ${output.email}
+- tapOn: "••••••••"
+- inputText: ${SENHA}
+- hideKeyboard
+- tapOn: "Entrar"
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 60000
+
+# Fechar e reabrir sem apagar os dados: a sessão guardada leva direto ao Painel.
+- stopApp
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 120000
+- assertNotVisible: "Esqueci minha senha"

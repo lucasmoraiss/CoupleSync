@@ -14,10 +14,11 @@ Também funciona pedir por extenso ("entregue a issue 7").
 
 issue → branch `entrega/<n>-...` → `implementador` → verificação local (todas as suítes, migrations, imagem,
 prebuild quando preciso) → `revisor` → correções com `re-revisor` (até 3 rodadas) → `revisor` de novo no diff
-inteiro → `polidor` → `revisor-final`, que aprova um commit exato → push e PR → CI "Build & Test" verde → merge
-desse mesmo commit → espera `/health` mostrar o commit → fumaça de produção → OTA se mudou JavaScript → tag e
-APK se mudou nativo → comentário na issue com o que foi publicado e **o que ficou sem verificação** → o que
-depende de aparelho vai para a sua issue de checkpoint → issue fechada.
+inteiro → `polidor` → `revisor-final`, que aprova um commit exato → push e PR → CI "Build & Test" e
+"App E2E" (testes de tela no emulador) verdes → merge desse mesmo commit → espera `/health` mostrar o
+commit → fumaça de produção → OTA se mudou JavaScript → tag e APK se mudou nativo → comentário na issue com o
+que foi publicado e **o que ficou sem verificação** → o que depende de aparelho vai para a sua issue de
+checkpoint → issue fechada.
 
 | Arquivo | Para quê |
 | --- | --- |
@@ -105,6 +106,36 @@ COUPLESYNC_DEMO_ALLOW=demo...@...      ← o mesmo e-mail, repetido: é a única
 Sem ela a esteira confere só as rotas públicas e avisa que a parte autenticada não foi verificada.
 
 Já está pronto: segredos `EXPO_TOKEN` e `EXPO_PUBLIC_API_BASE_URL` no GitHub e apagar o branch no merge.
+
+## Testes de tela automáticos (`App E2E`)
+
+A cada PR para `main`, o workflow `.github/workflows/app-e2e.yml` (job **`App E2E`**) constrói o app de verdade
+— um APK de teste, feito no próprio CI, sem EAS e sem segredo nenhum —, instala num emulador Android e o dirige
+com o Maestro contra a imagem da API e um PostgreSQL descartável. Nada disso fala com a produção. É o que
+substitui o teste manual entre um checkpoint seu e o outro.
+
+O que os fluxos cobrem (`mobile/tests/e2e/flows/`): cadastro e criação do grupo; sair e entrar de novo, e
+continuar logado ao reabrir o app; segunda conta entrando no grupo pelo código de convite; criar, editar e
+apagar transação manual; criar meta e fonte de renda; abrir todas as abas sem erro; e a captura de uma
+notificação bancária de exemplo até virar transação. O que continua manual está em
+`mobile/tests/e2e/manual-walkthrough.md` e nos seus checkpoints.
+
+- Se o PR não toca `mobile/`, `backend/` nem o próprio workflow, o job termina verde em segundos sem subir emulador.
+- Cada fluxo que falha é repetido uma única vez; o resumo do job diz qual passou só na repetição.
+- Se o próprio app travar ("não está respondendo") ou cair durante os testes, o job fica vermelho mesmo que os
+  fluxos passem, e o resumo abre com esse aviso. Diálogo de travamento de outro app do emulador (o sistema, o
+  launcher) é só fechado e contado.
+- Em falha, o artefato `app-e2e-evidencias` da execução traz as capturas de tela e o log do Maestro, o logcat
+  e o log da API.
+- O APK de teste aceita HTTP sem TLS, aponta para o emulador e tem as atualizações OTA desligadas: nunca é
+  publicado. O fluxo de captura instala no emulador um app de teste com o identificador de um app de banco
+  (`mobile/tests/e2e/notification-stub/`), porque o leitor só lê notificações de bancos conhecidos; ele também
+  só existe no emulador.
+- A esteira exige `App E2E` verde junto de `Build & Test` antes do merge (passo 9 da skill `entregar`). Na regra
+  do branch no GitHub ela **não** é obrigatória: torná-la obrigatória lá é decisão sua, depois de um período
+  estável — basta pedir na sessão.
+- O cache do build só fica quente para os PRs depois de uma execução em `main`: Actions → **App E2E** →
+  **Run workflow** em `main` (vale repetir quando as dependências do app mudarem).
 
 ## Quando a esteira para e o que ela pergunta
 
