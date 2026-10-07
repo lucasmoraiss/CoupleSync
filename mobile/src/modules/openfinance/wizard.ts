@@ -248,7 +248,7 @@ export function connectionErrorHelp(connection: Pick<BankConnectionResponse, 'st
 
 /**
  * Em que passo o wizard abre. Quem já tem conexão (ativa ou com erro) só adiciona bancos: passo 4. Quem
- * desconectou precisa informar as credenciais de novo. Sem o aceite do aviso de privacidade, sempre o passo 1.
+ * desconectou precisa informar as credenciais de novo. Sem conexão e sem o aceite do aviso de privacidade, o passo 1.
  */
 export function startingStep(input: {
   readonly progress: WizardProgress;
