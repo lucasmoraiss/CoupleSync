@@ -31,12 +31,15 @@ if ! git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
   exit 0
 fi
 
-changed="$(git diff --name-only 'HEAD^1' HEAD)"
+# --no-renames: a file moved out of mobile/ or backend/ is listed under its old path too (as a deletion).
+# core.quotePath=false: a path with non-ASCII characters is printed as it is, not quoted and escaped.
+changed="$(git -c core.quotePath=false diff --name-only --no-renames 'HEAD^1' HEAD)"
 relevant="$(printf '%s\n' "$changed" | grep -E "$RELEVANT" || true)"
 
 if [ -n "$relevant" ]; then
   echo "Files of this pull request that the screen tests cover:"
-  printf '%s\n' "$relevant" | head -n 40 | sed 's/^/  /'
+  # sed reads the whole list (no `head`: under pipefail a closed pipe would fail the step on a huge PR).
+  printf '%s\n' "$relevant" | sed -n '1,40s/^/  /p'
   decide true "The screen tests run."
 else
   decide false "This pull request touches nothing under mobile/, backend/ or the App E2E workflow: nothing to test."
