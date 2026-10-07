@@ -70,9 +70,10 @@ parada (formato no fim). Só o dono libera.
 6. **`revisor-final` disse NÃO PODE PUBLICAR** e a rodada de correção permitida (passo 7) não resolveu.
 7. **Teto de rodadas de correção atingido** (passo 5).
 8. **Decisão que é do dono**: requisito ambíguo que muda o resultado; variável nova no Render; mudança de SDK
-   do Expo (muda o `runtimeVersion` e deixa os APKs instalados sem OTA); qualquer configuração do GitHub,
-   Render, Expo ou Neon (inclusive um merge recusado pelas regras do branch); tag que já existe; `main` que
-   andou com conflito que não é trivial; os casos da seção "Quem manda".
+   do Expo (muda o `runtimeVersion` e deixa os APKs instalados sem OTA); configuração do GitHub, Render, Expo
+   ou Neon que você NÃO consegue fazer por API/CLI, que exige um segredo do dono ou que afrouxa uma proteção
+   (regra do `CLAUDE.md`: o que dá para fazer por API você faz e relata); tag que já existe; `main` que andou
+   com conflito que não é trivial; os casos da seção "Quem manda".
 9. **Deploy não confirmado ou fumaça de produção falhando** (ver passo 10 e "Volta atrás").
 
 Teste em aparelho **não** é parada: o dono testa em checkpoints, quando ele decidir. A esteira publica com as
@@ -230,7 +231,12 @@ Em qualquer dos casos o novo "SHA revisado" substitui o anterior. Essas rodadas 
   traga `origin/main` para o branch com um merge (sem rebase, sem force-push) e siga a regra do SHA aprovado.
   Esta conferência é sua; não conte com a regra do branch no GitHub para isso.
 - Merge: `ghp pr merge <pr> --repo lucasmoraiss/CoupleSync --merge --match-head-commit <sha aprovado>`.
-  Recusado por regra do branch → PARADA 8, com a mensagem do GitHub. Nunca use `--admin`, nunca altere a regra.
+  Recusado por regra do branch: leia a regra (`ghp api repos/lucasmoraiss/CoupleSync/rules/branches/main`) e
+  descubra qual exigência falta. Exigência legítima ainda não cumprida (verificação rodando, branch
+  desatualizado) → cumpra-a. Regra mal configurada, que nenhum PR consegue cumprir → corrija-a pela API para o
+  estado descrito em `.claude/README.md` e relate o antes e o depois; isso não pode tirar a exigência de PR
+  nem a de "Build & Test". Nunca use `--admin` e nunca afrouxe a regra para fazer um merge passar: precisando
+  disso → PARADA 8, com a mensagem do GitHub.
 - Commit do merge: `ghp pr view <pr> --repo lucasmoraiss/CoupleSync --json mergeCommit --jq .mergeCommit.oid`.
 
 ### 10. Confirmar o deploy da API

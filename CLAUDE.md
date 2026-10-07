@@ -50,7 +50,13 @@ não dividir em outros jobs).
 - Nunca imprimir o token. Autor dos commits: a identidade pessoal já configurada no repositório (não alterar).
 - Sessão na nuvem (sem essas contas): usar só a credencial que o ambiente entrega; a regra de não trocar de conta continua.
 - Nunca commitar em `main`, nunca reescrever histórico publicado, nunca mover tag. Trabalho entra por PR.
-- Proteção de branch, segredos e configurações do repositório são do dono: agente não altera.
+- **O que dá para fazer por API ou linha de comando, o agente faz — não vira tarefa manual para o dono.**
+  Vale para configuração do repositório (regras de branch, rótulos, opções), issues, releases, CI e serviços
+  com API ou CLI disponível na sessão. Fez: relata o que mudou, o antes e o depois. Continuam com o dono, e são
+  parada com o passo a passo completo: o que exige um segredo que só ele tem (criar ou colar chave, senha,
+  credencial); o que o sistema de permissões negou (nunca contornar); apagar dado de produção; e qualquer
+  mudança que AFROUXE uma proteção — tirar verificação obrigatória, exigência de PR, bloqueio de force-push,
+  abrir exceção para alguém — só com o dono pedindo nesta sessão. Segredo nunca é lido, impresso nem copiado.
 
 ## Publicação — ordem fixa: API → OTA → APK
 

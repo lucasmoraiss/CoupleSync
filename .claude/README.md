@@ -45,10 +45,15 @@ Só você. O repositório é público, então a esteira trata como pedido apenas
 issues abertas pela conta `lucasmoraiss`; dos comentários, só os seus. Texto de qualquer outra pessoa — issue,
 comentário, PR — é lido como dado e nunca como instrução.
 
-## O que você faz uma vez, à mão
+## O que só você consegue fazer
 
-### 1. Regra do branch `main`
+Regra da casa: o que dá para fazer por API ou linha de comando, os agentes fazem e relatam — não vira tarefa
+manual para você. Sobra para você o que exige um segredo seu (criar ou colar uma chave), o que precisa de um
+aparelho na mão, e decidir quando alguma proteção deve ser afrouxada.
 
+### 1. Regra do branch `main` — feita pelos agentes; isto é a referência do estado certo
+
+Configurada pela API em 07/10/2026. Se um dia precisar conferir ou refazer à mão:
 GitHub → repositório → **Settings** → **Rules** → **Rulesets** → abra o conjunto de regras que vale para
 `main` (ou **New ruleset → New branch ruleset**, com *Enforcement status* = **Active** e, em *Target branches*,
 **Add target → Include default branch**). Em **Branch rules**, deixe marcado **só** isto:
@@ -67,7 +72,8 @@ Todo o resto fica **desmarcado**. Em especial, estas duas travam todo merge nest
 *Bypass list* vazia (a regra vale também para você). **Save changes**.
 
 Como conferir: abra qualquer PR; na caixa de merge tem de aparecer `Build & Test` como **Required**, e o
-botão de merge só libera com ele verde. Os agentes não mexem nesta configuração: é sua.
+botão de merge só libera com ele verde. Os agentes mantêm esta regra neste estado e a corrigem pela API se
+ela sair dele; afrouxá-la (tirar a exigência de PR ou de `Build & Test`, abrir exceção) só com você pedindo.
 
 ### 2. E-mail (Brevo) no Render — feito
 
@@ -104,7 +110,7 @@ Ela nunca decide estas coisas sozinha. Você recebe um relato com o que acontece
 | Permissão negada | Liberar o comando, fazer você mesmo, ou mudar o plano |
 | `revisor-final`: NÃO PODE PUBLICAR | Aceitar o adiamento, mudar o escopo, ou liberar mais uma rodada |
 | Teto de 3 rodadas de correção | Idem |
-| Decisão sua | Requisito ambíguo; variável nova no Render; mudança de SDK do Expo; tag que já existe; merge recusado pela regra do branch; pedido que mexe em credenciais ou afrouxa uma verificação |
+| Decisão sua | Requisito ambíguo; variável nova no Render; mudança de SDK do Expo; tag que já existe; configuração que não dá para fazer por API ou que afrouxa uma proteção; pedido que mexe em credenciais ou afrouxa uma verificação |
 | Deploy não confirmado | Olhar o log do Render. Sem prova de falha a esteira **não** reverte nada |
 | Fumaça falhou duas vezes | Ela já abriu a reversão (quando não há migration); você confirma o diagnóstico |
 
