@@ -1,0 +1,12 @@
+# Aquecimento, segunda opinião: usado por scripts/app-e2e-run-flows.sh só quando a conferência por adb não viu
+# a tela de login depois da primeira abertura do app. É a mesma espera que todo fluxo faz no começo.
+# Não apaga os dados nem encerra o app: ele já foi aberto pelo script.
+appId: com.couplesync.app
+name: 00 - Aquecimento
+---
+- launchApp:
+    clearState: false
+    stopApp: false
+- extendedWaitUntil:
+    visible: "Ir para o cadastro de conta nova"
+    timeout: 120000

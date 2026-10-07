@@ -1,0 +1,32 @@
+# Captura de notificação bancária, segunda parte (ver 07-captura-de-notificacao.yaml): a notificação de exemplo
+# já foi publicada pelo script; aqui se confere que ela virou uma transação do grupo.
+#
+# O app continua aberto, na conta criada pela primeira parte: este fluxo não abre nem fecha o app.
+# "PADARIA E2E" e "37,50" são os dados inventados da notificação publicada por
+# mobile/tests/e2e/notification-stub/src/com/couplesync/e2estub/PostNotificationActivity.java.
+appId: com.couplesync.app
+name: 07 - Captura de notificação (transação)
+---
+- tapOn: "Transações"
+- extendedWaitUntil:
+    visible: "Adicionar transação manualmente"
+    timeout: 30000
+
+# O envio da notificação à API é assíncrono: se a lista foi lida antes de a transação existir, puxa para
+# atualizar, no máximo dez vezes.
+- repeat:
+    times: 10
+    while:
+      notVisible: "PADARIA E2E"
+    commands:
+      - swipe:
+          start: 50%, 35%
+          end: 50%, 75%
+      - extendedWaitUntil:
+          visible: "Adicionar transação manualmente"
+          timeout: 15000
+- assertVisible: "PADARIA E2E"
+- assertVisible: ".*37,50"
+- assertVisible: "Notificação"
+- assertVisible: "1 no total"
+- assertNotVisible: "Tentar novamente"

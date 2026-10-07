@@ -1,0 +1,8 @@
+# Parte comum: da tela "Vamos configurar" até "Grupo criado!", com o código de convite à vista.
+appId: com.couplesync.app
+---
+- tapOn: "Criar grupo"
+- extendedWaitUntil:
+    visible: "Grupo criado!"
+    timeout: 60000
+- assertVisible: "Código de convite"

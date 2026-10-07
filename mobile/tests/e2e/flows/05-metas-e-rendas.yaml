@@ -1,0 +1,67 @@
+# Criar uma meta e uma fonte de renda e vê-las nas telas.
+appId: com.couplesync.app
+name: 05 - Metas e rendas
+---
+- evalScript: ${output.email = 'e2e-05-' + Date.now() + '@example.com'}
+# O prazo da meta tem de ser futuro: 31 de dezembro do ano seguinte ao da execução.
+- evalScript: ${output.anoDoPrazo = String(new Date().getFullYear() + 1)}
+- runFlow:
+    file: comum/conta-com-grupo-no-painel.yaml
+    env:
+      NOME: Fabio Teste
+      EMAIL: ${output.email}
+
+# Meta: os campos de valor e prazo recebem só dígitos (o app põe a vírgula e as barras).
+- tapOn: "Metas"
+- extendedWaitUntil:
+    visible: "Nenhuma meta ativa"
+    timeout: 30000
+- tapOn: "Criar nova meta"
+- extendedWaitUntil:
+    visible: "Título da meta"
+    timeout: 15000
+- tapOn: "Título da meta"
+- inputText: "Viagem E2E"
+- tapOn: "Valor alvo da meta"
+- inputText: "150000"
+- tapOn: "Prazo da meta"
+- inputText: ${'3112' + output.anoDoPrazo}
+- hideKeyboard
+- tapOn: "Criar meta"
+- extendedWaitUntil:
+    visible: "Viagem E2E"
+    timeout: 30000
+- assertVisible: ${'31/12/' + output.anoDoPrazo}
+- assertVisible: "Editar meta Viagem E2E"
+- assertNotVisible: "Nenhuma meta ativa"
+
+# Fonte de renda.
+- tapOn: "Rendas e orçamento"
+- extendedWaitUntil:
+    visible: "Fontes de Renda"
+    timeout: 30000
+- assertVisible: "Configure suas rendas"
+# O formulário abre com o teclado: o botão de salvar só aparece depois de escondê-lo.
+- tapOn: "Adicionar fonte de renda"
+- extendedWaitUntil:
+    visible: "Nome da fonte de renda"
+    timeout: 15000
+- tapOn: "Nome da fonte de renda"
+- inputText: "Salario E2E"
+- tapOn: "Valor mensal"
+- inputText: "500000"
+- hideKeyboard
+- tapOn: "Salvar fonte de renda"
+- extendedWaitUntil:
+    visible: "Salario E2E"
+    timeout: 30000
+- assertVisible: "Rendas Recorrentes"
+- assertVisible: ".*5\\.000,00"
+- assertNotVisible: "Configure suas rendas"
+
+# A meta continua lá ao voltar para a aba.
+- tapOn: "Metas"
+- extendedWaitUntil:
+    visible: "Viagem E2E"
+    timeout: 30000
+- assertNotVisible: "Tentar novamente"

@@ -1,0 +1,15 @@
+# Parte comum: abre o app do zero, cria conta e grupo e chega ao Painel. Quem chama passa NOME e EMAIL.
+appId: com.couplesync.app
+---
+- launchApp:
+    clearState: true
+- runFlow:
+    file: criar-conta.yaml
+    env:
+      NOME: ${NOME}
+      EMAIL: ${EMAIL}
+- runFlow: criar-grupo.yaml
+- tapOn: "Ir para o Painel"
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 60000

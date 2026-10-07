@@ -1,0 +1,86 @@
+# Criar duas transações seguidas, editar uma, apagar a outra (confirmando o diálogo) e conferir a lista.
+appId: com.couplesync.app
+name: 04 - Transação manual
+---
+- evalScript: ${output.email = 'e2e-04-' + Date.now() + '@example.com'}
+- runFlow:
+    file: comum/conta-com-grupo-no-painel.yaml
+    env:
+      NOME: Eva Teste
+      EMAIL: ${output.email}
+
+- tapOn: "Transações"
+- extendedWaitUntil:
+    visible: "Nenhuma transação ainda"
+    timeout: 30000
+
+# Primeira transação.
+- tapOn: "Adicionar transação manualmente"
+- extendedWaitUntil:
+    visible: "Nova transação"
+    timeout: 15000
+- tapOn: "Valor em reais"
+- inputText: "42,90"
+- tapOn: "Descrição"
+- inputText: "Mercado E2E"
+- hideKeyboard
+- tapOn: "Categoria Transporte"
+- tapOn: "Salvar transação"
+- extendedWaitUntil:
+    visible: "Mercado E2E"
+    timeout: 30000
+- assertVisible: "1 no total"
+
+# Segunda, logo em seguida: o formulário (aba oculta, que fica montada) tem de abrir vazio.
+- tapOn: "Adicionar transação manualmente"
+- extendedWaitUntil:
+    visible: "Nova transação"
+    timeout: 15000
+- assertNotVisible: "42,90"
+- assertNotVisible: "Mercado E2E"
+- tapOn: "Valor em reais"
+- inputText: "18,00"
+- tapOn: "Descrição"
+- inputText: "Padaria E2E"
+- hideKeyboard
+- tapOn: "Salvar transação"
+- extendedWaitUntil:
+    visible: "Padaria E2E"
+    timeout: 30000
+- assertVisible: "Mercado E2E"
+- assertVisible: "2 no total"
+- assertVisible: ".*42,90"
+- assertVisible: ".*18,00"
+
+# Editar a primeira: o valor muda de 42,90 para 55,00.
+- tapOn: "Editar transação Mercado E2E"
+- extendedWaitUntil:
+    visible: "Salvar alterações"
+    timeout: 15000
+- tapOn: "Valor em reais"
+- eraseText
+- inputText: "55,00"
+- hideKeyboard
+- tapOn: "Salvar alterações"
+- extendedWaitUntil:
+    visible: ".*55,00"
+    timeout: 30000
+- assertVisible: "Mercado E2E"
+- assertNotVisible: ".*42,90"
+- assertVisible: "2 no total"
+
+# Apagar a segunda: botão "Excluir" do diálogo.
+- tapOn: "Excluir transação Padaria E2E"
+- extendedWaitUntil:
+    visible: "Tem certeza que deseja excluir esta transação.*"
+    timeout: 15000
+- tapOn:
+    id: "android:id/button1"
+    text: "Excluir"
+- extendedWaitUntil:
+    visible: "1 no total"
+    timeout: 30000
+- assertNotVisible: "Padaria E2E"
+- assertVisible: "Mercado E2E"
+- assertVisible: ".*55,00"
+- assertNotVisible: "Tentar novamente"
