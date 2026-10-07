@@ -1,7 +1,8 @@
 // Edição de uma transação do grupo: valor, descrição, data/hora (Brasília) e categoria.
 // Recebe os valores atuais pela rota (a API não tem leitura por id) e envia só o que mudou.
+// A regra de "de qual transação são estes campos" e "o que mudou" está em modules/transactions/editForm.ts.
 import { getApiErrorMessage } from '@/services/apiError';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -15,84 +16,72 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { transactionsApiClient, isCoupleRequiredError } from '@/services/apiClient';
-import type { UpdateTransactionBody } from '@/services/apiClient';
-import { toCategoryKey } from '@/modules/transactions/categories';
+import {
+  buildEditSubmission,
+  createEditForm,
+  formFor,
+  originalFromParams,
+  type EditFormState,
+} from '@/modules/transactions/editForm';
+import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { useCategories } from '@/modules/transactions/useCategories';
-import { parseAmountText } from '@/utils/amount';
-import { formatBrazilDate, formatBrazilTime, parseBrazilDateTime } from '@/utils/brazilDateTime';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 
-function formatAmountText(amount: number): string {
-  return amount.toFixed(2).replace('.', ',');
-}
+type EditParams = {
+  id: string;
+  amount: string;
+  description?: string;
+  merchant?: string;
+  category: string;
+  eventTimestampUtc: string;
+};
 
-export default function EditTransactionScreen() {
-  const params = useLocalSearchParams<{
-    id: string;
-    amount: string;
-    description?: string;
-    merchant?: string;
-    category: string;
-    eventTimestampUtc: string;
-  }>();
+function EditTransactionScreen() {
+  const params = useLocalSearchParams<EditParams>();
   const queryClient = useQueryClient();
   const categories = useCategories();
 
-  const original = {
-    amount: Number(params.amount),
-    description: params.description ?? '',
-    merchant: params.merchant ?? '',
-    category: toCategoryKey(params.category ?? '') ?? params.category ?? '',
-    eventTimestampUtc: params.eventTimestampUtc ?? new Date().toISOString(),
-  };
-  const originalDate = formatBrazilDate(original.eventTimestampUtc);
-  const originalTime = formatBrazilTime(original.eventTimestampUtc);
+  // A transação que a rota manda AGORA. A tela é uma aba oculta e continua montada entre visitas.
+  const original = useMemo(
+    () => originalFromParams(params),
+    [params.id, params.amount, params.description, params.merchant, params.category, params.eventTimestampUtc],
+  );
 
-  const [amountText, setAmountText] = useState(formatAmountText(original.amount));
-  const [merchant, setMerchant] = useState(original.merchant);
-  const [description, setDescription] = useState(original.description);
-  const [dateText, setDateText] = useState(originalDate);
-  const [timeText, setTimeText] = useState(originalTime);
-  const [category, setCategory] = useState<string>(original.category);
+  // Os campos pertencem a uma transação (ver editForm.ts). formFor() descarta, já na renderização, um formulário
+  // que seja de outra transação: os valores de uma nunca aparecem nem são enviados para outra.
+  const [storedForm, setStoredForm] = useState<EditFormState>(() => createEditForm(original));
+  const form = formFor(storedForm, original);
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async () => {
-    const body: UpdateTransactionBody = {};
+  const setField = <K extends 'amountText' | 'merchant' | 'description' | 'dateText' | 'timeText' | 'category'>(
+    field: K,
+    value: EditFormState[K],
+  ) => setStoredForm((previous) => ({ ...formFor(previous, original), [field]: value }));
 
-    const parsed = parseAmountText(amountText);
-    if (!parsed.ok) {
-      Alert.alert('Valor inválido', parsed.message);
+  const handleSubmit = async () => {
+    const submission = buildEditSubmission(form, original);
+    if (submission.kind === 'stale') {
+      // Não deveria acontecer (formFor já alinhou o formulário); se acontecer, nada é enviado.
+      setStoredForm(createEditForm(original));
+      Alert.alert('Transação', 'Os dados desta transação foram recarregados. Confira e salve de novo.');
       return;
     }
-    if (parsed.value !== original.amount) body.amount = parsed.value;
-
-    if (merchant.trim() !== original.merchant.trim()) body.merchant = merchant.trim();
-
-    if (description.trim() !== original.description.trim()) body.description = description.trim();
-
-    if (dateText.trim() !== originalDate || timeText.trim() !== originalTime) {
-      const when = parseBrazilDateTime(dateText, timeText);
-      if (!when.ok) {
-        Alert.alert('Data inválida', when.message);
-        return;
-      }
-      body.eventTimestampUtc = when.iso;
+    if (submission.kind === 'invalid') {
+      Alert.alert(submission.title, submission.message);
+      return;
     }
-
-    if (category !== original.category) body.category = category;
-
-    if (Object.keys(body).length === 0) {
-      router.back();
+    if (submission.kind === 'unchanged') {
+      goToParent('transactions/edit');
       return;
     }
 
     setSubmitting(true);
     try {
-      await transactionsApiClient.update(params.id, body);
+      await transactionsApiClient.update(submission.id, submission.body);
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['transactions'] }),
@@ -102,7 +91,8 @@ export default function EditTransactionScreen() {
         queryClient.invalidateQueries({ queryKey: ['goals'] }),
       ]);
 
-      router.back();
+      // Sempre para a lista de transações, onde a alteração aparece (não depende do histórico de abas).
+      goToParent('transactions/edit');
     } catch (err: any) {
       if (isCoupleRequiredError(err)) return;
       Alert.alert('Erro', getApiErrorMessage(err, 'Não foi possível salvar a transação.'));
@@ -110,6 +100,8 @@ export default function EditTransactionScreen() {
       setSubmitting(false);
     }
   };
+
+  const { amountText, merchant, description, dateText, timeText, category } = form;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -119,7 +111,7 @@ export default function EditTransactionScreen() {
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.headerRow}>
-            <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="Voltar">
+            <Pressable onPress={() => goToParent('transactions/edit')} hitSlop={12} accessibilityRole="button" accessibilityLabel="Voltar">
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </Pressable>
             <Text style={styles.title} accessibilityRole="header">Editar transação</Text>
@@ -133,7 +125,7 @@ export default function EditTransactionScreen() {
             placeholder="0,00"
             placeholderTextColor={colors.placeholder}
             value={amountText}
-            onChangeText={setAmountText}
+            onChangeText={(text) => setField('amountText', text)}
             editable={!submitting}
           />
 
@@ -143,7 +135,7 @@ export default function EditTransactionScreen() {
             placeholder="Ex: Pão de Açúcar"
             placeholderTextColor={colors.placeholder}
             value={merchant}
-            onChangeText={setMerchant}
+            onChangeText={(text) => setField('merchant', text)}
             editable={!submitting}
             maxLength={512}
           />
@@ -154,7 +146,7 @@ export default function EditTransactionScreen() {
             placeholder="Ex: Mercado"
             placeholderTextColor={colors.placeholder}
             value={description}
-            onChangeText={setDescription}
+            onChangeText={(text) => setField('description', text)}
             editable={!submitting}
             maxLength={512}
           />
@@ -167,7 +159,7 @@ export default function EditTransactionScreen() {
               placeholder="dd/mm/aaaa"
               placeholderTextColor={colors.placeholder}
               value={dateText}
-              onChangeText={setDateText}
+              onChangeText={(text) => setField('dateText', text)}
               editable={!submitting}
               maxLength={10}
               accessibilityLabel="Data"
@@ -178,7 +170,7 @@ export default function EditTransactionScreen() {
               placeholder="hh:mm"
               placeholderTextColor={colors.placeholder}
               value={timeText}
-              onChangeText={setTimeText}
+              onChangeText={(text) => setField('timeText', text)}
               editable={!submitting}
               maxLength={5}
               accessibilityLabel="Hora"
@@ -193,7 +185,7 @@ export default function EditTransactionScreen() {
                 <Pressable accessibilityLabel={`Categoria ${c.label}`}
                   key={c.value}
                   style={[styles.categoryChip, selected && styles.categoryChipActive]}
-                  onPress={() => setCategory(c.value)}
+                  onPress={() => setField('category', c.value)}
                   disabled={submitting}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
@@ -229,6 +221,9 @@ export default function EditTransactionScreen() {
     </SafeAreaView>
   );
 }
+
+// Remontada a cada visita e a cada transação: os campos começam sempre dos valores da transação aberta agora.
+export default resetOnFocus(EditTransactionScreen);
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },

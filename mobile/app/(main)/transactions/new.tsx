@@ -15,16 +15,16 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { transactionsApiClient } from '@/services/apiClient';
 import { PREDEFINED_CATEGORIES } from '@/modules/transactions/categories';
 import { useCategories } from '@/modules/transactions/useCategories';
 import { parseAmountText } from '@/utils/amount';
+import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 
-export default function NewTransactionScreen() {
+function NewTransactionScreen() {
   const queryClient = useQueryClient();
   const categories = useCategories();
 
@@ -33,17 +33,6 @@ export default function NewTransactionScreen() {
   const [merchant, setMerchant] = useState('');
   const [category, setCategory] = useState<string>(PREDEFINED_CATEGORIES[0].value);
   const [submitting, setSubmitting] = useState(false);
-
-  useFocusEffect(
-    React.useCallback(() => {
-      if (!submitting) {
-        setAmountText('');
-        setDescription('');
-        setMerchant('');
-        setCategory(PREDEFINED_CATEGORIES[0].value);
-      }
-    }, [submitting])
-  );
 
   const handleSubmit = async () => {
     // Mesma regra da API: maior que zero, até R$ 999.999.999,99 e no máximo duas casas decimais.
@@ -77,7 +66,7 @@ export default function NewTransactionScreen() {
         queryClient.invalidateQueries({ queryKey: ['budget'] }),
       ]);
 
-      router.back();
+      goToParent('transactions/new');
     } catch (err: any) {
       Alert.alert('Erro', getApiErrorMessage(err, 'Não foi possível registrar a transação.'));
     } finally {
@@ -93,7 +82,7 @@ export default function NewTransactionScreen() {
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.headerRow}>
-            <Pressable accessibilityLabel="Voltar" onPress={() => router.back()} hitSlop={12} accessibilityRole="button">
+            <Pressable accessibilityLabel="Voltar" onPress={() => goToParent('transactions/new')} hitSlop={12} accessibilityRole="button">
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </Pressable>
             <Text style={styles.title} accessibilityRole="header">Nova transação</Text>
@@ -175,6 +164,9 @@ export default function NewTransactionScreen() {
     </SafeAreaView>
   );
 }
+
+// Aba oculta: cada visita começa com o formulário vazio.
+export default resetOnFocus(NewTransactionScreen);
 
 const styles = StyleSheet.create({
   container: {

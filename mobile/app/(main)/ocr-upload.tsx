@@ -1,7 +1,9 @@
 // AC-121, AC-129, AC-130: OCR upload screen — PDF file picker + status polling.
 // Only PDF is offered: the server's default parser handles digital PDF statements only and
 // rejects images (IMAGE_NOT_SUPPORTED), so camera and image selection are not exposed.
-import { appendAiConsent } from '@/modules/ocr/uploadForm';
+import { aiConsentForUpload, appendAiConsent, shouldResetUploadOnRevisit } from '@/modules/ocr/uploadForm';
+import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
+import { goToParent, useOnRefocus } from '@/navigation/resetOnFocus';
 import { isAiChatAllowedNow } from '@/modules/privacy/consentStore';
 import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback, useRef } from 'react';
@@ -67,6 +69,9 @@ export default function OcrUploadScreen() {
       refetchOpenImports();
     }, [refetchOpenImports]),
   );
+
+  // Ao voltar à tela, o erro de uma tentativa anterior some; envio ou processamento em andamento continuam.
+  useOnRefocus(() => setState((current) => (shouldResetUploadOnRevisit(current.phase) ? { phase: 'idle' } : current)));
 
   const handleReopen = useCallback((uploadId: string) => {
     router.push(`/(main)/ocr-review?uploadId=${uploadId}` as any);
@@ -193,7 +198,7 @@ export default function OcrUploadScreen() {
         type: PDF_MIME_TYPE,
         name: fileName,
       } as any);
-      appendAiConsent(formData, isAiChatAllowedNow());
+      appendAiConsent(formData, aiConsentForUpload(AI_FEATURE_ENABLED, isAiChatAllowedNow()));
 
       try {
         const res = await ocrApiClient.upload(formData, controller.signal);
@@ -252,7 +257,7 @@ export default function OcrUploadScreen() {
       <View style={styles.header}>
         <TouchableOpacity accessibilityRole="button"
           style={styles.backBtn}
-          onPress={() => router.back()}
+          onPress={() => goToParent('ocr-upload')}
           accessibilityLabel="Voltar"
         >
           <Ionicons name="arrow-back" size={22} color={TEXT} />

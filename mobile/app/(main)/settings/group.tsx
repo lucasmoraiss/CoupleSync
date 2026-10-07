@@ -1,9 +1,10 @@
 // Tela do grupo: membros, código de convite com validade (sempre visível, com botão de copiar)
 // e as ações sair / remover membro / gerar novo código, cada uma com confirmação.
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -27,6 +28,7 @@ import { isCaptureAllowedNow } from '@/modules/privacy/consentStore';
 import { describeJoinCodeValidity, isGroupOwner } from '@/modules/couple/group';
 import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
+import { goToParent, useOnRefocus } from '@/navigation/resetOnFocus';
 import { colors } from '@/theme';
 import type { CoupleMemberResponse, GetCoupleMeResponse } from '@/types/api';
 
@@ -36,7 +38,8 @@ export default function GroupScreen() {
   const queryClient = useQueryClient();
   const userId = useSessionStore((s) => s.userId);
   const [copied, setCopied] = useState(false);
-  const { data: myGroups } = useMyGroups();
+  const { data: myGroups, refetch: refetchMyGroups } = useMyGroups();
+  const [refreshing, setRefreshing] = useState(false);
 
   const { data, error, isLoading, isError, refetch } = useQuery<GetCoupleMeResponse>({
     queryKey: QUERY_KEY,
@@ -44,6 +47,25 @@ export default function GroupScreen() {
     // "Você não tem grupo" não muda ao tentar de novo.
     retry: (failureCount, err) => !isNoGroupError(err) && failureCount < 2,
   });
+
+  // A tela é uma aba oculta e continua montada: membros, administrador, validade do código e a lista de grupos
+  // mudam por ação de outras pessoas. Busca de novo a cada volta à tela e ao puxar para atualizar.
+  const reload = useCallback(
+    () => Promise.all([refetch({ cancelRefetch: false }), refetchMyGroups({ cancelRefetch: false })]),
+    [refetch, refetchMyGroups],
+  );
+  useOnRefocus(() => {
+    setCopied(false);
+    void reload();
+  });
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await reload();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [reload]);
 
   // O servidor diz que não há grupo (removido, ou grupo guardado velho): esquece o grupo e vai configurar outro.
   const noGroup = isNoGroupError(error);
@@ -150,8 +172,11 @@ export default function GroupScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Voltar">
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primaryLight} />}
+      >
+        <TouchableOpacity onPress={() => goToParent('settings/group')} accessibilityRole="button" accessibilityLabel="Voltar">
           <Text style={styles.back}>← Voltar</Text>
         </TouchableOpacity>
         <Text style={styles.title} accessibilityRole="header">Grupo</Text>

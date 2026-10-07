@@ -2,24 +2,23 @@
 // Texto dentro do app (sem link externo). Mostra também as respostas de consentimento do usuário neste aparelho.
 import React from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity } from 'react-native';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@/theme';
 import { TextSections } from '@/components/TextSections';
-import { PRIVACY_SECTIONS, PRIVACY_TITLE } from '@/modules/privacy/privacyContent';
-import { formatConsentDate } from '@/modules/privacy/consent';
+import { PRIVACY_TITLE, consentStatusLines, privacySections } from '@/modules/privacy/privacyContent';
+import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
+import { goToParent } from '@/navigation/resetOnFocus';
 import { useConsentStore } from '@/modules/privacy/consentStore';
 
 export default function PrivacyScreen() {
   const record = useConsentStore((s) => s.record);
-  const aiAccepted = record.aiChat.acceptedAt;
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         <TouchableOpacity
           style={styles.backRow}
-          onPress={() => router.back()}
+          onPress={() => goToParent('settings/privacy')}
           accessibilityRole="button"
           accessibilityLabel="Voltar para as configurações"
         >
@@ -29,20 +28,13 @@ export default function PrivacyScreen() {
         <Text style={styles.title} accessibilityRole="header">{PRIVACY_TITLE}</Text>
         <Text style={styles.subtitle}>Como o CoupleSync trata os seus dados.</Text>
 
-        <TextSections sections={PRIVACY_SECTIONS} />
+        <TextSections sections={privacySections(AI_FEATURE_ENABLED)} />
 
         <View style={styles.statusBox}>
           <Text style={styles.statusTitle} accessibilityRole="header">Suas respostas neste aparelho</Text>
-          <Text style={styles.statusLine}>
-            {record.capture.acceptedAt
-              ? `Captura de notificações: aceita em ${formatConsentDate(record.capture.acceptedAt)} (${record.capture.enabled ? 'ligada' : 'desligada'}).`
-              : 'Captura de notificações: não aceita.'}
-          </Text>
-          <Text style={styles.statusLine}>
-            {aiAccepted
-              ? `Chat IA (Google Gemini): aceito em ${formatConsentDate(aiAccepted)}.`
-              : 'Chat IA (Google Gemini): não aceito.'}
-          </Text>
+          {consentStatusLines(record, AI_FEATURE_ENABLED).map((line) => (
+            <Text key={line} style={styles.statusLine}>{line}</Text>
+          ))}
         </View>
       </ScrollView>
     </SafeAreaView>

@@ -14,13 +14,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { router } from 'expo-router';
 import { authApiClient } from '@/services/apiClient';
 import { getApiErrorMessage } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
+import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { colors } from '@/theme';
 
-export default function ChangePasswordScreen() {
+function ChangePasswordScreen() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -42,8 +42,13 @@ export default function ChangePasswordScreen() {
       const { data } = await authApiClient.changePassword({ currentPassword, newPassword });
       const session = useSessionStore.getState();
       await session.setTokens(data.accessToken, data.refreshToken || session.refreshToken || '');
+      // As senhas não ficam na memória da tela depois de usadas (ela continua montada como aba oculta).
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setShowPasswords(false);
       Alert.alert('Senha alterada', 'Sua senha foi alterada. Nos outros aparelhos será preciso entrar de novo.', [
-        { text: 'OK', onPress: () => router.back() },
+        { text: 'OK', onPress: () => goToParent('settings/change-password') },
       ]);
     } catch (err) {
       // Senha atual errada e senha nova fora da regra voltam da API com a mensagem exata do que falta.
@@ -57,7 +62,7 @@ export default function ChangePasswordScreen() {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'android' ? 'height' : 'padding'}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Voltar">
+          <TouchableOpacity onPress={() => goToParent('settings/change-password')} accessibilityRole="button" accessibilityLabel="Voltar">
             <Text style={styles.back}>← Voltar</Text>
           </TouchableOpacity>
           <Text style={styles.title} accessibilityRole="header">Alterar senha</Text>
@@ -127,6 +132,9 @@ export default function ChangePasswordScreen() {
     </SafeAreaView>
   );
 }
+
+// Sair da tela (ou voltar a ela) descarta o que foi digitado: senha atual, senha nova e "mostrar senhas".
+export default resetOnFocus(ChangePasswordScreen);
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },

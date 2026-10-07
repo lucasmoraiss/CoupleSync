@@ -10,7 +10,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { goToParent } from '@/navigation/resetOnFocus';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { notificationsApiClient } from '@/services/apiClient';
@@ -60,7 +60,7 @@ export default function AlertSettingsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Voltar para as configurações" style={styles.backRow} onPress={() => router.back()}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Voltar para as configurações" style={styles.backRow} onPress={() => goToParent('settings/alerts')}>
           <Ionicons name="chevron-back" size={20} color={colors.primaryLight} />
           <Text style={styles.backText}>Configurações</Text>
         </TouchableOpacity>

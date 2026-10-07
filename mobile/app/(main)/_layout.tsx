@@ -7,12 +7,12 @@ import Animated, { useAnimatedStyle, withSpring, useSharedValue } from 'react-na
 import { useSessionStore } from '@/state/sessionStore';
 import { useGroupEpoch } from '@/state/groupEpoch';
 import { mainAreaGate } from '@/modules/couple/groups';
+import { TABS_BACK_BEHAVIOR } from '@/navigation/routes';
 import { useCaptureConsentSync } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
 import { registerPushToken } from '@/services/pushTokenService';
+import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
 import { colors } from '@/theme';
 
-// AI Chat tab is visible only when EXPO_PUBLIC_AI_CHAT_ENABLED=true
-const AI_CHAT_ENABLED = process.env.EXPO_PUBLIC_AI_CHAT_ENABLED === 'true';
 
 type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -73,6 +73,8 @@ export default function MainLayout() {
   return (
     <Tabs
       key={groupEpoch}
+      // Voltar (botão do Android) refaz o caminho das abas visitadas; o padrão da biblioteca pula para o Painel.
+      backBehavior={TABS_BACK_BEHAVIOR}
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -97,7 +99,7 @@ export default function MainLayout() {
       <Tabs.Screen name="cashflow/index" options={{ title: 'Fluxo', tabBarLabel: 'Fluxo', tabBarAccessibilityLabel: 'Fluxo de caixa', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="trending-up-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="budget/index" options={{ title: 'Rendas', tabBarLabel: 'Rendas', tabBarAccessibilityLabel: 'Rendas e orçamento', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="wallet-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="reports/index" options={{ title: 'Relatórios', tabBarLabel: 'Relatórios', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="pie-chart-outline" color={color} size={size} focused={focused} /> }} />
-      <Tabs.Screen name="chat/index" options={{ title: 'Chat IA', tabBarLabel: 'Chat IA', href: AI_CHAT_ENABLED ? undefined : null, tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="chatbubble-ellipses-outline" color={color} size={size} focused={focused} /> }} />
+      <Tabs.Screen name="chat/index" options={{ title: 'Chat IA', tabBarLabel: 'Chat IA', href: AI_FEATURE_ENABLED ? undefined : null, tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="chatbubble-ellipses-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="settings/index" options={{ title: 'Config', tabBarLabel: 'Config', tabBarAccessibilityLabel: 'Configurações', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="settings-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="settings/alerts" options={{ href: null }} />
       <Tabs.Screen name="settings/group" options={{ href: null }} />

@@ -105,6 +105,13 @@ function IncomeSourceRow({
     setEditMode(false);
   }, [source.id, source.name, name, amountCents, onUpdate, toast]);
 
+  // A aba fica montada e a renda pode ter mudado desde a última edição: os campos partem do valor atual.
+  const startEdit = useCallback(() => {
+    setName(source.name);
+    setAmountCents(Math.round(source.amount * 100));
+    setEditMode(true);
+  }, [source.name, source.amount]);
+
   const handleCancel = useCallback(() => {
     setName(source.name);
     setAmountCents(Math.round(source.amount * 100));
@@ -172,7 +179,7 @@ function IncomeSourceRow({
             <Ionicons name="people-outline" size={12} color={ACCENT} />
           </View>
         )}
-        <TouchableOpacity accessibilityRole="button" onPress={() => setEditMode(true)} style={styles.iconBtn} accessibilityLabel="Editar">
+        <TouchableOpacity accessibilityRole="button" onPress={startEdit} style={styles.iconBtn} accessibilityLabel="Editar">
           <Ionicons name="pencil-outline" size={18} color={ACCENT} />
         </TouchableOpacity>
         <TouchableOpacity accessibilityRole="button"

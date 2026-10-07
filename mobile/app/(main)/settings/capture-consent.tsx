@@ -1,8 +1,8 @@
 // MOB-03: consentimento da captura de notificações bancárias. A captura só é ligada depois do aceite aqui.
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { router } from 'expo-router';
 import { colors } from '@/theme';
+import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { useMyGroups } from '@/modules/couple/useMyGroups';
 import { captureDestinationText } from '@/modules/couple/groups';
 import { TextSections } from '@/components/TextSections';
@@ -14,12 +14,13 @@ import {
   openNotificationListenerSettings,
 } from '@/modules/integrations/notification-capture/NotificationListenerBridge';
 
+// Aberta de Configurações, do aviso da tela de Transações e do pedido inicial: a resposta sempre leva a
+// Configurações, onde o resultado (captura ligada/desligada e o que falta) está à vista.
 function leave() {
-  if (router.canGoBack()) router.back();
-  else router.replace('/(main)/settings' as any);
+  goToParent('settings/capture-consent');
 }
 
-export default function CaptureConsentScreen() {
+function CaptureConsentScreen() {
   const { data: myGroups } = useMyGroups();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -91,6 +92,9 @@ export default function CaptureConsentScreen() {
     </SafeAreaView>
   );
 }
+
+// Cada visita começa limpa: o aviso "não foi possível registrar" não fica de uma tentativa anterior.
+export default resetOnFocus(CaptureConsentScreen);
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },

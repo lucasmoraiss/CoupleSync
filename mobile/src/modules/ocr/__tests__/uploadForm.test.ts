@@ -1,4 +1,4 @@
-import { appendAiConsent } from '../uploadForm';
+import { aiConsentForUpload, appendAiConsent, shouldResetUploadOnRevisit } from '../uploadForm';
 
 function fakeForm() {
   const fields: Record<string, unknown> = {};
@@ -16,5 +16,29 @@ describe('appendAiConsent', () => {
     const declined = fakeForm();
     appendAiConsent(declined, false);
     expect(declined.fields.aiCategorizationConsent).toBe('false');
+  });
+});
+
+describe('aiConsentForUpload (M-I3)', () => {
+  it('com o recurso de IA desligado no app o extrato vai sempre sem consentimento de IA, mesmo com aceite antigo', () => {
+    expect(aiConsentForUpload(false, true)).toBe(false);
+    expect(aiConsentForUpload(false, false)).toBe(false);
+  });
+
+  it('com o recurso ligado vale a resposta do usuário', () => {
+    expect(aiConsentForUpload(true, true)).toBe(true);
+    expect(aiConsentForUpload(true, false)).toBe(false);
+  });
+});
+
+describe('shouldResetUploadOnRevisit (M-I1)', () => {
+  it('o erro de uma tentativa anterior não fica na tela ao voltar', () => {
+    expect(shouldResetUploadOnRevisit('error')).toBe(true);
+  });
+
+  it('envio e processamento em andamento continuam; tela parada não muda', () => {
+    expect(shouldResetUploadOnRevisit('uploading')).toBe(false);
+    expect(shouldResetUploadOnRevisit('polling')).toBe(false);
+    expect(shouldResetUploadOnRevisit('idle')).toBe(false);
   });
 });

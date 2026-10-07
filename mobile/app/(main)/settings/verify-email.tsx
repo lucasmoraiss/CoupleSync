@@ -14,7 +14,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { router } from 'expo-router';
 import { authApiClient } from '@/services/apiClient';
 import {
   CODE_LENGTH,
@@ -27,9 +26,10 @@ import {
 } from '@/services/emailCodes';
 import { queryClient } from '@/services/queryClient';
 import { ME_QUERY_KEY } from '@/components/EmailVerificationBanner';
+import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { colors } from '@/theme';
 
-export default function VerifyEmailScreen() {
+function VerifyEmailScreen() {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
@@ -50,7 +50,7 @@ export default function VerifyEmailScreen() {
     try {
       await authApiClient.confirmEmail(code);
       await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
-      Alert.alert('E-mail confirmado', 'Obrigado! Seu e-mail foi confirmado.', [{ text: 'OK', onPress: () => router.back() }]);
+      Alert.alert('E-mail confirmado', 'Obrigado! Seu e-mail foi confirmado.', [{ text: 'OK', onPress: () => goToParent('settings/verify-email') }]);
     } catch (err) {
       if (isEmailNotConfigured(err)) setUnavailable(true);
       Alert.alert(
@@ -85,7 +85,7 @@ export default function VerifyEmailScreen() {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'android' ? 'height' : 'padding'}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Voltar">
+          <TouchableOpacity onPress={() => goToParent('settings/verify-email')} accessibilityRole="button" accessibilityLabel="Voltar">
             <Text style={styles.back}>← Voltar</Text>
           </TouchableOpacity>
           <Text style={styles.title} accessibilityRole="header">Confirmar e-mail</Text>
@@ -141,6 +141,9 @@ export default function VerifyEmailScreen() {
     </SafeAreaView>
   );
 }
+
+// Cada visita começa limpa: código digitado, aviso de indisponível e contagem de reenvio não ficam da visita anterior.
+export default resetOnFocus(VerifyEmailScreen);
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },

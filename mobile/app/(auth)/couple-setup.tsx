@@ -13,6 +13,7 @@ import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { coupleApiClient } from '@/services/apiClient';
 import { getApiErrorMessage } from '@/services/apiError';
+import { logout } from '@/services/logout';
 import { applyGroupSession } from '@/modules/couple/groupSession';
 import { useSessionStore } from '@/state/sessionStore';
 import { useMyGroups } from '@/modules/couple/useMyGroups';
@@ -72,7 +73,7 @@ export default function CoupleSetupScreen() {
       setCreatedCode(data.joinCode);
       setMode('create');
     } catch (err: any) {
-      Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao criar casal. Tente novamente.'));
+      Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao criar o grupo. Tente novamente.'));
     } finally {
       setLoading(false);
     }
@@ -80,7 +81,7 @@ export default function CoupleSetupScreen() {
 
   const handleJoin = async () => {
     if (!joinCode.trim()) {
-      Alert.alert('Código vazio', 'Cole o código de convite do seu parceiro(a).');
+      Alert.alert('Código vazio', 'Cole o código de convite do grupo.');
       return;
     }
 
@@ -92,10 +93,25 @@ export default function CoupleSetupScreen() {
       announceGroupChange();
       router.replace('/' as any);
     } catch (err: any) {
-      Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao entrar no casal. Tente novamente.'));
+      Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao entrar no grupo. Tente novamente.'));
     } finally {
       setLoading(false);
     }
+  };
+
+  // Chega-se aqui com a sessão aberta e sem grupo (saiu do último, foi removido): tem de haver como sair da conta.
+  const handleLogout = () => {
+    Alert.alert('Sair da conta', 'Deseja realmente sair da conta? Você também será desconectado dos outros aparelhos em que usa esta conta.', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Sair',
+        style: 'destructive',
+        onPress: async () => {
+          await logout();
+          router.replace('/login' as any);
+        },
+      },
+    ]);
   };
 
   const [copied, setCopied] = useState(false);
@@ -108,20 +124,20 @@ export default function CoupleSetupScreen() {
     }
   };
 
-  const goToDashboard = () => {
+  const goToHome = () => {
     router.replace('/' as any);
   };
 
-  // Show the join code after creating a couple
+  // Show the join code after creating a group
   if (createdCode) {
     return (
       <View style={styles.container}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
             <Text style={styles.emoji}>🎉</Text>
-            <Text style={styles.title} accessibilityRole="header">Casal criado!</Text>
+            <Text style={styles.title} accessibilityRole="header">Grupo criado!</Text>
             <Text style={styles.subtitle}>
-              Compartilhe este código com seu parceiro(a)
+              Compartilhe este código com quem vai participar do grupo
             </Text>
           </View>
 
@@ -133,7 +149,7 @@ export default function CoupleSetupScreen() {
               style={styles.copyButton}
               onPress={handleCopyCode}
               activeOpacity={0.7}
-              accessibilityLabel="Copiar código do casal"
+              accessibilityLabel="Copiar código do grupo"
               accessibilityRole="button"
             >
               <Text style={styles.copyButtonText}>
@@ -142,18 +158,18 @@ export default function CoupleSetupScreen() {
             </TouchableOpacity>
 
             <Text style={styles.codeHint}>
-              O parceiro(a) deve usar este código para entrar no casal
+              Quem receber o código deve usá-lo para entrar no grupo
             </Text>
           </View>
 
           <TouchableOpacity
             style={styles.button}
-            onPress={goToDashboard}
+            onPress={goToHome}
             activeOpacity={0.8}
-            accessibilityLabel="Ir para o Dashboard"
+            accessibilityLabel="Ir para o Painel"
             accessibilityRole="button"
           >
-            <Text style={styles.buttonText}>Ir para o Dashboard</Text>
+            <Text style={styles.buttonText}>Ir para o Painel</Text>
           </TouchableOpacity>
         </ScrollView>
       </View>
@@ -167,9 +183,9 @@ export default function CoupleSetupScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
             <Text style={styles.emoji}>🔗</Text>
-            <Text style={styles.title} accessibilityRole="header">Entrar no casal</Text>
+            <Text style={styles.title} accessibilityRole="header">Entrar no grupo</Text>
             <Text style={styles.subtitle}>
-              Cole o código que seu parceiro(a) compartilhou
+              Cole o código de convite que você recebeu
             </Text>
           </View>
 
@@ -191,7 +207,7 @@ export default function CoupleSetupScreen() {
               onPress={handleJoin}
               disabled={loading}
               activeOpacity={0.8}
-              accessibilityLabel="Confirmar entrada no casal"
+              accessibilityLabel="Confirmar entrada no grupo"
               accessibilityRole="button"
             >
               {loading ? (
@@ -224,7 +240,7 @@ export default function CoupleSetupScreen() {
           <Text style={styles.emoji}>💑</Text>
           <Text style={styles.title} accessibilityRole="header">Vamos configurar</Text>
           <Text style={styles.subtitle}>
-            Crie um casal ou entre com um código de convite
+            Crie um grupo ou entre com um código de convite
           </Text>
         </View>
 
@@ -244,7 +260,7 @@ export default function CoupleSetupScreen() {
             onPress={handleCreate}
             disabled={loading}
             activeOpacity={0.8}
-            accessibilityLabel="Criar casal"
+            accessibilityLabel="Criar grupo"
             accessibilityRole="button"
           >
             {loading ? (
@@ -252,9 +268,9 @@ export default function CoupleSetupScreen() {
             ) : (
               <>
                 <Text style={styles.optionEmoji}>🏠</Text>
-                <Text style={styles.optionTitle}>Criar casal</Text>
+                <Text style={styles.optionTitle}>Criar grupo</Text>
                 <Text style={styles.optionDesc}>
-                  Comece e convide seu parceiro(a) com um código
+                  Comece e convide outra pessoa com um código
                 </Text>
               </>
             )}
@@ -265,13 +281,13 @@ export default function CoupleSetupScreen() {
             onPress={() => setMode('join')}
             disabled={loading}
             activeOpacity={0.8}
-            accessibilityLabel="Entrar em um casal com código de convite"
+            accessibilityLabel="Entrar em um grupo com código de convite"
             accessibilityRole="button"
           >
             <Text style={styles.optionEmoji}>🔗</Text>
-            <Text style={styles.optionTitle}>Entrar em um casal</Text>
+            <Text style={styles.optionTitle}>Entrar em um grupo</Text>
             <Text style={styles.optionDesc}>
-              Tenho um código de convite do meu parceiro(a)
+              Tenho um código de convite
             </Text>
           </TouchableOpacity>
         </View>
@@ -287,6 +303,16 @@ export default function CoupleSetupScreen() {
             <Text style={styles.linkText}>← Voltar</Text>
           </TouchableOpacity>
         ) : null}
+
+        <TouchableOpacity
+          style={styles.linkButton}
+          onPress={handleLogout}
+          disabled={loading}
+          accessibilityLabel="Sair da conta"
+          accessibilityRole="button"
+        >
+          <Text style={styles.linkText}>Sair da conta</Text>
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
