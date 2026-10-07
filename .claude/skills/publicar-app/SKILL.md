@@ -88,7 +88,7 @@ Sintoma: o app novo quebra em uso. A API fica como está (o JavaScript anterior 
   `npx eas-cli@12 update:republish --group <id do grupo anterior> --message "volta atrás: <motivo>" --non-interactive`
 - Sem o id anterior e com EAS CLI: ache-o com
   `npx eas-cli@12 update:list --branch production --limit 5 --json --non-interactive` (o grupo anterior ao que
-  quebrou). Sem EAS CLI na sessão → PARADA: peça ao dono para rodar o comando acima.
+  quebrou). Sem EAS CLI na sessão → PARADA: peça ao dono para rodar os dois comandos acima (listar e republicar).
 - Depois conserte para a frente por PR; não publique outro OTA sem nova passagem pela esteira.
 - APK: não apague Release nem tag; relate e deixe a decisão com o dono.
 

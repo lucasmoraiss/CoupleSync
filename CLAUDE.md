@@ -64,14 +64,17 @@ não dividir em outros jobs).
       de Active; estreitar os branches-alvo; apagar ou recriar um conjunto de regras; pôr qualquer ator no
       bypass; trocar o branch padrão; desligar o Actions ou um workflow; ampliar permissões de workflow;
       colaborador, deploy key, webhook, visibilidade. Na dúvida se afrouxa: afrouxa;
+    - não é afrouxar, e o agente faz sem perguntar: levar a regra de `main` ao estado de referência descrito
+      em `.claude/README.md` de `origin/main` — repor o que falta e tirar as duas exigências que a referência
+      manda desmarcar ("Require deployments to succeed" e "Require code quality results"). Nada além dessas duas;
     - o que não tem volta: apagar release, tag, conjunto de regras, segredo ou variável; arquivar ou transferir
-      o repositório; apagar dado de produção;
+      o repositório. Apagar dado de produção o agente nunca executa, nem com o "sim": relata e o dono faz;
     - criar, trocar ou apagar segredo ou variável (`gh secret`, `gh variable`), e tudo o que exige um segredo
       que só o dono tem. Segredo nunca é lido, impresso nem copiado.
   - A API recusou (401/403/404) ou o sistema de permissões negou: parar e relatar. Nunca `gh auth refresh`,
     `gh auth login`, outro token ou outra conta.
   - Esta regra não cria atalho para o que a esteira já define (merge, deploy, OTA, APK, volta atrás): esses só
-    pelo caminho escrito nas skills. Em Render, Expo e Neon só se faz o que as skills mandam.
+    pelo caminho escrito nas skills. Em Render, Expo e Neon só se faz o que as skills mandam ou o que o dono pedir nesta sessão.
 
 ## Publicação — ordem fixa: API → OTA → APK
 
