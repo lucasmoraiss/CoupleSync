@@ -1,0 +1,73 @@
+# Abrir cada aba e conferir que nenhuma mostra erro ("Tentar novamente" é o botão das telas de erro;
+# "Algo deu errado" é a tela de falha inesperada).
+appId: com.couplesync.app
+name: 06 - Abas
+---
+- evalScript: ${output.email = 'e2e-06-' + Date.now() + '@example.com'}
+- runFlow:
+    file: comum/conta-com-grupo-no-painel.yaml
+    env:
+      NOME: Gil Teste
+      EMAIL: ${output.email}
+
+# Painel (já aberto).
+- assertVisible: "Ver todas as transações"
+- assertNotVisible: "Tentar novamente"
+- assertNotVisible: "Algo deu errado"
+
+- tapOn: "Transações"
+- extendedWaitUntil:
+    visible: "Nenhuma transação ainda"
+    timeout: 30000
+- assertVisible: "Adicionar transação manualmente"
+- assertNotVisible: "Tentar novamente"
+- assertNotVisible: "Algo deu errado"
+
+- tapOn: "Metas"
+- extendedWaitUntil:
+    visible: "Nenhuma meta ativa"
+    timeout: 30000
+- assertVisible: "Criar nova meta"
+- assertNotVisible: "Tentar novamente"
+- assertNotVisible: "Algo deu errado"
+
+- tapOn: "Fluxo de caixa"
+- extendedWaitUntil:
+    visible: "Saldo previsto no fim do mês"
+    timeout: 30000
+- assertVisible: "Fluxo de Caixa"
+- assertNotVisible: "Tentar novamente"
+- assertNotVisible: "Algo deu errado"
+
+- tapOn: "Rendas e orçamento"
+- extendedWaitUntil:
+    visible: "Fontes de Renda"
+    timeout: 30000
+- assertVisible: "Adicionar fonte de renda"
+- assertNotVisible: "Tentar novamente"
+- assertNotVisible: "Algo deu errado"
+
+- tapOn: "Relatórios"
+- extendedWaitUntil:
+    visible: "Resumo do período"
+    timeout: 30000
+- assertVisible: "Gastos por categoria"
+- assertNotVisible: "Erro ao carregar dados"
+- assertNotVisible: "Tentar novamente"
+- assertNotVisible: "Algo deu errado"
+
+- tapOn: "Configurações"
+- extendedWaitUntil:
+    visible: "Sair da conta"
+    timeout: 30000
+- assertVisible: "Captura de notificações bancárias"
+- assertVisible: "Privacidade"
+- assertNotVisible: "Tentar novamente"
+- assertNotVisible: "Algo deu errado"
+
+# De volta ao Painel pela aba.
+- tapOn: "Painel"
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 30000
+- assertNotVisible: "Tentar novamente"

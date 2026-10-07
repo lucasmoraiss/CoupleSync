@@ -1,0 +1,33 @@
+# Parte comum: da tela de login até a tela "Vamos configurar", criando uma conta nova.
+# Quem chama passa NOME e EMAIL (e-mail único por execução). Não abre o app: quem chama já abriu.
+appId: com.couplesync.app
+env:
+  SENHA: SenhaSegura123
+---
+# A primeira abertura de um build de release num emulador de CI é lenta: espera longa só aqui.
+- extendedWaitUntil:
+    visible: "Ir para o cadastro de conta nova"
+    timeout: 180000
+- tapOn: "Ir para o cadastro de conta nova"
+- extendedWaitUntil:
+    visible: "Junte-se ao CoupleSync"
+    timeout: 30000
+
+# Os campos são achados pelo texto de exemplo (placeholder): o rótulo acima de cada um repete o nome do campo.
+- tapOn: "Seu nome"
+- inputText: ${NOME}
+- tapOn: "seu@email.com"
+- inputText: ${EMAIL}
+- tapOn: "Mínimo 8 caracteres, com letras e números"
+- inputText: ${SENHA}
+- tapOn: "Repita a senha"
+- inputText: ${SENHA}
+- hideKeyboard
+
+# "Criar conta" é também o título da tela: o botão é o que fica abaixo do campo de confirmação.
+- tapOn:
+    text: "Criar conta"
+    below: "Confirmar senha"
+- extendedWaitUntil:
+    visible: "Vamos configurar"
+    timeout: 60000

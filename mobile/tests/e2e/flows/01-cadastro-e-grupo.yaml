@@ -1,0 +1,27 @@
+# Criar conta, criar grupo, ver o código de convite e chegar ao Painel.
+appId: com.couplesync.app
+name: 01 - Cadastro e grupo
+---
+- evalScript: ${output.email = 'e2e-01-' + Date.now() + '@example.com'}
+- launchApp:
+    clearState: true
+- runFlow:
+    file: comum/criar-conta.yaml
+    env:
+      NOME: Ana Teste
+      EMAIL: ${output.email}
+- runFlow: comum/criar-grupo.yaml
+
+# O código de convite: 8 caracteres, e o botão de copiar.
+- copyTextFrom:
+    text: "[A-Z0-9]{8}"
+- assertTrue: ${maestro.copiedText.length == 8}
+- assertVisible: "Copiar código do grupo"
+
+- tapOn: "Ir para o Painel"
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 60000
+- assertVisible: "0 transações"
+- assertVisible: "Ver todas as transações"
+- assertNotVisible: "Tentar novamente"
