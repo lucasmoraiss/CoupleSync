@@ -20,6 +20,7 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     public const string EmptyItem = "a1b2c3d4-0000-4000-8000-000000000002";
     public const string ItemWithLoginError = "a1b2c3d4-0000-4000-8000-000000000003";
     public const string OtherItemWithAccounts = "a1b2c3d4-0000-4000-8000-000000000004";
+    public const string ItemWaitingUserInput = "a1b2c3d4-0000-4000-8000-000000000005";
     public const string UnknownItem = "a1b2c3d4-0000-4000-8000-00000000dead";
 
     public const string CheckingAccountId = "b1b2c3d4-0000-4000-8000-00000000000a";
@@ -119,6 +120,7 @@ internal sealed class FakePluggyServer : HttpMessageHandler
                 OtherItemWithAccounts => Json(HttpStatusCode.OK, ItemJson(itemId, "Banco Modelo", "UPDATED", "SUCCESS", null)),
                 EmptyItem => Json(HttpStatusCode.OK, ItemJson(itemId, "Banco Exemplo", "UPDATED", "SUCCESS", null)),
                 ItemWithLoginError => Json(HttpStatusCode.OK, ItemJson(itemId, "Banco Exemplo", "LOGIN_ERROR", "INVALID_CREDENTIALS", "Invalid credentials")),
+                ItemWaitingUserInput => Json(HttpStatusCode.OK, ItemJson(itemId, "Banco Exemplo", "WAITING_USER_INPUT", "WAITING_USER_INPUT", null)),
                 _ => Json(HttpStatusCode.NotFound, """{"code":404,"message":"item not found"}"""),
             };
         }

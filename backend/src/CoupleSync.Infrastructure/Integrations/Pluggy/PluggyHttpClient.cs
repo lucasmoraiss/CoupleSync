@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Net;
-using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
@@ -133,7 +133,8 @@ public sealed class PluggyHttpClient : IPluggyClient
     private async Task<string> RequestApiKeyAsync(string clientId, string clientSecret, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, Url("/auth"));
-        request.Content = JsonContent.Create(new { clientId, clientSecret });
+        // Serialised first, so the body goes out whole with a Content-Length (JsonContent would send it in chunks).
+        request.Content = new StringContent(JsonSerializer.Serialize(new { clientId, clientSecret }), Encoding.UTF8, "application/json");
 
         using var response = await SendAsync(request, "auth", ct);
         if (!response.IsSuccessStatusCode)

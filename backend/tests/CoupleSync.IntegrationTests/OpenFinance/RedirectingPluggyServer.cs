@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -31,6 +32,9 @@ internal sealed class RedirectingPluggyServer : IAsyncDisposable
     /// <summary>"METHOD path" of every request, in order.</summary>
     public ConcurrentQueue<string> Requests { get; } = new();
 
+    /// <summary>Headers and body of every POST /auth, as they arrived on the socket.</summary>
+    public ConcurrentQueue<AuthRequest> AuthRequests { get; } = new();
+
     /// <summary>The X-API-KEY header of every request that reached <see cref="ElsewherePath"/>.</summary>
     public ConcurrentQueue<string?> KeysSentElsewhere { get; } = new();
 
@@ -59,22 +63,19 @@ internal sealed class RedirectingPluggyServer : IAsyncDisposable
             try
             {
                 await using var stream = client.GetStream();
-                var head = await ReadHeadAsync(stream);
-                if (head is null) return;
+                var request = await ReadRequestAsync(stream);
+                if (request is not var (head, body)) return;
 
-                var lines = head.Split("\r\n");
-                var requestLine = lines[0].Split(' ');
+                var requestLine = head.Split("\r\n")[0].Split(' ');
                 var method = requestLine[0];
                 var path = requestLine[1];
-                var headers = lines.Skip(1)
-                    .Select(line => line.Split(':', 2))
-                    .Where(parts => parts.Length == 2)
-                    .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim(), StringComparer.OrdinalIgnoreCase);
+                var headers = HeadersOf(head);
                 Requests.Enqueue($"{method} {path}");
 
                 string response;
                 if (method == "POST" && path == "/auth")
                 {
+                    AuthRequests.Enqueue(new AuthRequest(headers, body));
                     response = Ok("{\"apiKey\":\"" + ApiKey + "\"}");
                 }
                 else if (path.StartsWith(ElsewherePath, StringComparison.Ordinal))
@@ -101,8 +102,11 @@ internal sealed class RedirectingPluggyServer : IAsyncDisposable
         }
     }
 
-    /// <summary>The request line and headers. The body, when there is one, is not needed and is not read.</summary>
-    private static async Task<string?> ReadHeadAsync(NetworkStream stream)
+    /// <summary>
+    /// The request line and headers, and the body read to its end (by Content-Length, or to the last chunk) before
+    /// anything is answered: the connection is never closed on a caller that is still sending.
+    /// </summary>
+    private static async Task<(string Head, string Body)?> ReadRequestAsync(NetworkStream stream)
     {
         var buffer = new byte[8192];
         var read = 0;
@@ -113,11 +117,31 @@ internal sealed class RedirectingPluggyServer : IAsyncDisposable
             read += count;
             var text = Encoding.ASCII.GetString(buffer, 0, read);
             var end = text.IndexOf("\r\n\r\n", StringComparison.Ordinal);
-            if (end >= 0) return text[..end];
+            if (end < 0) continue;
+
+            var head = text[..end];
+            var body = text[(end + 4)..];
+            var headers = HeadersOf(head);
+            if (headers.TryGetValue("Content-Length", out var length))
+            {
+                if (body.Length < int.Parse(length, CultureInfo.InvariantCulture)) continue;
+            }
+            else if (headers.ContainsKey("Transfer-Encoding") && !body.EndsWith("0\r\n\r\n", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return (head, body);
         }
 
         return null;
     }
+
+    private static Dictionary<string, string> HeadersOf(string head)
+        => head.Split("\r\n").Skip(1)
+            .Select(line => line.Split(':', 2))
+            .Where(parts => parts.Length == 2)
+            .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim(), StringComparer.OrdinalIgnoreCase);
 
     private static string Ok(string json)
         => $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {Encoding.UTF8.GetByteCount(json)}\r\nConnection: close\r\n\r\n{json}";
@@ -130,3 +154,5 @@ internal sealed class RedirectingPluggyServer : IAsyncDisposable
         _stop.Dispose();
     }
 }
+
+internal sealed record AuthRequest(IReadOnlyDictionary<string, string> Headers, string Body);

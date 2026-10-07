@@ -383,10 +383,8 @@ public sealed class OpenFinanceTests
         var raw = await answer.Content.ReadAsStringAsync();
         Assert.True(HttpStatusCode.Conflict == answer.StatusCode, raw);
         var error = JsonSerializer.Deserialize<JsonElement>(raw);
-        Assert.Equal("BANK_CONNECTION_DISCONNECTED", error.GetProperty("code").GetString());
-        Assert.Equal(
-            "Esta conexão foi desconectada. Conecte de novo com o Client ID e o Client Secret para adicionar bancos.",
-            error.GetProperty("message").GetString());
+        Assert.Equal("BANK_CONNECTION_CHANGED", error.GetProperty("code").GetString());
+        Assert.Equal("Esta conexão mudou durante a verificação. Verifique de novo.", error.GetProperty("message").GetString());
 
         var row = Assert.Single(await database.RowsAsync(
             "SELECT status, client_id_encrypted, client_secret_encrypted, client_id_hint, last_error_code, last_error_message FROM bank_connections"));

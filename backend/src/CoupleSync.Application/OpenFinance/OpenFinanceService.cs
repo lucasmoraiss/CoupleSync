@@ -14,6 +14,9 @@ public sealed class OpenFinanceService
     public const string UnavailableCode = "OPENFINANCE_UNAVAILABLE";
     public const string ItemEmptyCode = "PLUGGY_ITEM_EMPTY";
 
+    /// <summary>The stored credentials changed (disconnected, or connected again) while the request was being served.</summary>
+    public const string ChangedCode = "BANK_CONNECTION_CHANGED";
+
     public const string ItemEmptyMessage =
         "Nenhuma conta neste item. Confira se o conector MeuPluggy está ligado na aplicação e se a conexão foi feita pela Demo com a sua conta do Meu Pluggy.";
 
@@ -258,8 +261,12 @@ public sealed class OpenFinanceService
                 await _repository.SaveChangesAsync(ct);
                 return;
             }
-            catch (ConcurrencyConflictException) when (attempt < MaxDisconnectAttempts)
+            catch (ConcurrencyConflictException)
             {
+                // The credentials changed under every attempt: nothing was erased, and the person tries again.
+                if (attempt == MaxDisconnectAttempts)
+                    throw new ConflictException(ChangedCode, "Esta conexão mudou enquanto era desconectada. Tente desconectar de novo.");
+
                 // Another request changed the credentials first (disconnected too, or connected again): whatever is
                 // stored now is what gets erased.
                 await _repository.ReloadConnectionAsync(connection, ct);
@@ -269,7 +276,7 @@ public sealed class OpenFinanceService
 
     /// <summary>
     /// Stores what a verification at Pluggy found, unless the person disconnected (or connected again) while Pluggy
-    /// was answering: then nothing is written and the verification answers as for a disconnected connection.
+    /// was answering: then nothing is written and the verification answers that the connection changed.
     /// </summary>
     private async Task SaveVerificationAsync(BankConnection connection, CancellationToken ct)
     {
@@ -280,7 +287,10 @@ public sealed class OpenFinanceService
         }
         catch (ConcurrencyConflictException)
         {
-            throw Disconnected();
+            // This verification may have asked Pluggy for an API key with the credentials it had in memory, after
+            // they were erased or replaced: that key is not kept for the connection.
+            _pluggy.ForgetConnection(connection.Id);
+            throw new ConflictException(ChangedCode, "Esta conexão mudou durante a verificação. Verifique de novo.");
         }
     }
 
