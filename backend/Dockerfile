@@ -36,6 +36,9 @@ RUN mkdir -p /app/uploads && chown appuser:appgroup /app/uploads
 
 USER appuser
 
+# The PDF reader runs as a child process of the API: the same CoupleSync.Api.dll started with --pdf-worker by the same
+# `dotnet` host and the same user (appuser). It needs nothing beyond what is copied here; it runs with a minimal
+# environment and a heap limit (see ChildProcessPdfTextExtractor).
 COPY --from=build /app/publish ./
 
 ENV ASPNETCORE_URLS=http://+:8080
