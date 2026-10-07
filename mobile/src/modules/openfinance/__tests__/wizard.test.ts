@@ -15,8 +15,10 @@ import {
   canFinishWizard,
   canTestCredentials,
   canVerifyItem,
+  connectionControls,
   connectionErrorHelp,
   connectionStatusLabel,
+  existingConnectionAfterCreateError,
   itemStatusNote,
   statusWhenRouteMissing,
   describeAccount,
@@ -248,11 +250,68 @@ describe('status do servidor', () => {
     );
   });
 
+  it('quem não conectou vê a conexão sem nenhum controle de edição', () => {
+    const none = { syncSwitch: false, addBank: false, reconnect: false, disconnect: false };
+    const partner = { isMine: false, userId: 'user-2', userName: 'Bruno' };
+    expect(connectionControls(connection({ ...partner, status: 'Active' }), true)).toEqual(none);
+    expect(connectionControls(connection({ ...partner, status: 'Error' }), true)).toEqual(none);
+    expect(connectionControls(connection({ ...partner, status: 'Disconnected' }), true)).toEqual(none);
+    expect(connectionControls(connection({ ...partner, status: 'Active' }), false)).toEqual(none);
+  });
+
+  it('quem conectou liga/desliga a sincronização, adiciona banco e desconecta', () => {
+    const editing = { syncSwitch: true, addBank: true, reconnect: false, disconnect: true };
+    expect(connectionControls(connection({ status: 'Active' }), true)).toEqual(editing);
+    // "Com erro": o caminho é desconectar, então o botão continua lá.
+    expect(connectionControls(connection({ status: 'Error' }), true)).toEqual(editing);
+  });
+
+  it('quem desconectou só tem "Conectar de novo" (não há o que desconectar nem onde adicionar banco)', () => {
+    expect(connectionControls(connection({ status: 'Disconnected' }), true)).toEqual({
+      syncSwitch: true,
+      addBank: false,
+      reconnect: true,
+      disconnect: false,
+    });
+  });
+
+  it('com o servidor indisponível, nem quem conectou tem botões (o interruptor aparece, desabilitado pela tela)', () => {
+    const noButtons = { syncSwitch: true, addBank: false, reconnect: false, disconnect: false };
+    expect(connectionControls(connection({ status: 'Active' }), false)).toEqual(noButtons);
+    expect(connectionControls(connection({ status: 'Disconnected' }), false)).toEqual(noButtons);
+  });
+
   it('conexão sem erro não mostra caminho de correção', () => {
     expect(connectionErrorHelp(connection({ status: 'Active' }))).toBeNull();
     expect(connectionErrorHelp(connection({ status: 'Disconnected' }))).toBeNull();
     // Mensagem antiga gravada numa conexão que já voltou a funcionar não traz a ajuda de volta.
     expect(connectionErrorHelp(connection({ status: 'Active', lastErrorMessage: 'antiga' }))).toBeNull();
+  });
+});
+
+describe('passo 3: guardar a conexão quando o servidor diz que ela já existe', () => {
+  const status = (connections: BankConnectionResponse[]): OpenFinanceStatusResponse => ({ available: true, connections });
+  const partner = connection({ id: 'partner', isMine: false, userId: 'user-2', userName: 'Bruno' });
+
+  it('segue para o passo 4 com a conexão que o servidor tem (criada em outro aparelho, ou resposta perdida)', async () => {
+    const load = jest.fn(async () => status([partner, connection({ id: 'mine' })]));
+    await expect(existingConnectionAfterCreateError('BANK_CONNECTION_ALREADY_EXISTS', load)).resolves.toBe('mine');
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('qualquer outro erro continua sendo erro, e o status nem é buscado', async () => {
+    const load = jest.fn(async () => status([connection({ id: 'mine' })]));
+    await expect(existingConnectionAfterCreateError('PLUGGY_INVALID_CREDENTIALS', load)).resolves.toBeNull();
+    await expect(existingConnectionAfterCreateError('BANK_CONNECTION_DISCONNECTED', load)).resolves.toBeNull();
+    await expect(existingConnectionAfterCreateError(undefined, load)).resolves.toBeNull();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('se o servidor não mostra uma conexão minha, o erro aparece (nunca segue com a do parceiro)', async () => {
+    await expect(existingConnectionAfterCreateError('BANK_CONNECTION_ALREADY_EXISTS', async () => status([partner]))).resolves.toBeNull();
+    await expect(existingConnectionAfterCreateError('BANK_CONNECTION_ALREADY_EXISTS', async () => status([]))).resolves.toBeNull();
+    // A busca do status falhou (sem resposta).
+    await expect(existingConnectionAfterCreateError('BANK_CONNECTION_ALREADY_EXISTS', async () => undefined)).resolves.toBeNull();
   });
 });
 

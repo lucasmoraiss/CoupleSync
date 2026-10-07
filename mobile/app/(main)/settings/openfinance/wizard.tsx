@@ -50,6 +50,7 @@ import {
   canTestCredentials,
   canVerifyItem,
   describeItemAccounts,
+  existingConnectionAfterCreateError,
   isOpenFinanceAvailable,
   myConnectionOf,
   sameCredentials,
@@ -234,19 +235,16 @@ function OpenFinanceWizardScreen() {
       goTo(4, { connectionId: created.id });
     } catch (err) {
       if (getSessionEpoch() !== epoch) return;
-      if (getApiErrorCode(err) === 'BANK_CONNECTION_ALREADY_EXISTS') {
-        // A conexão já existe (criada em outro aparelho, ou a resposta anterior se perdeu): segue para os bancos.
-        const refreshed = await refetch({ cancelRefetch: false });
-        if (getSessionEpoch() !== epoch) return;
-        const existing = myConnectionOf(refreshed.data);
-        if (existing) {
-          setClientId('');
-          setClientSecret('');
-          setTested(null);
-          setConnectionId(existing.id);
-          goTo(4, { connectionId: existing.id });
-          return;
-        }
+      // Se a conexão já existe (criada em outro aparelho, ou a resposta anterior se perdeu), segue para os bancos.
+      const existingId = await existingConnectionAfterCreateError(getApiErrorCode(err), async () => (await refetch({ cancelRefetch: false })).data);
+      if (getSessionEpoch() !== epoch) return;
+      if (existingId) {
+        setClientId('');
+        setClientSecret('');
+        setTested(null);
+        setConnectionId(existingId);
+        goTo(4, { connectionId: existingId });
+        return;
       }
       setNotice(getApiErrorMessage(err, 'Não foi possível guardar a conexão. Tente novamente.'));
     } finally {

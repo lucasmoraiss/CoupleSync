@@ -28,6 +28,7 @@ import { useWizardStore } from '@/modules/openfinance/wizardStore';
 import {
   UNAVAILABLE_TEXT,
   UNAVAILABLE_TITLE,
+  connectionControls,
   connectionErrorHelp,
   connectionStatusLabel,
   describeAccount,
@@ -184,7 +185,7 @@ export default function OpenFinanceScreen() {
         ) : null}
 
         {connections.map((connection) => {
-          const disconnected = connection.status === 'Disconnected';
+          const controls = connectionControls(connection, available);
           const errorHelp = connectionErrorHelp(connection);
           return (
             <View key={connection.id} style={styles.card}>
@@ -224,11 +225,11 @@ export default function OpenFinanceScreen() {
                               ? ` · Limite disponível: ${formatMoney(account.availableCreditLimit, account.currency)}`
                               : ''}
                           </Text>
-                          {!connection.isMine ? (
+                          {!controls.syncSwitch ? (
                             <Text style={styles.muted}>{account.syncEnabled ? 'Sincroniza' : 'Não sincroniza'}</Text>
                           ) : null}
                         </View>
-                        {connection.isMine ? (
+                        {controls.syncSwitch ? (
                           <View style={styles.switchBox}>
                             <Text style={styles.switchLabel}>sincronizar</Text>
                             <Switch
@@ -249,18 +250,18 @@ export default function OpenFinanceScreen() {
                 );
               })}
 
-              {connection.isMine && available ? (
+              {controls.addBank || controls.reconnect ? (
                 <View style={styles.actions}>
                   <TouchableOpacity
                     style={styles.secondaryBtn}
                     onPress={openWizard}
                     disabled={disconnecting}
                     accessibilityRole="button"
-                    accessibilityLabel={disconnected ? 'Conectar de novo com as credenciais do Pluggy' : 'Adicionar banco a esta conexão'}
+                    accessibilityLabel={controls.reconnect ? 'Conectar de novo com as credenciais do Pluggy' : 'Adicionar banco a esta conexão'}
                   >
-                    <Text style={styles.secondaryText}>{disconnected ? 'Conectar de novo' : 'Adicionar banco'}</Text>
+                    <Text style={styles.secondaryText}>{controls.reconnect ? 'Conectar de novo' : 'Adicionar banco'}</Text>
                   </TouchableOpacity>
-                  {!disconnected ? (
+                  {controls.disconnect ? (
                     <TouchableOpacity
                       style={styles.dangerBtn}
                       onPress={() => confirmDisconnect(connection)}

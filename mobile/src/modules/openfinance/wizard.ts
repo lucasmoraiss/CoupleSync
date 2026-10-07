@@ -187,6 +187,48 @@ export function myConnectionOf(status: OpenFinanceStatusResponse | null | undefi
   return status?.connections?.find((connection) => connection.isMine) ?? null;
 }
 
+/** Os controles de edição que a tela de gestão mostra numa conexão. */
+export interface ConnectionControls {
+  /** Interruptor "sincronizar" de cada conta (sem ele, a conta mostra só "Sincroniza" / "Não sincroniza"). */
+  readonly syncSwitch: boolean;
+  readonly addBank: boolean;
+  /** "Conectar de novo", no lugar de "Adicionar banco", para quem desconectou. */
+  readonly reconnect: boolean;
+  readonly disconnect: boolean;
+}
+
+/**
+ * Todos do grupo veem bancos, contas e saldos; os controles de edição são só de quem conectou. Os botões
+ * dependem também de o servidor estar disponível (`available`).
+ */
+export function connectionControls(
+  connection: Pick<BankConnectionResponse, 'isMine' | 'status'>,
+  available: boolean,
+): ConnectionControls {
+  const mine = connection.isMine === true;
+  const disconnected = connection.status === 'Disconnected';
+  return {
+    syncSwitch: mine,
+    addBank: mine && available && !disconnected,
+    reconnect: mine && available && disconnected,
+    disconnect: mine && available && !disconnected,
+  };
+}
+
+/**
+ * Passo 3, quando guardar a conexão falha. Se o servidor diz que ela já existe (criada em outro aparelho, ou a
+ * resposta anterior se perdeu), o wizard segue para o passo 4 com a conexão que o servidor tem: devolve o id
+ * dela. Com outro erro (o status nem é buscado), ou se o servidor não mostra uma conexão minha, devolve null e
+ * o erro aparece na tela.
+ */
+export async function existingConnectionAfterCreateError(
+  errorCode: string | undefined,
+  loadStatus: () => Promise<OpenFinanceStatusResponse | null | undefined>,
+): Promise<string | null> {
+  if (errorCode !== 'BANK_CONNECTION_ALREADY_EXISTS') return null;
+  return myConnectionOf(await loadStatus())?.id ?? null;
+}
+
 export function connectionStatusLabel(status: string): string {
   if (status === 'Error') return 'Com erro';
   if (status === 'Disconnected') return 'Desconectada';

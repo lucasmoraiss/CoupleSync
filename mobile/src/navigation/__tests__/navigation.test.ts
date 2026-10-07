@@ -82,6 +82,27 @@ describe('voltar das abas ocultas (M-I2)', () => {
     expect(screen).toMatch(/<RefreshControl /);
   });
 
+  it('Open Finance: na tela de gestão, cada controle de edição depende da regra testada (connectionControls)', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/const controls = connectionControls\(connection, available\);/);
+    // O interruptor, o botão de adicionar banco/conectar de novo e o de desconectar.
+    expect(screen).toMatch(/\{controls\.syncSwitch \? \(\s*<View style=\{styles\.switchBox\}>[\s\S]{0,200}<Switch\b/);
+    expect(screen).toMatch(/\{controls\.addBank \|\| controls\.reconnect \? \(\s*<View style=\{styles\.actions\}>/);
+    expect(screen).toMatch(/\{controls\.disconnect \? \(\s*<TouchableOpacity[\s\S]{0,200}confirmDisconnect\(connection\)/);
+    // Nenhum deles aparece em outro lugar da tela, fora dessas condições.
+    expect(screen.match(/<Switch\b/g)).toHaveLength(1);
+    expect(screen.match(/confirmDisconnect\(connection\)/g)).toHaveLength(1);
+    expect(screen.match(/styles\.actions\}/g)).toHaveLength(1);
+    // "isMine" só sobra no texto "Conectada por você / por Fulano".
+    expect(screen.match(/\.isMine\b/g)).toHaveLength(1);
+  });
+
+  it('Open Finance: no passo 3 do wizard, o que fazer quando a conexão já existe vem da regra testada', () => {
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    expect(wizard).toMatch(/await existingConnectionAfterCreateError\(getApiErrorCode\(err\), /);
+    expect(wizard).not.toContain('BANK_CONNECTION_ALREADY_EXISTS');
+  });
+
   it('Open Finance: o wizard abre os dois sites pelo Linking do React Native, sem módulo nativo novo', () => {
     const wizard = read('(main)/settings/openfinance/wizard.tsx');
     expect(wizard).toMatch(/Linking\.openURL\(/);
