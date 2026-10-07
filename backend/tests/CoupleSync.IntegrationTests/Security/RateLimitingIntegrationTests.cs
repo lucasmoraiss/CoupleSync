@@ -413,10 +413,9 @@ public sealed class RateLimitingIntegrationTests
             SetJwtEnvironment();
         }
 
-        protected override IHost CreateHost(IHostBuilder builder)
+        protected override void BeforeCreateHost()
         {
             SetJwtEnvironment();
-            return base.CreateHost(builder);
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

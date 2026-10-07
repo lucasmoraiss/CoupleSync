@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace CoupleSync.TestSupport;
@@ -20,14 +21,31 @@ public sealed class TestHostGuardTests
     [Fact]
     public void EveryWebApplicationFactoryInThisAssembly_GoesThroughTheSharedBase()
     {
-        var unprotected = TestApiFactoryGuard.FindUnprotected(typeof(TestApiFactory).Assembly.GetTypes()
+        var types = typeof(TestApiFactory).Assembly.GetTypes()
             // The deliberately unprotected example of the guard's own test is the only exception.
-            .Where(t => t.DeclaringType != typeof(TestHostGuardTests)));
+            .Where(t => t.DeclaringType != typeof(TestHostGuardTests))
+            .ToList();
+
+        // A scan that finds no factory at all must fail instead of passing: this assembly has at least one protected host.
+        Assert.Contains(types, t => t.IsClass && t != typeof(TestApiFactory) && typeof(TestApiFactory).IsAssignableFrom(t));
+
+        var unprotected = TestApiFactoryGuard.FindUnprotected(types);
 
         Assert.True(
             unprotected.Count == 0,
             "These test hosts do not derive from CoupleSync.TestSupport.TestApiFactory (the \"Testing\" environment point): "
             + string.Join(", ", unprotected.Select(t => t.FullName)));
+    }
+
+    /// <summary>A derived factory cannot skip the base's CreateHost (environment, DATABASE_URL); it uses BeforeCreateHost.</summary>
+    [Fact]
+    public void TheSharedBase_CannotHaveItsCreateHostReplaced()
+    {
+        var createHost = typeof(TestApiFactory).GetMethod(
+            "CreateHost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+
+        Assert.NotNull(createHost);
+        Assert.True(createHost!.IsFinal, "TestApiFactory.CreateHost must be sealed.");
     }
 
     [Fact]

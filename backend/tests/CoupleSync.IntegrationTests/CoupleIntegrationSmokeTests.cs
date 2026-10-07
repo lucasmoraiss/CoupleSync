@@ -256,13 +256,12 @@ public sealed class CoupleIntegrationSmokeTests
             Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
         }
 
-        protected override IHost CreateHost(IHostBuilder builder)
+        protected override void BeforeCreateHost()
         {
             // Re-apply env vars right before construction to guard against parallel test teardown races
             Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
             Environment.SetEnvironmentVariable("JWT__ISSUER", JwtIssuer);
             Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
-            return base.CreateHost(builder);
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

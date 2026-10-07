@@ -1,36 +1,59 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Hosting;
+
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace CoupleSync.TestSupport;
 
 /// <summary>
 /// The single point every API test host goes through (issue #16). It is compiled into every test project that starts
-/// the API, and <c>TestHostGuardTests</c> fails when a <see cref="WebApplicationFactory{TEntryPoint}"/> skips it.
+/// the API; <c>TestHostGuardTests</c> fails when a <see cref="WebApplicationFactory{TEntryPoint}"/> class skips it and
+/// <c>TestHostSourceGuardTests</c> fails on any host built without a class and on any test project that does not link it.
 /// <list type="bullet">
 /// <item>The host always runs in the "Testing" environment, so appsettings.Development.json (which on the owner's
-/// machine points at production) is never loaded. Applied in <see cref="CreateHost"/>, after every
-/// <c>ConfigureWebHost</c>, so a factory cannot move itself out of "Testing".</item>
+/// machine points at production) is never loaded. Applied in <see cref="CreateHost"/>, which is sealed and runs after
+/// every <c>ConfigureWebHost</c>, so a factory cannot move itself out of "Testing" nor skip this.</item>
 /// <item>DATABASE_URL, which outranks configuration in <c>DatabaseConnectionResolver</c>, is set to
 /// <see cref="DatabaseConnectionString"/> before the host is built: the machine's value is never used. By default
-/// that is <see cref="UnreachableConnectionString"/>, which no test can connect to; hosts that need a real database
-/// (PostgreSQL in a Testcontainers container) override it, and hosts on SQLite replace the DbContext.</item>
+/// that is <see cref="TestDatabaseIsolation.UnreachableConnectionString"/>, which no test can connect to; hosts that
+/// need a real database (PostgreSQL in a Testcontainers container) override it, and hosts on SQLite replace the
+/// DbContext.</item>
+/// <item>The assembly attribute above is declared here, not in a file of its own: the host code reads and writes
+/// process-wide state (JWT__SECRET, DATABASE_URL, ...), two test classes running at the same time race on it, and a
+/// project that links this file can therefore never run in parallel.</item>
 /// </list>
-/// A factory that needs configuration declares it itself (in-memory collection or environment variable).
+/// A factory that needs configuration declares it itself (in-memory collection or environment variable), and process
+/// state that must be in place right before the host is built goes in <see cref="BeforeCreateHost"/>.
 /// </summary>
 internal class TestApiFactory : WebApplicationFactory<Program>
 {
     internal const string TestEnvironmentName = "Testing";
 
-    /// <summary>Harmless value: nothing listens on port 1 and the credentials are not real.</summary>
-    internal const string UnreachableConnectionString =
-        "Host=127.0.0.1;Port=1;Database=couplesync_unused_in_tests;Username=test;Password=test;Timeout=1";
+    protected virtual string DatabaseConnectionString => TestDatabaseIsolation.UnreachableConnectionString;
 
-    protected virtual string DatabaseConnectionString => UnreachableConnectionString;
-
-    protected override IHost CreateHost(IHostBuilder builder)
+    /// <summary>Hook for process-wide state (environment variables) a factory needs right before the host is built.</summary>
+    protected virtual void BeforeCreateHost()
     {
+    }
+
+    protected sealed override IHost CreateHost(IHostBuilder builder)
+    {
+        BeforeCreateHost();
         builder.UseEnvironment(TestEnvironmentName);
         Environment.SetEnvironmentVariable("DATABASE_URL", DatabaseConnectionString);
         return base.CreateHost(builder);
+    }
+}
+
+public sealed class TestNoParallelizationTests
+{
+    [Fact]
+    public void ATestProjectThatStartsHosts_DoesNotRunItsTestsInParallel()
+    {
+        var behavior = typeof(TestApiFactory).Assembly.GetCustomAttribute<CollectionBehaviorAttribute>();
+
+        Assert.NotNull(behavior);
+        Assert.True(behavior!.DisableTestParallelization, "DisableTestParallelization must be true.");
     }
 }

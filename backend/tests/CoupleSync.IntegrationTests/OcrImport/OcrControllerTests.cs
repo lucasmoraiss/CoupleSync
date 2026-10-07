@@ -424,12 +424,11 @@ internal sealed class OcrWebApplicationFactory : TestApiFactory
         Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
     }
 
-    protected override IHost CreateHost(IHostBuilder builder)
+    protected override void BeforeCreateHost()
     {
         Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
         Environment.SetEnvironmentVariable("JWT__ISSUER", JwtIssuer);
         Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
-        return base.CreateHost(builder);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

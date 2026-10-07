@@ -43,16 +43,13 @@ internal sealed class PostgresApiFactory : TestApiFactory
         Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
         Environment.SetEnvironmentVariable("JWT__ISSUER", JwtIssuer);
         Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
-        // Whatever resolves a connection string from the environment finds the container, never another database.
-        Environment.SetEnvironmentVariable("DATABASE_URL", _database.ConnectionString);
     }
 
     protected override string DatabaseConnectionString => _database.ConnectionString;
 
-    protected override IHost CreateHost(IHostBuilder builder)
+    protected override void BeforeCreateHost()
     {
         SetEnvironment();
-        return base.CreateHost(builder);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -99,7 +96,8 @@ internal sealed class PostgresApiFactory : TestApiFactory
         Environment.SetEnvironmentVariable("JWT__SECRET", null);
         Environment.SetEnvironmentVariable("JWT__ISSUER", null);
         Environment.SetEnvironmentVariable("JWT__AUDIENCE", null);
-        Environment.SetEnvironmentVariable("DATABASE_URL", null);
+        // Back to the per-process belt value (TestDatabaseIsolation), never to "unset".
+        Environment.SetEnvironmentVariable("DATABASE_URL", TestDatabaseIsolation.UnreachableConnectionString);
     }
 
     /// <summary>A new DbContext (no group filter) on the same database, for seeding and for assertions.</summary>

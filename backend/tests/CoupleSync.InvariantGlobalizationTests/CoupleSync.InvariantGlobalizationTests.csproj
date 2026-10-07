@@ -22,9 +22,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\TestDatabaseIsolation.cs" Link="TestDatabaseIsolation.cs" />
+    <Compile Include="..\Shared\TestHostSourceGuardTests.cs" Link="TestHostSourceGuardTests.cs" />
     <Compile Include="..\Shared\TestEmailIsolation.cs" Link="TestEmailIsolation.cs" />
     <Compile Include="..\Shared\TestApiFactory.cs" Link="TestApiFactory.cs" />
-    <Compile Include="..\Shared\TestNoParallelization.cs" Link="TestNoParallelization.cs" />
     <Compile Include="..\Shared\TestHostGuardTests.cs" Link="TestHostGuardTests.cs" />
     <Compile Include="..\Shared\TestHostEnvironmentTests.cs" Link="TestHostEnvironmentTests.cs" />
     <!-- The same category cases the unit tests run with ICU, run again without it. -->

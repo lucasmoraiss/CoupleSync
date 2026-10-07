@@ -51,10 +51,16 @@ public sealed class TestHostEnvironmentTests
             File.WriteAllText(
                 Path.Combine(contentRoot, "appsettings.Development.json"),
                 "{ \"TestSentinel\": \"development-file-was-loaded\" }");
+            // Positive control: the same mechanism DOES load the file of the environment the host runs in, so a null
+            // below means "the Development file was skipped", not "this host loads no appsettings from the content root".
+            File.WriteAllText(
+                Path.Combine(contentRoot, "appsettings.Testing.json"),
+                "{ \"TestingSentinel\": \"testing-file-was-loaded\" }");
 
             using var factory = new SqliteApiFactory(builder => builder.UseContentRoot(contentRoot));
 
             var configuration = factory.Services.GetRequiredService<IConfiguration>();
+            Assert.Equal("testing-file-was-loaded", configuration["TestingSentinel"]);
             Assert.Null(configuration["TestSentinel"]);
             Assert.Equal(contentRoot, factory.Services.GetRequiredService<IHostEnvironment>().ContentRootPath.TrimEnd(Path.DirectorySeparatorChar));
         }
@@ -76,7 +82,7 @@ public sealed class TestHostEnvironmentTests
             _ = factory.Services;
 
             var resolved = DatabaseConnectionResolver.Resolve(factory.Services.GetRequiredService<IConfiguration>());
-            Assert.Equal(DatabaseConnectionResolver.ParseDatabaseUrl(TestApiFactory.UnreachableConnectionString), resolved);
+            Assert.Equal(DatabaseConnectionResolver.ParseDatabaseUrl(TestDatabaseIsolation.UnreachableConnectionString), resolved);
             Assert.DoesNotContain("machine-database", resolved);
         }
         finally
@@ -90,6 +96,7 @@ public sealed class TestHostEnvironmentTests
     {
         private readonly string _connectionString = $"Data Source=couplesync-host-guard-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         private readonly Action<IWebHostBuilder>? _configure;
+        private readonly string? _previousSecret = Environment.GetEnvironmentVariable("JWT__SECRET");
         private SqliteConnection? _keepAlive;
 
         public SqliteApiFactory(Action<IWebHostBuilder>? configure = null)
@@ -123,6 +130,7 @@ public sealed class TestHostEnvironmentTests
             if (disposing)
             {
                 _keepAlive?.Dispose();
+                Environment.SetEnvironmentVariable("JWT__SECRET", _previousSecret);
             }
         }
     }
