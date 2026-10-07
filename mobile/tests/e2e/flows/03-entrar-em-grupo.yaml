@@ -1,0 +1,54 @@
+# Segunda conta entra no grupo da primeira pelo código de convite (lido da tela, nunca fixo).
+appId: com.couplesync.app
+name: 03 - Entrar em grupo
+---
+- evalScript: ${output.emailA = 'e2e-03a-' + Date.now() + '@example.com'}
+- evalScript: ${output.emailB = 'e2e-03b-' + Date.now() + '@example.com'}
+
+# Primeira conta: cria o grupo; o código de convite é copiado da tela.
+- launchApp:
+    clearState: true
+- runFlow:
+    file: comum/criar-conta.yaml
+    env:
+      NOME: Caio Teste
+      EMAIL: ${output.emailA}
+- runFlow: comum/criar-grupo.yaml
+- copyTextFrom:
+    text: "[A-Z0-9]{8}"
+- evalScript: ${output.codigo = maestro.copiedText}
+- assertTrue: ${output.codigo.length == 8}
+
+# Segunda conta, como num outro aparelho: o app é aberto do zero.
+- launchApp:
+    clearState: true
+- runFlow:
+    file: comum/criar-conta.yaml
+    env:
+      NOME: Davi Teste
+      EMAIL: ${output.emailB}
+- tapOn: "Entrar em um grupo com código de convite"
+- extendedWaitUntil:
+    visible: "Entrar no grupo"
+    timeout: 15000
+- tapOn: "Código de convite do grupo"
+- inputText: ${output.codigo}
+- hideKeyboard
+- tapOn: "Confirmar entrada no grupo"
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 60000
+
+# O grupo em que entrou é o da primeira conta: mesmo código, os dois membros.
+- tapOn: "Configurações"
+- extendedWaitUntil:
+    visible: "Abrir o grupo: membros e código de convite"
+    timeout: 30000
+- tapOn: "Abrir o grupo: membros e código de convite"
+- extendedWaitUntil:
+    visible: "Membros"
+    timeout: 30000
+- assertVisible: ${output.codigo}
+- assertVisible: "Caio Teste"
+- assertVisible: "Davi Teste \\(você\\)"
+- assertNotVisible: "Tentar novamente"

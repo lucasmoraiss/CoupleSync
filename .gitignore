@@ -50,6 +50,9 @@ mobile/expo-env.d.ts
 mobile/google-services.json
 mobile/GoogleService-Info.plist
 
+# Output of a local run of the App E2E scripts (scripts/app-e2e-*.sh): test APKs and evidence
+app-e2e-out/
+
 # ─── Docker ──────────────────────────────────────────────────────────────────
 docker-compose.override.yml
 

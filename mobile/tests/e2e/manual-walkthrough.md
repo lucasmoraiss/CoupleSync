@@ -6,6 +6,44 @@
 
 ---
 
+## Automated screen tests — what is already covered and what stays manual
+
+On every pull request to `main`, the **App E2E** workflow (`.github/workflows/app-e2e.yml`) builds a test APK
+from the pull request, installs it on an Android emulator (API 34) and runs the Maestro flows of
+`mobile/tests/e2e/flows/` against the real API container image with a throwaway PostgreSQL. Each flow creates
+its own account (a unique e-mail per run) and does not depend on the others.
+
+| Flow | What it checks on the screen |
+| --- | --- |
+| `01-cadastro-e-grupo.yaml` | Sign up, create a group, see the 8-character invite code, reach the Painel |
+| `02-login-e-logout.yaml` | Sign out (confirming the dialog), sign in again, close and reopen the app and still be signed in |
+| `03-entrar-em-grupo.yaml` | A second account joins the first one's group with the invite code read from the screen; both members are listed |
+| `04-transacao-manual.yaml` | Two manual transactions in a row (the form opens empty the second time), edit one, delete the other (confirming the dialog), check the list |
+| `05-metas-e-rendas.yaml` | Create a goal and an income source and see them on their screens |
+| `06-abas.yaml` | Open every tab; none shows an error state |
+| `07-captura-de-notificacao.yaml` + `partes/07-conferir-transacao-capturada.yaml` | With Android's notification access granted, accept the capture consent, receive one made-up bank notification and see it as a transaction |
+
+Flow 07 is driven by `scripts/app-e2e-run-flows.sh` (Maestro cannot run `adb`). The notification comes from a
+test double installed only on the emulator (`mobile/tests/e2e/notification-stub/`), whose application id is one
+the notification reader accepts; its text is invented.
+
+**Still manual** (the scenarios below, on a real device, at the owner's checkpoints):
+
+- pairing across two real devices and what the *other* partner sees (Scenarios 1, 4 and 8 — the flows use one emulator);
+- the Android "Notification access" settings screen itself and notifications from the real bank apps, including
+  every bank format and deduplication of a repeated notification (Scenarios 2, 3 and 9);
+- push alerts (Scenario 7 — the test APK has no Firebase configuration);
+- statement import (PDF/photo through the system file picker), password recovery and e-mail confirmation
+  (they need a real inbox), the arrival of an OTA update and installing a new APK over an old one;
+- how things look: layout on other screen sizes, tap-target sizes and load-time measurements (Scenario 10).
+
+To run the flows on your own emulator: build the test APK and the test double with
+`scripts/app-e2e-build-apk.sh` and `scripts/app-e2e-notification-stub.sh` (in a throwaway copy of the
+repository), start the API with `scripts/app-e2e-api.sh start`, install Maestro (the version pinned in the
+workflow) and run `scripts/app-e2e-run-flows.sh`. Never point a test build at the production API.
+
+---
+
 ## Scenario 1 — Couple Registration and Pairing (AC-001)
 
 **Preconditions:** Two Android devices (A and B). App installed on both. No existing accounts.
