@@ -524,7 +524,9 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.Label).HasColumnName("label").HasMaxLength(BankConnection.MaxLabelLength).IsRequired();
             // Encrypted (AES-256-GCM); null once the person disconnected.
             entity.Property(x => x.ClientIdEncrypted).HasColumnName("client_id_encrypted").HasMaxLength(1024);
-            entity.Property(x => x.ClientSecretEncrypted).HasColumnName("client_secret_encrypted").HasMaxLength(1024);
+            // A concurrency token: every encryption gives another text, so a write made on a copy read before the
+            // person disconnected (or connected again) is rejected instead of bringing the old state back.
+            entity.Property(x => x.ClientSecretEncrypted).HasColumnName("client_secret_encrypted").HasMaxLength(1024).IsConcurrencyToken();
             entity.Property(x => x.ClientIdHint).HasColumnName("client_id_hint").HasMaxLength(BankConnection.ClientIdHintLength);
             entity.Property(x => x.Status)
                 .HasColumnName("status")

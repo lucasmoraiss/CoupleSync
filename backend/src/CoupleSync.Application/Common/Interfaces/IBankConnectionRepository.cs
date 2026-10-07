@@ -29,5 +29,15 @@ public interface IBankConnectionRepository
 
     Task AddAccountAsync(BankAccount account, CancellationToken ct);
 
+    /// <summary>
+    /// Makes the next save fail with <c>ConcurrencyConflictException</c> (and write nothing at all) when the stored
+    /// credentials of <paramref name="connection"/> are no longer the ones that were read, even if the save would
+    /// otherwise not touch the connection.
+    /// </summary>
+    void RequireSameCredentialsOnSave(BankConnection connection);
+
+    /// <summary>Discards the in-memory copy of <paramref name="connection"/> and reads it again, e.g. after a concurrency conflict.</summary>
+    Task ReloadConnectionAsync(BankConnection connection, CancellationToken ct);
+
     Task SaveChangesAsync(CancellationToken ct);
 }

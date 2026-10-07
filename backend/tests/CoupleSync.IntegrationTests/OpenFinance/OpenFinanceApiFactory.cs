@@ -48,6 +48,27 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
 
     public CapturedLogs Logs { get; } = new();
 
+    /// <summary>
+    /// False (the default): everything is logged down to Trace, to prove that no secret is written at any level.
+    /// True: the levels of appsettings.json, the ones production runs with.
+    /// </summary>
+    public bool ProductionLogLevels { get; init; }
+
+    /// <summary>
+    /// When set, the Pluggy client keeps the HTTP handler the application registers and calls this address
+    /// (a loopback server of the test) instead of <see cref="Pluggy"/>.
+    /// </summary>
+    public string? LoopbackPluggyAddress { get; init; }
+
+    /// <summary>Runs once, right before the next save of the API: what another request did in the meantime.</summary>
+    public Func<Task>? BeforeNextSave
+    {
+        get => _saveHook.BeforeNextSave;
+        set => _saveHook.BeforeNextSave = value;
+    }
+
+    private readonly SaveHook _saveHook = new();
+
     private static void SetEnvironment()
     {
         Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
@@ -61,7 +82,7 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
     {
         builder.ConfigureAppConfiguration((_, configBuilder) =>
         {
-            configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+            var settings = new Dictionary<string, string?>
             {
                 ["Jwt:Secret"] = JwtSecret,
                 ["Jwt:Issuer"] = JwtIssuer,
@@ -70,11 +91,17 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
                 ["RateLimiting:CoupleJoin:PermitLimit"] = "10000",
                 // Empty (not absent) so that a value in the machine's environment can never leak into a test.
                 ["OPENFINANCE_ENCRYPTION_KEY"] = _encryptionKey ?? string.Empty,
-                ["OpenFinance:PluggyBaseUrl"] = FakePluggyServer.BaseUrl,
+                ["OpenFinance:PluggyBaseUrl"] = LoopbackPluggyAddress ?? FakePluggyServer.BaseUrl,
+            };
+            if (!ProductionLogLevels)
+            {
                 // Everything is captured, down to Trace (where HttpClient writes request headers).
-                ["Logging:LogLevel:Default"] = "Trace",
-                ["Logging:LogLevel:Microsoft.AspNetCore"] = "Trace",
-            });
+                settings["Logging:LogLevel:Default"] = "Trace";
+                settings["Logging:LogLevel:Microsoft.AspNetCore"] = "Trace";
+                settings["Logging:LogLevel:System.Net.Http.HttpClient.Pluggy"] = "Trace";
+            }
+
+            configBuilder.AddInMemoryCollection(settings);
         });
 
         builder.ConfigureLogging(logging =>
@@ -91,10 +118,11 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
             _keepAliveConnection = new SqliteConnection(_databaseConnectionString);
             _keepAliveConnection.Open();
 
-            services.AddDbContext<AppDbContext>(options => options.UseSqlite(_databaseConnectionString));
+            services.AddDbContext<AppDbContext>(options => options.UseSqlite(_databaseConnectionString).AddInterceptors(_saveHook));
 
             // Every call of the named client "Pluggy" lands on the in-memory fake: no network.
-            services.AddHttpClient("Pluggy").ConfigurePrimaryHttpMessageHandler(() => Pluggy);
+            if (LoopbackPluggyAddress is null)
+                services.AddHttpClient("Pluggy").ConfigurePrimaryHttpMessageHandler(() => Pluggy);
 
             using var scope = services.BuildServiceProvider().CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -157,6 +185,33 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
         }
 
         return rows;
+    }
+
+    /// <summary>Writes straight to the database, as another request (or another server) would have.</summary>
+    public async Task ExecuteAsync(string sql, params (string Name, object? Value)[] parameters)
+    {
+        await using var connection = new SqliteConnection(_databaseConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private sealed class SaveHook : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        public Func<Task>? BeforeNextSave { get; set; }
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var hook = BeforeNextSave;
+            BeforeNextSave = null;
+            if (hook is not null) await hook();
+            return await base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 
     private static void Use(HttpClient client, string token)

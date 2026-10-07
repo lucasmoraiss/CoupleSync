@@ -142,7 +142,10 @@ public sealed class OpenFinanceDomainTests
         Assert.Null(connection.LastErrorCode);
         Assert.Equal(Now.AddMinutes(1), connection.UpdatedAtUtc);
 
-        // A late error of a call that was in flight does not bring the connection back.
+        // On this same copy, a late answer does not bring the connection back. A request that read the connection
+        // BEFORE the disconnection holds another copy, which these guards cannot see: that one is stopped by the
+        // database (the stored secret is a concurrency token), proved in OpenFinanceIntegrationTests and in
+        // CoupleSync.PostgresTests ("DisconnectWhileAnItemIsBeingVerified...").
         connection.MarkError(PluggyErrorCodes.Unavailable, "mensagem", Now.AddMinutes(2));
         Assert.Equal(BankConnectionStatus.Disconnected, connection.Status);
         connection.MarkWorking(Now.AddMinutes(2));

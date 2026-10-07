@@ -151,6 +151,7 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasColumnName("client_id_hint");
 
                     b.Property<string>("ClientSecretEncrypted")
+                        .IsConcurrencyToken()
                         .HasMaxLength(1024)
                         .HasColumnType("character varying(1024)")
                         .HasColumnName("client_secret_encrypted");

@@ -53,6 +53,14 @@ public sealed class BankConnectionRepository : IBankConnectionRepository
     public Task AddAccountAsync(BankAccount account, CancellationToken ct)
         => _dbContext.BankAccounts.AddAsync(account, ct).AsTask();
 
+    public void RequireSameCredentialsOnSave(BankConnection connection)
+        // An UPDATE of the row carries the concurrency token (the stored secret) in its WHERE: writing a column
+        // back, changed or not, is what makes the save check it.
+        => _dbContext.Entry(connection).Property(c => c.UpdatedAtUtc).IsModified = true;
+
+    public Task ReloadConnectionAsync(BankConnection connection, CancellationToken ct)
+        => _dbContext.Entry(connection).ReloadAsync(ct);
+
     public Task SaveChangesAsync(CancellationToken ct)
         => DbSaveTranslator.SaveAsync(_dbContext, ct);
 }

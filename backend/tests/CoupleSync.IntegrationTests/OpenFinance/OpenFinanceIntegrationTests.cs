@@ -577,12 +577,15 @@ public sealed class OpenFinanceIntegrationTests
 
         var response = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
 
-        await AssertErrorAsync(response, HttpStatusCode.UnprocessableEntity, "PLUGGY_INVALID_CREDENTIALS");
+        // The answer and what the group reads on the connection name the way out that exists: trying again would
+        // send the same stored credentials.
+        const string wayOut = "O Pluggy recusou as credenciais guardadas nesta conexão. Desconecte e conecte de novo com o Client ID e o Client Secret certos.";
+        await AssertErrorAsync(response, HttpStatusCode.UnprocessableEntity, "PLUGGY_INVALID_CREDENTIALS", wayOut);
         var status = await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/status");
         var connection = Assert.Single(status.GetProperty("connections").EnumerateArray());
         Assert.Equal("Error", connection.GetProperty("status").GetString());
         Assert.Equal("PLUGGY_INVALID_CREDENTIALS", connection.GetProperty("lastErrorCode").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(connection.GetProperty("lastErrorMessage").GetString()));
+        Assert.Equal(wayOut, connection.GetProperty("lastErrorMessage").GetString());
 
         // Working again: the mark goes away.
         factory.Pluggy.AuthStatus = null;
@@ -733,5 +736,241 @@ public sealed class OpenFinanceIntegrationTests
         Assert.NotNull(row["client_secret_encrypted"]);
         Assert.Equal(12L, row["history_months"]);
         await AddItemAsync(ana, connectionId, FakePluggyServer.OtherItemWithAccounts);
+    }
+
+    // ---------------------------------------------------------------- review round 1
+
+    [Fact]
+    public async Task TestCredentials_AcceptedOrRefused_NeverWritesTheCredentialsToTheLog()
+    {
+        const string wrongSecret = "fake-wrong-secret-0f1e2d3c";
+        await using var factory = new OpenFinanceApiFactory();
+        var ana = await factory.RegisterAsync("Ana");
+
+        var accepted = await ana.Client.PostAsJsonAsync($"{Base}/credentials/test", Credentials());
+        var refused = await ana.Client.PostAsJsonAsync($"{Base}/credentials/test", Credentials(clientSecret: wrongSecret));
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        await AssertErrorAsync(refused, HttpStatusCode.UnprocessableEntity, "PLUGGY_INVALID_CREDENTIALS");
+        foreach (var answer in new[] { await accepted.Content.ReadAsStringAsync(), await refused.Content.ReadAsStringAsync() })
+        {
+            Assert.DoesNotContain(FakePluggyServer.ClientSecret, answer, StringComparison.Ordinal);
+            Assert.DoesNotContain(wrongSecret, answer, StringComparison.Ordinal);
+            Assert.DoesNotContain(FakePluggyServer.ClientId, answer, StringComparison.Ordinal);
+        }
+
+        // The log was really captured down to Trace: the action of this route and the Pluggy HTTP client are in it.
+        Assert.Contains(factory.Logs.Lines, line => line.StartsWith("Trace", StringComparison.Ordinal)
+            && line.Contains("TestCredentials", StringComparison.Ordinal));
+        Assert.Contains(factory.Logs.Lines, line => line.StartsWith("Trace System.Net.Http.HttpClient.Pluggy", StringComparison.Ordinal));
+        Assert.DoesNotContain(factory.Logs.Lines, line => line.Contains(FakePluggyServer.ClientSecret, StringComparison.Ordinal));
+        Assert.DoesNotContain(factory.Logs.Lines, line => line.Contains(wrongSecret, StringComparison.Ordinal));
+        Assert.DoesNotContain(factory.Logs.Lines, line => line.Contains(FakePluggyServer.ClientId, StringComparison.Ordinal));
+        Assert.DoesNotContain(factory.Logs.Lines, line => line.Contains("fake-api-key", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AddItem_WhenTheStoredCredentialsWereEncryptedWithAnotherKey_Answers422_WithoutCallingPluggy()
+    {
+        // What another key wrote: the stored secret of a server with a different OPENFINANCE_ENCRYPTION_KEY.
+        string foreignSecret;
+        await using (var otherServer = new OpenFinanceApiFactory())
+        {
+            await ConnectAsync(await otherServer.RegisterAsync("Outra"));
+            foreignSecret = Assert.IsType<string>(
+                Assert.Single(await otherServer.RowsAsync("SELECT client_secret_encrypted FROM bank_connections"))["client_secret_encrypted"]);
+        }
+
+        await using var factory = new OpenFinanceApiFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana);
+        await factory.ExecuteAsync("UPDATE bank_connections SET client_secret_encrypted = $secret", ("$secret", foreignSecret));
+        var before = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        var pluggyCalls = factory.Pluggy.Requests.Count;
+
+        var response = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
+
+        await AssertErrorAsync(response, HttpStatusCode.UnprocessableEntity, "OPENFINANCE_CREDENTIALS_UNREADABLE",
+            "Não foi possível ler as credenciais guardadas. Desconecte e conecte de novo com o Client ID e o Client Secret.");
+        Assert.Equal(pluggyCalls, factory.Pluggy.Requests.Count); // nothing was sent to Pluggy
+        var after = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("Active", after["status"]);
+        Assert.Equal(before, after); // the connection is exactly as it was
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM bank_items"));
+
+        // The way out the message names works: disconnect, connect again.
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
+        await ConnectAsync(ana);
+        await AddItemAsync(ana, connectionId, FakePluggyServer.ItemWithAccounts);
+    }
+
+    [Theory]
+    [InlineData(false)] // Pluggy answers with the item and its accounts
+    [InlineData(true)] // Pluggy refuses the credentials the verification used
+    public async Task DisconnectWhileAnItemIsBeingVerified_TheVerificationAnswers409_AndWritesNothing(bool pluggyRefuses)
+    {
+        await using var factory = new OpenFinanceApiFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana);
+        if (pluggyRefuses) factory.Pluggy.DataStatus = HttpStatusCode.Forbidden;
+
+        // Pluggy holds its answer about the item until the test lets it go.
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answerNow = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Pluggy.BeforeAnswer = async request =>
+        {
+            if (!request.Path.StartsWith("/items/", StringComparison.Ordinal)) return;
+            asked.TrySetResult();
+            await answerNow.Task;
+        };
+
+        var verifying = ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
+        await asked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var disconnected = await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}");
+        Assert.Equal(HttpStatusCode.NoContent, disconnected.StatusCode);
+        answerNow.SetResult();
+
+        await AssertErrorAsync(await verifying, HttpStatusCode.Conflict, "BANK_CONNECTION_DISCONNECTED",
+            "Esta conexão foi desconectada. Conecte de novo com o Client ID e o Client Secret para adicionar bancos.");
+        var row = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("Disconnected", row["status"]);
+        Assert.Null(row["client_secret_encrypted"]);
+        Assert.Null(row["client_id_encrypted"]);
+        Assert.Null(row["client_id_hint"]);
+        Assert.Null(row["last_error_code"]);
+        Assert.Null(row["last_error_message"]);
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM bank_items"));
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM bank_accounts"));
+
+        // Nothing is stuck: the person connects again and the same item is verified.
+        factory.Pluggy.BeforeAnswer = null;
+        factory.Pluggy.DataStatus = null;
+        await ConnectAsync(ana);
+        await AddItemAsync(ana, connectionId, FakePluggyServer.ItemWithAccounts);
+    }
+
+    [Theory]
+    [InlineData(false)] // the other request disconnected too
+    [InlineData(true)] // the other request disconnected and connected again, with other credentials
+    public async Task Disconnect_WhenAnotherRequestChangedTheCredentialsFirst_StillErasesThem_204(bool reconnected)
+    {
+        await using var factory = new OpenFinanceApiFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana);
+        factory.BeforeNextSave = () => reconnected
+            ? factory.ExecuteAsync("UPDATE bank_connections SET client_id_encrypted = 'other-ciphertext', client_secret_encrypted = 'other-ciphertext'")
+            : factory.ExecuteAsync("UPDATE bank_connections SET client_id_encrypted = NULL, client_secret_encrypted = NULL, client_id_hint = NULL, status = 'Disconnected'");
+
+        var response = await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}");
+
+        Assert.True(HttpStatusCode.NoContent == response.StatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Null(factory.BeforeNextSave); // the other write did happen in the middle
+        var row = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("Disconnected", row["status"]);
+        Assert.Null(row["client_secret_encrypted"]);
+        Assert.Null(row["client_id_encrypted"]);
+        Assert.Null(row["client_id_hint"]);
+    }
+
+    [Fact]
+    public async Task ConnectAgain_WhenAnotherRequestConnectedFirst_Answers409_AndKeepsWhatWasStored()
+    {
+        await using var factory = new OpenFinanceApiFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana);
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
+        factory.BeforeNextSave = () => factory.ExecuteAsync(
+            "UPDATE bank_connections SET client_id_encrypted = 'other-ciphertext', client_secret_encrypted = 'other-ciphertext', status = 'Active', label = 'A outra'");
+
+        var response = await ana.Client.PostAsJsonAsync($"{Base}/connections", NewConnection("Esta"));
+
+        await AssertErrorAsync(response, HttpStatusCode.Conflict, "BANK_CONNECTION_ALREADY_EXISTS");
+        var row = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("A outra", row["label"]);
+        Assert.Equal("other-ciphertext", row["client_secret_encrypted"]);
+    }
+
+    [Fact]
+    public async Task WhenWhoConnectedLeavesTheGroup_ThePartnerStillSeesTheConnection_AndWhoLeftGets403()
+    {
+        // Pins what phase 1 does today, so that phase 2 changes it on purpose (see the report of issue #24).
+        await using var factory = new OpenFinanceApiFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var bruno = await factory.RegisterAsync("Bruno", ana.JoinCode);
+        var connectionId = await ConnectAsync(bruno, "Bancos do Bruno");
+        var added = await AddItemAsync(bruno, connectionId, FakePluggyServer.ItemWithAccounts);
+        var accountId = added.GetProperty("accounts")[0].GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.OK, (await bruno.Client.PostAsJsonAsync("/api/v1/couples/leave", new { })).StatusCode);
+
+        // The partner: the connection, its item and accounts are still listed, under a name that is no one's.
+        var status = await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/status");
+        var connection = Assert.Single(status.GetProperty("connections").EnumerateArray());
+        Assert.Equal(connectionId, connection.GetProperty("id").GetGuid());
+        Assert.Equal("Bancos do Bruno", connection.GetProperty("label").GetString());
+        Assert.Equal("Pessoa que saiu do grupo", connection.GetProperty("userName").GetString());
+        Assert.False(connection.GetProperty("isMine").GetBoolean());
+        Assert.Equal("Active", connection.GetProperty("status").GetString());
+        Assert.Equal(2, Assert.Single(connection.GetProperty("items").EnumerateArray()).GetProperty("accounts").GetArrayLength());
+        // ...and the partner cannot change it.
+        await AssertErrorAsync(await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}"),
+            HttpStatusCode.Forbidden, "BANK_CONNECTION_FORBIDDEN");
+
+        // Who left (the token still names the group): 403 on every route, nothing reaches Pluggy.
+        var pluggyCalls = factory.Pluggy.Requests.Count;
+        await AssertErrorAsync(await bruno.Client.GetAsync($"{Base}/status"), HttpStatusCode.Forbidden, "COUPLE_REQUIRED");
+        await AssertErrorAsync(await bruno.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.OtherItemWithAccounts }),
+            HttpStatusCode.Forbidden, "COUPLE_REQUIRED");
+        await AssertErrorAsync(await bruno.Client.PatchAsJsonAsync($"{Base}/accounts/{accountId}", new { syncEnabled = false }),
+            HttpStatusCode.Forbidden, "COUPLE_REQUIRED");
+        await AssertErrorAsync(await bruno.Client.DeleteAsync($"{Base}/connections/{connectionId}"),
+            HttpStatusCode.Forbidden, "COUPLE_REQUIRED");
+        Assert.Equal(pluggyCalls, factory.Pluggy.Requests.Count);
+
+        // The row is untouched: still the leaver's, credentials still stored (encrypted).
+        var row = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("Active", row["status"]);
+        Assert.Equal(bruno.UserId.ToString(), row["user_id"]!.ToString(), ignoreCase: true);
+        Assert.NotNull(row["client_secret_encrypted"]);
+        Assert.All(await factory.RowsAsync("SELECT sync_enabled FROM bank_accounts"), r => Assert.Equal(1L, r["sync_enabled"]));
+    }
+
+    [Fact]
+    public async Task WithTheLogLevelsOfProduction_TheItemIdNeverReachesTheLog()
+    {
+        await using var factory = new OpenFinanceApiFactory { ProductionLogLevels = true };
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana);
+
+        await AddItemAsync(ana, connectionId, FakePluggyServer.ItemWithAccounts);
+        var unknown = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.UnknownItem });
+
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal(2, factory.Pluggy.Requests.Count(r => r.Path.StartsWith("/items/", StringComparison.Ordinal)));
+        // Information is on, as in production...
+        Assert.Contains(factory.Logs.Lines, line => line.StartsWith("Information", StringComparison.Ordinal));
+        // ...and the address of the calls to Pluggy (which carries the Item ID) is not written.
+        Assert.DoesNotContain(factory.Logs.Lines, line => line.Contains(FakePluggyServer.ItemWithAccounts, StringComparison.Ordinal));
+        Assert.DoesNotContain(factory.Logs.Lines, line => line.Contains(FakePluggyServer.UnknownItem, StringComparison.Ordinal));
+        Assert.DoesNotContain(factory.Logs.Lines, line => line.Contains(FakePluggyServer.BaseUrl, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ARedirectFromPluggy_IsNotFollowed_AndAnswersPluggyUnavailable()
+    {
+        await using var pluggy = new RedirectingPluggyServer();
+        await using var factory = new OpenFinanceApiFactory { LoopbackPluggyAddress = pluggy.Address };
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana);
+
+        var response = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
+
+        await AssertErrorAsync(response, HttpStatusCode.BadGateway, "PLUGGY_UNAVAILABLE",
+            "O Pluggy não respondeu agora. Tente de novo em alguns minutos.");
+        Assert.Contains($"GET /items/{FakePluggyServer.ItemWithAccounts}", pluggy.Requests); // the 302 was really answered
+        Assert.DoesNotContain(pluggy.Requests, request => request.Contains(RedirectingPluggyServer.ElsewherePath, StringComparison.Ordinal));
+        Assert.Empty(pluggy.KeysSentElsewhere); // the API key went nowhere else
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM bank_items"));
     }
 }

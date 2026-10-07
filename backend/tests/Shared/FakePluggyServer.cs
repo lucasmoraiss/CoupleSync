@@ -51,6 +51,12 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     /// <summary>Body of GET /accounts for <see cref="ItemWithAccounts"/> (replace to test other shapes).</summary>
     public string AccountsJson { get; set; } = DefaultAccountsJson;
 
+    /// <summary>
+    /// Runs after a request is recorded and before it is answered: a test holds an answer here while something else
+    /// happens (Pluggy taking its time).
+    /// </summary>
+    public Func<RecordedRequest, Task>? BeforeAnswer { get; set; }
+
     public int AuthCalls => Count("POST", "/auth");
 
     public int Count(string method, string path)
@@ -69,10 +75,13 @@ internal sealed class FakePluggyServer : HttpMessageHandler
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
         var path = request.RequestUri!.AbsolutePath;
         var apiKey = request.Headers.TryGetValues("X-API-KEY", out var values) ? values.FirstOrDefault() : null;
-        lock (_gate) Requests.Add(new RecordedRequest(request.Method.Method, path, request.RequestUri.Query, apiKey, body));
+        var recorded = new RecordedRequest(request.Method.Method, path, request.RequestUri.Query, apiKey, body);
+        lock (_gate) Requests.Add(recorded);
 
         if (!string.Equals(request.RequestUri.GetLeftPart(UriPartial.Authority), BaseUrl, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"The fake Pluggy server was called with another host: {request.RequestUri}.");
+
+        if (BeforeAnswer is { } beforeAnswer) await beforeAnswer(recorded);
 
         if (NetworkDown) throw new HttpRequestException("Connection refused (fake).");
         if (TimesOut) throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout (fake).", new TimeoutException());

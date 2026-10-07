@@ -17,7 +17,12 @@ public sealed class OpenFinanceService
     public const string ItemEmptyMessage =
         "Nenhuma conta neste item. Confira se o conector MeuPluggy está ligado na aplicação e se a conexão foi feita pela Demo com a sua conta do Meu Pluggy.";
 
+    public const string StoredCredentialsRefusedMessage =
+        "O Pluggy recusou as credenciais guardadas nesta conexão. Desconecte e conecte de novo com o Client ID e o Client Secret certos.";
+
     private const string FormerMemberName = "Pessoa que saiu do grupo";
+
+    private const int MaxDisconnectAttempts = 3;
 
     private readonly IBankConnectionRepository _repository;
     private readonly ICoupleRepository _coupleRepository;
@@ -111,9 +116,10 @@ public sealed class OpenFinanceService
         {
             await _repository.SaveChangesAsync(ct);
         }
-        catch (UniqueViolationException)
+        catch (DataStoreException ex) when (ex is UniqueViolationException or ConcurrencyConflictException)
         {
-            // The same person, twice at the same time: the other request stored the connection first.
+            // The same person, twice at the same time: the other request stored the connection first (a new row,
+            // or new credentials on the disconnected one).
             throw AlreadyConnected();
         }
 
@@ -134,9 +140,7 @@ public sealed class OpenFinanceService
         var connection = await GetOwnConnectionAsync(connectionId, coupleId, userId, ct);
 
         if (!connection.HasCredentials)
-            throw new ConflictException(
-                "BANK_CONNECTION_DISCONNECTED",
-                "Esta conexão foi desconectada. Conecte de novo com o Client ID e o Client Secret para adicionar bancos.");
+            throw Disconnected();
 
         if (!_cipher.TryDecrypt(connection.ClientIdEncrypted!, out var clientId)
             || !_cipher.TryDecrypt(connection.ClientSecretEncrypted!, out var clientSecret))
@@ -160,10 +164,11 @@ public sealed class OpenFinanceService
         }
         catch (PluggyException ex) when (ex.Code == PluggyErrorCodes.InvalidCredentials)
         {
-            // The stored credentials stopped working (regenerated or revoked at Pluggy): the group sees why.
-            connection.MarkError(ex.Code, ex.Message, _clock.UtcNow);
-            await _repository.SaveChangesAsync(ct);
-            throw;
+            // The stored credentials stopped working (regenerated or revoked at Pluggy): the group sees why, and
+            // the way out, which is not "try again" (the same credentials would be sent).
+            connection.MarkError(ex.Code, StoredCredentialsRefusedMessage, _clock.UtcNow);
+            await SaveVerificationAsync(connection, ct);
+            throw new AppException(ex.Code, StoredCredentialsRefusedMessage, ex.StatusCode);
         }
 
         if (pluggyAccounts.Count == 0)
@@ -213,7 +218,7 @@ public sealed class OpenFinanceService
 
         try
         {
-            await _repository.SaveChangesAsync(ct);
+            await SaveVerificationAsync(connection, ct);
         }
         catch (UniqueViolationException)
         {
@@ -244,9 +249,39 @@ public sealed class OpenFinanceService
         EnsureAvailable();
         var connection = await GetOwnConnectionAsync(connectionId, coupleId, userId, ct);
 
-        connection.Disconnect(_clock.UtcNow);
-        _pluggy.ForgetConnection(connection.Id);
-        await _repository.SaveChangesAsync(ct);
+        for (var attempt = 1; ; attempt++)
+        {
+            connection.Disconnect(_clock.UtcNow);
+            _pluggy.ForgetConnection(connection.Id);
+            try
+            {
+                await _repository.SaveChangesAsync(ct);
+                return;
+            }
+            catch (ConcurrencyConflictException) when (attempt < MaxDisconnectAttempts)
+            {
+                // Another request changed the credentials first (disconnected too, or connected again): whatever is
+                // stored now is what gets erased.
+                await _repository.ReloadConnectionAsync(connection, ct);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Stores what a verification at Pluggy found, unless the person disconnected (or connected again) while Pluggy
+    /// was answering: then nothing is written and the verification answers as for a disconnected connection.
+    /// </summary>
+    private async Task SaveVerificationAsync(BankConnection connection, CancellationToken ct)
+    {
+        _repository.RequireSameCredentialsOnSave(connection);
+        try
+        {
+            await _repository.SaveChangesAsync(ct);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            throw Disconnected();
+        }
     }
 
     private void EnsureAvailable()
@@ -271,6 +306,11 @@ public sealed class OpenFinanceService
 
         return connection;
     }
+
+    private static ConflictException Disconnected()
+        => new(
+            "BANK_CONNECTION_DISCONNECTED",
+            "Esta conexão foi desconectada. Conecte de novo com o Client ID e o Client Secret para adicionar bancos.");
 
     private static NotFoundException AccountNotFound()
         => new("BANK_ACCOUNT_NOT_FOUND", "Conta bancária não encontrada.");

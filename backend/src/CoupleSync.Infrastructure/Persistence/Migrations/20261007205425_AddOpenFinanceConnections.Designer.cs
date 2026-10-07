@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CoupleSync.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261007193209_AddOpenFinanceConnections")]
+    [Migration("20261007205425_AddOpenFinanceConnections")]
     partial class AddOpenFinanceConnections
     {
         /// <inheritdoc />
@@ -154,6 +154,7 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                         .HasColumnName("client_id_hint");
 
                     b.Property<string>("ClientSecretEncrypted")
+                        .IsConcurrencyToken()
                         .HasMaxLength(1024)
                         .HasColumnType("character varying(1024)")
                         .HasColumnName("client_secret_encrypted");

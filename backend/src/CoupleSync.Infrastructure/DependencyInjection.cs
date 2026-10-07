@@ -145,8 +145,10 @@ public static class DependencyInjection
         services.AddSingleton<ICredentialCipher, AesGcmCredentialCipher>();
         services.AddMemoryCache();
         services.AddHttpClient(PluggyHttpClient.HttpClientName, c => c.Timeout = PluggyHttpClient.RequestTimeout)
-            // The API key travels in a header: it must not reach the log even with header logging (Trace) on.
-            .RedactLoggedHeaders([PluggyHttpClient.ApiKeyHeader]);
+            // The API key travels in a header: it must not reach the log even with header logging (Trace) on...
+            .RedactLoggedHeaders([PluggyHttpClient.ApiKeyHeader])
+            // ...nor follow a redirect to another address: a 3xx is an answer Pluggy does not give, and it fails.
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<IPluggyClient, PluggyHttpClient>();
     }
 }

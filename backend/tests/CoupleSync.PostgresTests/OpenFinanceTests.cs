@@ -342,6 +342,95 @@ public sealed class OpenFinanceTests
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM bank_connections"));
     }
 
+    // ---------------------------------------------------------------- disconnecting in the middle of something else
+
+    [PostgresFact]
+    public async Task DisconnectWhileAnItemIsBeingVerified_PluggyAnswersWithTheAccounts_TheVerificationGets409_AndWritesNothing()
+        => await DisconnectWhileVerifyingAsync(pluggyRefuses: false);
+
+    [PostgresFact]
+    public async Task DisconnectWhileAnItemIsBeingVerified_PluggyRefusesTheCredentials_TheVerificationGets409_AndWritesNothing()
+        => await DisconnectWhileVerifyingAsync(pluggyRefuses: true);
+
+    private async Task DisconnectWhileVerifyingAsync(bool pluggyRefuses)
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = WithOpenFinance(factory, pluggy);
+        var ana = await RegisterAsync(factory, host, "Ana");
+        var created = await ana.Client.PostAsJsonAsync($"{Base}/connections", NewConnection("Bancos da Ana"));
+        Assert.True(HttpStatusCode.Created == created.StatusCode, await created.Content.ReadAsStringAsync());
+        var connectionId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        if (pluggyRefuses) pluggy.DataStatus = HttpStatusCode.Forbidden;
+
+        // Pluggy holds its answer about the item until the test lets it go.
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answerNow = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        pluggy.BeforeAnswer = async request =>
+        {
+            if (!request.Path.StartsWith("/items/", StringComparison.Ordinal)) return;
+            asked.TrySetResult();
+            await answerNow.Task;
+        };
+
+        var verifying = ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
+        await asked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
+        answerNow.SetResult();
+
+        var answer = await verifying;
+        var raw = await answer.Content.ReadAsStringAsync();
+        Assert.True(HttpStatusCode.Conflict == answer.StatusCode, raw);
+        var error = JsonSerializer.Deserialize<JsonElement>(raw);
+        Assert.Equal("BANK_CONNECTION_DISCONNECTED", error.GetProperty("code").GetString());
+        Assert.Equal(
+            "Esta conexão foi desconectada. Conecte de novo com o Client ID e o Client Secret para adicionar bancos.",
+            error.GetProperty("message").GetString());
+
+        var row = Assert.Single(await database.RowsAsync(
+            "SELECT status, client_id_encrypted, client_secret_encrypted, client_id_hint, last_error_code, last_error_message FROM bank_connections"));
+        Assert.Equal(new object?[] { "Disconnected", null, null, null, null, null }, row);
+        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM bank_items"));
+        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM bank_accounts"));
+
+        // Nothing is stuck: the person connects again and the same item is verified.
+        pluggy.BeforeAnswer = null;
+        pluggy.DataStatus = null;
+        Assert.Equal(HttpStatusCode.Created, (await ana.Client.PostAsJsonAsync($"{Base}/connections", NewConnection("De volta"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts })).StatusCode);
+        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM bank_accounts"));
+    }
+
+    [PostgresFact]
+    public async Task ConnectingAgainSixTimesAtOnce_StoresOneSetOfCredentials_TheOthersGet409_AndDisconnectingAtOnceAlwaysErases()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        await using var host = WithOpenFinance(factory, new FakePluggyServer());
+        var ana = await RegisterAsync(factory, host, "Ana");
+        var created = await ana.Client.PostAsJsonAsync($"{Base}/connections", NewConnection("Bancos da Ana"));
+        var connectionId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        // Six disconnections at the same time: every one answers 204 and the credentials are gone.
+        var disconnections = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")));
+        Assert.All(disconnections, r => Assert.Equal(HttpStatusCode.NoContent, r.StatusCode));
+        Assert.Equal(new object?[] { "Disconnected", null, null },
+            Assert.Single(await database.RowsAsync("SELECT status, client_id_encrypted, client_secret_encrypted FROM bank_connections")));
+
+        // Six reconnections at the same time: the stored secret is a concurrency token, so exactly one is stored.
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6)
+            .Select(i => ana.Client.PostAsJsonAsync($"{Base}/connections", NewConnection($"Tentativa {i}"))));
+
+        var statuses = responses.Select(r => r.StatusCode).ToList();
+        Assert.Single(statuses, s => s == HttpStatusCode.Created);
+        Assert.Equal(5, statuses.Count(s => s == HttpStatusCode.Conflict));
+        var winner = await responses.Single(r => r.StatusCode == HttpStatusCode.Created).Content.ReadFromJsonAsync<JsonElement>();
+        var stored = Assert.Single(await database.RowsAsync("SELECT id, label, status FROM bank_connections"));
+        Assert.Equal(new object?[] { connectionId, winner.GetProperty("label").GetString(), "Active" }, stored);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static object NewConnection(string label) => new
