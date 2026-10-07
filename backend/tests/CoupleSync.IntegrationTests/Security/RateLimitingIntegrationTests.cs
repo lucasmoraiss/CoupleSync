@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -394,7 +395,7 @@ public sealed class RateLimitingIntegrationTests
 
     private sealed record ErrorDto(string Code, string Message, string TraceId);
 
-    private sealed class RateLimitWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class RateLimitWebApplicationFactory : TestApiFactory
     {
         public const string ProxyAddress = "10.0.0.1";
 

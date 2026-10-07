@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\TestEmailIsolation.cs" Link="TestEmailIsolation.cs" />
+    <Compile Include="..\Shared\TestApiFactory.cs" Link="TestApiFactory.cs" />
+    <Compile Include="..\Shared\TestHostGuardTests.cs" Link="TestHostGuardTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -254,7 +255,7 @@ public sealed class NotificationsIntegrationTests
     private sealed record AuthUserDto(Guid Id, string Email, string Name);
 }
 
-internal sealed class NotificationsWebApplicationFactory : WebApplicationFactory<Program>
+internal sealed class NotificationsWebApplicationFactory : TestApiFactory
 {
     public const string JwtSecret = "integration-test-secret-1234567890-abcdef";
     public const string JwtIssuer = "CoupleSync.IntegrationTests";

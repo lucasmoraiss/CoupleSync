@@ -5,6 +5,7 @@ using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Interfaces;
 using CoupleSync.Infrastructure.BackgroundJobs;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -22,7 +23,7 @@ namespace CoupleSync.PostgresTests;
 /// by <see cref="PostgresServer.Guard"/> before any context is built. Program.cs applies every migration from zero at
 /// startup, exactly as in production.
 /// </summary>
-internal sealed class PostgresApiFactory : WebApplicationFactory<Program>
+internal sealed class PostgresApiFactory : TestApiFactory
 {
     public const string JwtSecret = "postgres-test-secret-1234567890-abcdef";
     public const string JwtIssuer = "CoupleSync.PostgresTests";
@@ -46,6 +47,8 @@ internal sealed class PostgresApiFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("DATABASE_URL", _database.ConnectionString);
     }
 
+    protected override string DatabaseConnectionString => _database.ConnectionString;
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         SetEnvironment();
@@ -54,7 +57,6 @@ internal sealed class PostgresApiFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration((_, configBuilder) =>
         {
             configBuilder.AddInMemoryCollection(new Dictionary<string, string?>

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using CoupleSync.Api.Filters;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -107,7 +108,7 @@ public sealed class CoupleAuthorizationTests
 
     private sealed record ErrorDto(string Code, string Message, string TraceId);
 
-    private sealed class AuthorizationWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class AuthorizationWebApplicationFactory : TestApiFactory
     {
         // Use the same JWT constants as other integration test factories to avoid env-var race
         // conditions when multiple factories run in parallel within the same process.

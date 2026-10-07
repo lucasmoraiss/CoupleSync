@@ -7,6 +7,7 @@ using System.Text.Json;
 using CoupleSync.Api.Validators;
 using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using FluentValidation;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -106,7 +107,7 @@ public sealed class InvariantGlobalizationTests
     }
 }
 
-internal sealed class InvariantApiFactory : WebApplicationFactory<Program>
+internal sealed class InvariantApiFactory : TestApiFactory
 {
     private const string JwtSecret = "invariant-test-secret-1234567890-abcdef";
 

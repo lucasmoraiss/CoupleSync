@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using CoupleSync.Domain.Interfaces;
 using CoupleSync.Infrastructure.Integrations.Gemini;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -243,7 +244,7 @@ internal sealed class FakeChatGeminiAdapter : IGeminiAdapter
 
 // ── WebApplicationFactory ──────────────────────────────────────────────────
 
-internal sealed class ChatWebApplicationFactory : WebApplicationFactory<Program>
+internal sealed class ChatWebApplicationFactory : TestApiFactory
 {
     public const string JwtSecret = "integration-test-secret-1234567890-abcdef";
     public const string JwtIssuer = "CoupleSync.IntegrationTests";

@@ -1,5 +1,6 @@
 using CoupleSync.Api.Security;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -112,7 +113,7 @@ public sealed class JwtSecretStartupTests
     /// Boots the real Program with only the versioned appsettings.json ("Testing" environment,
     /// so no appsettings.Development.json) and the JWT secret given through JWT__SECRET.
     /// </summary>
-    private sealed class StartupWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class StartupWebApplicationFactory : TestApiFactory
     {
         private readonly string _databaseConnectionString = $"Data Source=couplesync-startup-tests-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         private readonly string? _previousSecret;
@@ -126,8 +127,6 @@ public sealed class JwtSecretStartupTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment("Testing");
-
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<DbContextOptions<AppDbContext>>();

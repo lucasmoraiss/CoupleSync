@@ -8,6 +8,7 @@ using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
 using CoupleSync.Infrastructure.BackgroundJobs;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -405,7 +406,7 @@ internal sealed class OcrIntegrationFakeOcrProvider : IOcrProvider
 
 // ── WebApplicationFactory ──────────────────────────────────────────────────
 
-internal sealed class OcrWebApplicationFactory : WebApplicationFactory<Program>
+internal sealed class OcrWebApplicationFactory : TestApiFactory
 {
     public const string JwtSecret   = "integration-test-secret-1234567890-abcdef";
     public const string JwtIssuer   = "CoupleSync.IntegrationTests";

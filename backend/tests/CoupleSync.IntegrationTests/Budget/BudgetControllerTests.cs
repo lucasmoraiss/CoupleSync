@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -511,7 +512,7 @@ public sealed class BudgetControllerTests
     private sealed record UpdateIncomeResponseDto(Guid PlanId, string Month, decimal GrossIncome, string Currency);
 }
 
-internal sealed class BudgetWebApplicationFactory : WebApplicationFactory<Program>
+internal sealed class BudgetWebApplicationFactory : TestApiFactory
 {
     public const string JwtSecret = "integration-test-secret-1234567890-abcdef";
     public const string JwtIssuer = "CoupleSync.IntegrationTests";
