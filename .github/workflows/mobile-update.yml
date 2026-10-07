@@ -119,14 +119,14 @@ jobs:
           fi
 
           echo "OTA_GROUP_ID=${GROUP_ID:-unknown}"
-          echo "OTA_BRANCH=${BRANCH:-${UPDATE_BRANCH}}"
+          echo "OTA_BRANCH=${BRANCH:-unknown}"
           {
             echo "## OTA publicado"
             echo ""
             echo "| | |"
             echo "| --- | --- |"
             echo "| Grupo da atualização | \`${GROUP_ID:-desconhecido}\` |"
-            echo "| Branch EAS | \`${BRANCH:-${UPDATE_BRANCH}}\` |"
+            echo "| Branch EAS | \`${BRANCH:-desconhecido (pedido: ${UPDATE_BRANCH})}\` |"
             echo "| Runtime | \`${RUNTIME:-desconhecido}\` |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
             echo ""

@@ -43,8 +43,10 @@ não dividir em outros jobs).
 
 - A conta `gh` ativa GLOBAL desta máquina é a do empregador do dono. **Nunca rodar `gh auth switch`.**
 - Todo comando para este repositório leva a conta pessoal no próprio comando:
-  - `GH_TOKEN=$(gh auth token --user lucasmoraiss) gh <comando> --repo lucasmoraiss/CoupleSync`
-  - `GH_TOKEN=$(gh auth token --user lucasmoraiss) git -c credential.helper= -c 'credential.helper=!f() { echo username=lucasmoraiss; echo password=$GH_TOKEN; }; f' push|fetch ...`
+  - `T=$(gh auth token --user lucasmoraiss) && [ -n "$T" ] && GH_TOKEN="$T" gh <comando> --repo lucasmoraiss/CoupleSync`
+  - `T=$(gh auth token --user lucasmoraiss) && [ -n "$T" ] && GH_TOKEN="$T" git -c credential.helper= -c 'credential.helper=!f() { echo username=lucasmoraiss; echo password=$GH_TOKEN; }; f' push|fetch ...`
+  - O `&&` é a trava: sem token da conta pessoal o comando não roda. Com `GH_TOKEN` vazio o `gh` usaria a conta
+    global (a do empregador) — isso nunca pode acontecer. Token vazio → parar e relatar.
 - Nunca imprimir o token. Autor dos commits: a identidade pessoal já configurada no repositório (não alterar).
 - Sessão na nuvem (sem essas contas): usar só a credencial que o ambiente entrega; a regra de não trocar de conta continua.
 - Nunca commitar em `main`, nunca reescrever histórico publicado, nunca mover tag. Trabalho entra por PR.

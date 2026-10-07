@@ -15,9 +15,12 @@
 # Uso (a partir da raiz do repositório, depois de buscar origin/main):  producao-fumaca.sh [commit-esperado]
 #
 # Saída:  0  tudo conferido (ou parcial, sem conta de demonstração)
-#         1  FALHA COMPROVADA: a API respondeu, e respondeu errado (saúde ou leitura falhando)
-#         3  NÃO CONFIRMADO: prazo esgotado, versão inesperada, sem resposta, conta recusada.
-#            É uma PARADA para o dono — nunca motivo para reverter sozinho.
+#         1  FALHA COMPROVADA (com essa linha na saída): a versão esperada está no ar e respondeu errado —
+#            erro 500, ou rota pública fora do contrato.
+#         3  NÃO CONFIRMADO: prazo esgotado, versão inesperada, sem resposta, indisponibilidade
+#            (429/502/503/504: proxy do Render ou banco fora do ar), conta de demonstração recusada ou sem
+#            grupo, parâmetro inválido. É uma PARADA para o dono — nunca motivo para reverter sozinho.
+#         Qualquer outra saída, ou saída 1 sem a linha "FALHA COMPROVADA:", é "sem resultado".
 #
 #   COUPLESYNC_API_URL        base da API (padrão: https://couplesync-api.onrender.com)
 #   COUPLESYNC_DEPLOY_WAIT    segundos de espera pelo deploy (padrão: 1200)
@@ -41,6 +44,9 @@ TOKEN=""
 fail() { echo "FALHA COMPROVADA: $*"; exit 1; }
 unconfirmed() { echo "NÃO CONFIRMADO: $*"; exit 3; }
 
+case "$WAIT$POLL" in *[!0-9]*|'') unconfirmed "COUPLESYNC_DEPLOY_WAIT e COUPLESYNC_DEPLOY_POLL precisam ser números inteiros" ;; esac
+[ "$POLL" -ge 1 ] || unconfirmed "COUPLESYNC_DEPLOY_POLL precisa ser pelo menos 1"
+
 # json_field <nome>: primeiro valor de texto de "nome" no JSON lido da entrada.
 json_field() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1; }
 
@@ -60,11 +66,20 @@ http_get() {
   echo "${out##*$'\n'} ${out%$'\n'*}"
 }
 
+# expect_status <rótulo> <status esperado> <resposta> [demo]
+# Indisponibilidade (sem resposta, 429, 502, 503, 504) nunca é falha comprovada: pode ser o proxy do Render ou
+# o banco fora do ar, sem relação com a entrega. Com "demo", 401/403 também não: é a conta (sem grupo, sessão).
 expect_status() {
-  local label="$1" status="$2" response="$3"
-  echo "$label -> HTTP ${response%% *}"
-  [ "${response%% *}" = "000" ] && unconfirmed "$label: sem resposta da API"
-  [ "${response%% *}" = "$status" ] || fail "$label: esperado HTTP $status"
+  local label="$1" status="$2" response="$3" kind="${4:-}" got
+  got="${response%% *}"
+  echo "$label -> HTTP $got"
+  [ "$got" = "$status" ] && return 0
+  case "$got" in
+    000) unconfirmed "$label: sem resposta da API" ;;
+    429|502|503|504) unconfirmed "$label: HTTP $got (indisponibilidade ou limite de requisições)" ;;
+    401|403) [ "$kind" = "demo" ] && unconfirmed "$label: HTTP $got — confira a conta de demonstração (ela precisa estar num grupo)" ;;
+  esac
+  fail "$label: esperado HTTP $status, veio HTTP $got"
 }
 
 commit_of() { git rev-parse --verify --quiet "$1^{commit}" 2>/dev/null || true; }
@@ -159,16 +174,16 @@ status="${out##*$'\n'}"
 echo "POST /api/v1/auth/login (conta de demonstração) -> HTTP $status"
 case "$status" in
   200) ;;
-  5*) fail "login da conta de demonstração: HTTP $status" ;;
-  *) unconfirmed "a API recusou a conta de demonstração (HTTP $status): confira as credenciais" ;;
+  500) fail "login da conta de demonstração: HTTP 500" ;;
+  *) unconfirmed "a API não aceitou a conta de demonstração (HTTP $status): confira as credenciais ou a disponibilidade" ;;
 esac
 TOKEN="$(printf '%s' "${out%$'\n'*}" | json_field accessToken)"
-[ -n "$TOKEN" ] || fail "login da conta de demonstração: resposta sem accessToken"
+[ -n "$TOKEN" ] || fail "login da conta de demonstração: resposta 200 sem accessToken"
 
-expect_status "GET /api/v1/auth/me" 200 "$(http_get /api/v1/auth/me)"
+expect_status "GET /api/v1/auth/me" 200 "$(http_get /api/v1/auth/me)" demo
 # As duas rotas abaixo exigem que a conta de demonstração pertença a um grupo (403 COUPLE_REQUIRED sem ele).
-expect_status "GET /api/v1/dashboard" 200 "$(http_get /api/v1/dashboard)"
-expect_status "GET /api/v1/transactions" 200 "$(http_get /api/v1/transactions)"
+expect_status "GET /api/v1/dashboard" 200 "$(http_get /api/v1/dashboard)" demo
+expect_status "GET /api/v1/transactions" 200 "$(http_get /api/v1/transactions)" demo
 
 echo "AUTENTICADO=ok"
 echo "FUMAÇA=ok"

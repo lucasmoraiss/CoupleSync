@@ -10,9 +10,10 @@ argument-hint: "[ota | apk | ota+apk] [mensagem]"
 
 # Publicar o app: $ARGUMENTS
 
-Ordem fixa: **API confirmada → OTA → APK**. `CLAUDE.md` vale inteiro; as PARADAS e a notação `ghp` / `gitp`
-da skill `entregar` valem aqui (conta pessoal no próprio comando, nunca `gh auth switch`, negação de permissão
-= parar e relatar).
+Ordem fixa: **API confirmada → OTA → APK**. `CLAUDE.md` vale inteiro; as PARADAS, a notação `ghp` / `gitp`, a
+regra das "Esperas longas" e a seção "Quem manda" da skill `entregar` valem aqui (conta pessoal no próprio
+comando, nunca `gh auth switch`, negação de permissão = parar e relatar, comando interrompido = sem resultado).
+Esta skill nunca reverte nada na API: fumaça com saída `1` ou `3` aqui é sempre parada, com o relato.
 
 Fatos: projeto EAS `@luuty/couplesync`; uma linha de atualização, branch EAS `production`; os canais
 `production` e `preview` apontam para ela e há APKs instalados nos dois — um OTA chega a TODOS os aparelhos.
@@ -24,11 +25,14 @@ Fatos: projeto EAS `@luuty/couplesync`; uma linha de atualização, branch EAS `
   `gitp fetch origin main` (`git rev-parse origin/main`). Na skill `entregar` ele tem de conter o commit do
   merge da entrega. Anote-o: todos os passos abaixo usam esse mesmo SHA, nunca "o que estiver em `main`".
 - A API em produção já atende esse commit:
-  `bash .claude/skills/entregar/scripts/producao-fumaca.sh <SHA>` com saída `0`. Saída `1` ou `3` → pare
-  (regras do passo 10 da skill `entregar`).
-- "Build & Test" verde nesse SHA:
-  `ghp api repos/lucasmoraiss/CoupleSync/commits/<SHA>/check-runs --jq '.check_runs[] | select(.name=="Build & Test") | .conclusion'` → `success`.
-- O diff desde o último OTA não muda o SDK do Expo (`expo` em `mobile/package.json`). Mudou → PARADA: decisão do dono.
+  `bash .claude/skills/entregar/scripts/producao-fumaca.sh <SHA>` com saída `0`. Qualquer outra saída → pare
+  e relate. (Dentro da skill `entregar`, quem decide o que fazer com a saída é o passo 10 dela, antes de chegar aqui.)
+- "Build & Test" verde nesse SHA — a execução mais recente, já terminada:
+  `ghp api repos/lucasmoraiss/CoupleSync/commits/<SHA>/check-runs --jq '[.check_runs[] | select(.name=="Build & Test")] | sort_by(.started_at) | last | {status, conclusion}'`
+  → `completed` / `success`. Ainda rodando: espere e consulte de novo. Outra conclusão, ou nenhuma execução → pare.
+- O diff desde o último OTA não muda o SDK do Expo. O commit do último OTA é o `headSha` da última execução
+  verde: `ghp run list --repo lucasmoraiss/CoupleSync --workflow mobile-update.yml --status success --limit 1 --json headSha`;
+  compare com `git diff <headSha> <SHA> -- mobile/package.json` (linha `"expo":`). Mudou → PARADA: decisão do dono.
 - Mudança nativa: o JavaScript novo guarda toda chamada nativa nova (o `revisor-final` conferiu) — o OTA vai
   chegar aos APKs antigos antes de qualquer pessoa instalar o novo.
 
@@ -57,7 +61,8 @@ ponha o roteiro de teste na issue de checkpoint do dono (passo 14 da skill `entr
 
 ## 2. APK (só com mudança nativa)
 
-1. Versão: `expo.version` em `mobile/app.json` de `main` tem de ser maior que a da última tag `v*`
+1. Versão: `expo.version` em `mobile/app.json` no `<SHA>` tem de ser maior que a da maior tag no formato exato
+   `vX.Y.Z` (ignore tags com sufixo, como `v1.0.0-pit`)
    (o `implementador` sobe a versão quando mexe em nativo). Não subiu → PARADA: vira um PR de correção, nunca
    um commit direto em `main`.
 2. Tag = `v<expo.version>`, no mesmo `<SHA>` do OTA. Confira que não existe:
