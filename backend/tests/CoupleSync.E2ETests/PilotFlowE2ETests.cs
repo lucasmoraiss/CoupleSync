@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -230,7 +231,7 @@ public sealed class PilotFlowE2ETests
 
     // ── WebApplicationFactory ── //
 
-    private sealed class E2EWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class E2EWebApplicationFactory : TestApiFactory
     {
         private const string JwtSecret = "e2e-test-secret-1234567890-abcdef-ghij";
         private const string JwtIssuer = "CoupleSync.E2ETests";

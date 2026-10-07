@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -10,7 +11,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 
 namespace CoupleSync.IntegrationTests;
 
@@ -239,7 +239,7 @@ public sealed class CoupleIntegrationSmokeTests
 
     private sealed record ErrorDto(string Code, string Message, string TraceId);
 
-    private sealed class CoupleIntegrationWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class CoupleIntegrationWebApplicationFactory : TestApiFactory
     {
         public const string JwtSecret = "integration-test-secret-1234567890-abcdef";
         public const string JwtIssuer = "CoupleSync.IntegrationTests";
@@ -255,13 +255,12 @@ public sealed class CoupleIntegrationSmokeTests
             Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
         }
 
-        protected override IHost CreateHost(IHostBuilder builder)
+        protected override void BeforeCreateHost()
         {
             // Re-apply env vars right before construction to guard against parallel test teardown races
             Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
             Environment.SetEnvironmentVariable("JWT__ISSUER", JwtIssuer);
             Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
-            return base.CreateHost(builder);
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

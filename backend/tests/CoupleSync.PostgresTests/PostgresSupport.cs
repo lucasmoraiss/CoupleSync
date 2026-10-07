@@ -7,7 +7,7 @@ namespace CoupleSync.PostgresTests;
 
 /// <summary>
 /// SAFETY: these tests only ever talk to the PostgreSQL container they start themselves. The machine's DATABASE_URL
-/// (which on a developer machine can point to the production cloud database) is wiped when the assembly loads, nothing
+/// (which on a developer machine can point to the production cloud database) is replaced by an unreachable value when the assembly loads (TestDatabaseIsolation), nothing
 /// reads .env or appsettings.Development.json (the host runs in the "Testing" environment), and every connection
 /// string handed to a host or a DbContext goes through <see cref="PostgresServer.Guard"/> first.
 /// </summary>
@@ -19,7 +19,6 @@ internal static class PostgresTestEnvironment
     [ModuleInitializer]
     internal static void Isolate()
     {
-        Environment.SetEnvironmentVariable("DATABASE_URL", null);
         Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", null);
     }
 

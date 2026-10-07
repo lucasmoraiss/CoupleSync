@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using CoupleSync.Api.Filters;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -12,7 +13,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 
 namespace CoupleSync.IntegrationTests.Authorization;
 
@@ -107,7 +107,7 @@ public sealed class CoupleAuthorizationTests
 
     private sealed record ErrorDto(string Code, string Message, string TraceId);
 
-    private sealed class AuthorizationWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class AuthorizationWebApplicationFactory : TestApiFactory
     {
         // Use the same JWT constants as other integration test factories to avoid env-var race
         // conditions when multiple factories run in parallel within the same process.
@@ -125,12 +125,11 @@ public sealed class CoupleAuthorizationTests
             Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
         }
 
-        protected override IHost CreateHost(IHostBuilder builder)
+        protected override void BeforeCreateHost()
         {
             Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
             Environment.SetEnvironmentVariable("JWT__ISSUER", JwtIssuer);
             Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
-            return base.CreateHost(builder);
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -176,7 +175,7 @@ public sealed class CoupleAuthorizationTests
             _keepAliveConnection?.Dispose();
             _keepAliveConnection = null;
             // Do NOT null out JWT env vars — nulling races with other parallel test class factories
-            // that call SetEnvironmentVariable then immediately read them in CreateHost.
+            // that call SetEnvironmentVariable then immediately read them when the host is built (BeforeCreateHost).
             // The env vars intentionally remain set for the lifetime of the test process.
         }
     }
