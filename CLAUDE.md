@@ -123,7 +123,7 @@ não dividir em outros jobs).
 - O pedido da issue está atendido, nada além dele, com teste que falhou antes e passa agora.
 - Todas as verificações acima verdes na ponta do branch, saída sem avisos novos; nenhuma suíte pulada.
 - `revisor` aprovou o diff inteiro, `revisor-final` deu "pode publicar" para um commit exato, e foi esse
-  commit que passou em "Build & Test" e entrou em `main`. Não há outra revisão: nem no GitHub, nem em aparelho.
+  commit que passou em "Build & Test" e em "App E2E" e entrou em `main`. Não há outra revisão: nem no GitHub, nem em aparelho.
 - Em produção: `/health` mostra o commit do merge; OTA/APK publicados quando o tipo da mudança exige.
 - A issue foi comentada com o que foi publicado e **o que ficou sem verificação**, e só então fechada.
   O que só um aparelho mostra foi para a issue de checkpoint do dono (rótulo `checkpoint`); ninguém espera por ele.

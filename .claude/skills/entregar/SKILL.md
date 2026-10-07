@@ -314,7 +314,8 @@ JavaScript ou nativa: siga a skill `publicar-app` (OTA; depois APK se nativa). S
     desta entrega: não reverta — PARADA 9.
   - Mudança SEM migration: abra o PR de reversão você mesmo — branch `reverte/<pr>` a partir de `origin/main`,
     `git revert -m 1 <commit-do-merge>`, push, PR, "Build & Test" verde, merge com `--match-head-commit`, e
-    confirme `/health` com o commit da reversão. Esta é a ÚNICA exceção à regra do SHA aprovado: uma reversão
+    confirme `/health` com o commit da reversão. A reversão NÃO espera "App E2E": é urgente e devolve `main`
+    a um estado em que os testes de tela já passaram; o resultado dela, se sair, entra no relato. Esta é a ÚNICA exceção à regra do SHA aprovado: uma reversão
     pura e sem conflito não passa pelos revisores, porque devolve `main` a um estado que já foi revisado.
     Reversão com conflito, ou que precise de qualquer edição à mão → não é reversão pura: PARADA 9, sem merge.
     Não publique OTA. Depois PARADA 9 com o relato.

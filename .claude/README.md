@@ -15,9 +15,10 @@ Também funciona pedir por extenso ("entregue a issue 7").
 issue → branch `entrega/<n>-...` → `implementador` → verificação local (todas as suítes, migrations, imagem,
 prebuild quando preciso) → `revisor` → correções com `re-revisor` (até 3 rodadas) → `revisor` de novo no diff
 inteiro → `polidor` → `revisor-final`, que aprova um commit exato → push e PR → CI "Build & Test" e
-"App E2E" (testes de tela no emulador) verdes → merge desse mesmo commit → espera `/health` mostrar o commit → fumaça de produção → OTA se mudou JavaScript → tag e
-APK se mudou nativo → comentário na issue com o que foi publicado e **o que ficou sem verificação** → o que
-depende de aparelho vai para a sua issue de checkpoint → issue fechada.
+"App E2E" (testes de tela no emulador) verdes → merge desse mesmo commit → espera `/health` mostrar o
+commit → fumaça de produção → OTA se mudou JavaScript → tag e APK se mudou nativo → comentário na issue com o
+que foi publicado e **o que ficou sem verificação** → o que depende de aparelho vai para a sua issue de
+checkpoint → issue fechada.
 
 | Arquivo | Para quê |
 | --- | --- |
