@@ -1,20 +1,30 @@
 name: Mobile — OTA Update
 
 # Runs on manual dispatch only: an OTA update replaces the JavaScript of every
-# installed app, so it is published deliberately, not on every push.
+# installed app, so it is published deliberately, not on every push — and only
+# after the API it talks to is confirmed in production (GET /health shows the commit).
 #
-# Uses EAS Update (Over-the-Air) — 100% free, unlimited pushes.
-# No native rebuild required; the installed APK fetches the new JS bundle
-# on next launch automatically.
+# One update line: EAS branch `production`. The channels `production` and `preview`
+# both point to it, so every installed APK receives the update.
 #
-# Required secret: EXPO_TOKEN
-#   expo.dev → Settings → Access Tokens → Create token
+# Required secrets: EXPO_TOKEN (expo.dev → Settings → Access Tokens)
+#                   EXPO_PUBLIC_API_BASE_URL (the production API base URL)
 
 on:
   workflow_dispatch:
+    inputs:
+      message:
+        description: 'Mensagem da atualização (aparece no EAS). Vazio: "ci: <commit>".'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
+
+concurrency:
+  group: mobile-ota-production
+  cancel-in-progress: false
 
 jobs:
   ota-update:
@@ -45,18 +55,52 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           # Must be set here so Metro inlines the correct production URL when
-          # bundling. eas.json build.preview.env only applies to `eas build`,
-          # NOT to `eas update`. Without this, process.env.EXPO_PUBLIC_API_BASE_URL
-          # is undefined and the app falls back to the emulator address (10.0.2.2:5000).
+          # bundling. The `env` of a build profile in eas.json only applies to
+          # `eas build`, NOT to `eas update`. Without this,
+          # process.env.EXPO_PUBLIC_API_BASE_URL is undefined and the app falls
+          # back to the emulator address (10.0.2.2:5000).
           # No hardcoded fallback: the job fails if the secret is not configured.
           EXPO_PUBLIC_API_BASE_URL: ${{ secrets.EXPO_PUBLIC_API_BASE_URL }}
+          # Passed through the environment, never interpolated into the script.
+          UPDATE_MESSAGE: ${{ inputs.message }}
+          UPDATE_BRANCH: production
         run: |
           if [ -z "${EXPO_PUBLIC_API_BASE_URL}" ]; then
             echo "::error::Secret EXPO_PUBLIC_API_BASE_URL is not set."
             exit 1
           fi
+          if [ -z "${UPDATE_MESSAGE}" ]; then
+            UPDATE_MESSAGE="ci: ${GITHUB_SHA}"
+          fi
+
+          # --json prints the published update(s) on stdout; progress goes to stderr.
           eas update \
             --platform android \
-            --branch production \
-            --message "ci: ${{ github.sha }}" \
-            --non-interactive
+            --branch "${UPDATE_BRANCH}" \
+            --message "${UPDATE_MESSAGE}" \
+            --non-interactive \
+            --json > "${RUNNER_TEMP}/eas-update.json"
+          cat "${RUNNER_TEMP}/eas-update.json"
+
+          # The update is already published at this point: a parsing problem below is a warning, not a failure.
+          GROUP_ID=$(jq -r 'if type == "array" then .[0] else . end | .group // empty' "${RUNNER_TEMP}/eas-update.json" 2>/dev/null || true)
+          BRANCH=$(jq -r 'if type == "array" then .[0] else . end | .branch // empty' "${RUNNER_TEMP}/eas-update.json" 2>/dev/null || true)
+          RUNTIME=$(jq -r 'if type == "array" then .[0] else . end | .runtimeVersion // empty' "${RUNNER_TEMP}/eas-update.json" 2>/dev/null || true)
+          if [ -z "${GROUP_ID}" ]; then
+            echo "::warning::Update published, but the group id could not be read from the EAS output above."
+          fi
+
+          echo "OTA_GROUP_ID=${GROUP_ID:-unknown}"
+          echo "OTA_BRANCH=${BRANCH:-${UPDATE_BRANCH}}"
+          {
+            echo "## OTA publicado"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Grupo da atualização | \`${GROUP_ID:-desconhecido}\` |"
+            echo "| Branch EAS | \`${BRANCH:-${UPDATE_BRANCH}}\` |"
+            echo "| Runtime | \`${RUNTIME:-desconhecido}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo ""
+            echo "Volta atrás: \`eas update:republish --group <grupo anterior>\`."
+          } >> "${GITHUB_STEP_SUMMARY}"

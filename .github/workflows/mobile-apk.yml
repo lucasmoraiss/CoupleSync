@@ -1,11 +1,14 @@
 name: Mobile APK — Build & Publish
 
-# Runs on manual dispatch and on version-tag pushes (v*). The backend is deployed
+# Runs on version-tag pushes (v*) and on manual dispatch. The backend is deployed
 # by the hosting platform (Render) straight from the repository, so there is no
 # deploy workflow to wait for.
 #
-# APK is uploaded as a GitHub Actions artifact for manual download.
-# Firebase App Distribution has been removed for the pilot (5 couples).
+# Every run uploads the APK as a workflow artifact. A run for a v* tag also
+# publishes it on the GitHub Release of that tag under the FIXED name
+# `couplesync.apk`, so this link always downloads the newest build:
+#   https://github.com/lucasmoraiss/CoupleSync/releases/latest/download/couplesync.apk
+# A manual dispatch from a branch builds and uploads the artifact only.
 #
 # Required secret: EXPO_TOKEN
 #   expo.dev → Settings → Access Tokens → Create token
@@ -16,7 +19,7 @@ on:
     tags:
       - 'v*'
 
-# Minimal permissions — no write access required
+# Read-only by default; only the release job below gets write access.
 permissions:
   contents: read
 
@@ -85,11 +88,53 @@ jobs:
           echo "apk_url=${APK_URL}" >> "$GITHUB_OUTPUT"
 
       - name: Download APK
-        run: curl -fsSL -o app-production.apk "${{ steps.get-apk.outputs.apk_url }}"
+        run: curl -fsSL -o couplesync.apk "${{ steps.get-apk.outputs.apk_url }}"
 
       - name: Upload APK as GitHub Actions artifact
         uses: actions/upload-artifact@v4
         with:
           name: couplesync-production-apk
-          path: app-production.apk
+          path: couplesync.apk
+          if-no-files-found: error
           retention-days: 30
+
+  # Only for v* tags: a manual dispatch from a branch stops at the artifact above.
+  publish-release:
+    name: GitHub Release — couplesync.apk
+    needs: build-apk
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: couplesync-production-apk
+
+      # Creates the Release on the first run for a tag; a re-run replaces the asset (same fixed name).
+      - name: Create or update the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            echo "Release ${TAG} already exists: replacing the asset."
+          else
+            gh release create "${TAG}" \
+              --verify-tag \
+              --latest \
+              --title "CoupleSync ${TAG}" \
+              --notes "APK Android do CoupleSync ${TAG}. Baixe o arquivo couplesync.apk abaixo e instale por cima do app atual."
+          fi
+          gh release upload "${TAG}" couplesync.apk --clobber
+
+          {
+            echo "## APK publicado"
+            echo ""
+            echo "- Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+            echo "- Link fixo (sempre o mais novo): ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/latest/download/couplesync.apk"
+          } >> "${GITHUB_STEP_SUMMARY}"
