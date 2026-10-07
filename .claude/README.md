@@ -78,7 +78,7 @@ no app com a sua conta).
 
 ### 3. Conta de demonstração (opcional, melhora a fumaça de produção)
 
-Uma conta de produção só de teste, num grupo só dela, cujo e-mail **começa com `demo`**. Guarde as credenciais
+Uma conta de produção só de teste, num grupo só dela, cujo e-mail tem **`demo` como palavra inteira antes do `@`** (por exemplo `demo.teste@...` ou `ana.demo.1@...`). Guarde as credenciais
 FORA do repositório, no arquivo `~/.couplesync/conta-demo` (ou em variáveis de ambiente com os mesmos nomes):
 
 ```

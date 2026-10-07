@@ -69,6 +69,9 @@ O arquivo de diff do branch inteiro contra `main` (commits, estatística, diff),
    - um achado Crítico ou Importante das rodadas não tem RESOLVIDO do `re-revisor`;
    - existe commit no branch (`git log --oneline origin/main..HEAD`) que nenhuma revisão cobriu — os commits de
      polimento contam como cobertos só se há um APROVADO do `revisor` para o diff do polimento.
+     Também contam como cobertos, depois de você conferir: commits de polimento junto com o `git revert`
+     deles, quando `git diff <ponta antes do polimento>..<ponta depois do revert>` é vazio; e um merge de
+     `origin/main` sem conflito, quando `git show <merge>` não mostra nenhuma alteração feita à mão.
 9. **Menores adiados.** Para cada um: corrigir antes do merge ou pode esperar (vira issue de backlog).
    Menor que o usuário percebe (texto errado, tela que confunde, erro sem mensagem) é para corrigir antes.
 10. **O que só um aparelho mostraria.** O dono só testa em checkpoints. Liste, para este branch, o que nenhum

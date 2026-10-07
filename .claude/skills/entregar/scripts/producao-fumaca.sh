@@ -30,7 +30,8 @@
 #   (ou COUPLESYNC_DEMO_FILE), uma linha CHAVE=valor cada:
 #     COUPLESYNC_DEMO_EMAIL, COUPLESYNC_DEMO_PASSWORD e
 #     COUPLESYNC_DEMO_ALLOW   o e-mail repetido por extenso: a única conta que este script pode usar.
-#   O script só entra se EMAIL for idêntico a ALLOW e a parte antes do @ começar com "demo".
+#   O script só entra se EMAIL for idêntico a ALLOW e a parte antes do @ tiver "demo" como palavra
+#   inteira (demo@, demo.ana@, ana.demo.123@ — separada por ponto, hífen, sublinhado ou +).
 set -euo pipefail
 
 BASE="${COUPLESYNC_API_URL:-https://couplesync-api.onrender.com}"
@@ -160,9 +161,9 @@ fi
 if [ -z "$email" ] || [ -z "$password" ] || [ "$email" != "$allow" ]; then
   unconfirmed "conta de demonstração incompleta ou COUPLESYNC_DEMO_ALLOW diferente do e-mail; nada foi enviado"
 fi
-case "$email" in
-  demo*@*) ;;
-  *) unconfirmed "a conta configurada não é de demonstração (a parte antes do @ precisa começar com 'demo'); nada foi enviado" ;;
+case "${email%%@*}@" in
+  demo@*|demo[._+-]*@*|*[._+-]demo@*|*[._+-]demo[._+-]*@*) ;;
+  *) unconfirmed "a conta configurada não é de demonstração (a parte antes do @ precisa ter 'demo' como palavra inteira); nada foi enviado" ;;
 esac
 
 json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }

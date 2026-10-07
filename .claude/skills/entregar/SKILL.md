@@ -20,6 +20,8 @@ Você é o **controlador** desta entrega. Você não escreve código de produto:
 Escreva o comando completo a cada chamada (o shell não guarda estado). Nunca `gh auth switch`. Nunca imprima o token.
 O `&&` importa: se a conta pessoal não devolver token, o comando NÃO roda — sem ele o `gh` cairia na conta
 global da máquina, que é a do empregador do dono. Token vazio ou erro nessa busca → PARADA 5.
+Única exceção: sessão na nuvem, onde essas contas não existem (`gh auth status` não lista nenhuma conta da
+máquina) — ali `ghp` e `gitp` são `gh` e `git` puros, com a credencial que o ambiente entrega.
 
 **Esperas longas.** Deploy, CI e builds passam do limite de um comando em primeiro plano. Rode esses comandos
 em segundo plano e espere o aviso de término (ou repita em janelas de até 8 minutos). Comando interrompido pelo
@@ -119,9 +121,26 @@ Rode na ponta do branch e grave comandos, saídas e o SHA verificado em `verific
 | `npx tsc --noEmit` e `npm test`, em `mobile/` | sempre |
 | `docker build` + `scripts/api-image-smoke-test.sh` normal e com `SMOKE_FORCE_INVARIANT=1` | o diff toca `backend/` |
 | `npx expo prebuild --no-install --platform android` em cópia temporária fora do repositório (só arquivos versionados; sem `.env*` e sem `google-services.json`), apagada depois | o diff toca `mobile/package.json`, `mobile/package-lock.json`, `mobile/app.json` ou `mobile/plugins/` |
-| Varredura de segredos e de dados reais: leia o diff inteiro (`git diff origin/main...HEAD`) e rode `git diff origin/main...HEAD \| grep -nEi 'password\|passwd\|senha\|secret\|token\|api[_-]?key\|authorization: \|BEGIN [A-Z ]*PRIVATE KEY\|Host=.*Password=\|postgres(ql)?://\|xkeysib-\|ghp_\|eyJ[A-Za-z0-9_-]{20}'` — cada linha encontrada precisa ser claramente valor de teste; nomes de arquivo novos não podem ser `.env*`, `appsettings.*.json` (fora `appsettings.json`) nem `google-services.json`; CPF, conta, cartão, e-mail ou nome de pessoa real → PARADA 4 | sempre |
+| Varredura de segredos e de dados reais: leia o diff inteiro e rode o comando A abaixo — cada linha encontrada precisa ser claramente valor de teste | sempre |
 | Migrations do diff: aditivas? backup antes de conversão sem volta? teste PostgreSQL de dados antigos? | o diff tem migration |
-| Nenhum teste removido nem pulado: `git diff origin/main...HEAD \| grep -nE '^-.*\[(Fact\|Theory)\|^-[[:space:]]*(it\|test)\(\|^\+.*(Skip[[:space:]]*=\|\.skip\(\|\bxit\(\|\bxdescribe\()'` vazio, ou cada linha com motivo escrito em `relatorio.md` (grave a saída em `verificacao.md`) | sempre |
+| Nenhum teste removido, pulado ou isolado: comando B abaixo sem saída, ou cada linha com motivo escrito em `relatorio.md`; o diff não tira projeto de teste de `backend/CoupleSync.sln` nem estreita `mobile/jest.config.js` | sempre |
+
+Os dois comandos da tabela, para copiar exatamente como estão (grave a saída de cada um em `verificacao.md`;
+sem saída é o resultado bom, então confira antes que `git diff origin/main...HEAD` não está vazio):
+
+```bash
+# A — segredos e dados reais
+git diff origin/main...HEAD | grep -nEi 'password|passwd|senha|secret|token|api[_-]?key|authorization: |BEGIN [A-Z ]*PRIVATE KEY|Host=.*Password=|postgres(ql)?://|xkeysib-|ghp_|eyJ[A-Za-z0-9_-]{20}'
+git diff --name-only origin/main...HEAD | grep -nEi '(^|/)\.env|appsettings\.[^/]+\.json$|google-services\.json$'
+```
+
+No comando A, a segunda linha não pode achar nada (arquivo proibido → PARADA 4). CPF, conta, cartão, e-mail ou
+nome de pessoa real em qualquer parte do diff → PARADA 4.
+
+```bash
+# B — teste removido, pulado ou isolado
+git diff origin/main...HEAD | grep -nE '^-.*\[(Fact|Theory)|^-[[:space:]]*(it|test)(\.each)?\(|^\+.*(Skip[[:space:]]*=|\.skip\(|\.only\(|\bfit\(|\bxit\(|\bxtest\(|\bxdescribe\()'
+```
 
 - Sem Docker na sessão: se o diff NÃO toca `backend/`, registre "PostgreSQL e imagem: delegados ao CI" e siga
   (o CI roda os dois como obrigatórios). Se toca `backend/` → PARADA 3.
@@ -154,8 +173,8 @@ Você não rebaixa achado, não discute gravidade com o revisor e não aprova no
 Despache `polidor` com a lista de arquivos alterados (`git diff --name-only origin/main...HEAD`), o intervalo de
 commits, os Menores adiados e `relatorio.md`.
 - `POLIDO`: confira que o diff do polimento só toca arquivos da lista e nada da lista proibida dele; rode o
-  passo 4 de novo; depois despache `revisor` só com o diff do polimento (`git diff <ponta-antes>..HEAD`),
-  `tarefa.md` e esta pergunta única: "este diff muda algum comportamento, contrato ou texto que o usuário vê?".
+  passo 4 de novo; depois despache `revisor` em modo polimento, com o diff do polimento
+  (`git diff <ponta-antes>..HEAD`), `tarefa.md`, `relatorio.md`, `verificacao.md` e esta pergunta única: "este diff muda algum comportamento, contrato ou texto que o usuário vê?".
   Só `APROVADO` mantém o polimento. Qualquer problema ou `MUDANÇAS NECESSÁRIAS`: `git revert` dos commits de
   polimento (commit novo, sem reescrever), passo 4 de novo, e siga sem eles — polimento não ganha rodada de correção.
 - `NADA_A_POLIR` / `RECUSADO`: siga.

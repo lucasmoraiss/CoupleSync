@@ -33,6 +33,7 @@ Fatos: projeto EAS `@luuty/couplesync`; uma linha de atualização, branch EAS `
 - O diff desde o último OTA não muda o SDK do Expo. O commit do último OTA é o `headSha` da última execução
   verde: `ghp run list --repo lucasmoraiss/CoupleSync --workflow mobile-update.yml --status success --limit 1 --json headSha`;
   compare com `git diff <headSha> <SHA> -- mobile/package.json` (linha `"expo":`). Mudou → PARADA: decisão do dono.
+  Nenhuma execução verde registrada: compare contra o commit da maior tag `vX.Y.Z` e diga isso no relato.
 - Mudança nativa: o JavaScript novo guarda toda chamada nativa nova (o `revisor-final` conferiu) — o OTA vai
   chegar aos APKs antigos antes de qualquer pessoa instalar o novo.
 
