@@ -8,8 +8,10 @@ import {
   formatBRLInput,
   openImportSummary,
   parseBRLInput,
+  isReviewLoading,
   seedReviewRows,
   sessionFor,
+  shouldSeedReview,
   validateReviewRows,
   unselectedCount,
   type ReviewRow,
@@ -255,5 +257,48 @@ describe('confirmar e continuar depois', () => {
         creditsCount: 0,
       }),
     ).toEqual({ title: 'Extrato', pending: '1 de 1 transação pendente' });
+  });
+});
+
+describe('M-I1 — reabrir a MESMA importação mostra as linhas de agora, não as da visita anterior', () => {
+  const state = (overrides: Partial<Parameters<typeof shouldSeedReview>[0]> = {}) => ({
+    hasData: true,
+    isFetching: false,
+    isError: false,
+    seeded: false,
+    ...overrides,
+  });
+
+  it('o defeito: com a resposta da visita anterior no cache e a busca nova em andamento, NÃO preenche', () => {
+    const revisit = state({ hasData: true, isFetching: true });
+    expect(shouldSeedReview(revisit)).toBe(false);
+    expect(isReviewLoading(revisit)).toBe(true);
+  });
+
+  it('preenche quando a resposta desta visita chega', () => {
+    expect(shouldSeedReview(state())).toBe(true);
+    expect(isReviewLoading(state())).toBe(false);
+  });
+
+  it('preenche uma vez só: as edições do usuário não são sobrescritas por renders ou buscas posteriores', () => {
+    expect(shouldSeedReview(state({ seeded: true }))).toBe(false);
+    expect(shouldSeedReview(state({ seeded: true, isFetching: true }))).toBe(false);
+    expect(isReviewLoading(state({ seeded: true, isFetching: true }))).toBe(false);
+  });
+
+  it('se a busca desta visita falha, a resposta antiga não é usada: a tela mostra o erro', () => {
+    const failed = state({ hasData: true, isError: true });
+    expect(shouldSeedReview(failed)).toBe(false);
+    expect(isReviewLoading(failed)).toBe(false);
+  });
+
+  it('primeira abertura (sem nada no cache): carregando até a resposta chegar', () => {
+    expect(isReviewLoading(state({ hasData: false, isFetching: true }))).toBe(true);
+    expect(shouldSeedReview(state({ hasData: false, isFetching: true }))).toBe(false);
+  });
+
+  it('depois de "confirmar e continuar depois", só as linhas ainda pendentes voltam', () => {
+    const lines = [candidate(0, 'A', 10), { ...candidate(1, 'B', 20), lineState: 'Confirmed' as const }, candidate(2, 'C', 30)];
+    expect(seedReviewRows(lines).map((row) => row.index)).toEqual([0, 2]);
   });
 });

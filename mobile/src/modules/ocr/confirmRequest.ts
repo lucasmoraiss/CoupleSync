@@ -199,6 +199,32 @@ export function sessionFor(session: ReviewSession, uploadId: string): ReviewSess
   return session.uploadId === uploadId ? session : emptyReviewSession(uploadId);
 }
 
+export interface ReviewLoadState {
+  /** Há uma resposta (desta visita ou guardada de uma visita anterior). */
+  readonly hasData: boolean;
+  /** Uma busca está em andamento. */
+  readonly isFetching: boolean;
+  /** A última busca falhou. */
+  readonly isError: boolean;
+  /** As linhas desta visita já foram preenchidas. */
+  readonly seeded: boolean;
+}
+
+/**
+ * Cada visita à revisão busca as linhas de novo (a tela é remontada e a consulta usa refetchOnMount "always").
+ * Enquanto a busca não termina pode existir, no cache, a resposta da visita ANTERIOR: preencher a partir dela
+ * mostraria como pendentes linhas que já foram importadas. As linhas só são preenchidas com a resposta que
+ * chegou para esta visita: sem busca em andamento e sem erro.
+ */
+export function shouldSeedReview(state: ReviewLoadState): boolean {
+  return state.hasData && !state.isFetching && !state.isError && !state.seeded;
+}
+
+/** A tela mostra "carregando" até as linhas desta visita estarem preenchidas (nunca as da visita anterior). */
+export function isReviewLoading(state: ReviewLoadState): boolean {
+  return !state.isError && !state.seeded && (state.isFetching || !state.hasData);
+}
+
 /** Linhas a revisar: só as que ainda estão pendentes (as já confirmadas ou descartadas não voltam). */
 export function seedReviewRows(candidates: readonly OcrCandidateResponse[]): ReviewRow[] {
   return candidates

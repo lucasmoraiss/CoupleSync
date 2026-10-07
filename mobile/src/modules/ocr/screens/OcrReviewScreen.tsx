@@ -27,9 +27,11 @@ import {
   creditsLabel,
   emptyReviewSession,
   formatBRLInput,
+  isReviewLoading,
   parseBRLInput,
   seedReviewRows,
   sessionFor,
+  shouldSeedReview,
   validateReviewRows,
   type ReviewRow,
   type ReviewSession,
@@ -99,21 +101,27 @@ export default function OcrReviewScreen({ uploadId }: Props) {
     [uploadId],
   );
 
-  const { data, isLoading, isError, error: loadError, refetch } = useQuery({
+  const { data, isFetching, isError, error: loadError, refetch } = useQuery({
     queryKey: ['ocr-results', uploadId],
     queryFn: () => ocrApiClient.getResults(uploadId).then((r) => r.data),
     staleTime: Infinity,
-    // Leaving the screen drops the cache: reopening a partly confirmed import must load its current lines.
     gcTime: 0,
+    // The screen is remounted on every visit (see app/(main)/ocr-review.tsx): each visit loads the lines as they
+    // are on the server now. A cached answer of the previous visit can survive the remount, so it is never trusted.
+    refetchOnMount: 'always',
     retry: 1,
   });
 
-  // Seed editable rows once per import; the guard keeps the user's edits on later renders.
+  const loadState = { hasData: !!data, isFetching, isError, seeded: session.seeded };
+  const seedNow = shouldSeedReview(loadState);
+
+  // Seed editable rows once per visit, from the answer fetched for this visit; the guard keeps the user's
+  // edits on later renders.
   useEffect(() => {
-    if (data && !session.seeded) {
+    if (data && seedNow) {
       setStoredSession({ uploadId, rows: seedReviewRows(data.candidates), seeded: true });
     }
-  }, [data, session.seeded, uploadId]);
+  }, [data, seedNow, uploadId]);
 
   const creditsCount = data?.creditsCount ?? data?.credits?.length ?? 0;
 
@@ -223,7 +231,7 @@ export default function OcrReviewScreen({ uploadId }: Props) {
   const allSelected = rows.length > 0 && rows.every((r) => r.selected);
 
   // ─── Loading state ─────────────────────────────────────────────────────────
-  if (isLoading) {
+  if (isReviewLoading(loadState)) {
     return (
       <SafeAreaView style={styles.container}>
         <LoadingState message="Carregando resultados..." />
