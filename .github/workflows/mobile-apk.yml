@@ -74,9 +74,10 @@ jobs:
         working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          BUILD_ID: ${{ steps.eas-build.outputs.build_id }}
         run: |
           APK_URL=$(eas build:view \
-            "${{ steps.eas-build.outputs.build_id }}" \
+            "${BUILD_ID}" \
             --json \
             | jq -r '.artifacts.buildUrl')
 
@@ -87,8 +88,11 @@ jobs:
 
           echo "apk_url=${APK_URL}" >> "$GITHUB_OUTPUT"
 
+      # Step outputs reach the script through the environment, never interpolated into it.
       - name: Download APK
-        run: curl -fsSL -o couplesync.apk "${{ steps.get-apk.outputs.apk_url }}"
+        env:
+          APK_URL: ${{ steps.get-apk.outputs.apk_url }}
+        run: curl -fsSL --proto '=https' -o couplesync.apk "${APK_URL}"
 
       - name: Upload APK as GitHub Actions artifact
         uses: actions/upload-artifact@v4

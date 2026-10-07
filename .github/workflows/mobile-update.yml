@@ -7,12 +7,20 @@ name: Mobile — OTA Update
 # One update line: EAS branch `production`. The channels `production` and `preview`
 # both point to it, so every installed APK receives the update.
 #
+# The run publishes ONE exact commit: the `commit` input must be the full SHA at the tip
+# of `main` when the run starts. `main` can move between the smoke test of the API and
+# this dispatch; a run that would publish anything else stops before bundling.
+#
 # Required secrets: EXPO_TOKEN (expo.dev → Settings → Access Tokens)
 #                   EXPO_PUBLIC_API_BASE_URL (the production API base URL)
 
 on:
   workflow_dispatch:
     inputs:
+      commit:
+        description: 'SHA completo (40 caracteres) do commit de main a publicar. A execução para se a ponta de main for outra.'
+        required: true
+        type: string
       message:
         description: 'Mensagem da atualização (aparece no EAS). Vazio: "ci: <commit>".'
         required: false
@@ -33,8 +41,28 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # Before anything that can read a secret: only `main`, and only the commit that was asked for.
+      - name: Check that this run publishes the expected commit of main
+        env:
+          EXPECTED_COMMIT: ${{ inputs.commit }}
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::OTA updates are published from main only (this run is on ${GITHUB_REF})."
+            exit 1
+          fi
+          if ! printf '%s' "${EXPECTED_COMMIT}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::The 'commit' input must be a full 40-character commit SHA."
+            exit 1
+          fi
+          if [ "${GITHUB_SHA}" != "${EXPECTED_COMMIT}" ]; then
+            echo "::error::main is at ${GITHUB_SHA}, not at the expected ${EXPECTED_COMMIT}. Nothing was published."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
