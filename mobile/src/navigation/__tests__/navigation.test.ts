@@ -97,6 +97,13 @@ describe('voltar das abas ocultas (M-I2)', () => {
     expect(screen.match(/\.isMine\b/g)).toHaveLength(1);
   });
 
+  it('Open Finance: na tela de gestão, o texto de saldo e limite (com a data da leitura) vem da regra testada (accountBalanceText)', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/\{accountBalanceText\(account, formatMoney\)\}/);
+    expect(screen).not.toContain('Fatura atual');
+    expect(screen).not.toContain('Limite disponível');
+  });
+
   it('Open Finance: no passo 3 do wizard, o que fazer quando a conexão já existe vem da regra testada', () => {
     const wizard = read('(main)/settings/openfinance/wizard.tsx');
     expect(wizard).toMatch(/await existingConnectionAfterCreateError\(getApiErrorCode\(err\), /);

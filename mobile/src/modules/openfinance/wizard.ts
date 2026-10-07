@@ -4,6 +4,7 @@
 // O progresso guardado no aparelho tem SÓ o passo e campos não sensíveis. O Client ID, o Client Secret e os
 // Item IDs digitados ficam apenas na memória da tela e são descartados quando ela perde o foco (resetOnFocus).
 import { getApiErrorCode, getApiErrorStatus } from '@/services/apiError';
+import { formatBrazilDate } from '@/utils/brazilDateTime';
 import type { BankAccountResponse, BankConnectionResponse, OpenFinanceStatusResponse } from '@/types/api';
 
 export const MEU_PLUGGY_URL = 'https://meu.pluggy.ai';
@@ -274,6 +275,26 @@ const SUBTYPE_LABELS: Readonly<Record<string, string>> = {
 export function describeAccount(account: Pick<BankAccountResponse, 'type' | 'subtype' | 'numberMasked'>): string {
   const kind = (account.subtype && SUBTYPE_LABELS[account.subtype]) || (account.type === 'CREDIT' ? 'cartão' : 'conta');
   return account.numberMasked ? `${kind} ····${account.numberMasked}` : kind;
+}
+
+/**
+ * Linha de saldo (e limite) de uma conta na tela de gestão, com a data em que a API leu os valores
+ * (`balanceAtUtc`, dia de Brasília). Não afirma o que o saldo de um cartão significa (fatura ou outro valor):
+ * o rótulo é neutro. `formatMoney` vem da tela (Intl do aparelho). Sem data válida, o texto vem sem a data.
+ */
+export function accountBalanceText(
+  account: Pick<BankAccountResponse, 'type' | 'balance' | 'currency' | 'availableCreditLimit' | 'balanceAtUtc'>,
+  formatMoney: (value: number, currency: string) => string,
+): string {
+  const label = account.type === 'CREDIT' ? 'Saldo do cartão' : 'Saldo';
+  let text = `${label}: ${formatMoney(account.balance, account.currency)}`;
+  if (account.availableCreditLimit !== null) {
+    text += ` · Limite disponível: ${formatMoney(account.availableCreditLimit, account.currency)}`;
+  }
+  if (account.balanceAtUtc && !Number.isNaN(Date.parse(account.balanceAtUtc))) {
+    text += ` · lido em ${formatBrazilDate(account.balanceAtUtc)}`;
+  }
+  return text;
 }
 
 /** "Banco Exemplo · conta corrente ····1234 · cartão ····5678". */

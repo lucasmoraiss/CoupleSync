@@ -21,6 +21,7 @@ import {
   existingConnectionAfterCreateError,
   itemStatusNote,
   statusWhenRouteMissing,
+  accountBalanceText,
   describeAccount,
   describeItemAccounts,
   isOpenFinanceAvailable,
@@ -373,5 +374,37 @@ describe('textos e links do wizard', () => {
 
   it('o wizard termina avisando que a sincronização vem na próxima atualização', () => {
     expect(WIZARD_DONE_MESSAGE).toBe('Conexão pronta. A sincronização chega na próxima atualização do app.');
+  });
+});
+
+describe('saldo e limite na tela de gestão, com a data em que foram lidos', () => {
+  // Formatador falso: o teste não depende do Intl do aparelho.
+  const money = (value: number, currency: string) => `${currency} ${value.toFixed(2).replace('.', ',')}`;
+
+  it('conta: "Saldo", com a data da leitura em horário de Brasília', () => {
+    expect(accountBalanceText(account({ balance: 10, balanceAtUtc: '2026-10-07T12:00:00Z' }), money)).toBe(
+      'Saldo: BRL 10,00 · lido em 07/10/2026',
+    );
+    // 01:00 UTC ainda é o dia anterior em Brasília.
+    expect(accountBalanceText(account({ balanceAtUtc: '2026-10-07T01:00:00Z' }), money)).toBe('Saldo: BRL 10,00 · lido em 06/10/2026');
+  });
+
+  it('cartão: rótulo neutro "Saldo do cartão" (não afirma que é a fatura), limite disponível e data', () => {
+    const text = accountBalanceText(
+      account({ type: 'CREDIT', subtype: 'CREDIT_CARD', balance: 250, availableCreditLimit: 750, balanceAtUtc: '2026-10-07T12:00:00Z' }),
+      money,
+    );
+    expect(text).toBe('Saldo do cartão: BRL 250,00 · Limite disponível: BRL 750,00 · lido em 07/10/2026');
+    expect(text).not.toContain('Fatura');
+  });
+
+  it('sem data (vazia ou inválida): o texto vem sem a parte da data', () => {
+    expect(accountBalanceText(account({ balanceAtUtc: '' }), money)).toBe('Saldo: BRL 10,00');
+    expect(accountBalanceText(account({ balanceAtUtc: 'ontem' }), money)).toBe('Saldo: BRL 10,00');
+  });
+
+  it('limite disponível zero ainda aparece; sem limite, não', () => {
+    expect(accountBalanceText(account({ availableCreditLimit: 0 }), money)).toContain('Limite disponível: BRL 0,00');
+    expect(accountBalanceText(account({ availableCreditLimit: null }), money)).not.toContain('Limite');
   });
 });

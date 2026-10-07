@@ -28,6 +28,7 @@ import { useWizardStore } from '@/modules/openfinance/wizardStore';
 import {
   UNAVAILABLE_TEXT,
   UNAVAILABLE_TITLE,
+  accountBalanceText,
   connectionControls,
   connectionErrorHelp,
   connectionStatusLabel,
@@ -219,12 +220,7 @@ export default function OpenFinanceScreen() {
                         <View style={styles.accountInfo}>
                           <Text style={styles.accountName}>{account.name || account.marketingName || 'Conta'}</Text>
                           <Text style={styles.muted}>{describeAccount(account)}</Text>
-                          <Text style={styles.muted}>
-                            {account.type === 'CREDIT' ? 'Fatura atual' : 'Saldo'}: {formatMoney(account.balance, account.currency)}
-                            {account.availableCreditLimit !== null
-                              ? ` · Limite disponível: ${formatMoney(account.availableCreditLimit, account.currency)}`
-                              : ''}
-                          </Text>
+                          <Text style={styles.muted}>{accountBalanceText(account, formatMoney)}</Text>
                           {!controls.syncSwitch ? (
                             <Text style={styles.muted}>{account.syncEnabled ? 'Sincroniza' : 'Não sincroniza'}</Text>
                           ) : null}
