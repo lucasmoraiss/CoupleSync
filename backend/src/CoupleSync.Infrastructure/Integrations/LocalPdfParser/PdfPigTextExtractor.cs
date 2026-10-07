@@ -13,11 +13,27 @@ public class PdfPigTextExtractor : IPdfTextExtractor
     /// <summary>Reading one PDF may take at most this long; PdfPig is synchronous and cannot be cancelled mid-page.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
-    protected virtual int MaxPages => DefaultMaxPages;
+    private readonly int _maxPages;
+    private readonly TimeSpan _timeout;
 
-    protected virtual TimeSpan Timeout => DefaultTimeout;
+    public PdfPigTextExtractor() : this(DefaultMaxPages, DefaultTimeout)
+    {
+    }
 
-    public string ExtractText(Stream pdfStream)
+    public PdfPigTextExtractor(int maxPages, TimeSpan timeout)
+    {
+        _maxPages = maxPages;
+        _timeout = timeout;
+    }
+
+    protected virtual int MaxPages => _maxPages;
+
+    protected virtual TimeSpan Timeout => _timeout;
+
+    public string ExtractText(Stream pdfStream) => ExtractTextWithPageCount(pdfStream).Text;
+
+    /// <summary>Same as <see cref="ExtractText"/>, also telling how many pages the document had.</summary>
+    public PdfTextResult ExtractTextWithPageCount(Stream pdfStream)
     {
         // The work runs on a pool thread so that a PDF that never finishes parsing cannot hold the
         // caller (the import worker) past the time limit; the page loop also stops by itself.
@@ -46,7 +62,7 @@ public class PdfPigTextExtractor : IPdfTextExtractor
         }
     }
 
-    private string ReadAllPages(Stream pdfStream, CancellationToken cancellation)
+    private PdfTextResult ReadAllPages(Stream pdfStream, CancellationToken cancellation)
     {
         using var document = OpenDocument(pdfStream);
 
@@ -62,8 +78,11 @@ public class PdfPigTextExtractor : IPdfTextExtractor
             sb.AppendLine(page.Text);
         }
 
-        return sb.ToString();
+        return new PdfTextResult(sb.ToString(), document.NumberOfPages);
     }
 
     protected virtual PdfDocument OpenDocument(Stream stream) => PdfDocument.Open(stream);
 }
+
+/// <summary>The text of a PDF and the number of pages it was read from.</summary>
+public readonly record struct PdfTextResult(string Text, int Pages);
