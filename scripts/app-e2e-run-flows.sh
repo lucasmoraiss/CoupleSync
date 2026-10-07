@@ -3,7 +3,9 @@
 # the test API already answering on this machine (scripts/app-e2e-api.sh start).
 #
 # - waits until Android is really ready (boot flags, package manager, a focused window, load settling) and
-#   closes system dialogs ("... isn't responding") that a slow emulator shows right after boot;
+#   closes error dialogs of OTHER packages ("System UI isn't responding") that a slow emulator shows;
+# - a crash or an ANR of the APP UNDER TEST — seen as a dialog or in the system log — is never waved away:
+#   it is recorded, shown at the top of the summary, and the run ends red even if every flow passed;
 # - installs the test APK (scripts/app-e2e-build-apk.sh) and the notification test double
 #   (scripts/app-e2e-notification-stub.sh);
 # - WARM-UP: opens the app once and waits for the login screen. If it does not appear, the reason is printed
@@ -20,7 +22,7 @@
 #
 # Usage: scripts/app-e2e-run-flows.sh
 #        E2E_APK, E2E_STUB_APK, E2E_EVIDENCE_DIR and E2E_API_PORT override the defaults below.
-#        E2E_BUDGET_SECONDS (default 1980) is the time the whole script may take.
+#        E2E_BUDGET_SECONDS (default 1320) is the time the whole script may take.
 #        Needs adb and maestro on PATH and exactly one device (or ANDROID_SERIAL set).
 set -uo pipefail
 
@@ -56,11 +58,15 @@ FLOW_NAMES=(
 INFORMATIONAL_FLOWS=()
 
 # Time. The whole script has a budget; what is left of it caps each Maestro run.
-BUDGET_SECONDS="${E2E_BUDGET_SECONDS:-1980}"
+BUDGET_SECONDS="${E2E_BUDGET_SECONDS:-1320}"
 FLOW_TIMEOUT_SECONDS=600        # one Maestro run (a normal flow takes 1 to 3 minutes)
 SYSTEM_READY_TIMEOUT_SECONDS=180
-SETTLE_TIMEOUT_SECONDS=90       # after boot, wait at most this long for the load to drop
-SETTLE_LOAD=6                   # 1-minute load average of the emulator considered "settled"
+# After boot the emulator is busy with first-boot work. The wait ends when the 1-minute load drops below
+# SETTLE_LOAD or, at the latest, after SETTLE_TIMEOUT_SECONDS. On the hosted runner (3 cores) the load was
+# still 12 after the whole wait in the run that passed: there this is, in practice, a fixed pause of 90 s —
+# the one configuration proven to work, so it is kept as it is. The log says which of the two ended the wait.
+SETTLE_TIMEOUT_SECONDS=90
+SETTLE_LOAD=6
 WARMUP_TIMEOUT_SECONDS=240      # first launch of a release build on a software-rendered emulator is slow
 STARTED_AT="$(date +%s)"
 
@@ -99,41 +105,124 @@ screen_texts() {
   printf '%s' "$xml" | grep -oE '(text|content-desc)="[^"]+"' | sort -u
 }
 
-# System dialogs that cover every app until someone answers them. Closes them and leaves a record.
+# ── Error dialogs ("X isn't responding", "X keeps stopping") ───────────────────────────────────────────────
+# They cover every app until someone answers them. Two very different cases:
+#   - the dialog is about ANOTHER package (System UI, the launcher, Google Play services... on a slow emulator
+#     right after boot): it is closed, counted and reported as a warning, and the run goes on;
+#   - the dialog is about the APP UNDER TEST, or its owner cannot be told: that is the defect these tests
+#     exist to catch. It is recorded as an app problem and the run ends RED, whatever the flows do afterwards.
+# The dialogs are windows named "Application Not Responding: <process>" / "Application Error: <process>" in
+# `dumpsys window windows`. (The focused window is not a reliable sign: the dialog is often on the screen while
+# the window "in focus" is still the app behind it.)
 SYSTEM_DIALOGS=0
+APP_PROBLEMS=()
+
+# error_dialogs: one line per error dialog on the screen now, "<kind>: <owner process>".
+error_dialogs() {
+  device dumpsys window windows \
+    | grep -oE 'Window\{[^}]*Application (Not Responding|Error):[^}]*\}' \
+    | sed -E 's/^.*(Application (Not Responding|Error)): *([^}]*)\}$/\1: \3/' | sort -u
+}
+
+# is_app_dialog <line of error_dialogs>: true when it is about the app under test — or about nobody we can name.
+is_app_dialog() {
+  local owner="${1##*: }"
+  [ -z "$owner" ] || [ "$owner" = "$1" ] || [ "$owner" = "$APP_ID" ] || [ "${owner#"$APP_ID":}" != "$owner" ]
+}
+
+# record_app_problem <context> <what>: keeps it for the summary and the exit code, with the evidence of now.
+record_app_problem() {
+  local context="$1" what="$2" n=$(( ${#APP_PROBLEMS[@]} + 1 ))
+  APP_PROBLEMS+=("$what ($context)")
+  echo "::error::Problem of the app under test — $what ($context). The run will end red."
+  adb exec-out screencap -p > "$EVIDENCE/diagnostics/app-problem-$n.png" 2>/dev/null || true
+  {
+    echo "$(date -u +%H:%M:%S) $context: $what"
+    echo "on the screen: $(screen_texts "$EVIDENCE/diagnostics/app-problem-$n.xml" | sed -n '1,12p' | tr '\n' ' ')"
+    adb logcat -b crash -d -t 40 2>/dev/null | tr -d '\r'
+    adb logcat -d -v time 2>/dev/null | tr -d '\r' | grep -E "ANR in|Reason: |$APP_ID.*(has died|crash)" | tail -n 20
+  } > "$EVIDENCE/diagnostics/app-problem-$n.txt" 2>&1
+  sed -n '1,25s/^/     /p' "$EVIDENCE/diagnostics/app-problem-$n.txt"
+}
+
+# tap_dialog_button <button text...>: taps the first of these buttons found on the screen. 1 when none is there.
+tap_dialog_button() {
+  local xml="$EVIDENCE/diagnostics/dialog-window.xml" label numbers
+  screen_texts "$xml" >/dev/null
+  for label in "$@"; do
+    numbers="$(grep -oE "text=\"$label\"[^>]*bounds=\"\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]\"" "$xml" 2>/dev/null \
+      | sed -n '1p' | grep -oE '\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | tr -c '0-9\n' ' ')"
+    if [ -n "$numbers" ]; then
+      # shellcheck disable=SC2086
+      set -- $numbers
+      echo "tapping \"$label\" at $(( ($1 + $3) / 2 )),$(( ($2 + $4) / 2 ))"
+      device input tap "$(( ($1 + $3) / 2 ))" "$(( ($2 + $4) / 2 ))"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# dismiss_system_dialogs <context>: looks for error dialogs, records each one and closes it (a dialog of the
+# app is closed too — after being recorded — so that the rest of the run can still be diagnosed).
 dismiss_system_dialogs() {
-  local context="$1" focus attempt bounds x y
+  local context="$1" dialogs dialog attempt says=""
   for attempt in 1 2 3; do
-    focus="$(focused_window)"
-    case "$focus" in
-      *"Application Not Responding"*|*"Application Error"*|*"isn't responding"*|*"not responding"*) ;;
-      *) return 0 ;;
-    esac
-    SYSTEM_DIALOGS=$((SYSTEM_DIALOGS + 1))
-    echo "::warning::System dialog on the screen ($context, attempt $attempt): $focus"
-    echo "$(date -u +%H:%M:%S) $context: $focus" >> "$EVIDENCE/diagnostics/system-dialogs.txt"
-    adb exec-out screencap -p > "$EVIDENCE/diagnostics/system-dialog-$SYSTEM_DIALOGS.png" 2>/dev/null || true
-    # First the polite way (error dialogs listen to it), then the "Wait" button itself.
+    dialogs="$(error_dialogs)"
+    [ -n "$dialogs" ] || return 0
+    while IFS= read -r dialog <&3; do
+      [ -n "$dialog" ] || continue
+      if is_app_dialog "$dialog"; then
+        # Recorded once per dialog, not once per attempt to close it.
+        [ "$attempt" = "1" ] && record_app_problem "$context" "diálogo do sistema \"$dialog\""
+      else
+        if [ "$attempt" = "1" ]; then
+          SYSTEM_DIALOGS=$((SYSTEM_DIALOGS + 1))
+          adb exec-out screencap -p > "$EVIDENCE/diagnostics/system-dialog-$SYSTEM_DIALOGS.png" 2>/dev/null || true
+          # What the dialog says (title, buttons), with its hierarchy kept next to the screenshot.
+          says="$(screen_texts "$EVIDENCE/diagnostics/system-dialog-$SYSTEM_DIALOGS.xml" | sed -n '1,12p' | tr '\n' ' ')"
+          echo "$(date -u +%H:%M:%S) $context: $dialog | on the screen: $says" >> "$EVIDENCE/diagnostics/system-dialogs.txt"
+        fi
+        echo "::warning::System dialog of another package on the screen ($context, attempt $attempt): $dialog | on the screen: $says"
+      fi
+    done 3<<< "$dialogs"   # descriptor 3: adb reads the standard input and would swallow the list
+    # The polite way first (error dialogs listen to it); then the buttons: "Wait", and on the last attempt
+    # "Close app". A key press is never sent: with the dialog gone it would land on the app.
     device am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
     sleep 2
-    case "$(focused_window)" in
-      *"Not Responding"*|*"Application Error"*|*"responding"*)
-        bounds="$(screen_texts "$EVIDENCE/diagnostics/system-dialog-$SYSTEM_DIALOGS.xml" >/dev/null;
-                  grep -oE 'text="(Wait|Aguardar)"[^>]*bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' \
-                    "$EVIDENCE/diagnostics/system-dialog-$SYSTEM_DIALOGS.xml" 2>/dev/null | grep -oE '[0-9]+' | tr '\n' ' ')"
-        if [ -n "$bounds" ]; then
-          # shellcheck disable=SC2086
-          set -- $bounds
-          x=$(( ($1 + $3) / 2 )); y=$(( ($2 + $4) / 2 ))
-          echo "tapping the Wait button at $x,$y"
-          device input tap "$x" "$y"
-        else
-          device input keyevent KEYCODE_ENTER
-        fi
-        sleep 2
-        ;;
-    esac
+    if [ -n "$(error_dialogs)" ]; then
+      if [ "$attempt" = "3" ]; then
+        tap_dialog_button "Close app" "Fechar app" "Wait" "Aguardar" || true
+      else
+        tap_dialog_button "Wait" "Aguardar" || true
+      fi
+      sleep 2
+    fi
   done
+  dialogs="$(error_dialogs)"
+  [ -z "$dialogs" ] || echo "::warning::Error dialog still on the screen after three attempts ($context): $dialogs"
+  return 0
+}
+
+# check_app_health <context>: a crash or an ANR of the app under test since the last check, as the system
+# logged it — whether or not a dialog was (still) on the screen when we looked. Read from the logcat file this
+# script records from its start, so nothing is lost when the device buffer rotates. Only lines stamped after
+# the start of the script count (LOG_START, device clock): the buffer may still hold older ones.
+LOG_START=""
+# Lines of the recorded logcat ("MM-DD HH:MM:SS.mmm ...") stamped at or after LOG_START.
+lines_since_start() {
+  awk -v start="$LOG_START" '{ sub(/\r$/, "") } substr($0, 1, 14) >= start' "$EVIDENCE/logcat.txt" 2>/dev/null
+}
+SEEN_APP_ANRS=0
+SEEN_APP_CRASHES=0
+check_app_health() {
+  local context="$1" anrs crashes
+  anrs="$(lines_since_start | grep -cE "ActivityManager.*ANR in $APP_ID( |$)" || true)"
+  crashes="$(lines_since_start | grep -cE "AndroidRuntime.*Process: $APP_ID(,|:| |$)" || true)"
+  anrs="${anrs:-0}"; crashes="${crashes:-0}"
+  [ "$anrs" -gt "$SEEN_APP_ANRS" ] && record_app_problem "$context" "o app parou de responder (ANR) $(( anrs - SEEN_APP_ANRS )) vez(es)"
+  [ "$crashes" -gt "$SEEN_APP_CRASHES" ] && record_app_problem "$context" "o app caiu (exceção fatal) $(( crashes - SEEN_APP_CRASHES )) vez(es)"
+  SEEN_APP_ANRS="$anrs"; SEEN_APP_CRASHES="$crashes"
   return 0
 }
 
@@ -172,7 +261,7 @@ print_diagnostics() {
 wait_for_system() {
   local deadline=$(( $(date +%s) + SYSTEM_READY_TIMEOUT_SECONDS )) boot dev focus load
   echo "== waiting for Android to be ready"
-  adb wait-for-device
+  timeout 120 adb wait-for-device || { echo "no device answered adb within 120s"; return 1; }
   while :; do
     boot="$(device getprop sys.boot_completed)"; dev="$(device getprop dev.bootcomplete)"
     focus="$(device dumpsys window | grep -E 'mCurrentFocus' | sed 's/^ *//')"
@@ -195,7 +284,11 @@ wait_for_system() {
     fi
     sleep 5
   done
-  echo "emulator load (1 min): $load after $(elapsed)s"
+  if [ "${load%%.*}" -lt "$SETTLE_LOAD" ] 2>/dev/null; then
+    echo "emulator settled: load (1 min) $load, $(elapsed)s since the start"
+  else
+    echo "emulator did NOT settle (load $load, limit $SETTLE_LOAD): the ${SETTLE_TIMEOUT_SECONDS}s pause ran in full; going on"
+  fi
   dismiss_system_dialogs "after boot"
 }
 
@@ -259,11 +352,17 @@ maestro_run() {
     return 124
   fi
   echo "--- maestro: $label (limit ${limit}s, $(elapsed)s since the start)"
-  timeout "$limit" maestro test \
-    --format junit --output "$EVIDENCE/maestro/$label.xml" \
-    --debug-output "$EVIDENCE/maestro/$label" --flatten-debug-output \
-    "$file" 2>&1 | tee "$EVIDENCE/maestro/$label.log"
-  status="${PIPESTATUS[0]}"
+  # In the background and waited for: bash only runs a signal trap between foreground commands, and the
+  # summary must be written at once when the hard ceiling of the workflow step ends this script (TERM).
+  (
+    timeout "$limit" maestro test \
+      --format junit --output "$EVIDENCE/maestro/$label.xml" \
+      --debug-output "$EVIDENCE/maestro/$label" --flatten-debug-output \
+      "$file" 2>&1 | tee "$EVIDENCE/maestro/$label.log"
+    exit "${PIPESTATUS[0]}"
+  ) &
+  wait "$!"
+  status=$?
   if [ "$status" != "0" ]; then
     echo "--- maestro: $label failed (exit $status)"
     grep -E 'Failed|Assertion|not found|Exception' "$EVIDENCE/maestro/$label.log" | sed -n '1,10s/^/     /p'
@@ -277,14 +376,15 @@ run_capture_flow() {
   local label="$1" status=0
   adb shell pm clear "$APP_ID" >/dev/null || return 1
   adb shell cmd notification allow_listener "$LISTENER" || return 1
-  if maestro_run "$label-consentimento" "$FLOWS/$CAPTURE_FLOW.yaml"; then
+  # The exit code of Maestro is kept: 124 (no time left) must reach the caller as it is.
+  maestro_run "$label-consentimento" "$FLOWS/$CAPTURE_FLOW.yaml"; status=$?
+  if [ "$status" = "0" ]; then
     # The made-up notification, posted by the test double as a bank app would.
-    adb shell am start -W -n "$STUB_ACTIVITY" || status=1
-    if [ "$status" = "0" ]; then
-      maestro_run "$label-transacao" "$FLOWS/partes/07-conferir-transacao-capturada.yaml" || status=1
+    if adb shell am start -W -n "$STUB_ACTIVITY"; then
+      maestro_run "$label-transacao" "$FLOWS/partes/07-conferir-transacao-capturada.yaml"; status=$?
+    else
+      status=1
     fi
-  else
-    status=1
   fi
   # The access is taken back so that it never leaks into another flow (they must not see the consent screen).
   adb shell cmd notification disallow_listener "$LISTENER" || true
@@ -307,19 +407,45 @@ did_not_open() {
     && grep -q 'Failed' "$EVIDENCE"/maestro/"$1"-tentativa2*.log 2>/dev/null
 }
 
+
+# write_summary: the table of the job summary. Written once — at the normal end, or by the exit trap when the
+# script is stopped before it (the hard `timeout` of the workflow step, a failed precondition).
+SUMMARY_WRITTEN=0
+INTERRUPTED=""
 write_summary() {
+  [ "$SUMMARY_WRITTEN" = "0" ] || return 0
+  SUMMARY_WRITTEN=1
   {
+    local entry name problem listed_results
     echo "## App E2E — fluxos de tela no emulador"
     echo ""
+    if [ "${#APP_PROBLEMS[@]}" -gt 0 ]; then
+      echo "> [!CAUTION]"
+      echo "> **O app travou ou caiu durante os testes. O job falha por isso, mesmo que os fluxos tenham passado:**"
+      for problem in "${APP_PROBLEMS[@]}"; do
+        echo "> - $problem"
+      done
+      echo ""
+    fi
+    [ -z "$INTERRUPTED" ] || { echo "**Execução interrompida antes do fim: $INTERRUPTED.**"; echo ""; }
     echo "- Aquecimento (primeira abertura do app): $WARMUP_RESULT"
-    echo "- Diálogos do sistema (\"não está respondendo\") fechados: $SYSTEM_DIALOGS"
+    echo "- Travamentos ou quedas do próprio app: ${#APP_PROBLEMS[@]}"
+    echo "- Diálogos \"não está respondendo\" de OUTROS pacotes (sistema), fechados: $SYSTEM_DIALOGS"
     echo "- Tempo do script: $(elapsed)s de ${BUDGET_SECONDS}s"
     echo ""
     echo "| Fluxo | Resultado |"
     echo "| --- | --- |"
-    local entry
+    listed_results=" "
     for entry in "${RESULTS[@]:-}"; do
-      [ -n "$entry" ] && echo "| \`${entry%%|*}\` | ${entry#*|} |"
+      [ -n "$entry" ] || continue
+      echo "| \`${entry%%|*}\` | ${entry#*|} |"
+      listed_results="$listed_results${entry%%|*} "
+    done
+    for name in "${FLOW_NAMES[@]}"; do
+      case "$listed_results" in
+        *" $name "*) ;;
+        *) echo "| \`$name\` | não rodou (execução interrompida) |" ;;
+      esac
     done
     echo ""
     echo "Cada fluxo que falha é repetido uma única vez. Evidências (log e capturas do Maestro, logcat, diagnósticos,"
@@ -334,6 +460,8 @@ command -v maestro >/dev/null || fail "maestro is not on PATH"
 [ "$(curl --silent --output /dev/null --max-time 10 --write-out '%{http_code}' "$API_BASE/health/ready" || true)" = "200" ] \
   || fail "the test API is not answering at $API_BASE/health/ready"
 
+# An empty list and an empty directory would "pass" with nothing run.
+[ "${#FLOW_NAMES[@]}" -gt 0 ] || fail "FLOW_NAMES is empty: there is nothing to run"
 listed="$(printf '%s\n' "${FLOW_NAMES[@]}" | sort)"
 on_disk="$(find "$FLOWS" -maxdepth 1 -type f -name '[0-9][0-9]-*.yaml' -exec basename {} .yaml \; | sort)"
 [ "$listed" = "$on_disk" ] || fail "FLOW_NAMES and the NN-*.yaml files of $FLOWS differ. Listed: $(echo $listed) | On disk: $(echo $on_disk)"
@@ -343,17 +471,28 @@ maestro --version || fail "maestro does not start"
 
 RESULTS=()
 adb logcat -c >/dev/null 2>&1 || true
+LOG_START="$(device "date '+%m-%d %H:%M:%S'")"
+[ "${#LOG_START}" = "14" ] || fail "could not read the clock of the device (got: $LOG_START)"
 adb logcat -v time > "$EVIDENCE/logcat.txt" 2>&1 &
 LOGCAT_PID=$!
 finish() {
+  local status=$?
+  if [ "$SUMMARY_WRITTEN" = "0" ]; then
+    [ -n "$INTERRUPTED" ] || INTERRUPTED="o script terminou com o código $status antes de escrever o resumo"
+    write_summary
+    echo "APP E2E FAILED"
+  fi
   adb logcat -b crash -d > "$EVIDENCE/logcat-crash.txt" 2>/dev/null || true
   kill "$LOGCAT_PID" >/dev/null 2>&1 || true
 }
 trap finish EXIT
+# The hard ceiling of the workflow step (`timeout`) ends the script with TERM: the summary is still written.
+trap 'INTERRUPTED="o teto de tempo do passo foi atingido (sinal de término)"; exit 143' TERM INT
 
 if ! wait_for_system; then
   print_diagnostics "sistema"
   WARMUP_RESULT="não rodou: o Android não ficou pronto"
+  for name in "${FLOW_NAMES[@]}"; do RESULTS+=("$name|não rodou (o Android não ficou pronto)"); done
   write_summary
   echo "APP E2E FAILED"
   exit 1
@@ -366,11 +505,15 @@ adb install -r -g "$STUB_APK" || fail "could not install the notification test d
 adb shell cmd notification disallow_listener "$LISTENER" >/dev/null 2>&1 || true
 
 if ! warm_up; then
+  sleep 1
+  check_app_health "aquecimento"
   for name in "${FLOW_NAMES[@]}"; do RESULTS+=("$name|não rodou (o app não abriu no aquecimento)"); done
   write_summary
   echo "APP E2E FAILED"
   exit 1
 fi
+sleep 1
+check_app_health "aquecimento"
 
 failed_required=0
 not_open_in_a_row=0
@@ -382,6 +525,7 @@ for name in "${FLOW_NAMES[@]}"; do
     continue
   fi
   echo "== flow $name"
+  problems_before="${#APP_PROBLEMS[@]}"
   run_flow "$name" 1; status=$?
   if [ "$status" = "0" ]; then
     result="passou"
@@ -390,8 +534,12 @@ for name in "${FLOW_NAMES[@]}"; do
     stop_reason="tempo esgotado"
   else
     echo "== flow $name failed: repeating once"
-    if run_flow "$name" 2; then
+    run_flow "$name" 2; status=$?
+    if [ "$status" = "0" ]; then
       result="passou só na repetição"
+    elif [ "$status" = "124" ] && [ "$(remaining)" -lt 80 ]; then
+      result="FALHOU na 1ª tentativa; a repetição não rodou (tempo esgotado)"
+      stop_reason="tempo esgotado"
     else
       result="FALHOU"
       is_informational "$name" && result="FALHOU (informativo: não derruba o job)"
@@ -407,12 +555,17 @@ for name in "${FLOW_NAMES[@]}"; do
       else
         not_open_in_a_row=0
       fi
-      if [ "$not_open_in_a_row" -ge 2 ]; then
+      if [ -z "$stop_reason" ] && [ "$not_open_in_a_row" -ge 2 ]; then
         stop_reason="dois fluxos seguidos sem o app abrir"
         echo "::error::Two flows in a row failed because the app did not open: stopping."
       fi
       ;;
   esac
+  # A crash or an ANR of the app during this flow fails the run even when the flow itself passed.
+  sleep 1
+  dismiss_system_dialogs "after $name"
+  check_app_health "fluxo $name"
+  [ "${#APP_PROBLEMS[@]}" -gt "$problems_before" ] && result="$result — ATENÇÃO: o app travou ou caiu durante este fluxo"
   if [ -z "$stop_reason" ] && [ "$(remaining)" -lt 80 ]; then
     stop_reason="tempo esgotado"
     echo "::error::Time budget of ${BUDGET_SECONDS}s spent: stopping."
@@ -423,6 +576,11 @@ done
 
 write_summary
 
+if [ "${#APP_PROBLEMS[@]}" -gt 0 ]; then
+  echo "::error::The app under test stopped responding or crashed during the run (${#APP_PROBLEMS[@]} record(s)): the job fails."
+  echo "APP E2E FAILED"
+  exit 1
+fi
 if [ "$failed_required" != "0" ]; then
   echo "APP E2E FAILED"
   exit 1
