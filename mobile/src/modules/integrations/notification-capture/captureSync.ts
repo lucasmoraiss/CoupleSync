@@ -4,7 +4,9 @@
 //  - o nativo nunca recebe "desligar" só porque o consentimento ainda não carregou (isso gravaria false no aparelho
 //    para quem já aceitou e, se o processo morresse antes da leitura, a captura ficaria desligada);
 //  - sem sessão (logout/expiração) o nativo termina desligado;
-//  - a tela de consentimento abre sozinha no máximo uma vez.
+//  - a tela de consentimento abre sozinha no máximo uma vez;
+//  - ao ligar, a escuta do JS é registrada ANTES de o nativo ser avisado (é o aviso que faz o nativo entregar o que
+//    guardou enquanto ninguém escutava); soltar a escuta nunca desliga o nativo.
 import { isCaptureAllowed, shouldPromptCaptureConsent, type ConsentRecord } from '@/modules/privacy/consent';
 
 export type NativeAction = 'enable' | 'disable' | 'leave';
@@ -45,4 +47,29 @@ export function decideCaptureSync(input: CaptureSyncInput): CaptureSyncDecision 
     clearPending: true,
     prompt: shouldPromptCaptureConsent(input.record, input.listenerPermissionGranted === true),
   };
+}
+
+/** O que a decisão manda fazer, nas mãos de quem chama (o hook passa as funções reais; o teste, registradores). */
+export interface CaptureEffects {
+  /** Passa a escutar os eventos do módulo nativo; devolve como parar de escutar. */
+  attachListener(): () => void;
+  /** Avisa o serviço nativo. `true` também faz o nativo entregar os eventos que guardou sem ouvinte. */
+  setNativeEnabled(enabled: boolean): void;
+  clearPending(): void;
+}
+
+/**
+ * Executa a decisão na ordem que importa. Devolve a limpeza (parar de escutar) quando passou a escutar.
+ * A limpeza NÃO desliga o nativo: ela roda sempre que a área principal sai de cena (ir criar outro grupo, o
+ * Android destruir a tela), e desligar ali gravaria "captura desligada" no aparelho de quem não pediu isso.
+ * Quem desliga é a decisão `disable` (consentimento retirado, sem sessão) e a saída da conta.
+ */
+export function applyCaptureDecision(decision: CaptureSyncDecision, effects: CaptureEffects): (() => void) | undefined {
+  if (decision.native === 'disable') effects.setNativeEnabled(false);
+  if (decision.clearPending) effects.clearPending();
+  if (!decision.listen) return undefined;
+
+  const detach = effects.attachListener();
+  if (decision.native === 'enable') effects.setNativeEnabled(true);
+  return detach;
 }

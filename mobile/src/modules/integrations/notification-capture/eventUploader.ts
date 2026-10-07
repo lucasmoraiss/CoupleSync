@@ -57,6 +57,9 @@ let retryQueue: QueueEntry[] = [];
 // em vez de recolocar na fila eventos do usuário que saiu.
 let queueGeneration = 0;
 let pollHandle: ReturnType<typeof setInterval> | null = null;
+// Um reenvio por vez: o ciclo roda a cada 3 s e uma requisição pode levar até 30 s. Sem isto, o ciclo seguinte
+// encontraria os mesmos eventos ainda na fila e os enviaria de novo.
+let flushInFlight = false;
 
 function ensurePolling(): void {
   if (pollHandle !== null) return;
@@ -68,6 +71,16 @@ async function postEvent(request: IngestNotificationEventRequest): Promise<void>
 }
 
 async function flushQueue(): Promise<void> {
+  if (flushInFlight) return;
+  flushInFlight = true;
+  try {
+    await flushQueueOnce();
+  } finally {
+    flushInFlight = false;
+  }
+}
+
+async function flushQueueOnce(): Promise<void> {
   if (retryQueue.length === 0) return;
   if (!isCaptureAllowedNow()) {
     // Consentimento retirado (ou de outro usuário): nada pendente deve sair do aparelho.
@@ -81,7 +94,8 @@ async function flushQueue(): Promise<void> {
   const generation = queueGeneration;
   const now = Date.now();
   const due = retryQueue.filter((e) => e.nextRetryAt <= now);
-  const notDue = retryQueue.filter((e) => e.nextRetryAt > now);
+  // Sai da fila o que vai ser enviado agora; o que entrar na fila durante o envio continua nela.
+  retryQueue = retryQueue.filter((e) => e.nextRetryAt > now);
 
   const still: QueueEntry[] = [];
   await Promise.allSettled(
@@ -110,7 +124,7 @@ async function flushQueue(): Promise<void> {
 
   if (generation !== queueGeneration) return; // saiu da conta durante o envio
 
-  retryQueue = [...notDue, ...still];
+  retryQueue = [...retryQueue, ...still];
 
   if (retryQueue.length === 0 && pollHandle !== null) {
     clearInterval(pollHandle);
@@ -181,10 +195,28 @@ export async function handleRawNotificationEvent(
 export function clearPendingEvents(): void {
   queueGeneration += 1;
   retryQueue = [];
+  // O que o serviço nativo guardou sem entregar também é "capturado e ainda não enviado".
+  for (const drop of nativeBufferDroppers) {
+    try {
+      drop();
+    } catch {
+      // a fila do JS já foi esvaziada
+    }
+  }
   if (pollHandle !== null) {
     clearInterval(pollHandle);
     pollHandle = null;
   }
+}
+
+const nativeBufferDroppers = new Set<() => void>();
+
+/**
+ * Registra quem descarta os eventos guardados fora desta fila (o módulo nativo). Chamado por
+ * NotificationListenerBridge.ts ao carregar; assim este arquivo não depende do React Native.
+ */
+export function registerNativeBufferDropper(drop: () => void): void {
+  nativeBufferDroppers.add(drop);
 }
 
 registerUserDataCleaner(clearPendingEvents);

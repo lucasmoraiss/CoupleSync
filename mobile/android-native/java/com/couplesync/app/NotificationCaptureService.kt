@@ -25,7 +25,7 @@ object NotificationEventBus {
     @Volatile
     var listener: ((packageName: String, title: String, body: String, timestampMs: Long) -> Unit)? = null
 
-    private val buffer = mutableListOf<NotificationEvent>()
+    private val pending = mutableListOf<NotificationEvent>()
     private val lock = Any()
 
     // Guarda explícita contra recursão: se um listener (direta ou indiretamente) chamar dispatch de novo
@@ -60,17 +60,17 @@ object NotificationEventBus {
         captureEnabled = enabled
         if (!enabled) {
             // Desligar descarta o que ainda esperava a ponte: nada capturado antes do "desligar" sai depois dele.
-            synchronized(lock) { buffer.clear() }
+            synchronized(lock) { pending.clear() }
         }
     }
 
     /** Guarda o evento sem acionar o listener. Usado quando o listener existe mas ainda não pode entregar. */
     fun buffer(packageName: String, title: String, body: String, timestampMs: Long) {
         synchronized(lock) {
-            if (buffer.size >= MAX_BUFFER_SIZE) {
-                buffer.removeAt(0) // Drop oldest
+            if (pending.size >= MAX_BUFFER_SIZE) {
+                pending.removeAt(0) // Drop oldest
             }
-            buffer.add(NotificationEvent(packageName, title, body, timestampMs))
+            pending.add(NotificationEvent(packageName, title, body, timestampMs))
         }
     }
 
@@ -89,14 +89,19 @@ object NotificationEventBus {
     }
 
     fun flush(sink: (packageName: String, title: String, body: String, timestampMs: Long) -> Unit) {
-        val pending: List<NotificationEvent>
+        val toDeliver: List<NotificationEvent>
         synchronized(lock) {
-            pending = buffer.toList()
-            buffer.clear()
+            toDeliver = pending.toList()
+            pending.clear()
         }
-        for (event in pending) {
+        for (event in toDeliver) {
             sink(event.packageName, event.title, event.body, event.timestampMs)
         }
+    }
+
+    /** Descarta o que esperava a ponte sem mexer no consentimento (o grupo ativo mudou no app). */
+    fun discardBuffered() {
+        synchronized(lock) { pending.clear() }
     }
 }
 

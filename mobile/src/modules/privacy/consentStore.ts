@@ -36,6 +36,13 @@ interface ConsentState {
   userId: string | null;
   /** O registro do usuário já foi lido do armazenamento. Antes disso nada é permitido. */
   loaded: boolean;
+  /**
+   * A última leitura falhou (armazenamento seguro indisponível): a resposta do usuário é DESCONHECIDA. Não é
+   * "nunca respondeu": nada é desligado nem perguntado por causa disso, e a leitura é tentada de novo.
+   */
+  loadFailed: boolean;
+  /** Quantas leituras já foram tentadas para este usuário (muda a cada tentativa; agenda a próxima). */
+  loadAttempts: number;
   record: ConsentRecord;
 }
 
@@ -56,7 +63,7 @@ interface ConsentActions {
   reset: () => void;
 }
 
-const INITIAL: ConsentState = { userId: null, loaded: false, record: EMPTY_CONSENT };
+const INITIAL: ConsentState = { userId: null, loaded: false, loadFailed: false, loadAttempts: 0, record: EMPTY_CONSENT };
 
 export const useConsentStore = create<ConsentState & ConsentActions>((set, get) => {
   /** Troca o registro em memória na hora (síncrono) e só então grava; a gravação vai para a chave do dono do registro. */
@@ -81,16 +88,24 @@ export const useConsentStore = create<ConsentState & ConsentActions>((set, get) 
 
     load: async (userId) => {
       if (get().userId === userId && get().loaded) return;
-      set({ userId, loaded: false, record: EMPTY_CONSENT });
+      const attempts = get().userId === userId ? get().loadAttempts + 1 : 1;
+      set({ userId, loaded: false, loadFailed: false, loadAttempts: attempts, record: EMPTY_CONSENT });
       let raw: string | null = null;
+      let failed = false;
       try {
         raw = await SecureStore.getItemAsync(consentStorageKey(userId));
       } catch {
-        raw = null;
+        failed = true;
       }
       // Saiu da conta (ou outro usuário entrou) durante a leitura: este resultado não vale.
       if (get().userId !== userId) return;
-      set({ loaded: true, record: parseConsent(raw) });
+      if (failed) {
+        // Não leu: continua "não carregado". Tratar como registro vazio desligaria a captura de quem já aceitou
+        // e reabriria o pedido de consentimento.
+        set({ loaded: false, loadFailed: true });
+        return;
+      }
+      set({ loaded: true, loadFailed: false, record: parseConsent(raw) });
     },
 
     acceptCapture: () => update((r, now) => acceptCapture(r, now)),

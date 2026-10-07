@@ -3,7 +3,7 @@
 // event uploader pipeline. Android-only; no-ops on other platforms.
 import { DeviceEventEmitter, NativeModules, Platform } from 'react-native';
 import { registerUserDataCleaner } from '@/state/userData';
-import { handleRawNotificationEvent, type RawNotificationEvent } from './eventUploader';
+import { handleRawNotificationEvent, registerNativeBufferDropper, type RawNotificationEvent } from './eventUploader';
 
 // ── Native module contract (implemented in NotificationBridgeModule.kt) ──────
 interface NotificationBridgeNativeModule {
@@ -11,6 +11,10 @@ interface NotificationBridgeNativeModule {
   openNotificationListenerSettings(): void;
   /** Só existe em APK novo (consentimento da captura). Em APK antigo o porteiro é só o JS. */
   setCaptureEnabled?(enabled: boolean): void;
+  /** Só em APK novo: o JS deixou de escutar; o nativo guarda os eventos em vez de emiti-los para ninguém. */
+  pauseDelivery?(): void;
+  /** Só em APK novo: descarta os eventos guardados no nativo (o grupo ativo mudou). */
+  discardBuffered?(): void;
 }
 
 const NotificationBridge: NotificationBridgeNativeModule | undefined =
@@ -66,12 +70,37 @@ export function setNativeCaptureEnabled(enabled: boolean): void {
   }
 }
 
+/** Chama um método opcional do módulo nativo; em APK que não o tem (ou se ele falhar) nada acontece. */
+function callOptional(method: 'pauseDelivery' | 'discardBuffered'): void {
+  if (!isNotificationBridgeAvailable()) return;
+  try {
+    const fn = NotificationBridge![method];
+    if (typeof fn === 'function') fn.call(NotificationBridge);
+  } catch {
+    // O porteiro do JS continua valendo.
+  }
+}
+
+/**
+ * Descarta o que o nativo guardou sem entregar. Roda sempre que a fila do JS é esvaziada (clearPendingEvents):
+ * troca do grupo ativo (o servidor lançaria o evento no grupo do token atual), consentimento retirado, saída.
+ */
+export function discardNativeBufferedEvents(): void {
+  callOptional('discardBuffered');
+}
+
+registerNativeBufferDropper(discardNativeBufferedEvents);
+
 // Sair da conta (ou sessão expirada) deixa o serviço nativo desligado: sem usuário, nada de ler notificações.
 registerUserDataCleaner(() => setNativeCaptureEnabled(false));
 
 /**
  * Start listening for notification events from the Kotlin service.
  * Automatically parses and uploads each recognised bank notification.
+ *
+ * Order matters and is fixed by applyCaptureDecision (captureSync.ts): this listener is attached first, and only
+ * then is the native side told that capture is enabled, which is when it hands over what it buffered while
+ * nobody was listening (app closed, main area unmounted).
  *
  * @returns Cleanup function — call it (e.g. in useEffect return) to unsubscribe.
  */
@@ -90,6 +119,8 @@ export function startNotificationCapture(): () => void {
 
   return () => {
     subscription.remove();
+    // Ninguém escuta mais: o nativo passa a guardar os eventos em vez de emiti-los no vazio.
+    callOptional('pauseDelivery');
   };
 }
 
