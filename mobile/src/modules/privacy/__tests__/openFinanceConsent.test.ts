@@ -90,6 +90,12 @@ describe('texto do passo "O que é"', () => {
     expect(text).toContain('Client Secret');
   });
 
+  it('não promete que o Client ID nunca é mostrado: a tela de gestão mostra os 4 últimos caracteres ao grupo', () => {
+    expect(text).toContain('nunca são mostrados de novo por inteiro');
+    expect(text).toContain('só os 4 últimos caracteres do Client ID aparecem, para o grupo reconhecer a conexão');
+    expect(text).not.toContain('nem para você, nem para o seu grupo');
+  });
+
   it('a IA segue o consentimento que já existe: nada de novo é enviado ao Gemini por causa do Open Finance', () => {
     expect(text).toMatch(/Chat IA/);
     expect(text).toMatch(/aviso do Chat IA/);

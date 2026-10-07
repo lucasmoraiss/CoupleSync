@@ -123,7 +123,7 @@ export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
   {
     title: 'Como as credenciais são guardadas',
     paragraphs: [
-      'O Client ID e o Client Secret são guardados cifrados no servidor do CoupleSync e nunca são mostrados de novo: nem para você, nem para o seu grupo. No seu celular eles não ficam guardados.',
+      'O Client ID e o Client Secret são guardados cifrados no servidor do CoupleSync e nunca são mostrados de novo por inteiro: só os 4 últimos caracteres do Client ID aparecem, para o grupo reconhecer a conexão. No seu celular eles não ficam guardados.',
       'Ao desconectar, as credenciais são apagadas na hora. As contas já encontradas continuam visíveis para o grupo.',
     ],
   },
