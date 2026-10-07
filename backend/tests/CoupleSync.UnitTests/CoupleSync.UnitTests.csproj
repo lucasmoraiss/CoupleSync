@@ -21,6 +21,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\TestEmailIsolation.cs" Link="TestEmailIsolation.cs" />
+    <Compile Include="..\Shared\TestDatabaseIsolation.cs" Link="TestDatabaseIsolation.cs" />
+    <Compile Include="..\Shared\TestHostSourceGuardTests.cs" Link="TestHostSourceGuardTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\CoupleSync.Application\CoupleSync.Application.csproj" />
     <ProjectReference Include="..\..\src\CoupleSync.Infrastructure\CoupleSync.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\CoupleSync.Domain\CoupleSync.Domain.csproj" />

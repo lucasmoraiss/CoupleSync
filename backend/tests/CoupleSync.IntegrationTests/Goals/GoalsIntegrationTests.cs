@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -10,7 +11,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 
 namespace CoupleSync.IntegrationTests.Goals;
 
@@ -609,7 +609,7 @@ public sealed class GoalsIntegrationTests
     private sealed record AuthUserDto(Guid Id, string Email, string Name);
 }
 
-internal sealed class GoalsWebApplicationFactory : WebApplicationFactory<Program>
+internal sealed class GoalsWebApplicationFactory : TestApiFactory
 {
     public const string JwtSecret = "integration-test-secret-1234567890-abcdef";
     public const string JwtIssuer = "CoupleSync.IntegrationTests";
@@ -627,12 +627,11 @@ internal sealed class GoalsWebApplicationFactory : WebApplicationFactory<Program
         Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
     }
 
-    protected override IHost CreateHost(IHostBuilder builder)
+    protected override void BeforeCreateHost()
     {
         Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
         Environment.SetEnvironmentVariable("JWT__ISSUER", JwtIssuer);
         Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
-        return base.CreateHost(builder);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

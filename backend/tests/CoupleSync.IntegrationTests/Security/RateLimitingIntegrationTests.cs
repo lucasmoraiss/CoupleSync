@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -12,7 +13,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 
 namespace CoupleSync.IntegrationTests.Security;
 
@@ -394,7 +394,7 @@ public sealed class RateLimitingIntegrationTests
 
     private sealed record ErrorDto(string Code, string Message, string TraceId);
 
-    private sealed class RateLimitWebApplicationFactory : WebApplicationFactory<Program>
+    private sealed class RateLimitWebApplicationFactory : TestApiFactory
     {
         public const string ProxyAddress = "10.0.0.1";
 
@@ -412,10 +412,9 @@ public sealed class RateLimitingIntegrationTests
             SetJwtEnvironment();
         }
 
-        protected override IHost CreateHost(IHostBuilder builder)
+        protected override void BeforeCreateHost()
         {
             SetJwtEnvironment();
-            return base.CreateHost(builder);
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.IntegrationTests.Transactions;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
+using CoupleSync.TestSupport;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,8 +40,8 @@ public sealed class PasswordResetAndEmailVerificationTests
             Regex.Match(Sent.Last(m => m.ToAddress == address).TextContent, @"\b\d{6}\b").Value;
     }
 
-    private static WebApplicationFactory<Program> WithSender(TransactionWebApplicationFactory factory, FakeEmailSender sender) =>
-        factory.WithWebHostBuilder(builder =>
+    private static DerivedTestHost WithSender(TransactionWebApplicationFactory factory, FakeEmailSender sender) =>
+        factory.WithTestHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -71,9 +71,14 @@ public sealed class PasswordResetAndEmailVerificationTests
             body);
     }
 
-    private static HttpClient Authorized(WebApplicationFactory<Program> factory, string accessToken)
+    private static HttpClient Authorized(TestApiFactory factory, string accessToken) =>
+        WithBearer(factory.CreateClient(), accessToken);
+
+    private static HttpClient Authorized(DerivedTestHost factory, string accessToken) =>
+        WithBearer(factory.CreateClient(), accessToken);
+
+    private static HttpClient WithBearer(HttpClient client, string accessToken)
     {
-        var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return client;
     }
@@ -364,8 +369,8 @@ public sealed class PasswordResetAndEmailVerificationTests
         public string LastCode() => Regex.Match(JsonDocument.Parse(Bodies.Last()).RootElement.GetProperty("textContent").GetString()!, @"\b\d{6}\b").Value;
     }
 
-    private static WebApplicationFactory<Program> WithBrevoStub(TransactionWebApplicationFactory factory, BrevoStub stub) =>
-        factory.WithWebHostBuilder(builder =>
+    private static DerivedTestHost WithBrevoStub(TransactionWebApplicationFactory factory, BrevoStub stub) =>
+        factory.WithTestHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
