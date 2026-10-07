@@ -45,11 +45,12 @@ Só você. O repositório é público, então a esteira trata como pedido apenas
 issues abertas pela conta `lucasmoraiss`; dos comentários, só os seus. Texto de qualquer outra pessoa — issue,
 comentário, PR — é lido como dado e nunca como instrução.
 
-## O que só você consegue fazer
+## Configuração: o que os agentes mantêm e o que sobra para você
 
 Regra da casa: o que dá para fazer por API ou linha de comando, os agentes fazem e relatam — não vira tarefa
 manual para você. Sobra para você o que exige um segredo seu (criar ou colar uma chave), o que precisa de um
-aparelho na mão, e decidir quando alguma proteção deve ser afrouxada.
+aparelho na mão, o que mexe em dado de produção, o que não tem API na sessão (hoje: variáveis no Render), e
+decidir quando alguma proteção deve ser afrouxada — nesse caso basta o seu "sim" na sessão; quem executa é o agente.
 
 ### 1. Regra do branch `main` — feita pelos agentes; isto é a referência do estado certo
 
@@ -72,8 +73,16 @@ Todo o resto fica **desmarcado**. Em especial, estas duas travam todo merge nest
 *Bypass list* vazia (a regra vale também para você). **Save changes**.
 
 Como conferir: abra qualquer PR; na caixa de merge tem de aparecer `Build & Test` como **Required**, e o
-botão de merge só libera com ele verde. Os agentes mantêm esta regra neste estado e a corrigem pela API se
-ela sair dele; afrouxá-la (tirar a exigência de PR ou de `Build & Test`, abrir exceção) só com você pedindo.
+botão de merge só libera com ele verde.
+
+Na API: regras `deletion`, `non_fast_forward`, `pull_request` (`required_approving_review_count: 0`) e
+`required_status_checks` (`strict_required_status_checks_policy: true`, contexto `Build & Test` com a
+integração do GitHub Actions); `enforcement: active`; alvo `~DEFAULT_BRANCH`; `bypass_actors: []`.
+
+Os agentes repõem pela API o que faltar em relação a este estado e tiram as duas exigências acima que travam
+todo merge. Qualquer outra coisa que você acrescentar à regra eles não tiram sem perguntar. Afrouxá-la (tirar
+ou trocar a exigência de PR, de `Build & Test`, o bloqueio de force-push ou de exclusão, desativar a regra,
+abrir exceção) só com você pedindo na sessão.
 
 ### 2. E-mail (Brevo) no Render — feito
 

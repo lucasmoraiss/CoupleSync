@@ -86,8 +86,9 @@ só o dono consegue, nos checkpoints dele: registre como **não verificado** e p
 Sintoma: o app novo quebra em uso. A API fica como está (o JavaScript anterior funciona com ela).
 - Com o EAS CLI local (logado como `luuty`), em `mobile/`:
   `npx eas-cli@12 update:republish --group <id do grupo anterior> --message "volta atrás: <motivo>" --non-interactive`
-- Sem EAS CLI na sessão, ou sem o id anterior → PARADA: peça ao dono para rodar o comando acima
-  (os grupos aparecem em `eas update:list --branch production`).
+- Sem o id anterior e com EAS CLI: ache-o com
+  `npx eas-cli@12 update:list --branch production --limit 5 --json --non-interactive` (o grupo anterior ao que
+  quebrou). Sem EAS CLI na sessão → PARADA: peça ao dono para rodar o comando acima.
 - Depois conserte para a frente por PR; não publique outro OTA sem nova passagem pela esteira.
 - APK: não apague Release nem tag; relate e deixe a decisão com o dono.
 
