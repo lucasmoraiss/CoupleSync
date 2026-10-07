@@ -35,6 +35,7 @@ Publicar só o app: `/publicar-app`. Papéis em `.claude/agents/`. Guia do dono:
 | Imagem (quando `backend/` muda) | `docker build --file backend/Dockerfile --tag couplesync-api:smoke backend/`, depois `scripts/api-image-smoke-test.sh couplesync-api:smoke` e de novo com `SMOKE_FORCE_INVARIANT=1` |
 | App | em `mobile/`: `npx tsc --noEmit` e `npm test` |
 | Dependência do app mudou | `expo prebuild` de verdade numa cópia temporária fora do repositório (ver armadilha 8) |
+| Telas do app (emulador) | no CI, a cada PR: job **"App E2E"** (`.github/workflows/app-e2e.yml`) constrói o APK de teste e roda os fluxos Maestro de `mobile/tests/e2e/flows/` contra a imagem da API com PostgreSQL descartável |
 
 CI: `.github/workflows/ci.yml`, um único job **"Build & Test"** (nome da verificação obrigatória — não renomear,
 não dividir em outros jobs).
