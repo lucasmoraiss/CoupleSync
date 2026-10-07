@@ -122,6 +122,9 @@ notificação bancária de exemplo até virar transação. O que continua manual
 
 - Se o PR não toca `mobile/`, `backend/` nem o próprio workflow, o job termina verde em segundos sem subir emulador.
 - Cada fluxo que falha é repetido uma única vez; o resumo do job diz qual passou só na repetição.
+- Se o próprio app travar ("não está respondendo") ou cair durante os testes, o job fica vermelho mesmo que os
+  fluxos passem, e o resumo abre com esse aviso. Diálogo de travamento de outro app do emulador (o sistema, o
+  launcher) é só fechado e contado.
 - Em falha, o artefato `app-e2e-evidencias` da execução traz as capturas de tela e o log do Maestro, o logcat
   e o log da API.
 - O APK de teste aceita HTTP sem TLS, aponta para o emulador e tem as atualizações OTA desligadas: nunca é

@@ -151,9 +151,11 @@ jobs:
 
       # The action boots the emulator, runs the script and shuts the emulator down. `script` is ONE command:
       # the action runs each line in its own shell.
-      # The script has its own time budget (it stops by itself and reports what did not run); the `timeout`
-      # around it is the hard ceiling, far below the ceiling of the job, so the job is never cancelled by time
-      # and the evidence steps below always have time to run.
+      # Time: the script has its own budget (22 min: it stops by itself and reports what did not run); the
+      # `timeout` around it is the hard ceiling (25 min). Measured on the hosted runner, cold caches: about
+      # 13 min of steps before this one, 1 to 2 min to boot the emulator, 13 min 22 s for the script. Worst
+      # case: 20 min before (a slow cold build) + 2 + 25 = 47 min, which leaves the evidence steps 13 min
+      # before the 60 min of the job.
       # Third-party action, pinned to the commit of v2.38.0.
       - name: Run the screen tests on the emulator
         if: steps.changes.outputs.run == 'true'
@@ -168,7 +170,7 @@ jobs:
           disk-size: 6000M
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: timeout --signal=TERM --kill-after=30 2280 bash scripts/app-e2e-run-flows.sh
+          script: timeout --signal=TERM --kill-after=30 1500 bash scripts/app-e2e-run-flows.sh
 
       # ── Evidence ──────────────────────────────────────────────────────────────────────────────────────────
       # always(): also when the emulator step failed and when the run was cancelled.
