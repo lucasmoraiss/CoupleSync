@@ -17,6 +17,40 @@ public sealed class LayeringGuardTests
         Assert.Empty(references);
     }
 
+    /// <summary>
+    /// External services (Pluggy, Gemini...) are interfaces for the Application layer: the HTTP client that talks to
+    /// them lives in Infrastructure. The Application and Domain assemblies reference no HTTP library at all.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(DataStoreException))]
+    [InlineData(typeof(CoupleSync.Domain.Entities.BankConnection))]
+    public void ApplicationAndDomainAssemblies_ReferenceNoHttpClientAssembly(Type typeOfTheAssembly)
+    {
+        var references = typeOfTheAssembly.Assembly.GetReferencedAssemblies()
+            .Select(a => a.Name ?? string.Empty)
+            .Where(n => n.StartsWith("System.Net.Http", StringComparison.Ordinal)
+                        || n.StartsWith("Microsoft.Extensions.Http", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Empty(references);
+    }
+
+    [Fact]
+    public void ThePluggyClient_IsAnInterfaceInApplication_ImplementedOnlyInInfrastructure()
+    {
+        var contract = typeof(CoupleSync.Application.Common.Interfaces.IPluggyClient);
+        Assert.True(contract.IsInterface);
+        Assert.Same(typeof(DataStoreException).Assembly, contract.Assembly);
+
+        var implementations = new[] { typeof(DataStoreException).Assembly, typeof(CoupleSync.Infrastructure.Persistence.AppDbContext).Assembly }
+            .SelectMany(a => a.GetTypes())
+            .Where(t => t is { IsClass: true, IsAbstract: false } && contract.IsAssignableFrom(t))
+            .ToList();
+
+        var implementation = Assert.Single(implementations);
+        Assert.Equal("CoupleSync.Infrastructure.Integrations.Pluggy.PluggyHttpClient", implementation.FullName);
+    }
+
     // Any call of SaveChanges/SaveChangesAsync on anything: "_dbContext.SaveChangesAsync(", "db.SaveChanges ()",
     // or the call on its own line after the receiver.
     private static readonly Regex SaveCall = new(@"\.SaveChanges(Async)?\s*\(", RegexOptions.Compiled);

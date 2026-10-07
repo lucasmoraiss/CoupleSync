@@ -22,6 +22,7 @@ public static class RateLimitPolicies
     public const string AuthResetPassword = "auth-reset-password";
     public const string AuthConfirmEmail = "auth-confirm-email";
     public const string AuthResendEmailVerification = "auth-resend-email-verification";
+    public const string OpenFinanceCredentials = "openfinance-credentials";
 }
 
 /// <summary>Bound to the <c>RateLimiting</c> configuration section (env: <c>RATELIMITING__AUTH__PERMITLIMIT</c> etc.).</summary>
@@ -40,6 +41,12 @@ public sealed class RateLimitingOptions
     /// device, and several people may share one address) and still a ceiling for someone guessing tokens.
     /// </summary>
     public FixedWindowSettings Refresh { get; set; } = new() { PermitLimit = 60 };
+
+    /// <summary>
+    /// The Open Finance routes that send credentials to Pluggy (test and connect) — per authenticated user, one
+    /// budget for both, so that this API cannot be used to try client secrets freely.
+    /// </summary>
+    public FixedWindowSettings OpenFinance { get; set; } = new();
 }
 
 public sealed class FixedWindowSettings
@@ -97,6 +104,9 @@ public static class RateLimitingSetup
 
             limiter.AddPolicy(RateLimitPolicies.AuthResendEmailVerification, context =>
                 CreatePartition($"resend-email-verification:{UserOrIpKey(context)}", GetOptions(context).Auth));
+
+            limiter.AddPolicy(RateLimitPolicies.OpenFinanceCredentials, context =>
+                CreatePartition($"openfinance-credentials:{UserOrIpKey(context)}", GetOptions(context).OpenFinance));
 
             limiter.AddPolicy(RateLimitPolicies.CoupleJoin, context =>
             {

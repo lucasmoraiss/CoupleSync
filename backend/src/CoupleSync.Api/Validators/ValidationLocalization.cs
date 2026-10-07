@@ -19,6 +19,8 @@ public static class ValidationLocalization
         ["Bank"] = "Banco",
         ["CandidateEdits"] = "Transações editadas",
         ["Category"] = "Categoria",
+        ["ClientId"] = "Client ID",
+        ["ClientSecret"] = "Client Secret",
         ["CategoryOverrides"] = "Categorias alteradas",
         ["Code"] = "Código",
         ["Content"] = "Mensagem",
@@ -31,7 +33,10 @@ public static class ValidationLocalization
         ["EventTimestamp"] = "Data do evento",
         ["GrossIncome"] = "Renda bruta",
         ["History"] = "Histórico",
+        ["HistoryMonths"] = "Período",
+        ["ItemId"] = "Item ID",
         ["JoinCode"] = "Código de convite",
+        ["Label"] = "Apelido",
         ["Merchant"] = "Estabelecimento",
         ["Message"] = "Mensagem",
         ["Month"] = "Mês",
@@ -42,6 +47,7 @@ public static class ValidationLocalization
         ["RawNotificationText"] = "Texto da notificação",
         ["RefreshToken"] = "Token de renovação",
         ["Role"] = "Autor",
+        ["SyncEnabled"] = "Sincronizar",
         ["TargetAmount"] = "Valor da meta",
         ["Title"] = "Título"
     };
