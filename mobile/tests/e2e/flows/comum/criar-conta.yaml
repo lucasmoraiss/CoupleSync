@@ -4,10 +4,11 @@ appId: com.couplesync.app
 env:
   SENHA: SenhaSegura123
 ---
-# A primeira abertura de um build de release num emulador de CI é lenta: espera longa só aqui.
+# A primeira abertura de um build de release num emulador de CI é lenta, mas quem a espera é o aquecimento de
+# scripts/app-e2e-run-flows.sh; aqui o app já abriu uma vez.
 - extendedWaitUntil:
     visible: "Ir para o cadastro de conta nova"
-    timeout: 180000
+    timeout: 90000
 - tapOn: "Ir para o cadastro de conta nova"
 - extendedWaitUntil:
     visible: "Junte-se ao CoupleSync"

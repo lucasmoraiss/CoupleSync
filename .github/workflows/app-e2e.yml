@@ -80,8 +80,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: mobile/package-lock.json
+
+      # A cache key of this workflow only: other workflows (the published APK among them) never restore what
+      # a run of this one saved.
+      - name: Cache npm
+        if: steps.changes.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: app-e2e-npm-${{ runner.os }}-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: |
+            app-e2e-npm-${{ runner.os }}-
 
       - name: Setup JDK 17
         if: steps.changes.outputs.run == 'true'
@@ -142,9 +151,13 @@ jobs:
 
       # The action boots the emulator, runs the script and shuts the emulator down. `script` is ONE command:
       # the action runs each line in its own shell.
+      # The script has its own time budget (it stops by itself and reports what did not run); the `timeout`
+      # around it is the hard ceiling, far below the ceiling of the job, so the job is never cancelled by time
+      # and the evidence steps below always have time to run.
+      # Third-party action, pinned to the commit of v2.38.0.
       - name: Run the screen tests on the emulator
         if: steps.changes.outputs.run == 'true'
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 34
           arch: x86_64
@@ -155,17 +168,19 @@ jobs:
           disk-size: 6000M
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash scripts/app-e2e-run-flows.sh
+          script: timeout --signal=TERM --kill-after=30 2280 bash scripts/app-e2e-run-flows.sh
 
       # ── Evidence ──────────────────────────────────────────────────────────────────────────────────────────
+      # always(): also when the emulator step failed and when the run was cancelled.
       - name: Collect the logs of the API and of PostgreSQL
-        if: ${{ !cancelled() && steps.changes.outputs.run == 'true' }}
+        if: ${{ always() && steps.changes.outputs.run == 'true' }}
         run: bash scripts/app-e2e-api.sh logs "${E2E_EVIDENCE_DIR}/api"
 
-      # Maestro logs and screenshots, logcat, API log. Kept on success too: a flow that only passed on the
-      # repetition leaves here what went wrong the first time.
+      # Maestro logs and screenshots, logcat (written by the script while the emulator is alive), diagnoses,
+      # API log. Kept on success too: a flow that only passed on the repetition leaves here what went wrong
+      # the first time.
       - name: Upload the evidence
-        if: ${{ !cancelled() && steps.changes.outputs.run == 'true' }}
+        if: ${{ always() && steps.changes.outputs.run == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: app-e2e-evidencias
@@ -175,7 +190,7 @@ jobs:
 
       # Only when the run failed, to reproduce it. TEST BUILD: plain HTTP, points at 10.0.2.2, updates off.
       - name: Upload the test APK (test build — never publish)
-        if: ${{ failure() && steps.changes.outputs.run == 'true' }}
+        if: ${{ (failure() || cancelled()) && steps.changes.outputs.run == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: app-e2e-apk-de-teste-nao-publicar
