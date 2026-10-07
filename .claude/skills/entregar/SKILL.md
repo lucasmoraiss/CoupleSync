@@ -307,7 +307,9 @@ JavaScript ou nativa: siga a skill `publicar-app` (OTA; depois APK se nativa). S
 - `ghp issue close <n> --repo lucasmoraiss/CoupleSync`. Volte para `main` local (`git switch main`), sem apagar nada do dono.
 - Se o merge mudou `mobile/package-lock.json` ou `.github/workflows/app-e2e.yml`: aqueça o cache dos testes de
   tela para os próximos PRs com `ghp workflow run app-e2e.yml --repo lucasmoraiss/CoupleSync --ref main`. Não
-  espere por essa execução; se ela falhar, isso entra no relato.
+  espere por essa execução: o relato diz que ela foi disparada e que o resultado não foi conferido. Ela não é
+  verificação desta entrega — vermelha ou cancelada, não é PARADA 3 nem motivo de reversão; só quer dizer que
+  o cache continua frio.
 - Relato final ao dono: o mesmo conteúdo, curto.
 
 ## Volta atrás
