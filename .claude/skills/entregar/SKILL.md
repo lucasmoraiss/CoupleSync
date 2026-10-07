@@ -305,6 +305,9 @@ JavaScript ou nativa: siga a skill `publicar-app` (OTA; depois APK se nativa). S
 - Cada Menor adiado que vale a pena vira issue com rótulo `backlog` (`ghp issue create`), citada no comentário.
   O corpo começa com `[esteira]`: é uma sugestão para o dono priorizar, e só vira pedido quando ele pedir a entrega.
 - `ghp issue close <n> --repo lucasmoraiss/CoupleSync`. Volte para `main` local (`git switch main`), sem apagar nada do dono.
+- Se o merge mudou `mobile/package-lock.json` ou `.github/workflows/app-e2e.yml`: aqueça o cache dos testes de
+  tela para os próximos PRs com `ghp workflow run app-e2e.yml --repo lucasmoraiss/CoupleSync --ref main`. Não
+  espere por essa execução; se ela falhar, isso entra no relato.
 - Relato final ao dono: o mesmo conteúdo, curto.
 
 ## Volta atrás
