@@ -15,6 +15,7 @@ import {
   canFinishWizard,
   canTestCredentials,
   canVerifyItem,
+  connectionErrorHelp,
   connectionStatusLabel,
   itemStatusNote,
   statusWhenRouteMissing,
@@ -233,6 +234,25 @@ describe('status do servidor', () => {
     expect(connectionStatusLabel('Error')).toBe('Com erro');
     expect(connectionStatusLabel('Disconnected')).toBe('Desconectada');
     expect(connectionStatusLabel('SomethingNew')).toBe('Conectada');
+  });
+
+  it('conexão com erro: quem conectou lê o caminho que existe (desconectar e conectar de novo)', () => {
+    expect(connectionErrorHelp(connection({ status: 'Error' }))).toBe(
+      'Para voltar a funcionar, toque em "Desconectar" e depois em "Conectar de novo", com o Client ID e o Client Secret certos. Os bancos e as contas continuam aqui.',
+    );
+  });
+
+  it('conexão com erro do parceiro: só quem conectou resolve', () => {
+    expect(connectionErrorHelp(connection({ status: 'Error', isMine: false, userName: 'Bruno' }))).toBe(
+      'Só Bruno pode resolver: desconectando e conectando de novo com as credenciais certas.',
+    );
+  });
+
+  it('conexão sem erro não mostra caminho de correção', () => {
+    expect(connectionErrorHelp(connection({ status: 'Active' }))).toBeNull();
+    expect(connectionErrorHelp(connection({ status: 'Disconnected' }))).toBeNull();
+    // Mensagem antiga gravada numa conexão que já voltou a funcionar não traz a ajuda de volta.
+    expect(connectionErrorHelp(connection({ status: 'Active', lastErrorMessage: 'antiga' }))).toBeNull();
   });
 });
 

@@ -194,6 +194,17 @@ export function connectionStatusLabel(status: string): string {
 }
 
 /**
+ * O que fazer com uma conexão "Com erro"; null nos outros status. Tentar de novo não resolve (o servidor usaria
+ * as mesmas credenciais guardadas): o caminho é desconectar e conectar de novo, e só quem conectou pode.
+ */
+export function connectionErrorHelp(connection: Pick<BankConnectionResponse, 'status' | 'isMine' | 'userName'>): string | null {
+  if (connection.status !== 'Error') return null;
+  return connection.isMine
+    ? 'Para voltar a funcionar, toque em "Desconectar" e depois em "Conectar de novo", com o Client ID e o Client Secret certos. Os bancos e as contas continuam aqui.'
+    : `Só ${connection.userName} pode resolver: desconectando e conectando de novo com as credenciais certas.`;
+}
+
+/**
  * Em que passo o wizard abre. Quem já tem conexão (ativa ou com erro) só adiciona bancos: passo 4. Quem
  * desconectou precisa informar as credenciais de novo. Sem o aceite do aviso de privacidade, sempre o passo 1.
  */

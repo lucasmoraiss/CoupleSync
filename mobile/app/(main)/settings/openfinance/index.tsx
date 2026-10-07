@@ -28,6 +28,7 @@ import { useWizardStore } from '@/modules/openfinance/wizardStore';
 import {
   UNAVAILABLE_TEXT,
   UNAVAILABLE_TITLE,
+  connectionErrorHelp,
   connectionStatusLabel,
   describeAccount,
   isOpenFinanceAvailable,
@@ -184,6 +185,7 @@ export default function OpenFinanceScreen() {
 
         {connections.map((connection) => {
           const disconnected = connection.status === 'Disconnected';
+          const errorHelp = connectionErrorHelp(connection);
           return (
             <View key={connection.id} style={styles.card}>
               <Text style={styles.cardTitle}>{connection.label}</Text>
@@ -199,6 +201,7 @@ export default function OpenFinanceScreen() {
               {connection.lastErrorMessage ? (
                 <Text style={styles.errorText} accessibilityRole="alert">{connection.lastErrorMessage}</Text>
               ) : null}
+              {errorHelp ? <Text style={styles.cardText}>{errorHelp}</Text> : null}
 
               {connection.items.length === 0 ? (
                 <Text style={styles.muted}>Nenhum banco verificado nesta conexão.</Text>
