@@ -1,5 +1,7 @@
 using System.Reflection;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Hosting;
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
@@ -41,9 +43,44 @@ internal class TestApiFactory : WebApplicationFactory<Program>
     {
         BeforeCreateHost();
         builder.UseEnvironment(TestEnvironmentName);
-        Environment.SetEnvironmentVariable("DATABASE_URL", DatabaseConnectionString);
+
+        var connectionString = DatabaseConnectionString;
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            // An empty value would clear DATABASE_URL and hand the decision back to configuration.
+            throw new InvalidOperationException($"{GetType().Name}.{nameof(DatabaseConnectionString)} must not be empty.");
+        }
+
+        Environment.SetEnvironmentVariable("DATABASE_URL", connectionString);
         return base.CreateHost(builder);
     }
+
+    // Other ways in which a derived factory could build the host on its own terms: closed, like CreateHost.
+    protected sealed override IWebHostBuilder? CreateWebHostBuilder() => base.CreateWebHostBuilder();
+
+    protected sealed override TestServer CreateServer(IWebHostBuilder builder) => base.CreateServer(builder);
+
+    /// <summary>
+    /// A host derived from this one with extra configuration (<c>WithWebHostBuilder</c>), without the test having to name
+    /// <c>WebApplicationFactory</c> (the source guard forbids the name outside the shared files).
+    /// </summary>
+    internal DerivedTestHost WithTestHostBuilder(Action<IWebHostBuilder> configure) => new(WithWebHostBuilder(configure));
+}
+
+/// <summary>What the tests that derive a host need from it: clients, services and disposal.</summary>
+internal sealed class DerivedTestHost : IDisposable, IAsyncDisposable
+{
+    private readonly WebApplicationFactory<Program> _host;
+
+    internal DerivedTestHost(WebApplicationFactory<Program> host) => _host = host;
+
+    public IServiceProvider Services => _host.Services;
+
+    public HttpClient CreateClient() => _host.CreateClient();
+
+    public void Dispose() => _host.Dispose();
+
+    public ValueTask DisposeAsync() => _host.DisposeAsync();
 }
 
 public sealed class TestNoParallelizationTests

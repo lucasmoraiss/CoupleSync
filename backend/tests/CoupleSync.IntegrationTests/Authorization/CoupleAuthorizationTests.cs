@@ -13,7 +13,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 
 namespace CoupleSync.IntegrationTests.Authorization;
 
@@ -176,7 +175,7 @@ public sealed class CoupleAuthorizationTests
             _keepAliveConnection?.Dispose();
             _keepAliveConnection = null;
             // Do NOT null out JWT env vars — nulling races with other parallel test class factories
-            // that call SetEnvironmentVariable then immediately read them in CreateHost.
+            // that call SetEnvironmentVariable then immediately read them when the host is built (BeforeCreateHost).
             // The env vars intentionally remain set for the lifetime of the test process.
         }
     }

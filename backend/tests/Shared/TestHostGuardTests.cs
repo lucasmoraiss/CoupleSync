@@ -38,14 +38,35 @@ public sealed class TestHostGuardTests
     }
 
     /// <summary>A derived factory cannot skip the base's CreateHost (environment, DATABASE_URL); it uses BeforeCreateHost.</summary>
-    [Fact]
-    public void TheSharedBase_CannotHaveItsCreateHostReplaced()
+    [Theory]
+    [InlineData("CreateHost")]
+    [InlineData("CreateWebHostBuilder")]
+    [InlineData("CreateServer")]
+    public void TheSharedBase_CannotHaveItsHostConstructionReplaced(string method)
     {
-        var createHost = typeof(TestApiFactory).GetMethod(
-            "CreateHost", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+        var found = typeof(TestApiFactory).GetMethod(
+            method, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
 
-        Assert.NotNull(createHost);
-        Assert.True(createHost!.IsFinal, "TestApiFactory.CreateHost must be sealed.");
+        Assert.NotNull(found);
+        Assert.True(found!.IsFinal, $"TestApiFactory.{method} must be sealed.");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public void ATestHost_WithoutADatabaseConnectionString_RefusesToStart(string? connectionString)
+    {
+        using var factory = new NoDatabaseFactory(connectionString);
+
+        var error = Assert.Throws<InvalidOperationException>(() => factory.Services);
+
+        Assert.Contains("must not be empty", error.Message);
+    }
+
+    private sealed class NoDatabaseFactory(string? connectionString) : TestApiFactory
+    {
+        protected override string DatabaseConnectionString => connectionString!;
     }
 
     [Fact]

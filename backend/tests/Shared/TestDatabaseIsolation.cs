@@ -25,6 +25,12 @@ internal static class TestDatabaseIsolation
     }
 }
 
+/// <summary>
+/// Only in a project that cannot start a host (CoupleSync.UnitTests) does this test prove that the belt itself ran: in the
+/// projects with hosts, <c>TestApiFactory</c> also sets the same value, so an earlier host could make it pass without the
+/// belt. The value of the belt is that it exists BEFORE any host does; the guard that every project links it is
+/// <c>TestHostSourceGuardTests.EveryTestProjectThatCanReachTheApi_LinksTheSharedProtection</c>.
+/// </summary>
 public sealed class TestDatabaseIsolationTests
 {
     [Fact]

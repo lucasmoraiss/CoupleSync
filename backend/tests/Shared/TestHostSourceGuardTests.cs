@@ -99,20 +99,42 @@ public sealed class TestHostSourceGuardTests
     [InlineData("var s = new TestServer(builder);")]
     [InlineData("Program.Main(new string[0]);")]
     [InlineData("var p = new Program();")]
+    [InlineData("Program p = new();")]
+    [InlineData("private readonly WebApplicationFactory<Program> _factory = new();")]
+    [InlineData("WebApplicationFactory<Program> f = new();")]
+    [InlineData("static WebApplicationFactory<Program> Make() => new();")]
+    [InlineData("var f = new global::Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>();")]
+    [InlineData("using Factory = Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>;\nvar f = new Factory();")]
+    [InlineData("TestServer s = new(builder);")]
+    [InlineData("WebApplicationFactory<Program> f\n    = new();")]
+    [InlineData("HostBuilder b = new();")]
+    [InlineData("static WebApplicationFactory<Program> WithSender(TestApiFactory f) => f.WithWebHostBuilder(b => { });")]
+    // Code behind a "/*" that sits inside a string literal (normal, verbatim, interpolated, raw) is still seen.
+    [InlineData("var m = \"image/*\"; var f = new WebApplicationFactory<Program>();")]
+    [InlineData("var m = @\"image/*\"; WebApplicationFactory<Program> f = new();")]
+    [InlineData("var m = $\"image/*{x}\"; WebApplicationFactory<Program> f = new();")]
+    [InlineData("var m = \"\"\"image/*\"\"\"; WebApplicationFactory<Program> f = new();")]
+    [InlineData("var m = '\"'; var u = \"/*\"; WebApplicationFactory<Program> f = new();")]
+    [InlineData("var u = \"//\"; WebApplicationFactory<Program> f = new();")]
     public void TheRules_FlagAHostBuiltOutsideTheSharedBase(string code)
     {
         var found = TestHostSourceRules.FindHostCreation(new[] { new SourceFile("CoupleSync.UnitTests/Example.cs", code) });
 
-        Assert.Single(found);
+        Assert.NotEmpty(found);
     }
 
     [Theory]
     [InlineData("class Mine : TestApiFactory { }")]
-    [InlineData("static WebApplicationFactory<Program> WithSender(TestApiFactory f) => f.WithWebHostBuilder(b => { });")]
     [InlineData("// new WebApplicationFactory<Program>() is what the guard forbids")]
     [InlineData("/* WebApplication.CreateBuilder(args) */ var x = 1;")]
     [InlineData("var assembly = typeof(Program).Assembly;")]
     [InlineData("var host = new Mine().Services; var url = \"http://localhost\";")]
+    [InlineData("var x = new MyWebApplicationFactoryHelper();")]
+    [InlineData("var o = new WebApplicationFactoryClientOptions();")]
+    [InlineData("var s = \"WebApplicationFactory<Program> and TestServer are only words here\";")]
+    [InlineData("var s = @\"WebApplicationFactory\"; var t = \"\"\"TestServer\"\"\";")]
+    [InlineData("/* TestServer\n WebApplicationFactory */ // TestServer\nvar x = 1;")]
+    [InlineData("class Mine : TestApiFactory { }\nclass Other : IClassFixture<TransactionWebApplicationFactory> { }")]
     public void TheRules_AcceptAHostThatGoesThroughTheBase(string code)
     {
         Assert.Empty(TestHostSourceRules.FindHostCreation(new[] { new SourceFile("CoupleSync.UnitTests/Example.cs", code) }));
@@ -227,21 +249,25 @@ internal static class TestHostSourceRules
         "Shared/TestApiFactory.cs", "Shared/TestHostGuardTests.cs", "Shared/TestHostSourceGuardTests.cs",
     };
 
+    /// <summary>
+    /// The rule is "no mention": every way of building a host (<c>new WebApplicationFactory&lt;Program&gt;()</c>, target-typed
+    /// <c>= new()</c>, <c>global::</c>, a fully qualified name, a <c>using</c> alias, <c>TestServer</c>) has to WRITE the type
+    /// name somewhere, so the identifiers themselves are forbidden outside the permitted files, whole word, after comments are
+    /// removed and string literals are blanked. Spellings are not enumerated: that is how the previous version was bypassed.
+    /// </summary>
     private static readonly (string Name, Regex Pattern)[] HostCreation =
     {
-        ("new WebApplicationFactory<...>()", new Regex(@"\bnew\s+(?:[\w.]+\.)?WebApplicationFactory\s*<")),
-        ("class deriving from WebApplicationFactory<...>", new Regex(@"\bclass\s+\w+[^{;]*:[^{;]*\bWebApplicationFactory\s*<")),
+        ("mentions WebApplicationFactory", new Regex(@"\bWebApplicationFactory\b")),
+        ("mentions TestServer", new Regex(@"\bTestServer\b")),
+        ("mentions WebApplicationBuilder", new Regex(@"\bWebApplicationBuilder\b")),
+        ("mentions HostBuilder / WebHostBuilder", new Regex(@"\b(?:Web)?HostBuilder\b")),
         ("WebApplication.Create*", new Regex(@"\bWebApplication\s*\.\s*Create\w*\s*\(")),
-        ("new WebApplicationBuilder", new Regex(@"\bnew\s+WebApplicationBuilder\b")),
         ("Host.Create* / WebHost.Create*", new Regex(@"\b(?:Web)?Host\s*\.\s*Create\w*\s*\(")),
-        ("new HostBuilder / WebHostBuilder", new Regex(@"\bnew\s+(?:Web)?HostBuilder\s*\(")),
-        ("new TestServer", new Regex(@"\bnew\s+TestServer\s*\(")),
         ("Program.Main", new Regex(@"\bProgram\s*\.\s*Main\b")),
-        ("new Program()", new Regex(@"\bnew\s+Program\s*\(")),
+        ("new Program", new Regex(@"\bnew\s*Program\b")),
+        ("Program x = new()", new Regex(@"\bProgram\s+\w+\s*=\s*new\b")),
     };
 
-    private static readonly Regex BlockComment = new(@"/\*.*?\*/", RegexOptions.Singleline);
-    private static readonly Regex LineComment = new(@"(^|\s)//[^\r\n]*");
     private static readonly Regex FactoryClass = new(@"\bclass\s+(\w+)\s*(?:\([^)]*\))?\s*:\s*TestApiFactory\b");
 
     internal static IReadOnlyList<string> FindHostCreation(IEnumerable<SourceFile> sources)
@@ -308,5 +334,91 @@ internal static class TestHostSourceRules
 
     private static string Normalize(string? path) => (path ?? "").Replace('\\', '/');
 
-    internal static string StripComments(string code) => LineComment.Replace(BlockComment.Replace(code, " "), "$1");
+    /// <summary>
+    /// Removes comments (//, /* */) and blanks the content of ordinary string literals, respecting string syntax
+    /// (normal, verbatim, raw, char). Interpolated strings keep their content: code can live in their holes, and keeping it can
+    /// only make the guard stricter. Comment markers inside a string never start a comment.
+    /// </summary>
+    internal static string StripComments(string code)
+    {
+        var o = new System.Text.StringBuilder(code.Length);
+        var i = 0;
+        while (i < code.Length)
+        {
+            var c = code[i];
+            if (c == '/' && i + 1 < code.Length && code[i + 1] == '/')
+            {
+                while (i < code.Length && code[i] != '\n') i++;
+            }
+            else if (c == '/' && i + 1 < code.Length && code[i + 1] == '*')
+            {
+                var end = code.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = end < 0 ? code.Length : end + 2;
+                o.Append(' ');
+            }
+            else if (c == '\'')
+            {
+                var j = i + 1;
+                while (j < code.Length && code[j] != '\'' && code[j] != '\n') j += code[j] == '\\' ? 2 : 1;
+                i = Math.Min(j + 1, code.Length);
+                o.Append("' '");
+            }
+            else if (c == '"')
+            {
+                var interpolated = false;
+                var verbatim = false;
+                for (var k = o.Length - 1; k >= 0 && (o[k] == '$' || o[k] == '@'); k--)
+                {
+                    interpolated |= o[k] == '$';
+                    verbatim |= o[k] == '@';
+                }
+
+                var quotes = 1;
+                while (i + quotes < code.Length && code[i + quotes] == '"') quotes++;
+
+                int end;
+                if (quotes >= 3)
+                {
+                    // Raw string: ends at the same number of quotes.
+                    var close = code.IndexOf(new string('"', quotes), i + quotes, StringComparison.Ordinal);
+                    end = close < 0 ? code.Length : close + quotes;
+                }
+                else if (quotes == 2 && !verbatim)
+                {
+                    end = i + 2; // empty string
+                }
+                else
+                {
+                    var j = i + 1;
+                    while (j < code.Length)
+                    {
+                        if (verbatim && code[j] == '"' && j + 1 < code.Length && code[j + 1] == '"') j += 2;
+                        else if (!verbatim && code[j] == '\\') j += 2;
+                        else if (code[j] == '"') break;
+                        else j++;
+                    }
+
+                    end = Math.Min(j + 1, code.Length);
+                }
+
+                if (interpolated)
+                {
+                    o.Append(code, i, end - i);
+                }
+                else
+                {
+                    o.Append("\"\"");
+                }
+
+                i = end;
+            }
+            else
+            {
+                o.Append(c);
+                i++;
+            }
+        }
+
+        return o.ToString();
+    }
 }
