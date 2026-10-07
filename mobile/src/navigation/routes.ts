@@ -9,6 +9,9 @@ export const PARENT_ROUTE = {
   'settings/verify-email': '/(main)/settings',
   'settings/privacy': '/(main)/settings',
   'settings/capture-consent': '/(main)/settings',
+  'settings/openfinance/index': '/(main)/settings',
+  // O wizard é aberto da tela do Open Finance e volta para ela (onde o resultado da conexão aparece).
+  'settings/openfinance/wizard': '/(main)/settings/openfinance',
   'transactions/new': '/(main)/transactions',
   'transactions/edit': '/(main)/transactions',
   'ocr-upload': '/(main)/transactions',

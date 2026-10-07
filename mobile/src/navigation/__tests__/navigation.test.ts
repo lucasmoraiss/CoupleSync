@@ -68,6 +68,56 @@ describe('voltar das abas ocultas (M-I2)', () => {
     expect(parentRouteOf('transactions/edit')).toBe('/(main)/transactions');
   });
 
+  it('Open Finance: a tela de gestão volta para Configurações e o wizard volta para a tela de gestão', () => {
+    expect(parentRouteOf('settings/openfinance/index')).toBe('/(main)/settings');
+    expect(parentRouteOf('settings/openfinance/wizard')).toBe('/(main)/settings/openfinance');
+  });
+
+  it('Open Finance: Configurações tem o item que abre a tela, e a tela busca de novo a cada volta', () => {
+    const settings = read('(main)/settings/index.tsx');
+    expect(settings).toContain('Open Finance (conectar banco)');
+    expect(settings).toMatch(/router\.push\('\/\(main\)\/settings\/openfinance'/);
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/useOnRefocus\(/);
+    expect(screen).toMatch(/<RefreshControl /);
+  });
+
+  it('Open Finance: na tela de gestão, cada controle de edição depende da regra testada (connectionControls)', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/const controls = connectionControls\(connection, available\);/);
+    // O interruptor, o botão de adicionar banco/conectar de novo e o de desconectar.
+    expect(screen).toMatch(/\{controls\.syncSwitch \? \(\s*<View style=\{styles\.switchBox\}>[\s\S]{0,200}<Switch\b/);
+    expect(screen).toMatch(/\{controls\.addBank \|\| controls\.reconnect \? \(\s*<View style=\{styles\.actions\}>/);
+    expect(screen).toMatch(/\{controls\.disconnect \? \(\s*<TouchableOpacity[\s\S]{0,200}confirmDisconnect\(connection\)/);
+    // Nenhum deles aparece em outro lugar da tela, fora dessas condições.
+    expect(screen.match(/<Switch\b/g)).toHaveLength(1);
+    expect(screen.match(/confirmDisconnect\(connection\)/g)).toHaveLength(1);
+    expect(screen.match(/styles\.actions\}/g)).toHaveLength(1);
+    // "isMine" só sobra no texto "Conectada por você / por Fulano".
+    expect(screen.match(/\.isMine\b/g)).toHaveLength(1);
+  });
+
+  it('Open Finance: na tela de gestão, o texto de saldo e limite (com a data da leitura) vem da regra testada (accountBalanceText)', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/\{accountBalanceText\(account, formatMoney\)\}/);
+    expect(screen).not.toContain('Fatura atual');
+    expect(screen).not.toContain('Limite disponível');
+  });
+
+  it('Open Finance: no passo 3 do wizard, o que fazer quando a conexão já existe vem da regra testada', () => {
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    expect(wizard).toMatch(/await existingConnectionAfterCreateError\(getApiErrorCode\(err\), /);
+    expect(wizard).not.toContain('BANK_CONNECTION_ALREADY_EXISTS');
+  });
+
+  it('Open Finance: o wizard abre os dois sites pelo Linking do React Native, sem módulo nativo novo', () => {
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    expect(wizard).toMatch(/Linking\.openURL\(/);
+    expect(wizard).toMatch(/import \{[^}]*\bLinking\b[^}]*\} from 'react-native'/);
+    // O campo do segredo nunca aparece em texto aberto.
+    expect(wizard).toMatch(/accessibilityLabel="Client Secret"[\s\S]{0,200}secureTextEntry/);
+  });
+
   it('as abas usam o histórico para o botão voltar (o padrão da biblioteca pula para a primeira aba)', () => {
     expect(TABS_BACK_BEHAVIOR).toBe('history');
     expect(layout).toMatch(/<Tabs\s[^>]*backBehavior=\{TABS_BACK_BEHAVIOR\}/);
@@ -88,6 +138,7 @@ describe('voltar das abas ocultas (M-I2)', () => {
       '(main)/settings/change-password.tsx',
       '(main)/settings/verify-email.tsx',
       '(main)/settings/capture-consent.tsx',
+      '(main)/settings/openfinance/wizard.tsx',
     ];
     const missing = mustReset.filter((file) => !/export default resetOnFocus\(/.test(read(file)));
     expect(missing).toEqual([]);

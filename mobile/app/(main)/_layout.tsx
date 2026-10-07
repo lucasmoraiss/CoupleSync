@@ -11,6 +11,8 @@ import { TABS_BACK_BEHAVIOR } from '@/navigation/routes';
 import { useCaptureConsentSync } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
 import { registerPushToken } from '@/services/pushTokenService';
 import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
+// Carregado com o app (e não só ao abrir o wizard): é o módulo que registra a limpeza do progresso ao sair da conta.
+import '@/modules/openfinance/wizardStore';
 import { colors } from '@/theme';
 
 
@@ -107,6 +109,8 @@ export default function MainLayout() {
       <Tabs.Screen name="settings/verify-email" options={{ href: null }} />
       <Tabs.Screen name="settings/privacy" options={{ href: null }} />
       <Tabs.Screen name="settings/capture-consent" options={{ href: null }} />
+      <Tabs.Screen name="settings/openfinance/index" options={{ href: null }} />
+      <Tabs.Screen name="settings/openfinance/wizard" options={{ href: null }} />
       <Tabs.Screen name="ocr-upload" options={{ href: null }} />
       <Tabs.Screen name="ocr-review" options={{ href: null }} />
       <Tabs.Screen name="transactions/new" options={{ href: null }} />
