@@ -134,8 +134,10 @@ notificação bancária de exemplo até virar transação. O que continua manual
 - A esteira exige `App E2E` verde junto de `Build & Test` antes do merge (passo 9 da skill `entregar`). Na regra
   do branch no GitHub ela **não** é obrigatória: torná-la obrigatória lá é decisão sua, depois de um período
   estável — basta pedir na sessão.
-- O cache do build só fica quente para os PRs depois de uma execução em `main`: Actions → **App E2E** →
-  **Run workflow** em `main` (vale repetir quando as dependências do app mudarem).
+- O cache do build só fica quente para os PRs depois de uma execução em `main`. Quem dispara é a esteira
+  (`ghp workflow run app-e2e.yml --repo lucasmoraiss/CoupleSync --ref main`), ao fechar cada entrega cujo merge mude as
+  dependências do app (`mobile/package-lock.json`) ou o próprio workflow; não é tarefa sua. Depois de uma
+  semana sem PRs o cache expira sozinho; o primeiro PR seguinte só demora mais.
 
 ## Quando a esteira para e o que ela pergunta
 
