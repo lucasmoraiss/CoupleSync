@@ -43,12 +43,8 @@ export const CAPTURE_SOURCES_TEXT = CAPTURE_SOURCES
   .map((source) => `${source.bank} (${source.packages.join(', ')})`)
   .join('; ');
 
-/**
- * !!! TEMPORÁRIO !!! Contato para pedir a exclusão dos dados. Hoje é só uma descrição neutra (nenhum e-mail foi
- * definido). O responsável pelo app deve trocar por um contato real (ex.: um e-mail) ANTES de abrir o teste a mais
- * pessoas. É o único lugar onde esse contato aparece.
- */
-export const PRIVACY_CONTACT = 'a pessoa responsável pelo app que te convidou para o teste do CoupleSync';
+/** Contato para pedir a exclusão dos dados. É o único lugar onde esse contato aparece. */
+export const PRIVACY_CONTACT = 'salomaolucas13@outlook.com';
 
 export const CAPTURE_CONSENT_TITLE = 'Captura de notificações bancárias';
 
@@ -144,7 +140,7 @@ export function privacySections(aiAvailable: boolean): readonly TextSection[] {
     {
       title: 'Como pedir a exclusão',
       paragraphs: [
-        `Peça a exclusão da sua conta e dos seus dados a ${PRIVACY_CONTACT}, informando o e-mail da conta. O app ainda não tem um botão para excluir a conta. Você pode apagar transações, metas e rendas direto no app e sair do grupo a qualquer momento.`,
+        `Para pedir a exclusão da sua conta e dos seus dados, escreva para ${PRIVACY_CONTACT}, informando o e-mail da conta. O app ainda não tem um botão para excluir a conta. Você pode apagar transações, metas e rendas direto no app e sair do grupo a qualquer momento.`,
       ],
     },
   ];

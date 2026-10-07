@@ -69,7 +69,9 @@ describe('textos de privacidade', () => {
   it('o contato de exclusão vem de uma constante única', () => {
     expect(flat(WITH_AI)).toContain(PRIVACY_CONTACT);
     expect(flat(WITHOUT_AI)).toContain(PRIVACY_CONTACT);
-    expect(PRIVACY_CONTACT).not.toMatch(/@/); // nenhum e-mail inventado
+    expect(PRIVACY_CONTACT).toBe('salomaolucas13@outlook.com');
+    const deletion = WITH_AI.find((section) => section.title === 'Como pedir a exclusão');
+    expect(deletion?.paragraphs.join(' ')).toContain(`escreva para ${PRIVACY_CONTACT}`);
   });
 
   it('o aviso do chat informa que descrições de extratos podem ir ao Gemini após o aceite', () => {
