@@ -68,6 +68,28 @@ describe('voltar das abas ocultas (M-I2)', () => {
     expect(parentRouteOf('transactions/edit')).toBe('/(main)/transactions');
   });
 
+  it('Open Finance: a tela de gestão volta para Configurações e o wizard volta para a tela de gestão', () => {
+    expect(parentRouteOf('settings/openfinance/index')).toBe('/(main)/settings');
+    expect(parentRouteOf('settings/openfinance/wizard')).toBe('/(main)/settings/openfinance');
+  });
+
+  it('Open Finance: Configurações tem o item que abre a tela, e a tela busca de novo a cada volta', () => {
+    const settings = read('(main)/settings/index.tsx');
+    expect(settings).toContain('Open Finance (conectar banco)');
+    expect(settings).toMatch(/router\.push\('\/\(main\)\/settings\/openfinance'/);
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/useOnRefocus\(/);
+    expect(screen).toMatch(/<RefreshControl /);
+  });
+
+  it('Open Finance: o wizard abre os dois sites pelo Linking do React Native, sem módulo nativo novo', () => {
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    expect(wizard).toMatch(/Linking\.openURL\(/);
+    expect(wizard).toMatch(/import \{[^}]*\bLinking\b[^}]*\} from 'react-native'/);
+    // O campo do segredo nunca aparece em texto aberto.
+    expect(wizard).toMatch(/accessibilityLabel="Client Secret"[\s\S]{0,200}secureTextEntry/);
+  });
+
   it('as abas usam o histórico para o botão voltar (o padrão da biblioteca pula para a primeira aba)', () => {
     expect(TABS_BACK_BEHAVIOR).toBe('history');
     expect(layout).toMatch(/<Tabs\s[^>]*backBehavior=\{TABS_BACK_BEHAVIOR\}/);
@@ -88,6 +110,7 @@ describe('voltar das abas ocultas (M-I2)', () => {
       '(main)/settings/change-password.tsx',
       '(main)/settings/verify-email.tsx',
       '(main)/settings/capture-consent.tsx',
+      '(main)/settings/openfinance/wizard.tsx',
     ];
     const missing = mustReset.filter((file) => !/export default resetOnFocus\(/.test(read(file)));
     expect(missing).toEqual([]);

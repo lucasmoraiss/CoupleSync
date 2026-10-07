@@ -13,6 +13,7 @@ import {
   EMPTY_CONSENT,
   acceptAiChat,
   acceptCapture,
+  acceptOpenFinance,
   declineAiChat,
   declineCapture,
   isAiChatAllowed,
@@ -60,6 +61,8 @@ interface ConsentActions {
   setCaptureEnabled: (enabled: boolean) => Promise<boolean>;
   acceptAiChat: () => Promise<boolean>;
   declineAiChat: () => Promise<boolean>;
+  /** Aceite do aviso de privacidade do Open Finance (passo 1 do wizard). */
+  acceptOpenFinance: () => Promise<boolean>;
   reset: () => void;
 }
 
@@ -114,6 +117,7 @@ export const useConsentStore = create<ConsentState & ConsentActions>((set, get) 
     setCaptureEnabled: (enabled) => update((r, now) => setCaptureEnabled(r, enabled, now)),
     acceptAiChat: () => update((r, now) => acceptAiChat(r, now)),
     declineAiChat: () => update((r, now) => declineAiChat(r, now)),
+    acceptOpenFinance: () => update((r, now) => acceptOpenFinance(r, now)),
 
     reset: () => set({ ...INITIAL }),
   };

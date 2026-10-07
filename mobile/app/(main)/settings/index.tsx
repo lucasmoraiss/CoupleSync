@@ -1,6 +1,6 @@
 // AC-010: Settings screen stub
 import React from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Alert, Switch } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Alert, Switch } from 'react-native';
 import { router } from 'expo-router';
 import { logout } from '@/services/logout';
 import { openNotificationListenerSettings } from '@/modules/integrations/notification-capture/NotificationListenerBridge';
@@ -62,6 +62,8 @@ export default function SettingsScreen() {
         <Text style={styles.title} accessibilityRole="header">Configurações</Text>
       </View>
 
+      {/* Rolável: com um item a mais a lista já não cabe inteira em telas pequenas. */}
+      <ScrollView contentContainerStyle={styles.scrollContent}>
       <View style={styles.section}>
         <View style={styles.menuItem}>
           <View style={styles.switchInfo}>
@@ -108,6 +110,16 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
         <TouchableOpacity
           style={styles.menuItem}
+          onPress={() => router.push('/(main)/settings/openfinance' as any)}
+          accessibilityLabel="Abrir o Open Finance: conectar banco pelo Meu Pluggy"
+          accessibilityRole="button"
+        >
+          <Text style={styles.menuText}>Open Finance (conectar banco)</Text>
+          <Text style={styles.menuArrow}>›</Text>
+        </TouchableOpacity>
+        <View style={styles.divider} />
+        <TouchableOpacity
+          style={styles.menuItem}
           onPress={() => router.push('/(main)/settings/change-password' as any)}
           accessibilityLabel="Alterar a senha da conta"
           accessibilityRole="button"
@@ -145,6 +157,7 @@ export default function SettingsScreen() {
           <Text style={[styles.menuArrow, { color: colors.error }]}>›</Text>
         </TouchableOpacity>
       </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -152,6 +165,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, paddingHorizontal: 20, paddingTop: 24 },
   header: { marginBottom: 28 },
+  scrollContent: { paddingBottom: 24 },
   title: { fontSize: 26, fontWeight: '700', color: colors.text },
   section: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
   menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 18, minHeight: 56 },

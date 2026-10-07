@@ -23,16 +23,24 @@ export interface AiChatConsent {
   readonly declinedAt: string | null;
 }
 
+/** Aceite do aviso de privacidade do Open Finance (wizard de conexão com o Meu Pluggy). */
+export interface OpenFinanceConsent {
+  readonly acceptedAt: string | null;
+}
+
 export interface ConsentRecord {
   readonly version: number;
   readonly capture: CaptureConsent;
   readonly aiChat: AiChatConsent;
+  /** Ausente nos registros gravados antes do Open Finance existir: lido como "não aceito". */
+  readonly openFinance: OpenFinanceConsent;
 }
 
 export const EMPTY_CONSENT: ConsentRecord = {
   version: CONSENT_VERSION,
   capture: { acceptedAt: null, decidedAt: null, promptShownAt: null, enabled: false },
   aiChat: { acceptedAt: null, declinedAt: null },
+  openFinance: { acceptedAt: null },
 };
 
 function isoOrNull(value: unknown): string | null {
@@ -59,6 +67,7 @@ export function parseConsent(raw: string | null | undefined): ConsentRecord {
         acceptedAt: isoOrNull(data.aiChat?.acceptedAt),
         declinedAt: isoOrNull(data.aiChat?.declinedAt),
       },
+      openFinance: { acceptedAt: isoOrNull(data.openFinance?.acceptedAt) },
     };
   } catch {
     return EMPTY_CONSENT;
@@ -112,6 +121,14 @@ export function acceptAiChat(record: ConsentRecord, nowIso: string): ConsentReco
 
 export function declineAiChat(record: ConsentRecord, nowIso: string): ConsentRecord {
   return { ...record, aiChat: { acceptedAt: null, declinedAt: nowIso } };
+}
+
+export function isOpenFinanceAccepted(record: ConsentRecord): boolean {
+  return record.openFinance.acceptedAt !== null;
+}
+
+export function acceptOpenFinance(record: ConsentRecord, nowIso: string): ConsentRecord {
+  return { ...record, openFinance: { acceptedAt: nowIso } };
 }
 
 const MONTHS_PT_BR = [

@@ -95,6 +95,46 @@ export const AI_CHAT_SECTIONS: readonly TextSection[] = [
   },
 ];
 
+export const OPEN_FINANCE_CONSENT_TITLE = 'Open Finance: conectar seus bancos';
+
+/** Passo 1 do wizard ("O que é") e aviso de privacidade específico do Open Finance. */
+export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
+  {
+    title: 'O que é o Meu Pluggy',
+    paragraphs: [
+      'O Meu Pluggy (meu.pluggy.ai) é um serviço gratuito da Pluggy para você acessar só os seus próprios dados bancários pelo Open Finance, o sistema de compartilhamento de dados entre bancos regulado pelo Banco Central.',
+      'Você conecta os seus bancos lá, autorizando cada um no app do próprio banco, e cria as suas credenciais de acesso (Client ID, Client Secret e um Item ID por banco). O CoupleSync nunca vê a senha do seu banco.',
+    ],
+  },
+  {
+    title: 'O que o CoupleSync passa a ver',
+    paragraphs: [
+      'Com as suas credenciais, o servidor do CoupleSync consulta no Pluggy os dados dos bancos que você conectou: extrato da conta, cartão de crédito e faturas, saldos e investimentos.',
+      'Nesta versão o app só confere a conexão e mostra as contas encontradas, com saldo e limite. As transações do banco começam a chegar na próxima atualização do app, e nada entra nas suas finanças sem você revisar.',
+    ],
+  },
+  {
+    title: 'Quem vê',
+    paragraphs: [
+      'Tudo o que você conectar é do grupo: os membros do seu grupo veem as suas contas, saldos, cartões e o que mais vier do banco.',
+      'Só você altera a sua conexão, escolhe quais contas sincronizam e pode desconectar.',
+    ],
+  },
+  {
+    title: 'Como as credenciais são guardadas',
+    paragraphs: [
+      'O Client ID e o Client Secret são guardados cifrados no servidor do CoupleSync e nunca são mostrados de novo: nem para você, nem para o seu grupo. No seu celular eles não ficam guardados.',
+      'Ao desconectar, as credenciais são apagadas na hora. As contas já encontradas continuam visíveis para o grupo.',
+    ],
+  },
+  {
+    title: 'Inteligência artificial',
+    paragraphs: [
+      'Conectar um banco não muda o que vai para a IA: o Chat IA continua seguindo a resposta que você deu no aviso do Chat IA. Sem aquele aceite, nada do que vier do banco é enviado ao Google Gemini.',
+    ],
+  },
+];
+
 export const PRIVACY_TITLE = 'Privacidade';
 
 const GEMINI_SHARING_WHEN_AVAILABLE =
@@ -117,6 +157,7 @@ export function privacySections(aiAvailable: boolean): readonly TextSection[] {
         'Importação de extratos: o PDF que você envia é lido no servidor para extrair as transações e é apagado depois de processado.',
         'Captura de notificações (só se você aceitar): banco, valor, estabelecimento e data e hora das compras. O texto das notificações não é enviado.',
         'Alertas: o código do seu aparelho para enviar notificações do app (push).',
+        'Open Finance (só se você conectar): o Client ID e o Client Secret da sua aplicação no Pluggy, guardados cifrados, e as contas e cartões dos bancos que você conectou, com saldo, limite e os últimos dígitos do número.',
       ],
     },
     {
@@ -129,7 +170,8 @@ export function privacySections(aiAvailable: boolean): readonly TextSection[] {
     {
       title: 'Com quem são compartilhados',
       paragraphs: [
-        'Com os membros do seu grupo: eles veem as transações, rendas, orçamento e metas do grupo.',
+        'Com os membros do seu grupo: eles veem as transações, rendas, orçamento e metas do grupo e, se você conectar um banco pelo Open Finance, as contas, saldos e cartões dessa conexão.',
+        'Com o Pluggy, somente se você conectar um banco pelo Open Finance: o servidor usa as credenciais que você informou para consultar, no Pluggy, os dados dos seus bancos. Nenhum dado seu do CoupleSync é enviado ao Pluggy além dessas credenciais e dos Item IDs.',
         aiAvailable ? GEMINI_SHARING_WHEN_AVAILABLE : GEMINI_SHARING_WHEN_UNAVAILABLE,
         'Com o Google Firebase Cloud Messaging, que entrega as notificações push do app ao seu aparelho (recebe o código do aparelho e o texto do alerta).',
         'Com os provedores de hospedagem e de banco de dados em que o servidor roda, que guardam os dados em nome do CoupleSync.',
@@ -163,6 +205,10 @@ export function consentStatusLines(
         ? `Chat IA (Google Gemini): aceito em ${formatDate(record.aiChat.acceptedAt)}.`
         : 'Chat IA (Google Gemini): não aceito.',
     );
+  }
+  // Só para quem passou pelo wizard: quem nunca abriu o Open Finance não tem resposta a mostrar.
+  if (record.openFinance.acceptedAt) {
+    lines.push(`Open Finance (Meu Pluggy): aceito em ${formatDate(record.openFinance.acceptedAt)}.`);
   }
   return lines;
 }
