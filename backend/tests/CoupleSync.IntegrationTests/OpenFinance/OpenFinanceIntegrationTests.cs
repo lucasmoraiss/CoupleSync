@@ -242,6 +242,12 @@ public sealed class OpenFinanceIntegrationTests
         await AssertErrorAsync(sixth, HttpStatusCode.TooManyRequests, "RATE_LIMIT_EXCEEDED");
         Assert.Equal(5, factory.Pluggy.AuthCalls);
 
+        // Creating a connection sends credentials to Pluggy too: same budget, so it is no way around the limit.
+        var create = await ana.Client.PostAsJsonAsync($"{Base}/connections", NewConnection());
+        await AssertErrorAsync(create, HttpStatusCode.TooManyRequests, "RATE_LIMIT_EXCEEDED");
+        Assert.Equal(5, factory.Pluggy.AuthCalls);
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM bank_connections"));
+
         // Per user: the partner, from the same address, still gets through.
         var other = await bruno.Client.PostAsJsonAsync($"{Base}/credentials/test", Credentials());
         Assert.Equal(HttpStatusCode.OK, other.StatusCode);
