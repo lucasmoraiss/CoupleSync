@@ -136,6 +136,11 @@ jobs:
         working-directory: mobile
         run: npx tsc --noEmit
 
+      # Unit tests of the app's pure logic (ts-jest, node environment — see mobile/jest.config.js).
+      - name: Mobile tests
+        working-directory: mobile
+        run: npm test -- --ci
+
       - name: Secret scan
         uses: trufflesecurity/trufflehog@main
         with:
