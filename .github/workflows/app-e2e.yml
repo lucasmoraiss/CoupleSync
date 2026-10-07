@@ -1,0 +1,188 @@
+name: App E2E
+
+# Screen tests of the real app on an Android emulator, on every pull request to main.
+#
+# What runs: the APK is built here from the pull request (expo prebuild + Gradle, release build), installed on
+# an emulator and driven by Maestro (flows in mobile/tests/e2e/flows/) against the real API container image,
+# with a throwaway PostgreSQL next to it. Nothing here talks to production, to EAS or to Expo.
+#
+# The first step decides whether the pull request touches anything these tests cover (mobile/, backend/, this
+# workflow or its scripts). If it does not, every heavy step is skipped and the job ends green in seconds, so
+# the check always reports a result and can be made required later.
+#
+# No secret is read (pull requests from forks run the same way) and the token is read-only.
+#
+# The test APK accepts plain HTTP, points at the emulator host (10.0.2.2) and has OTA updates switched off
+# (scripts/app-e2e-build-apk.sh). It is never published: on a failure it is kept only as a short-lived
+# workflow artifact whose name says so, to reproduce the failure.
+#
+# Caches (npm, Gradle) are warm for a pull request only when a run on main has saved them: a manual run
+# (workflow_dispatch) on main does that.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per pull request (or per branch, for manual runs): a new push cancels the run of the previous one.
+concurrency:
+  group: app-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app-e2e:
+    name: App E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      # Pinned on purpose (never "latest"): a new Maestro can change how the flows behave.
+      MAESTRO_VERSION: "2.11.0"
+      MAESTRO_SHA256: "5384593cb4e7a106489e75a821d157dd43f4e438df6bc308b72e82c685e1283a"
+      API_IMAGE: "couplesync-api:e2e"
+      E2E_APK: ${{ github.workspace }}/app-e2e-out/couplesync-e2e-test.apk
+      E2E_STUB_APK: ${{ github.workspace }}/app-e2e-out/notification-stub.apk
+      E2E_EVIDENCE_DIR: ${{ github.workspace }}/app-e2e-out/evidence
+
+    steps:
+      # Two commits: the merge commit of the pull request and its parents, for the diff of the next step.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Decide whether there is anything to test
+        id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: bash scripts/app-e2e-changes.sh
+
+      - name: Nothing to test
+        if: steps.changes.outputs.run != 'true'
+        run: |
+          {
+            echo "## App E2E"
+            echo ""
+            echo "Este PR não toca \`mobile/\`, \`backend/\` nem o workflow App E2E: os testes de tela não rodaram."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # ── The API under test: the image that is deployed, built from this pull request ──────────────────────
+      - name: API — build the container image
+        if: steps.changes.outputs.run == 'true'
+        run: docker build --file backend/Dockerfile --tag "${API_IMAGE}" backend/
+
+      # ── The app under test ────────────────────────────────────────────────────────────────────────────────
+      - name: Setup Node.js 20
+        if: steps.changes.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup JDK 17
+        if: steps.changes.outputs.run == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The native dependencies follow the lockfile of the app, so it is the cache key.
+      - name: Cache Gradle
+        if: steps.changes.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: app-e2e-gradle-${{ runner.os }}-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: |
+            app-e2e-gradle-${{ runner.os }}-
+
+      - name: App — install dependencies
+        if: steps.changes.outputs.run == 'true'
+        working-directory: mobile
+        run: npm ci
+
+      # expo prebuild + Gradle assembleRelease, with the test-only changes to the generated manifest; the
+      # script inspects the finished APK (cleartext on, updates off, test API address) before accepting it.
+      - name: App — build the test APK
+        if: steps.changes.outputs.run == 'true'
+        run: bash scripts/app-e2e-build-apk.sh "${E2E_APK}"
+
+      - name: Notification test double — build
+        if: steps.changes.outputs.run == 'true'
+        run: bash scripts/app-e2e-notification-stub.sh "${E2E_STUB_APK}"
+
+      - name: Install Maestro (pinned version, checksum verified)
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' \
+            --output "${RUNNER_TEMP}/maestro.zip" \
+            "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
+          echo "${MAESTRO_SHA256}  ${RUNNER_TEMP}/maestro.zip" | sha256sum --check
+          unzip -q "${RUNNER_TEMP}/maestro.zip" -d "${RUNNER_TEMP}/maestro-cli"
+          echo "${RUNNER_TEMP}/maestro-cli/maestro/bin" >> "${GITHUB_PATH}"
+
+      # Started only now, so that the Gradle build above has the whole machine.
+      - name: API — start it with a throwaway PostgreSQL
+        if: steps.changes.outputs.run == 'true'
+        run: bash scripts/app-e2e-api.sh start "${API_IMAGE}"
+
+      # Hardware acceleration for the emulator on the hosted runner.
+      - name: Enable KVM
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The action boots the emulator, runs the script and shuts the emulator down. `script` is ONE command:
+      # the action runs each line in its own shell.
+      - name: Run the screen tests on the emulator
+        if: steps.changes.outputs.run == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          cores: 3
+          ram-size: 4096M
+          disk-size: 6000M
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/app-e2e-run-flows.sh
+
+      # ── Evidence ──────────────────────────────────────────────────────────────────────────────────────────
+      - name: Collect the logs of the API and of PostgreSQL
+        if: ${{ !cancelled() && steps.changes.outputs.run == 'true' }}
+        run: bash scripts/app-e2e-api.sh logs "${E2E_EVIDENCE_DIR}/api"
+
+      # Maestro logs and screenshots, logcat, API log. Kept on success too: a flow that only passed on the
+      # repetition leaves here what went wrong the first time.
+      - name: Upload the evidence
+        if: ${{ !cancelled() && steps.changes.outputs.run == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-e2e-evidencias
+          path: app-e2e-out/evidence
+          if-no-files-found: warn
+          retention-days: 7
+
+      # Only when the run failed, to reproduce it. TEST BUILD: plain HTTP, points at 10.0.2.2, updates off.
+      - name: Upload the test APK (test build — never publish)
+        if: ${{ failure() && steps.changes.outputs.run == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-e2e-apk-de-teste-nao-publicar
+          path: app-e2e-out/couplesync-e2e-test.apk
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: API — stop
+        if: ${{ always() && steps.changes.outputs.run == 'true' }}
+        run: bash scripts/app-e2e-api.sh stop
