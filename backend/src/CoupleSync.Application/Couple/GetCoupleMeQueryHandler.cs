@@ -18,25 +18,28 @@ public sealed class GetCoupleMeQueryHandler
 
         if (user is null || !user.IsActive)
         {
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired session.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        if (!user.CoupleId.HasValue)
+        if (!query.CoupleId.HasValue)
         {
-            throw new NotFoundException("COUPLE_NOT_FOUND", "Couple was not found.");
+            throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");
         }
 
-        var couple = await _coupleRepository.FindByIdWithMembersAsync(user.CoupleId.Value, cancellationToken);
+        var couple = await _coupleRepository.FindByIdWithMembersAsync(query.CoupleId.Value, cancellationToken);
 
-        if (couple is null)
+        // The token only says which group the caller is working in: it is shown to its members and to nobody else.
+        if (couple is null || !couple.HasMember(user.Id))
         {
-            throw new NotFoundException("COUPLE_NOT_FOUND", "Couple was not found.");
+            throw new NotFoundException("COUPLE_NOT_FOUND", "Casal não encontrado.");
         }
 
         var members = couple.Members
-            .Select(member => new CoupleMemberDto(member.Id, member.Name, member.Email))
+            .OrderBy(member => member.JoinedAtUtc)
+            .ThenBy(member => member.UserId)
+            .Select(member => new CoupleMemberDto(member.UserId, member.User.Name, member.User.Email))
             .ToArray();
 
-        return new GetCoupleMeResult(couple.Id, couple.JoinCode, couple.CreatedAtUtc, members);
+        return new GetCoupleMeResult(couple.Id, couple.JoinCode, couple.CreatedAtUtc, members, couple.OwnerUserId, couple.JoinCodeExpiresAtUtc);
     }
 }

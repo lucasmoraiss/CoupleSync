@@ -90,6 +90,29 @@ public sealed class OcrControllerTests
         Assert.NotEqual(Guid.Empty, payload!.UploadId);
     }
 
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("true", true)]
+    [InlineData("false", false)]
+    public async Task Upload_RecordsTheAiCategorizationConsentOfTheUploader(string? field, bool expected)
+    {
+        await using var factory = new OcrWebApplicationFactory();
+        using var client = factory.CreateClient();
+        var token = await RegisterWithCoupleAndGetTokenAsync(client, $"upload-ai-{Guid.NewGuid():N}@example.com");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var content = BuildMultipartContent(JpegBytes, "receipt.jpg");
+        if (field is not null) content.Add(new StringContent(field), "aiCategorizationConsent");
+        var response = await client.PostAsync("/api/v1/ocr/upload", content);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<UploadResponseDto>();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var job = await db.ImportJobs.FindAsync(payload!.UploadId);
+        Assert.Equal(expected, job!.AiCategorizationConsent);
+    }
+
     [Fact]
     public async Task Upload_UnsupportedFile_Returns415()
     {

@@ -5,5 +5,6 @@ namespace CoupleSync.Application.Common.Interfaces;
 
 public interface IGoalProgressService
 {
-    GoalProgressResult Compute(Goal goal, decimal contributedAmount, DateTime nowUtc);
+    /// <summary>Progress = the goal's manual amount + <paramref name="linkedAmount"/> (sum of linked transactions).</summary>
+    GoalProgressResult Compute(Goal goal, decimal linkedAmount, DateTime nowUtc);
 }

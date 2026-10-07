@@ -81,8 +81,8 @@ public sealed class CategoryRulesSeederTests : IDisposable
         Assert.NotNull(uber);
         Assert.True(uberEats!.Priority > uber!.Priority,
             $"UBER EATS priority ({uberEats.Priority}) must be higher than UBER priority ({uber.Priority})");
-        Assert.Equal("Alimentação", uberEats.Category);
-        Assert.Equal("Transporte", uber.Category);
+        Assert.Equal("ALIMENTACAO", uberEats.Category);
+        Assert.Equal("TRANSPORTE", uber.Category);
     }
 
     public void Dispose() => _connection.Dispose();

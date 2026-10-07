@@ -6,7 +6,7 @@ using ICoupleScoped = CoupleSync.Domain.Interfaces.ICoupleScoped;
 
 namespace CoupleSync.Infrastructure.Persistence;
 
-public sealed class AppDbContext : DbContext, IQueryDbContext
+public sealed class AppDbContext : DbContext
 {
     private readonly ICoupleContext? _coupleContext;
 
@@ -25,7 +25,11 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
     public DbSet<Couple> Couples => Set<Couple>();
 
+    public DbSet<CoupleMember> CoupleMembers => Set<CoupleMember>();
+
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+
+    public DbSet<EmailCode> EmailCodes => Set<EmailCode>();
 
     public DbSet<TransactionEventIngest> TransactionEventIngests => Set<TransactionEventIngest>();
 
@@ -61,20 +65,22 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id");
-            entity.Property(x => x.CoupleId).HasColumnName("couple_id");
-            entity.Property(x => x.CoupleJoinedAtUtc).HasColumnName("couple_joined_at_utc");
+            // The active group (a pointer; membership lives in couple_members). Column names predate that table.
+            entity.Property(x => x.ActiveCoupleId).HasColumnName("couple_id");
+            entity.Property(x => x.ActiveCoupleJoinedAtUtc).HasColumnName("couple_joined_at_utc");
             entity.Property(x => x.Email).HasColumnName("email").HasMaxLength(254).IsRequired();
             entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(120).IsRequired();
             entity.Property(x => x.PasswordHash).HasColumnName("password_hash").HasMaxLength(255).IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
             entity.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
+            entity.Property(x => x.EmailVerified).HasColumnName("email_verified").IsRequired().HasDefaultValue(false);
 
             entity.HasIndex(x => x.Email).IsUnique();
-            entity.HasIndex(x => x.CoupleId);
+            entity.HasIndex(x => x.ActiveCoupleId);
 
-            entity.HasOne(x => x.Couple)
-                .WithMany(x => x.Members)
-                .HasForeignKey(x => x.CoupleId)
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.ActiveCoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -84,7 +90,9 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id");
-            entity.Property(x => x.JoinCode).HasColumnName("join_code").HasMaxLength(6).IsRequired();
+            entity.Property(x => x.JoinCode).HasColumnName("join_code").HasMaxLength(8).IsRequired();
+            entity.Property(x => x.JoinCodeExpiresAtUtc).HasColumnName("join_code_expires_at_utc").IsRequired();
+            entity.Property(x => x.OwnerUserId).HasColumnName("owner_user_id");
             entity.Property(x => x.Status)
                 .HasColumnName("status")
                 .HasConversion<string>()
@@ -93,6 +101,42 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at").IsRequired();
 
             entity.HasIndex(x => x.JoinCode).IsUnique();
+
+            // ClientCascade: a member taken out of the collection is deleted by EF (the row IS the membership);
+            // in the database the key stays restrictive, like every other key (a group with members cannot be deleted).
+            entity.HasMany(x => x.Members)
+                .WithOne()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.ClientCascade);
+        });
+
+        modelBuilder.Entity<CoupleMember>(entity =>
+        {
+            entity.ToTable("couple_members");
+
+            // One row per user and group: this row is the membership.
+            entity.HasKey(x => new { x.CoupleId, x.UserId });
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.Role)
+                .HasColumnName("role")
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(x => x.JoinedAtUtc).HasColumnName("joined_at_utc").IsRequired();
+
+            entity.HasIndex(x => x.UserId);
+
+            // At most one owner per group, guaranteed by the database.
+            entity.HasIndex(x => x.CoupleId)
+                .IsUnique()
+                .HasFilter("role = 'Owner'")
+                .HasDatabaseName("IX_couple_members_one_owner_per_couple");
+
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>
@@ -109,6 +153,30 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
             entity.HasIndex(x => x.UserId).IsUnique();
             entity.HasIndex(x => x.TokenHash).IsUnique();
+
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EmailCode>(entity =>
+        {
+            entity.ToTable("email_codes");
+
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(x => x.Purpose).HasColumnName("purpose").HasMaxLength(32).IsRequired();
+            entity.Property(x => x.CodeHash).HasColumnName("code_hash").HasMaxLength(64).IsRequired();
+            entity.Property(x => x.ExpiresAtUtc).HasColumnName("expires_at_utc").IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+            entity.Property(x => x.Attempts).HasColumnName("attempts").IsRequired();
+            entity.Property(x => x.IssueWindowStartedAtUtc).HasColumnName("issue_window_started_at_utc").IsRequired();
+            entity.Property(x => x.IssueCount).HasColumnName("issue_count").IsRequired();
+
+            // One live code per user and purpose: a new request replaces the previous one.
+            entity.HasIndex(x => new { x.UserId, x.Purpose }).IsUnique();
 
             entity.HasOne(x => x.User)
                 .WithMany()
@@ -137,6 +205,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.HasIndex(x => x.CoupleId);
             entity.HasIndex(x => new { x.CoupleId, x.EventTimestamp });
             entity.HasIndex(x => new { x.CoupleId, x.CreatedAtUtc });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Transaction>(entity =>
@@ -163,6 +241,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.HasIndex(x => x.CoupleId);
             entity.HasIndex(x => new { x.CoupleId, x.EventTimestampUtc });
             entity.HasIndex(x => new { x.CoupleId, x.Category });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne<TransactionEventIngest>()
                 .WithMany()
@@ -212,6 +300,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
 
             entity.HasIndex(x => x.CoupleId);
             entity.HasIndex(x => new { x.CoupleId, x.Status });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<DeviceToken>(entity =>
@@ -227,7 +325,18 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
 
             entity.HasIndex(x => new { x.UserId, x.Platform }).IsUnique();
+            entity.HasIndex(x => x.Token).IsUnique();
             entity.HasIndex(x => x.CoupleId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<NotificationSettings>(entity =>
@@ -242,8 +351,19 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.BillReminderEnabled).HasColumnName("bill_reminder_enabled").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
 
-            entity.HasIndex(x => x.UserId).IsUnique();
+            // A user has one set of alert preferences per group they belong to.
+            entity.HasIndex(x => new { x.UserId, x.CoupleId }).IsUnique();
             entity.HasIndex(x => x.CoupleId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<NotificationEvent>(entity =>
@@ -261,6 +381,16 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.DeliveredAtUtc).HasColumnName("delivered_at_utc");
 
             entity.HasIndex(x => new { x.CoupleId, x.Status });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<BudgetPlan>(entity =>
@@ -326,6 +456,11 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .WithMany()
                 .HasForeignKey(x => x.CoupleId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ImportJob>(entity =>
@@ -341,7 +476,8 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
                 .HasColumnName("status")
                 .HasConversion<string>()
                 .HasMaxLength(16)
-                .IsRequired();
+                .IsRequired()
+                .IsConcurrencyToken();
             entity.Property(x => x.OcrResultJson)
                 .HasColumnName("ocr_result_json")
                 .HasColumnType("jsonb");
@@ -349,11 +485,26 @@ public sealed class AppDbContext : DbContext, IQueryDbContext
             entity.Property(x => x.ErrorMessage).HasColumnName("error_message").HasMaxLength(512);
             entity.Property(x => x.QuotaResetDate).HasColumnName("quota_reset_date");
             entity.Property(x => x.RetryCount).HasColumnName("retry_count").HasDefaultValue(0).IsRequired();
+            // Status and the line states are concurrency tokens: a write made on a stale copy of the job (the worker
+            // finishing a job that recovery already failed, two confirmations of different lines) is rejected.
+            entity.Property(x => x.LineStatesJson).HasColumnName("line_states_json").HasColumnType("text").IsConcurrencyToken();
+            entity.Property(x => x.AiCategorizationConsent).HasColumnName("ai_categorization_consent").IsRequired();
+            entity.Property(x => x.SourceFileName).HasColumnName("source_file_name").HasMaxLength(ImportJob.MaxFileNameLength);
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
 
             entity.HasIndex(x => x.CoupleId);
             entity.HasIndex(x => new { x.CoupleId, x.Status });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         ApplyCoupleQueryFilters(modelBuilder);

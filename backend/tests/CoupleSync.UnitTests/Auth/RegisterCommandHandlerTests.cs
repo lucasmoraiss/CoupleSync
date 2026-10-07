@@ -6,6 +6,7 @@ using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Infrastructure.Security;
 using CoupleSync.UnitTests.Support;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace CoupleSync.UnitTests.Auth;
@@ -32,7 +33,9 @@ public sealed class RegisterCommandHandlerTests
                 Audience = "CoupleSync.Mobile.Test",
                 AccessTokenTtlMinutes = 15,
                 RefreshTokenTtlDays = 7
-            }));
+            }),
+            EmailTestKit.NewFlow(repository, new InMemoryEmailSender(), new FixedDateTimeProvider(now)),
+            NullLogger<RegisterCommandHandler>.Instance);
 
         var command = new RegisterCommand("existing@example.com", "Another", "SecurePass123");
 
@@ -47,7 +50,7 @@ public sealed class RegisterCommandHandlerTests
         var now = new DateTime(2026, 4, 13, 12, 0, 0, DateTimeKind.Utc);
         var repository = new FakeAuthRepository
         {
-            SaveChangesException = new DbUpdateException("duplicate key value violates unique constraint 23505")
+            SaveChangesException = new UniqueViolationException("duplicate key value violates unique constraint 23505")
         };
 
         var handler = new RegisterCommandHandler(
@@ -63,12 +66,14 @@ public sealed class RegisterCommandHandlerTests
                 Audience = "CoupleSync.Mobile.Test",
                 AccessTokenTtlMinutes = 15,
                 RefreshTokenTtlDays = 7
-            }));
+            }),
+            EmailTestKit.NewFlow(repository, new InMemoryEmailSender(), new FixedDateTimeProvider(now)),
+            NullLogger<RegisterCommandHandler>.Instance);
 
         var exception = await Assert.ThrowsAsync<ConflictException>(() =>
             handler.HandleAsync(new RegisterCommand("new-user@example.com", "New User", "SecurePass123"), CancellationToken.None));
 
         Assert.Equal("EMAIL_ALREADY_IN_USE", exception.Code);
-        Assert.Equal("Email already in use.", exception.Message);
+        Assert.Equal("Já existe uma conta com esse e-mail.", exception.Message);
     }
 }

@@ -1,4 +1,5 @@
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Application.Couples;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -62,6 +63,8 @@ public sealed class NotificationDispatcherJob : BackgroundService
         var eventRepo = scope.ServiceProvider.GetRequiredService<INotificationEventRepository>();
         var tokenRepo = scope.ServiceProvider.GetRequiredService<IDeviceTokenRepository>();
         var dateTimeProvider = scope.ServiceProvider.GetRequiredService<IDateTimeProvider>();
+        var membership = scope.ServiceProvider.GetRequiredService<ICoupleMembership>();
+        var coupleRepo = scope.ServiceProvider.GetRequiredService<ICoupleRepository>();
 
         var pendingEvents = await eventRepo.GetAllPendingAsync(ct);
 
@@ -71,6 +74,20 @@ public sealed class NotificationDispatcherJob : BackgroundService
 
             try
             {
+                // A device receives the alerts of every group its user belongs to, and of no other: an alert
+                // queued for someone who has since left (or was removed from) the group is dropped here.
+                if (!await membership.IsMemberAsync(notificationEvent.UserId, notificationEvent.CoupleId, ct))
+                {
+                    _logger.LogDebug(
+                        "UserId={UserId} is no longer a member of the group of event {EventId}. Dropping it.",
+                        notificationEvent.UserId,
+                        notificationEvent.Id);
+                    notificationEvent.MarkFailed();
+                    await eventRepo.UpdateAsync(notificationEvent, ct);
+                    await eventRepo.SaveChangesAsync(ct);
+                    continue;
+                }
+
                 var deviceTokens = await tokenRepo.GetByUserIdAsync(notificationEvent.UserId, ct);
 
                 if (deviceTokens.Count == 0)
@@ -85,13 +102,20 @@ public sealed class NotificationDispatcherJob : BackgroundService
                     continue;
                 }
 
+                // Someone in several groups is told which group the alert is about.
+                var title = GroupLabel.PushTitle(
+                    notificationEvent.Title,
+                    notificationEvent.CoupleId,
+                    notificationEvent.UserId,
+                    await coupleRepo.GetGroupsOfUserAsync(notificationEvent.UserId, ct));
+
                 var anySuccess = false;
 
                 foreach (var deviceToken in deviceTokens)
                 {
                     var sent = await DispatchWithRetryAsync(
                         deviceToken.Token,
-                        notificationEvent.Title,
+                        title,
                         notificationEvent.Body,
                         ct);
 

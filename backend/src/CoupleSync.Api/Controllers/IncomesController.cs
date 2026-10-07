@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using System.Security.Claims;
 using CoupleSync.Api.Contracts.Income;
 using CoupleSync.Api.Filters;
@@ -38,7 +39,7 @@ public sealed class IncomesController : ControllerBase
         var coupleId = GetAuthenticatedCoupleId();
         var userId = GetAuthenticatedUserId();
 
-        var input = new CreateIncomeSourceInput(request.Name, request.Amount, request.Currency, request.IsShared, request.IsRecurring);
+        var input = new CreateIncomeSourceInput(request.Name, request.Amount, CurrencyRules.NormalizeOrBrl(request.Currency), request.IsShared, request.IsRecurring);
         var dto = await _incomeService.CreateAsync(coupleId, userId, request.Month, input, ct);
 
         return StatusCode(StatusCodes.Status201Created, MapSourceResponse(dto));
@@ -129,7 +130,7 @@ public sealed class IncomesController : ControllerBase
     {
         var claimValue = User.FindFirstValue("couple_id");
         if (!Guid.TryParse(claimValue, out var coupleId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired couple context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return coupleId;
     }
 
@@ -137,7 +138,7 @@ public sealed class IncomesController : ControllerBase
     {
         var claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!Guid.TryParse(claimValue, out var userId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired user context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return userId;
     }
 }

@@ -26,7 +26,7 @@ public sealed class GeminiChatService
         CancellationToken ct)
     {
         if (!_rateLimiter.IsAllowed(coupleId))
-            throw new ChatRateLimitException("CHAT_RATE_LIMITED", "Maximum 30 requests per hour. Please try again later.");
+            throw new ChatRateLimitException("CHAT_RATE_LIMITED", "Limite de 30 mensagens por hora atingido. Tente novamente mais tarde.");
 
         var systemPrompt = await _contextService.BuildSystemPromptAsync(coupleId, ct);
         return await _geminiAdapter.SendAsync(systemPrompt, history, message, ct);

@@ -39,7 +39,7 @@ public sealed class ChatController : ControllerBase
         CancellationToken ct)
     {
         if (!IsAiChatEnabled())
-            return NotFound(new { code = "AI_CHAT_DISABLED", message = "AI Chat is not available." });
+            throw new NotFoundException("AI_CHAT_DISABLED", "O assistente de IA não está disponível.");
 
         var coupleId = GetAuthenticatedCoupleId();
 
@@ -57,7 +57,7 @@ public sealed class ChatController : ControllerBase
     {
         var claimValue = User.FindFirstValue("couple_id");
         if (!Guid.TryParse(claimValue, out var coupleId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired couple context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return coupleId;
     }
 }

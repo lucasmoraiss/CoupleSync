@@ -24,7 +24,7 @@ public sealed class CategoryMatchingServiceTests
 
         var result = await service.MatchCategoryAsync(null, "IFOOD DELIVERY", CancellationToken.None);
 
-        Assert.Equal("Alimentação", result);
+        Assert.Equal("ALIMENTACAO", result);
     }
 
     [Fact]
@@ -34,7 +34,7 @@ public sealed class CategoryMatchingServiceTests
 
         var result = await service.MatchCategoryAsync("NETFLIX monthly subscription", null, CancellationToken.None);
 
-        Assert.Equal("Lazer", result);
+        Assert.Equal("LAZER", result);
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public sealed class CategoryMatchingServiceTests
 
         var result = await service.MatchCategoryAsync(null, "UBER EATS delivery", CancellationToken.None);
 
-        Assert.Equal("Alimentação", result);
+        Assert.Equal("ALIMENTACAO", result);
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class CategoryMatchingServiceTests
 
         var result = await service.MatchCategoryAsync(null, "ifood delivery", CancellationToken.None);
 
-        Assert.Equal("Alimentação", result);
+        Assert.Equal("ALIMENTACAO", result);
     }
 
     [Fact]

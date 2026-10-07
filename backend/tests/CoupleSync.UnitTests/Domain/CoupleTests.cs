@@ -40,7 +40,7 @@ public sealed class CoupleTests
         couple.AddMember(user, FixedNow);
 
         var exception = Assert.Throws<InvalidOperationException>(() => couple.AddMember(user, FixedNow));
-        Assert.Equal("User is already in this couple.", exception.Message);
+        Assert.Equal("O usuário já faz parte deste casal.", exception.Message);
     }
 
     [Fact]
@@ -59,6 +59,6 @@ public sealed class CoupleTests
 
         couple.AddMember(user, FixedNow);
 
-        Assert.Equal(couple.Id, user.CoupleId);
+        Assert.Equal(couple.Id, user.ActiveCoupleId);
     }
 }

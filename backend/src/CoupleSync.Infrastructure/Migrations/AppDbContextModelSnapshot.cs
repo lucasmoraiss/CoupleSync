@@ -153,9 +153,17 @@ namespace CoupleSync.Infrastructure.Migrations
 
                     b.Property<string>("JoinCode")
                         .IsRequired()
-                        .HasMaxLength(6)
-                        .HasColumnType("character varying(6)")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
                         .HasColumnName("join_code");
+
+                    b.Property<DateTime>("JoinCodeExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("join_code_expires_at_utc");
+
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -169,6 +177,38 @@ namespace CoupleSync.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("couples", (string)null);
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.CoupleMember", b =>
+                {
+                    b.Property<Guid>("CoupleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("couple_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<DateTime>("JoinedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("joined_at_utc");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("role");
+
+                    b.HasKey("CoupleId", "UserId");
+
+                    b.HasIndex("CoupleId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_couple_members_one_owner_per_couple")
+                        .HasFilter("role = 'Owner'");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("couple_members", (string)null);
                 });
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.DeviceToken", b =>
@@ -210,10 +250,64 @@ namespace CoupleSync.Infrastructure.Migrations
 
                     b.HasIndex("CoupleId");
 
+                    b.HasIndex("Token")
+                        .IsUnique();
+
                     b.HasIndex("UserId", "Platform")
                         .IsUnique();
 
                     b.ToTable("device_tokens", (string)null);
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.EmailCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("code_hash");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<int>("IssueCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("issue_count");
+
+                    b.Property<DateTime>("IssueWindowStartedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("issue_window_started_at_utc");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("purpose");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Purpose")
+                        .IsUnique();
+
+                    b.ToTable("email_codes", (string)null);
                 });
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.Goal", b =>
@@ -282,6 +376,8 @@ namespace CoupleSync.Infrastructure.Migrations
 
                     b.HasIndex("CoupleId");
 
+                    b.HasIndex("CreatedByUserId");
+
                     b.HasIndex("CoupleId", "Status");
 
                     b.ToTable("goals", (string)null);
@@ -293,6 +389,10 @@ namespace CoupleSync.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<bool>("AiCategorizationConsent")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ai_categorization_consent");
 
                     b.Property<Guid>("CoupleId")
                         .HasColumnType("uuid")
@@ -318,6 +418,11 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasColumnType("character varying(128)")
                         .HasColumnName("file_mime_type");
 
+                    b.Property<string>("LineStatesJson")
+                        .IsConcurrencyToken()
+                        .HasColumnType("text")
+                        .HasColumnName("line_states_json");
+
                     b.Property<string>("OcrResultJson")
                         .HasColumnType("jsonb")
                         .HasColumnName("ocr_result_json");
@@ -332,7 +437,13 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("retry_count");
 
+                    b.Property<string>("SourceFileName")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("source_file_name");
+
                     b.Property<string>("Status")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)")
@@ -355,6 +466,8 @@ namespace CoupleSync.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CoupleId");
+
+                    b.HasIndex("UserId");
 
                     b.HasIndex("CoupleId", "Status");
 
@@ -476,6 +589,8 @@ namespace CoupleSync.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("UserId");
+
                     b.HasIndex("CoupleId", "Status");
 
                     b.ToTable("notification_events", (string)null);
@@ -516,7 +631,7 @@ namespace CoupleSync.Infrastructure.Migrations
 
                     b.HasIndex("CoupleId");
 
-                    b.HasIndex("UserId")
+                    b.HasIndex("UserId", "CoupleId")
                         .IsUnique();
 
                     b.ToTable("notification_settings", (string)null);
@@ -646,6 +761,8 @@ namespace CoupleSync.Infrastructure.Migrations
 
                     b.HasIndex("IngestEventId");
 
+                    b.HasIndex("UserId");
+
                     b.HasIndex("CoupleId", "Category");
 
                     b.HasIndex("CoupleId", "EventTimestampUtc");
@@ -726,6 +843,8 @@ namespace CoupleSync.Infrastructure.Migrations
 
                     b.HasIndex("CoupleId");
 
+                    b.HasIndex("UserId");
+
                     b.HasIndex("CoupleId", "CreatedAtUtc");
 
                     b.HasIndex("CoupleId", "EventTimestamp");
@@ -740,11 +859,11 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<Guid?>("CoupleId")
+                    b.Property<Guid?>("ActiveCoupleId")
                         .HasColumnType("uuid")
                         .HasColumnName("couple_id");
 
-                    b.Property<DateTime?>("CoupleJoinedAtUtc")
+                    b.Property<DateTime?>("ActiveCoupleJoinedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("couple_joined_at_utc");
 
@@ -757,6 +876,12 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasMaxLength(254)
                         .HasColumnType("character varying(254)")
                         .HasColumnName("email");
+
+                    b.Property<bool>("EmailVerified")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("email_verified");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
@@ -776,7 +901,7 @@ namespace CoupleSync.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CoupleId");
+                    b.HasIndex("ActiveCoupleId");
 
                     b.HasIndex("Email")
                         .IsUnique();
@@ -806,6 +931,79 @@ namespace CoupleSync.Infrastructure.Migrations
                     b.Navigation("Couple");
                 });
 
+            modelBuilder.Entity("CoupleSync.Domain.Entities.CoupleMember", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany("Members")
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.ClientCascade)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.DeviceToken", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.EmailCode", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.Goal", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.ImportJob", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("CoupleSync.Domain.Entities.IncomeSource", b =>
                 {
                     b.HasOne("CoupleSync.Domain.Entities.Couple", "Couple")
@@ -814,7 +1012,43 @@ namespace CoupleSync.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Couple");
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.NotificationEvent", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.NotificationSettings", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.RefreshToken", b =>
@@ -830,6 +1064,12 @@ namespace CoupleSync.Infrastructure.Migrations
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.Transaction", b =>
                 {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("CoupleSync.Domain.Entities.Goal", null)
                         .WithMany()
                         .HasForeignKey("GoalId")
@@ -840,16 +1080,35 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasForeignKey("IngestEventId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.TransactionEventIngest", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.User", b =>
                 {
-                    b.HasOne("CoupleSync.Domain.Entities.Couple", "Couple")
-                        .WithMany("Members")
-                        .HasForeignKey("CoupleId")
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("ActiveCoupleId")
                         .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Couple");
                 });
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.BudgetPlan", b =>

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using CoupleSync.Api.Contracts.Ocr;
+using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Api.Filters;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.OcrImport;
@@ -36,15 +37,13 @@ public sealed class OcrController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status413RequestEntityTooLarge)]
     [ProducesResponseType(StatusCodes.Status415UnsupportedMediaType)]
-    public async Task<ActionResult<UploadResponse>> Upload(IFormFile file, CancellationToken ct)
+    public async Task<ActionResult<UploadResponse>> Upload(IFormFile file, CancellationToken ct, [FromForm] bool aiCategorizationConsent = false)
     {
         if (file is null || file.Length == 0)
-            return BadRequest(new { code = "FILE_REQUIRED", message = "A file must be provided." });
+            throw new BadRequestException("FILE_REQUIRED", "Envie um arquivo.");
 
         if (file.Length > MaxFileSizeBytes)
-            return StatusCode(
-                StatusCodes.Status413RequestEntityTooLarge,
-                new { code = "FILE_TOO_LARGE", message = "File must be 10 MB or less." });
+            throw new AppException("FILE_TOO_LARGE", "O arquivo deve ter no máximo 10 MB.", StatusCodes.Status413RequestEntityTooLarge);
 
         // Detect MIME type from magic bytes — do NOT trust Content-Type header.
         using var fileStream = file.OpenReadStream();
@@ -54,15 +53,13 @@ public sealed class OcrController : ControllerBase
 
         var detectedMime = FileTypeDetector.DetectMimeType(header.AsSpan(0, bytesRead));
         if (detectedMime is null)
-            return StatusCode(
-                StatusCodes.Status415UnsupportedMediaType,
-                new { code = "UNSUPPORTED_FILE_TYPE", message = "Accepted file types: JPEG, PNG, PDF." });
+            throw new AppException("UNSUPPORTED_FILE_TYPE", "Tipos de arquivo aceitos: JPEG, PNG e PDF.", StatusCodes.Status415UnsupportedMediaType);
 
         var coupleId = GetAuthenticatedCoupleId();
         var userId = GetAuthenticatedUserId();
 
         var uploadId = await _importJobService.UploadAsync(
-            coupleId, userId, fileStream, detectedMime, ct);
+            coupleId, userId, fileStream, detectedMime, ct, file.FileName, aiCategorizationConsent);
 
         return Ok(new UploadResponse(uploadId));
     }
@@ -71,7 +68,7 @@ public sealed class OcrController : ControllerBase
     {
         var claimValue = User.FindFirstValue("couple_id");
         if (!Guid.TryParse(claimValue, out var coupleId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired couple context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return coupleId;
     }
 
@@ -79,8 +76,22 @@ public sealed class OcrController : ControllerBase
     {
         var claimValue = User.FindFirstValue("user_id");
         if (!Guid.TryParse(claimValue, out var userId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired user context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return userId;
+    }
+
+    /// <summary>The couple's imports that still have lines waiting for review (to reopen them).</summary>
+    [HttpGet("open")]
+    [ProducesResponseType(typeof(OcrOpenImportsResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<OcrOpenImportsResponse>> GetOpenImports(CancellationToken ct)
+    {
+        var coupleId = GetAuthenticatedCoupleId();
+        var open = await _importJobService.GetOpenImportsAsync(coupleId, ct);
+
+        return Ok(new OcrOpenImportsResponse(open
+            .Select(i => new OcrOpenImportResponse(
+                i.UploadId, i.FileName, i.CreatedAtUtc, i.PendingLines, i.TotalLines, i.CreditsCount))
+            .ToList()));
     }
 
     /// <summary>Get the processing status of an OCR job.</summary>
@@ -92,7 +103,7 @@ public sealed class OcrController : ControllerBase
         var coupleId = GetAuthenticatedCoupleId();
         var job = await _importJobService.GetJobAsync(uploadId, coupleId, ct);
         if (job is null)
-            return NotFound(new { code = "OCR_JOB_NOT_FOUND", message = "Import job not found." });
+            throw new NotFoundException("OCR_JOB_NOT_FOUND", "Importação não encontrada.");
 
         return Ok(new OcrStatusResponse(job.Status.ToString(), job.ErrorCode, job.QuotaResetDate));
     }
@@ -105,14 +116,22 @@ public sealed class OcrController : ControllerBase
     public async Task<ActionResult<OcrResultsResponse>> GetResults(Guid uploadId, CancellationToken ct)
     {
         var coupleId = GetAuthenticatedCoupleId();
-        var candidates = await _importJobService.GetCandidatesAsync(uploadId, coupleId, ct);
-        if (candidates is null)
-            return NotFound(new { code = "OCR_JOB_NOT_FOUND", message = "Import job not found." });
+        var review = await _importJobService.GetReviewAsync(uploadId, coupleId, ct);
+        if (review is null)
+            throw new NotFoundException("OCR_JOB_NOT_FOUND", "Importação não encontrada.");
 
         var response = new OcrResultsResponse(
-            candidates.Select(c => new OcrCandidateResponse(
-                c.Index, c.Date, c.Description, c.Amount,
-                c.Currency, c.Confidence, c.DuplicateSuspected, c.SuggestedCategory)).ToList());
+            review.Lines.Select(l =>
+            {
+                var c = l.Candidate;
+                return new OcrCandidateResponse(
+                    c.Index, c.Date, c.Description, c.Amount,
+                    c.Currency, c.Confidence, c.DuplicateSuspected,
+                    c.SuggestedCategory is null ? null : TransactionCategories.NormalizeOrOther(c.SuggestedCategory),
+                    l.State.ToString());
+            }).ToList(),
+            review.Credits.Select(c => new OcrCreditResponse(c.Date, c.Description, c.Amount, c.Currency)).ToList(),
+            review.Credits.Count);
 
         return Ok(response);
     }
@@ -135,11 +154,12 @@ public sealed class OcrController : ControllerBase
             .ToDictionary(e => e.Index, e => new CandidateEdit(e.Description, e.Amount));
 
         var created = await _importJobService.ConfirmCandidatesAsync(
-            uploadId, coupleId, userId, request.SelectedIndices, overrides, ct, edits);
+            uploadId, coupleId, userId, request.SelectedIndices, overrides, ct, edits,
+            request.KeepJobOpen, request.DiscardedIndices);
 
         if (created is null)
-            return NotFound(new { code = "OCR_JOB_NOT_FOUND", message = "Import job not found." });
+            throw new NotFoundException("OCR_JOB_NOT_FOUND", "Importação não encontrada.");
 
-        return Ok(new ConfirmResponse(created.Created.Count, created.DuplicatesSkipped));
+        return Ok(new ConfirmResponse(created.Created.Count, created.DuplicatesSkipped, created.RemainingLines));
     }
 }

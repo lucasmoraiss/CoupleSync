@@ -288,7 +288,7 @@ public sealed class AuthIntegrationSmokeTests
     {
         Assert.NotNull(payload);
         Assert.Equal("UNAUTHORIZED", payload!.Code);
-        Assert.Equal("Invalid or expired session.", payload.Message);
+        Assert.Equal("Sessão inválida ou expirada. Entre novamente.", payload.Message);
     }
 
     private static TokenValidationParameters CreateTokenValidationParameters()

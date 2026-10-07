@@ -1,4 +1,5 @@
 using CoupleSync.Application.Dashboard;
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Domain.Entities;
 using CoupleSync.UnitTests.Support;
 
@@ -59,8 +60,9 @@ public sealed class GetDashboardQueryHandlerTests
             new GetDashboardQuery(coupleId, null, null),
             CancellationToken.None);
 
-        Assert.Equal(new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc), result.PeriodStart);
-        Assert.Equal(new DateTime(2026, 4, 30, 23, 59, 59, DateTimeKind.Utc), result.PeriodEnd);
+        // The month runs on Brasília time (UTC-3): April 1st 00:00 there is 03:00 UTC.
+        Assert.Equal(new DateTime(2026, 4, 1, 3, 0, 0, DateTimeKind.Utc), result.PeriodStart);
+        Assert.Equal(new DateTime(2026, 5, 1, 2, 59, 59, 999, DateTimeKind.Utc), result.PeriodEnd);
     }
 
     [Fact]
@@ -238,11 +240,11 @@ public sealed class GetDashboardQueryHandlerTests
         var start = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc);
         var end = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+        var ex = await Assert.ThrowsAsync<BadRequestException>(() =>
             handler.HandleAsync(
                 new GetDashboardQuery(coupleId, start, end),
                 CancellationToken.None));
 
-        Assert.Contains("INVALID_DATE_RANGE", ex.Message);
+        Assert.Equal("INVALID_DATE_RANGE", ex.Code);
     }
 }

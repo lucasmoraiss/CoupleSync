@@ -118,6 +118,51 @@ public sealed class IntegrationStatusIntegrationTests
         Assert.Equal(1, payload.Counts.TotalDuplicate);
     }
 
+    [Fact]
+    public async Task GetStatus_ManualTransaction_DoesNotCountAsNotificationEvent()
+    {
+        await using var factory = new NotificationCaptureWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var token = await RegisterWithCoupleAndGetTokenAsync(client, $"status-manual-{Guid.NewGuid():N}@example.com");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var manual = await client.PostAsJsonAsync("/api/v1/transactions",
+            new { Amount = 42m, Currency = "BRL", Description = "Padaria", Category = "Alimentação" });
+        Assert.Equal(HttpStatusCode.Created, manual.StatusCode);
+
+        var response = await client.GetAsync("/api/v1/integrations/status");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<IntegrationStatusDto>();
+        Assert.NotNull(payload);
+        Assert.False(payload!.IsActive);
+        Assert.Null(payload.LastEventAtUtc);
+        Assert.Equal(0, payload.Counts.TotalAccepted);
+    }
+
+    [Fact]
+    public async Task GetStatus_ManualTransactionAndNotification_CountsOnlyTheNotification()
+    {
+        await using var factory = new NotificationCaptureWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var token = await RegisterWithCoupleAndGetTokenAsync(client, $"status-mixed-{Guid.NewGuid():N}@example.com");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        await client.PostAsJsonAsync("/api/v1/transactions",
+            new { Amount = 42m, Currency = "BRL", Description = "Padaria", Category = "Alimentação" });
+        var ingest = await client.PostAsJsonAsync("/api/v1/integrations/events", new IngestRequestDto(
+            "NUBANK", 50m, "BRL", DateTime.UtcNow.AddMinutes(-5), "Coffee", "STARBUCKS", null));
+        Assert.Equal(HttpStatusCode.Created, ingest.StatusCode);
+
+        var payload = await (await client.GetAsync("/api/v1/integrations/status")).Content.ReadFromJsonAsync<IntegrationStatusDto>();
+
+        Assert.NotNull(payload);
+        Assert.True(payload!.IsActive);
+        Assert.Equal(1, payload.Counts.TotalAccepted);
+    }
+
     private static async Task<string> RegisterAndGetTokenAsync(HttpClient client, string email)
     {
         var response = await client.PostAsJsonAsync("/api/v1/auth/register", new

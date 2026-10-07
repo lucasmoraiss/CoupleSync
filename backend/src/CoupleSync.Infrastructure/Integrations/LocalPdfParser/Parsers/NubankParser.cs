@@ -17,10 +17,16 @@ public sealed class NubankParser : IBankStatementParser
         @"Nu Pagamentos|nubank\.com\.br|NUBANK",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // Captures: date (DD/MM/YYYY), description (non-greedy), amount (optional minus + optional R$ + digits)
-    private static readonly Regex TransactionPattern = new(
-        @"(\d{2}/\d{2}/\d{4})\s+(.+?)\s+([+-]?\s*R?\$?\s*[\d\.]+,\d{2})\s*$",
-        RegexOptions.Compiled | RegexOptions.Multiline);
+    // Entry start: a full date (DD/MM/YYYY) followed by whitespace. PdfPig may hand a whole page over as a
+    // single line with the next date glued to the previous amount ("-R$ 58,2006/09/2026 ..."), so entries are
+    // cut at the dates, not at line ends. The amount is the LAST money value of the entry.
+    private static readonly Regex StartPattern = new(
+        @"\d{2}/\d{2}/\d{4}(?=\s)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex MoneyPattern = new(
+        @"[+-]?\s*R?\$?\s*\d[\d\.]*,\d{2}",
+        RegexOptions.Compiled);
 
     public bool CanParse(string extractedText) => IdentifierPattern.IsMatch(extractedText);
 
@@ -28,17 +34,23 @@ public sealed class NubankParser : IBankStatementParser
     {
         var transactions = new List<ParsedTransaction>();
 
-        foreach (Match match in TransactionPattern.Matches(extractedText))
+        foreach (var segment in StatementSegments.Split(extractedText, StartPattern))
         {
-            if (!DateTime.TryParseExact(match.Groups[1].Value, "dd/MM/yyyy",
+            if (!DateTime.TryParseExact(segment[..10], "dd/MM/yyyy",
                     System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.None, out var date))
                 continue;
 
-            var description = match.Groups[2].Value.Trim();
-            var rawAmount = match.Groups[3].Value.Trim();
+            var body = segment[10..];
+            var money = StatementSegments.LastMatch(MoneyPattern, body);
+            if (money is null)
+                continue;
 
-            if (!BrazilianCurrencyParser.TryParse(rawAmount, out var amount))
+            var description = body[..money.Index].Trim();
+            if (description.Length == 0)
+                continue;
+
+            if (!BrazilianCurrencyParser.TryParse(money.Value.Trim(), out var amount))
                 continue;
 
             var type = amount >= 0 ? TransactionType.Credit : TransactionType.Debit;

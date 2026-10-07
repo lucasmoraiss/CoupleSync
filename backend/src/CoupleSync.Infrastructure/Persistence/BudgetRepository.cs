@@ -27,7 +27,7 @@ public sealed class BudgetRepository : IBudgetRepository
         => _dbContext.BudgetPlans.AddAsync(plan, ct).AsTask();
 
     public Task SaveChangesAsync(CancellationToken ct)
-        => _dbContext.SaveChangesAsync(ct);
+        => DbSaveTranslator.SaveAsync(_dbContext, ct);
 
     public async Task<BudgetPlan> ReplaceAllocationsAsync(
         BudgetPlan plan,
@@ -45,7 +45,7 @@ public sealed class BudgetRepository : IBudgetRepository
             await _dbContext.Set<BudgetAllocation>().AddAsync(allocation, ct);
         }
 
-        await _dbContext.SaveChangesAsync(ct);
+        await DbSaveTranslator.SaveAsync(_dbContext, ct);
         await tx.CommitAsync(ct);
 
         // Reload the updated allocations into the tracked plan

@@ -43,8 +43,8 @@ public sealed class NotificationEvent : ICoupleScoped
         string body,
         DateTime nowUtc)
     {
-        if (title.Length > 128) throw new ArgumentException("Title must be at most 128 characters.", nameof(title));
-        if (body.Length > 512) throw new ArgumentException("Body must be at most 512 characters.", nameof(body));
+        if (title.Length > 128) throw new ArgumentException("O título deve ter no máximo 128 caracteres.", nameof(title));
+        if (body.Length > 512) throw new ArgumentException("O texto deve ter no máximo 512 caracteres.", nameof(body));
 
         return new NotificationEvent(Guid.NewGuid(), coupleId, userId, alertType, title, body, nowUtc);
     }

@@ -69,7 +69,7 @@ public sealed class PilotFlowE2ETests
         var coupleCreated = await createCoupleResp.Content.ReadFromJsonAsync<CreateCoupleDto>();
         Assert.NotNull(coupleCreated);
         Assert.NotEqual(Guid.Empty, coupleCreated!.CoupleId);
-        Assert.Equal(6, coupleCreated.JoinCode.Length);
+        Assert.Equal(8, coupleCreated.JoinCode.Length);
 
         // Refresh User A token so couple_id claim is embedded
         var loginAResp = await factory.CreateClient().PostAsJsonAsync("/api/v1/auth/login", new

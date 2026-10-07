@@ -8,6 +8,11 @@ describe('monthLabelFromIso', () => {
     expect(monthLabelFromIso('2026-10-01T00:00:00Z')).toBe('outubro de 2026');
   });
 
+  it('lê o início do mês de Brasília devolvido pelo servidor (03:00Z)', () => {
+    expect(monthLabelFromIso('2026-10-01T03:00:00Z')).toBe('outubro de 2026');
+    expect(monthLabelFromIso('2026-01-01T03:00:00Z')).toBe('janeiro de 2026');
+  });
+
   it('aceita data sem hora e com fração de segundo', () => {
     expect(monthLabelFromIso('2026-01-01')).toBe('janeiro de 2026');
     expect(monthLabelFromIso('2026-12-01T00:00:00.000Z')).toBe('dezembro de 2026');

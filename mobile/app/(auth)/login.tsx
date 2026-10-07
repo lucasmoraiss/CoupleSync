@@ -13,9 +13,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import axios from 'axios';
 import { authApiClient, coupleApiClient } from '@/services/apiClient';
+import { getApiErrorMessage } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
+import { resetUserCaches } from '@/state/userData';
 import { colors } from '@/theme';
 
 export default function LoginScreen() {
@@ -33,6 +34,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const { data } = await authApiClient.login({ email: email.trim(), password });
+      await resetUserCaches(); // segunda trava: nada de uma conta anterior sobrevive ao novo login
       
       // Try to get couple info — user may not have one yet
       let coupleId: string | null = null;
@@ -57,23 +59,7 @@ export default function LoginScreen() {
         router.replace('/couple-setup' as any);
       }
     } catch (err: any) {
-      let msg: string;
-      if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
-        msg = 'Tempo esgotado. Tente novamente.';
-      } else if (axios.isAxiosError(err) && err.response) {
-        const status = err.response.status;
-        if (status === 401) {
-          msg = 'E-mail ou senha incorretos.';
-        } else if (status >= 500 && status < 600) {
-          msg = 'Servidor com problemas. Tente novamente mais tarde.';
-        } else {
-          msg = 'Erro inesperado. Tente novamente.';
-        }
-      } else if (err.request) {
-        msg = 'Servidor indisponível. Verifique a conexão com o servidor.';
-      } else {
-        msg = 'Sem conexão. Verifique sua internet.';
-      }
+      const msg = getApiErrorMessage(err, 'Erro inesperado. Tente novamente.');
       if (__DEV__) console.log('[Login] Error:', { code: err?.code, status: err?.response?.status, message: err?.response?.data?.message ?? err?.message });
       Alert.alert('Erro', msg);
     } finally {
@@ -98,7 +84,7 @@ export default function LoginScreen() {
 
         <View style={styles.form}>
           <Text style={styles.label}>E-mail</Text>
-          <TextInput
+          <TextInput accessibilityLabel="E-mail"
             style={styles.input}
             placeholder="seu@email.com"
             placeholderTextColor={colors.placeholder}
@@ -112,7 +98,7 @@ export default function LoginScreen() {
 
           <Text style={styles.label}>Senha</Text>
           <View style={styles.inputWrapper}>
-            <TextInput
+            <TextInput accessibilityLabel="Senha"
               style={styles.inputField}
               placeholder="••••••••"
               placeholderTextColor={colors.placeholder}
@@ -121,7 +107,7 @@ export default function LoginScreen() {
               secureTextEntry={!showPassword}
               editable={!loading}
             />
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
               onPress={() => setShowPassword(!showPassword)}
               style={styles.eyeButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -130,7 +116,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Entrar" accessibilityState={{ disabled: loading, busy: loading }}
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={loading}
@@ -143,8 +129,17 @@ export default function LoginScreen() {
             )}
           </TouchableOpacity>
 
-          {/* TODO(future): Forgot password flow — link here to password recovery screen */}
           <TouchableOpacity
+            style={styles.forgotButton}
+            onPress={() => router.push('/forgot-password' as any)}
+            disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel="Esqueci minha senha"
+          >
+            <Text style={styles.forgotText}>Esqueci minha senha</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Ir para o cadastro de conta nova"
             style={styles.linkButton}
             onPress={() => router.push('/register' as any)}
             disabled={loading}
@@ -225,9 +220,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  linkButton: {
+  forgotButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  forgotText: {
+    color: colors.primaryLight,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  linkButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
     paddingVertical: 8,
   },
   linkText: {

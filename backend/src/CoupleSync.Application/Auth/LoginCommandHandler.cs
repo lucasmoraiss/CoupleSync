@@ -37,9 +37,13 @@ public sealed class LoginCommandHandler
         var email = EmailAddress.From(command.Email).Value;
         var user = await _authRepository.FindUserByEmailAsync(email, cancellationToken);
 
-        if (user is null || !_passwordHasher.VerifyPassword(command.Password, user.PasswordHash) || !user.IsActive)
+        // Always run one bcrypt verification, even for an unknown e-mail, so response time does not reveal
+        // whether the account exists.
+        var passwordMatches = _passwordHasher.VerifyPassword(command.Password, user?.PasswordHash ?? _passwordHasher.DummyHash);
+
+        if (user is null || !passwordMatches || !user.IsActive)
         {
-            throw new UnauthorizedException("INVALID_CREDENTIALS", "Invalid credentials.");
+            throw new UnauthorizedException("INVALID_CREDENTIALS", "E-mail ou senha incorretos.");
         }
 
         var now = _dateTimeProvider.UtcNow;
@@ -56,7 +60,7 @@ public sealed class LoginCommandHandler
         await _authRepository.SaveChangesAsync(cancellationToken);
 
         return new AuthResult(
-            new AuthenticatedUserDto(user.Id, user.Email, user.Name),
+            new AuthenticatedUserDto(user.Id, user.Email, user.Name, user.EmailVerified),
             accessToken,
             refreshTokenRaw);
     }

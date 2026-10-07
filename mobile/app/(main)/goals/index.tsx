@@ -1,6 +1,6 @@
 // AC-005: Goals management screen — list, create, edit, delete
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback } from 'react';
-import axios from 'axios';
 import {
   View,
   Text,
@@ -28,6 +28,9 @@ import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
+import { amountCentsError, centsFromDigits } from '@/utils/amount';
+import { isDeadlineBeforeToday } from '@/utils/goalDeadline';
+import { describeProgress, spokenBRL } from '@/utils/a11y';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -90,7 +93,7 @@ function formatBRLInput(cents: number): string {
 }
 
 function isDeadlinePast(dateStr: string): boolean {
-  return new Date(dateStr) < new Date();
+  return isDeadlineBeforeToday(dateStr);
 }
 
 // ─── Goal form state ──────────────────────────────────────────────────────────
@@ -98,7 +101,8 @@ interface GoalFormState {
   title: string;
   description: string;
   amountCents: number; // stored as cents for input control
-  currentAmountCents: number; // current progress amount in cents
+  manualAmountCents: number; // manually saved amount in cents (the transactions part is read-only)
+  linkedAmount: number; // sum of linked transactions, shown for context only
   deadlineInput: string; // DD/MM/YYYY
 }
 
@@ -106,16 +110,27 @@ const EMPTY_FORM: GoalFormState = {
   title: '',
   description: '',
   amountCents: 0,
-  currentAmountCents: 0,
+  manualAmountCents: 0,
+  linkedAmount: 0,
   deadlineInput: '',
 };
+
+/** Valor guardado manualmente (servidor antigo não manda o campo: currentAmount era só o manual). */
+function manualAmountOf(goal: GoalDto): number {
+  return goal.manualAmount ?? goal.currentAmount;
+}
+
+function linkedAmountOf(goal: GoalDto): number {
+  return goal.linkedAmount ?? 0;
+}
 
 function formFromGoal(goal: GoalDto): GoalFormState {
   return {
     title: goal.title,
     description: goal.description ?? '',
     amountCents: Math.round(goal.targetAmount * 100),
-    currentAmountCents: Math.round(goal.currentAmount * 100),
+    manualAmountCents: Math.round(manualAmountOf(goal) * 100),
+    linkedAmount: linkedAmountOf(goal),
     deadlineInput: toInputDate(goal.deadline),
   };
 }
@@ -146,9 +161,7 @@ function GoalFormModal({
   }, [visible, initialValues]);
 
   const handleAmountChange = (raw: string) => {
-    const digitsOnly = raw.replace(/[^\d]/g, '');
-    const cents = digitsOnly ? Number(digitsOnly) : 0;
-    setForm((f) => ({ ...f, amountCents: cents }));
+    setForm((f) => ({ ...f, amountCents: centsFromDigits(raw) }));
   };
 
   const handleDeadlineChange = (raw: string) => {
@@ -161,15 +174,16 @@ function GoalFormModal({
   };
 
   const titleError = !form.title.trim() ? 'Título é obrigatório' : null;
-  const amountError = form.amountCents <= 0 ? 'Valor deve ser maior que zero' : null;
+  const amountError = amountCentsError(form.amountCents);
+  const manualAmountError = amountCentsError(form.manualAmountCents, { allowZero: true });
   const deadlineError = (() => {
     const iso = parseDateInput(form.deadlineInput);
     if (!iso) return 'Data inválida (DD/MM/AAAA)';
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    if (new Date(iso) < today) return 'O prazo deve ser hoje ou uma data futura';
+    // "Hoje" é o dia de Brasília, o mesmo que o servidor usa.
+    if (isDeadlineBeforeToday(iso)) return 'O prazo deve ser hoje ou uma data futura';
     return null;
   })();
-  const isValid = !titleError && !amountError && !deadlineError;
+  const isValid = !titleError && !amountError && !manualAmountError && !deadlineError;
 
   return (
     <Modal
@@ -182,17 +196,17 @@ function GoalFormModal({
         style={styles.modalOverlay}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <Pressable style={styles.modalBackdrop} onPress={onClose} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Fechar" style={styles.modalBackdrop} onPress={onClose} />
         <View style={styles.modalSheet}>
           {/* Handle */}
           <View style={styles.modalHandle} />
 
           {/* Header */}
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>
+            <Text style={styles.modalTitle} accessibilityRole="header">
               {mode === 'create' ? 'Nova meta' : 'Editar meta'}
             </Text>
-            <TouchableOpacity onPress={onClose} accessibilityLabel="Fechar" disabled={isSaving}>
+            <TouchableOpacity style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="button" onPress={onClose} accessibilityLabel="Fechar" disabled={isSaving}>
               <Ionicons name="close" size={24} color={MUTED} />
             </TouchableOpacity>
           </View>
@@ -238,24 +252,34 @@ function GoalFormModal({
               editable={!isSaving}
               accessibilityLabel="Valor alvo da meta"
             />
+            {form.title.trim().length > 0 && amountError && (
+              <Text style={styles.fieldError}>{amountError}</Text>
+            )}
 
-            {/* Current amount (progress) */}
+            {/* Manually saved amount (the progress also counts linked transactions) */}
             {mode === 'edit' && (
               <>
-                <Text style={styles.fieldLabel}>Valor atual (R$)</Text>
+                <Text style={styles.fieldLabel}>Guardado manualmente (R$)</Text>
                 <TextInput
                   style={styles.input}
-                  value={form.currentAmountCents > 0 ? formatBRLInput(form.currentAmountCents) : ''}
+                  value={form.manualAmountCents > 0 ? formatBRLInput(form.manualAmountCents) : ''}
                   onChangeText={(raw) => {
-                    const digits = raw.replace(/[^\d]/g, '');
-                    setForm((f) => ({ ...f, currentAmountCents: digits ? Number(digits) : 0 }));
+                    setForm((f) => ({ ...f, manualAmountCents: centsFromDigits(raw) }));
                   }}
                   placeholder="0,00"
                   placeholderTextColor={MUTED}
                   keyboardType="numeric"
                   editable={!isSaving}
-                  accessibilityLabel="Valor atual da meta"
+                  accessibilityLabel="Valor guardado manualmente na meta"
                 />
+                {form.linkedAmount > 0 && (
+                  <Text
+                    style={styles.fieldHint}
+                    accessibilityLabel={`Mais ${spokenBRL(form.linkedAmount)} de transações vinculadas, somados automaticamente.`}
+                  >
+                    Mais {formatBRL(form.linkedAmount)} de transações vinculadas, somados automaticamente.
+                  </Text>
+                )}
               </>
             )}
 
@@ -277,7 +301,7 @@ function GoalFormModal({
             )}
 
             {/* Save button */}
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button"
               style={[styles.saveBtn, (!isValid || isSaving) && styles.saveBtnDisabled]}
               onPress={() => isValid && !isSaving && onSave(form)}
               disabled={!isValid || isSaving}
@@ -307,10 +331,13 @@ interface GoalCardProps {
 
 function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
   const isPast = isDeadlinePast(goal.deadline);
-  const progressPercent = goal.targetAmount > 0
+  // Tudo vem do servidor (mesma conta em todas as telas); o cálculo local só cobre servidor antigo.
+  const progressPercent = goal.progressPercent ?? (goal.targetAmount > 0
     ? Math.min(100, (goal.currentAmount / goal.targetAmount) * 100)
-    : 0;
-  const isAchieved = progressPercent >= 100;
+    : 0);
+  const isAchieved = goal.isAchieved ?? goal.currentAmount >= goal.targetAmount;
+  const manualAmount = manualAmountOf(goal);
+  const linkedAmount = linkedAmountOf(goal);
 
   return (
     <View style={styles.card} accessibilityLabel={`Meta: ${goal.title}`}>
@@ -337,11 +364,23 @@ function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
       ) : null}
 
       {/* Progress bar */}
-      <View style={styles.progressBarBg}>
+      <View
+        style={styles.progressBarBg}
+        accessible
+        accessibilityRole="progressbar"
+        accessibilityLabel={describeProgress(goal.title, progressPercent, goal.currentAmount, goal.targetAmount)}
+        accessibilityValue={{ min: 0, max: 100, now: Math.round(Math.min(100, progressPercent)) }}
+      >
         <View style={[styles.progressBarFill, { width: `${progressPercent}%` as any }]} />
       </View>
-      <Text style={styles.progressText}>
-        {formatBRL(goal.currentAmount)} / {formatBRL(goal.targetAmount)} ({progressPercent.toFixed(0)}%)
+      <Text style={styles.progressText} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+        {formatBRL(goal.currentAmount)} / {formatBRL(goal.targetAmount)} ({Math.floor(progressPercent)}%)
+      </Text>
+      <Text
+        style={styles.progressBreakdown}
+        accessibilityLabel={`Guardado manualmente: ${spokenBRL(manualAmount)}. Por transações: ${spokenBRL(linkedAmount)}.`}
+      >
+        Guardado manualmente: {formatBRL(manualAmount)} · Por transações: {formatBRL(linkedAmount)}
       </Text>
 
       {/* Amount + deadline */}
@@ -357,7 +396,7 @@ function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
 
       {/* Actions */}
       <View style={styles.cardActions}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.cardActionBtn}
           onPress={() => onEdit(goal)}
           accessibilityLabel={`Editar meta ${goal.title}`}
@@ -365,7 +404,7 @@ function GoalCard({ goal, onEdit, onDelete }: GoalCardProps) {
           <Ionicons name="pencil-outline" size={16} color={ACCENT} />
           <Text style={styles.cardActionText}>Editar</Text>
         </TouchableOpacity>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={[styles.cardActionBtn, styles.cardActionBtnDanger]}
           onPress={() => onDelete(goal)}
           accessibilityLabel={`Excluir meta ${goal.title}`}
@@ -389,7 +428,7 @@ export default function GoalsScreen() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingGoal, setEditingGoal] = useState<GoalDto | null>(null);
 
-  const { data, isLoading, isError, refetch } = useQuery<GetGoalsResponse>({
+  const { data, isLoading, isError, error: loadError, refetch } = useQuery<GetGoalsResponse>({
     queryKey: ['goals'],
     queryFn: async () => {
       const res = await goalsApiClient.list(false);
@@ -424,8 +463,7 @@ export default function GoalsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      const apiMsg = axios.isAxiosError(error) ? (error.response?.data as any)?.message : undefined;
-      toast.error(apiMsg ?? 'Não foi possível criar a meta. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível criar a meta. Tente novamente.'));
     },
   });
 
@@ -437,7 +475,7 @@ export default function GoalsScreen() {
         title: form.title.trim(),
         description: form.description.trim() || undefined,
         targetAmount: form.amountCents / 100,
-        currentAmount: form.currentAmountCents / 100,
+        manualAmount: form.manualAmountCents / 100,
         deadline: isoDeadline,
       });
     },
@@ -449,8 +487,7 @@ export default function GoalsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      const apiMsg = axios.isAxiosError(error) ? (error.response?.data as any)?.message : undefined;
-      toast.error(apiMsg ?? 'Não foi possível atualizar a meta. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível atualizar a meta. Tente novamente.'));
     },
   });
 
@@ -462,7 +499,7 @@ export default function GoalsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível excluir a meta. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível excluir a meta. Tente novamente.'));
     },
   });
 
@@ -501,10 +538,10 @@ export default function GoalsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Metas</Text>
+          <Text style={styles.title} accessibilityRole="header">Metas</Text>
           <Text style={styles.subtitle}>Objetivos financeiros do casal</Text>
         </View>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.addBtn}
           onPress={() => setCreateModalVisible(true)}
           accessibilityLabel="Criar nova meta"
@@ -519,7 +556,7 @@ export default function GoalsScreen() {
       {/* Error */}
       {isError && !isLoading && (
         <ErrorState
-          message="Não foi possível carregar as metas"
+          message={getApiErrorMessage(loadError, 'Não foi possível carregar as metas.')}
           onRetry={refetch}
         />
       )}
@@ -641,7 +678,8 @@ const styles = StyleSheet.create({
   // Progress bar
   progressBarBg: { height: 6, backgroundColor: BORDER, borderRadius: 3, marginBottom: 4 },
   progressBarFill: { height: 6, backgroundColor: SUCCESS, borderRadius: 3 },
-  progressText: { fontSize: 12, color: MUTED, marginBottom: 12 },
+  progressText: { fontSize: 12, color: MUTED, marginBottom: 4 },
+  progressBreakdown: { fontSize: 11, color: MUTED, marginBottom: 12 },
 
   // Status badge
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99 },
@@ -748,6 +786,7 @@ const styles = StyleSheet.create({
   },
   inputMultiline: { minHeight: 80, textAlignVertical: 'top' },
   fieldError: { fontSize: 12, color: ERROR, marginTop: 4 },
+  fieldHint: { fontSize: 12, color: MUTED, marginTop: 4 },
   saveBtn: {
     backgroundColor: PRIMARY,
     borderRadius: 12,

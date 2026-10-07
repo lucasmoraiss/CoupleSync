@@ -52,3 +52,16 @@ services:
         value: "false"
       - key: GEMINI_API_KEY
         sync: false
+
+      # Envio de e-mail (recuperação de senha e confirmação de e-mail) pela API HTTP da Brevo,
+      # porque o Render gratuito bloqueia as portas SMTP. Sem Email__Provider=brevo, a chave e o
+      # remetente, o envio fica desligado: as rotas de e-mail respondem 503 EMAIL_NOT_CONFIGURED.
+      - key: Email__Provider
+        value: brevo
+      - key: Email__ApiKey
+        sync: false
+      # Remetente verificado na Brevo.
+      - key: Email__FromAddress
+        sync: false
+      - key: Email__FromName
+        value: CoupleSync

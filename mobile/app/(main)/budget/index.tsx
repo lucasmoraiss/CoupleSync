@@ -1,4 +1,5 @@
 // Income Sources screen — personal income categories + partner (read-only) + shared
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback } from 'react';
 import {
   View,
@@ -23,6 +24,9 @@ import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
 import type { IncomeSourceResponse, IncomeGroupResponse } from '@/types/api';
+import { brazilMonth } from '@/utils/month';
+import { amountCentsError, centsFromDigits } from '@/utils/amount';
+import { spokenBRL } from '@/utils/a11y';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -49,10 +53,7 @@ function formatBRLInput(cents: number): string {
 }
 
 function currentMonthISO(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+  return brazilMonth();
 }
 
 const MONTH_NAMES = [
@@ -92,10 +93,24 @@ function IncomeSourceRow({
   const [name, setName] = useState(source.name);
   const [amountCents, setAmountCents] = useState(Math.round(source.amount * 100));
 
+  const { toast } = useToast();
+
   const handleSave = useCallback(() => {
+    const error = amountCentsError(amountCents);
+    if (error) {
+      toast.error(error);
+      return;
+    }
     onUpdate(source.id, name.trim() || source.name, amountCents);
     setEditMode(false);
-  }, [source.id, source.name, name, amountCents, onUpdate]);
+  }, [source.id, source.name, name, amountCents, onUpdate, toast]);
+
+  // A aba fica montada e a renda pode ter mudado desde a última edição: os campos partem do valor atual.
+  const startEdit = useCallback(() => {
+    setName(source.name);
+    setAmountCents(Math.round(source.amount * 100));
+    setEditMode(true);
+  }, [source.name, source.amount]);
 
   const handleCancel = useCallback(() => {
     setName(source.name);
@@ -108,7 +123,7 @@ function IncomeSourceRow({
       <View style={styles.sourceRow}>
         <View style={styles.sourceInfo}>
           <Text style={styles.sourceName}>{source.name}</Text>
-          <Text style={styles.sourceAmount}>{formatBRL(source.amount)}</Text>
+          <Text style={styles.sourceAmount} accessibilityLabel={spokenBRL(source.amount)}>{formatBRL(source.amount)}</Text>
         </View>
         {source.isShared && (
           <View style={styles.sharedBadge}>
@@ -135,20 +150,17 @@ function IncomeSourceRow({
           <TextInput
             style={styles.editAmountInput}
             value={amountCents > 0 ? formatBRLInput(amountCents) : ''}
-            onChangeText={(raw) => {
-              const digits = raw.replace(/[^\d]/g, '');
-              setAmountCents(digits ? Number(digits) : 0);
-            }}
+            onChangeText={(raw) => setAmountCents(centsFromDigits(raw))}
             placeholder="0,00"
             placeholderTextColor={MUTED}
             keyboardType="numeric"
             accessibilityLabel="Valor"
           />
         </View>
-        <TouchableOpacity onPress={handleSave} disabled={isSaving} style={styles.iconBtn} accessibilityLabel="Salvar">
+        <TouchableOpacity accessibilityRole="button" onPress={handleSave} disabled={isSaving} style={styles.iconBtn} accessibilityLabel="Salvar">
           <Ionicons name="checkmark-circle" size={22} color={SUCCESS} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={handleCancel} style={styles.iconBtn} accessibilityLabel="Cancelar">
+        <TouchableOpacity accessibilityRole="button" onPress={handleCancel} style={styles.iconBtn} accessibilityLabel="Cancelar">
           <Ionicons name="close-circle" size={22} color={MUTED} />
         </TouchableOpacity>
       </View>
@@ -159,7 +171,7 @@ function IncomeSourceRow({
     <View style={styles.sourceRow}>
       <View style={styles.sourceInfo}>
         <Text style={styles.sourceName}>{source.name}</Text>
-        <Text style={styles.sourceAmount}>{formatBRL(source.amount)}</Text>
+        <Text style={styles.sourceAmount} accessibilityLabel={spokenBRL(source.amount)}>{formatBRL(source.amount)}</Text>
       </View>
       <View style={styles.rowActions}>
         {source.isShared && (
@@ -167,10 +179,10 @@ function IncomeSourceRow({
             <Ionicons name="people-outline" size={12} color={ACCENT} />
           </View>
         )}
-        <TouchableOpacity onPress={() => setEditMode(true)} style={styles.iconBtn} accessibilityLabel="Editar">
+        <TouchableOpacity accessibilityRole="button" onPress={startEdit} style={styles.iconBtn} accessibilityLabel="Editar">
           <Ionicons name="pencil-outline" size={18} color={ACCENT} />
         </TouchableOpacity>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           onPress={() => {
             Alert.alert('Remover', `Deseja remover "${source.name}"?`, [
               { text: 'Cancelar', style: 'cancel' },
@@ -255,7 +267,7 @@ function IncomeGroupSection({
 
       <View style={styles.groupTotalRow}>
         <Text style={styles.groupTotalLabel}>Subtotal</Text>
-        <Text style={styles.groupTotalValue}>{formatBRL(group.total)}</Text>
+        <Text style={styles.groupTotalValue} accessibilityLabel={spokenBRL(group.total)}>{formatBRL(group.total)}</Text>
       </View>
     </View>
   );
@@ -275,6 +287,15 @@ function AddIncomeForm({
   const [isShared, setIsShared] = useState(false);
   const [isRecurring, setIsRecurring] = useState(true);
   const [expanded, setExpanded] = useState(false);
+
+  const handleCreate = () => {
+    const error = amountCentsError(amountCents);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    createMutation.mutate();
+  };
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -297,13 +318,13 @@ function AddIncomeForm({
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível criar a fonte de renda.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível criar a fonte de renda.'));
     },
   });
 
   if (!expanded) {
     return (
-      <TouchableOpacity style={styles.addBtn} onPress={() => setExpanded(true)} accessibilityLabel="Adicionar fonte de renda">
+      <TouchableOpacity accessibilityRole="button" style={styles.addBtn} onPress={() => setExpanded(true)} accessibilityLabel="Adicionar fonte de renda">
         <Ionicons name="add-circle-outline" size={20} color={ACCENT} />
         <Text style={styles.addBtnText}>Adicionar fonte de renda</Text>
       </TouchableOpacity>
@@ -326,17 +347,14 @@ function AddIncomeForm({
         <TextInput
           style={styles.addAmountInput}
           value={amountCents > 0 ? formatBRLInput(amountCents) : ''}
-          onChangeText={(raw) => {
-            const digits = raw.replace(/[^\d]/g, '');
-            setAmountCents(digits ? Number(digits) : 0);
-          }}
+          onChangeText={(raw) => setAmountCents(centsFromDigits(raw))}
           placeholder="0,00"
           placeholderTextColor={MUTED}
           keyboardType="numeric"
           accessibilityLabel="Valor mensal"
         />
       </View>
-      <TouchableOpacity
+      <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: isShared }}
         style={styles.sharedToggle}
         onPress={() => setIsShared(!isShared)}
         accessibilityLabel={isShared ? 'Desmarcar como compartilhado' : 'Marcar como compartilhado'}
@@ -349,7 +367,7 @@ function AddIncomeForm({
           <Text style={styles.recurringToggleTitle}>Renda recorrente</Text>
           <Text style={styles.recurringToggleHint}>{isRecurring ? 'Aparece em Rendas Recorrentes' : 'Aparece em Rendas Extras'}</Text>
         </View>
-        <Switch
+        <Switch accessibilityRole="switch" accessibilityLabel="Renda recorrente: repete todo mês" accessibilityState={{ checked: isRecurring }}
           value={isRecurring}
           onValueChange={setIsRecurring}
           trackColor={{ false: BORDER, true: ACCENT }}
@@ -357,9 +375,9 @@ function AddIncomeForm({
         />
       </View>
       <View style={styles.addFormActions}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={[styles.addSaveBtn, createMutation.isPending && styles.btnDisabled]}
-          onPress={() => createMutation.mutate()}
+          onPress={handleCreate}
           disabled={createMutation.isPending || !name.trim()}
           accessibilityLabel="Salvar fonte de renda"
         >
@@ -369,7 +387,7 @@ function AddIncomeForm({
             <Text style={styles.addSaveBtnText}>Adicionar</Text>
           )}
         </TouchableOpacity>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.addCancelBtn}
           onPress={() => { setExpanded(false); setName(''); setAmountCents(0); setIsShared(false); setIsRecurring(true); }}
           accessibilityLabel="Cancelar"
@@ -387,7 +405,7 @@ export default function IncomeSourcesScreen() {
   const { toast } = useToast();
   const [month] = useState(currentMonthISO());
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['incomes', 'current'],
     queryFn: () => incomeApiClient.getCurrent().then((r) => r.data),
     retry: false,
@@ -402,7 +420,7 @@ export default function IncomeSourcesScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível atualizar.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível atualizar.'));
     },
   });
 
@@ -414,7 +432,7 @@ export default function IncomeSourcesScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível remover.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível remover.'));
     },
   });
 
@@ -449,7 +467,7 @@ export default function IncomeSourcesScreen() {
   if (isError) {
     return (
       <SafeAreaView style={styles.container}>
-        <ErrorState onRetry={() => refetch()} />
+        <ErrorState message={getApiErrorMessage(loadError, 'Não foi possível carregar o orçamento.')} onRetry={() => refetch()} />
       </SafeAreaView>
     );
   }
@@ -473,7 +491,7 @@ export default function IncomeSourcesScreen() {
           keyboardShouldPersistTaps="handled"
         >
           {/* Header */}
-          <Text style={styles.screenTitle}>Fontes de Renda</Text>
+          <Text style={styles.screenTitle} accessibilityRole="header">Fontes de Renda</Text>
 
           {/* Month display */}
           <View style={styles.card}>
@@ -488,7 +506,7 @@ export default function IncomeSourcesScreen() {
                 <Text style={styles.totalLabel}>Renda Total do Casal</Text>
                 <Text style={styles.totalHint}>Soma de todas as fontes de renda</Text>
               </View>
-              <Text style={styles.totalValue}>{formatBRL(data.coupleTotal)}</Text>
+              <Text style={styles.totalValue} accessibilityLabel={spokenBRL(data.coupleTotal)}>{formatBRL(data.coupleTotal)}</Text>
             </View>
           )}
 
@@ -639,7 +657,7 @@ const styles = StyleSheet.create({
   sourceAmount: { fontSize: 15, color: ACCENT, fontWeight: '700', marginTop: 2 },
   rowActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   sharedBadge: { paddingHorizontal: 4 },
-  iconBtn: { padding: 4 },
+  iconBtn: { minHeight: 44, minWidth: 44, padding: 4 },
   editNameInput: { flex: 2, fontSize: 14, color: TEXT, marginRight: 6, padding: 4 },
   editAmountCell: { flex: 1.5, flexDirection: 'row', alignItems: 'center' },
   editAmountInput: { flex: 1, fontSize: 14, color: TEXT, padding: 0 },
@@ -654,6 +672,7 @@ const styles = StyleSheet.create({
   groupTotalValue: { fontSize: 14, color: TEXT, fontWeight: '700' },
   emptyText: { fontSize: 13, color: MUTED, textAlign: 'center', paddingVertical: 12 },
   addBtn: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     padding: 10,
@@ -672,7 +691,7 @@ const styles = StyleSheet.create({
   addAmountRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   currencySymbol: { fontSize: 18, color: ACCENT, marginRight: 8, fontWeight: '700' },
   addAmountInput: { flex: 1, fontSize: 18, color: TEXT, padding: 0 },
-  sharedToggle: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  sharedToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   sharedToggleText: { fontSize: 13, color: MUTED },
   recurringToggleRow: {
     flexDirection: 'row',
@@ -686,6 +705,8 @@ const styles = StyleSheet.create({
   recurringToggleHint: { fontSize: 12, color: MUTED, marginTop: 2 },
   addFormActions: { flexDirection: 'row', gap: 10 },
   addSaveBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
     flex: 1,
     backgroundColor: PRIMARY,
     borderRadius: 10,
@@ -694,6 +715,8 @@ const styles = StyleSheet.create({
   },
   addSaveBtnText: { color: TEXT, fontSize: 14, fontWeight: '700' },
   addCancelBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
     flex: 1,
     borderRadius: 10,
     padding: 12,

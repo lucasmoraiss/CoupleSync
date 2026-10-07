@@ -17,10 +17,18 @@ public sealed class ItauParser : IBankStatementParser
         @"Itaú Unibanco|itau\.com\.br|ITAÚ|Itau",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // Captures: short date (DD/MM), description, amount with optional trailing minus
-    private static readonly Regex TransactionPattern = new(
-        @"(\d{2}/\d{2})\s+(.+?)\s+([\d\.]+,\d{2})(-?)\s*$",
-        RegexOptions.Compiled | RegexOptions.Multiline);
+    // Entry start: a short date (DD/MM) followed by whitespace, not part of a full date, not the end of a range
+    // in a header ("de 01/09 a 30/09") and not an installment ("Parcela 03/10"). PdfPig may hand a whole page
+    // over as a single line with the next date glued to the previous amount ("61,30-09/09 ..."), so entries
+    // are cut at the dates, not at line ends. The amount is the LAST money value of the entry (this layout
+    // has no running-balance column); a trailing minus means Debit.
+    private static readonly Regex StartPattern = new(
+        @"(?<!\b(?:de|a|até|parcela|parc\.?)\s+)(?<![\d/])\d{2}/\d{2}(?![\d/])(?=\s)|(?<=,\d{2}-?)\d{2}/\d{2}(?![\d/])(?=\s)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex MoneyPattern = new(
+        @"\d[\d\.]*,\d{2}-?",
+        RegexOptions.Compiled);
 
     public bool CanParse(string extractedText) => IdentifierPattern.IsMatch(extractedText);
 
@@ -29,12 +37,20 @@ public sealed class ItauParser : IBankStatementParser
         var transactions = new List<ParsedTransaction>();
         var today = DateTime.UtcNow;
 
-        foreach (Match match in TransactionPattern.Matches(extractedText))
+        foreach (var segment in StatementSegments.Split(extractedText, StartPattern))
         {
-            var shortDate = match.Groups[1].Value; // DD/MM
-            var description = match.Groups[2].Value.Trim();
-            var rawAmount = match.Groups[3].Value.Trim();
-            var trailingMinus = match.Groups[4].Value.Trim();
+            var shortDate = segment[..5]; // DD/MM
+            var body = segment[5..];
+            var moneyMatch = StatementSegments.LastMatch(MoneyPattern, body);
+            if (moneyMatch is null)
+                continue;
+
+            var description = body[..moneyMatch.Index].Trim();
+            if (description.Length == 0)
+                continue;
+
+            var trailingMinus = moneyMatch.Value.EndsWith('-') ? "-" : "";
+            var rawAmount = moneyMatch.Value.TrimEnd('-');
 
             // Resolve year: if parsed month > current month, it's the previous year
             if (!DateTime.TryParseExact(shortDate, "dd/MM",

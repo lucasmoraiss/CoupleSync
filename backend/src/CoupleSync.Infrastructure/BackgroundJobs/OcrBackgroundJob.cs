@@ -2,6 +2,7 @@ using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.OcrImport;
 using CoupleSync.Domain.Interfaces;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,21 @@ public sealed class OcrBackgroundJob : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("OcrBackgroundJob started.");
+
+        // The API sleeps and restarts on the free tier; a job that was Processing at that moment would
+        // never be picked up again, so it is failed (with a clear error) as soon as the worker starts.
+        try
+        {
+            await RecoverStuckJobsAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not recover import jobs stuck in Processing at startup.");
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -55,6 +71,23 @@ public sealed class OcrBackgroundJob : BackgroundService
         _logger.LogInformation("OcrBackgroundJob stopped.");
     }
 
+    /// <summary>Fails every import job left in Processing by a previous process. Public so it can be unit-tested.</summary>
+    public async Task<int> RecoverStuckJobsAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var recovery = new ImportJobRecovery(
+            scope.ServiceProvider.GetRequiredService<IImportJobRepository>(),
+            scope.ServiceProvider.GetRequiredService<IStorageAdapter>(),
+            scope.ServiceProvider.GetRequiredService<IDateTimeProvider>(),
+            _logger);
+
+        // Startup: every job still in Processing is orphaned (single instance), no need to wait for the timeout.
+        var recovered = await recovery.RecoverAllAsync(ct, TimeSpan.Zero);
+        if (recovered > 0)
+            _logger.LogWarning("{Count} import job(s) stuck in Processing were marked as failed.", recovered);
+        return recovered;
+    }
+
     /// <summary>Runs one polling pass over the pending jobs. Public so the pass can be unit-tested.</summary>
     public async Task ProcessPendingJobsAsync(CancellationToken ct)
     {
@@ -82,7 +115,7 @@ public sealed class OcrBackgroundJob : BackgroundService
 
                 var rawOcrJson = await ocrProvider.AnalyzeAsync(job.StoragePath, job.FileMimeType, ct);
 
-                var candidates = await ocrProcessingService.ParseAndDeduplicateAsync(job.CoupleId, rawOcrJson, ct);
+                var candidates = await ocrProcessingService.ParseAndDeduplicateAsync(job.CoupleId, rawOcrJson, ct, job.AiCategorizationConsent);
                 var candidatesJson = OcrProcessingService.SerializeCandidates(candidates);
 
                 job.MarkReady(candidatesJson, dateTimeProvider.UtcNow);
@@ -92,6 +125,12 @@ public sealed class OcrBackgroundJob : BackgroundService
 
                 // Delete the uploaded file only after successful processing
                 await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
+            }
+            catch (ConcurrencyConflictException)
+            {
+                // Recovery failed this job while it was being processed: its verdict stands, the result is dropped.
+                _logger.LogWarning("Import job {JobId} was changed by recovery while processing; result discarded.", job.Id);
+                await repo.ReloadAsync(job, ct);
             }
             catch (OcrQuotaExhaustedException ex)
             {

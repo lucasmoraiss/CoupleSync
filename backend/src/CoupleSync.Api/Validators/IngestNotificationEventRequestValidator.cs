@@ -5,43 +5,37 @@ namespace CoupleSync.Api.Validators;
 
 public sealed class IngestNotificationEventRequestValidator : AbstractValidator<IngestNotificationEventRequest>
 {
-    private static readonly string[] AllowedCurrencies = ["BRL", "USD", "EUR"];
     private static readonly string[] AllowedBanks = ["NUBANK", "ITAU", "INTER", "C6", "BRADESCO", "XP", "BTG", "SANTANDER", "CAIXA", "BB"];
 
     public IngestNotificationEventRequestValidator()
     {
         RuleFor(x => x.Bank)
             .Cascade(CascadeMode.Stop)
-            .NotEmpty().WithMessage("Bank is required.")
-            .MaximumLength(64).WithMessage("Bank name must not exceed 64 characters.")
+            .NotEmpty().WithMessage("O banco é obrigatório.")
+            .MaximumLength(64).WithMessage("O nome do banco deve ter no máximo 64 caracteres.")
             .Must(b => AllowedBanks.Contains(b.Trim().ToUpperInvariant()))
-            .WithMessage("Bank '{PropertyValue}' is not supported. Supported banks: " + string.Join(", ", AllowedBanks));
+            .WithMessage("O banco '{PropertyValue}' não é suportado. Bancos suportados: " + string.Join(", ", AllowedBanks));
 
         RuleFor(x => x.Amount)
-            .GreaterThan(0).WithMessage("Amount must be greater than zero.")
-            .LessThanOrEqualTo(1_000_000).WithMessage("Amount exceeds maximum allowed value.");
+            .PositiveMoney();
 
-        RuleFor(x => x.Currency)
-            .Cascade(CascadeMode.Stop)
-            .NotEmpty().WithMessage("Currency is required.")
-            .Must(c => AllowedCurrencies.Contains(c.Trim().ToUpperInvariant()))
-            .WithMessage("Currency '{PropertyValue}' is not supported. Supported: BRL, USD, EUR.");
+        RuleFor(x => x.Currency).BrlCurrency();
 
         RuleFor(x => x.EventTimestamp)
-            .NotEmpty().WithMessage("EventTimestamp is required.")
+            .NotEmpty().WithMessage("A data do evento é obrigatória.")
             .Must(ts => ts <= DateTime.UtcNow.AddMinutes(5))
-            .WithMessage("EventTimestamp cannot be in the future.");
+            .WithMessage("A data do evento não pode estar no futuro.");
 
         RuleFor(x => x.Description)
             .MaximumLength(512).When(x => x.Description != null)
-            .WithMessage("Description must not exceed 512 characters.");
+            .WithMessage("A descrição deve ter no máximo 512 caracteres.");
 
         RuleFor(x => x.Merchant)
             .MaximumLength(512).When(x => x.Merchant != null)
-            .WithMessage("Merchant must not exceed 512 characters.");
+            .WithMessage("O estabelecimento deve ter no máximo 512 caracteres.");
 
         RuleFor(x => x.RawNotificationText)
             .MaximumLength(2048).When(x => x.RawNotificationText != null)
-            .WithMessage("RawNotificationText must not exceed 2048 characters (will be truncated at storage).");
+            .WithMessage("O texto da notificação deve ter no máximo 2048 caracteres.");
     }
 }

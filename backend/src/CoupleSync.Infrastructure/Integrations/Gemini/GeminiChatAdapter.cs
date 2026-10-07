@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Domain.Interfaces;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CoupleSync.Infrastructure.Integrations.Gemini;
@@ -12,13 +13,15 @@ public sealed class GeminiChatAdapter : IGeminiAdapter
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly GeminiOptions _options;
+    private readonly ILogger<GeminiChatAdapter> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public GeminiChatAdapter(IHttpClientFactory httpClientFactory, IOptions<GeminiOptions> options)
+    public GeminiChatAdapter(IHttpClientFactory httpClientFactory, IOptions<GeminiOptions> options, ILogger<GeminiChatAdapter> logger)
     {
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
+        _logger = logger;
     }
 
     public async Task<string> SendAsync(
@@ -28,7 +31,7 @@ public sealed class GeminiChatAdapter : IGeminiAdapter
         CancellationToken ct)
     {
         if (string.IsNullOrEmpty(_options.ApiKey))
-            throw new AppException("CHAT_NOT_CONFIGURED", "AI Chat is not configured.", 503);
+            throw new AppException("CHAT_NOT_CONFIGURED", "O assistente de IA não está configurado.", 503);
 
         var contents = history
             .Select(h => new GeminiContent(h.Role, new[] { new GeminiPart(h.Content) }))
@@ -48,14 +51,17 @@ public sealed class GeminiChatAdapter : IGeminiAdapter
         request.Content = JsonContent.Create(requestBody, options: JsonOptions);
         using var response = await client.SendAsync(request, ct);
 
+        if (!response.IsSuccessStatusCode)
+            _logger.LogWarning("Gemini API answered {StatusCode}.", (int)response.StatusCode);
+
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
-            throw new ChatRateLimitException("CHAT_RATE_LIMITED", "Gemini API quota exceeded. Please try again later.");
+            throw new ChatRateLimitException("CHAT_RATE_LIMITED", "O assistente de IA atingiu o limite de uso. Tente novamente mais tarde.");
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
-            throw new AppException("CHAT_ADAPTER_AUTH_FAILURE", "Gemini API authentication failed.", 502);
+            throw new AppException("CHAT_ADAPTER_AUTH_FAILURE", "Não foi possível acessar o assistente de IA no momento.", 502);
 
         if (!response.IsSuccessStatusCode)
-            throw new AppException("CHAT_ADAPTER_ERROR", $"Gemini API returned {(int)response.StatusCode}.", 502);
+            throw new AppException("CHAT_ADAPTER_ERROR", "O assistente de IA está indisponível no momento. Tente novamente mais tarde.", 502);
 
         var result = await response.Content.ReadFromJsonAsync<GeminiResponse>(JsonOptions, ct)
             ?? throw new InvalidOperationException("Empty response from Gemini API.");

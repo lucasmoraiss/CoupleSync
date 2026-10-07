@@ -1,5 +1,6 @@
 // AC-003: Transactions list screen — FlatList + pull-to-refresh + inline category editor
-import React, { useState, useCallback, useEffect } from 'react';
+import { getApiErrorMessage } from '@/services/apiError';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,29 +14,35 @@ import {
   Pressable,
   ScrollView,
   Alert,
-  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { transactionsApiClient, isCoupleRequiredError } from '@/services/apiClient';
 import {
-  PREDEFINED_CATEGORIES,
   getCategoryLabel,
   getCategoryIcon,
+  toCategoryKey,
 } from '@/modules/transactions/categories';
+import { useCategories } from '@/modules/transactions/useCategories';
+import { getTransactionSubtitle, getTransactionTitle } from '@/modules/transactions/display';
+import {
+  TRANSACTIONS_PAGE_SIZE,
+  flattenTransactionPages,
+  getNextTransactionsPage,
+} from '@/modules/transactions/pagination';
 import type { TransactionResponse, GetTransactionsResponse } from '@/types/api';
 import { colors } from '@/theme';
-import {
-  checkNotificationListenerPermission,
-  openNotificationListenerSettings,
-  isNotificationBridgeAvailable,
-} from '@/modules/integrations/notification-capture/NotificationListenerBridge';
+import { openNotificationListenerSettings } from '@/modules/integrations/notification-capture/NotificationListenerBridge';
+import { useNotificationPermission } from '@/modules/integrations/notification-capture/useNotificationPermission';
+import { captureBannerText } from '@/modules/privacy/captureStatus';
 import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
 import { useSessionStore } from '@/state/sessionStore';
+import { useConsentStore } from '@/modules/privacy/consentStore';
+import { spokenBRL } from '@/utils/a11y';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -96,23 +103,37 @@ function TransactionRow({
   currentUserId,
   onPress,
   onLongPress,
+  onEdit,
   onDelete,
 }: {
   item: TransactionResponse;
   currentUserId: string | null;
   onPress: (item: TransactionResponse) => void;
   onLongPress: (item: TransactionResponse) => void;
+  onEdit: (item: TransactionResponse) => void;
   onDelete: (item: TransactionResponse) => void;
 }) {
-  const label = item.merchant ?? item.description ?? item.bank;
+  const label = getTransactionTitle(item);
+  const subtitle = getTransactionSubtitle(item);
   const authorLabel = getDisplayAuthorName(item, currentUserId);
   const sourceBadge = getSourceBadge(item.source);
   return (
-    <TouchableOpacity
+    <TouchableOpacity accessibilityRole="button"
       style={styles.txRow}
       onPress={() => onPress(item)}
       onLongPress={() => onLongPress(item)}
-      accessibilityLabel={`Transação: ${label}, ${formatBRL(item.amount)}`}
+      accessibilityLabel={`Transação: ${label}, ${spokenBRL(item.amount)}, ${getCategoryLabel(item.category)}, ${formatRelativeDate(item.eventTimestampUtc)}, ${authorLabel}`}
+      accessibilityHint="Toque para alterar a categoria"
+      // Os botões de editar e excluir ficam dentro da linha, e o leitor de tela trata a linha como um só item:
+      // por isso as mesmas duas ações são oferecidas como ações personalizadas (deslizar para cima/baixo).
+      accessibilityActions={[
+        { name: 'edit', label: 'Editar transação' },
+        { name: 'delete', label: 'Excluir transação' },
+      ]}
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === 'edit') onEdit(item);
+        else if (event.nativeEvent.actionName === 'delete') onDelete(item);
+      }}
       activeOpacity={0.7}
     >
       <View style={styles.txIconWrap}>
@@ -122,6 +143,11 @@ function TransactionRow({
         <Text style={styles.txTitle} numberOfLines={1}>
           {label}
         </Text>
+        {subtitle && (
+          <Text style={styles.txSubtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        )}
         <View style={styles.txMetaRow}>
           <Text style={styles.txCategory}>{getCategoryLabel(item.category)}</Text>
           <View style={[styles.sourceBadge, { backgroundColor: sourceBadge.bg }]}>
@@ -131,10 +157,18 @@ function TransactionRow({
         <Text style={styles.txAuthor}>{authorLabel}</Text>
       </View>
       <View style={styles.txRight}>
-        <Text style={styles.txAmount}>{formatBRL(item.amount)}</Text>
+        <Text style={styles.txAmount} accessibilityLabel={spokenBRL(item.amount)}>{formatBRL(item.amount)}</Text>
         <Text style={styles.txDate}>{formatRelativeDate(item.eventTimestampUtc)}</Text>
       </View>
-      <TouchableOpacity
+      <TouchableOpacity accessibilityRole="button"
+        onPress={() => onEdit(item)}
+        style={styles.deleteBtn}
+        accessibilityLabel={`Editar transação ${label}`}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Ionicons name="create-outline" size={18} color={ACCENT} />
+      </TouchableOpacity>
+      <TouchableOpacity accessibilityRole="button"
         onPress={() => onDelete(item)}
         style={styles.deleteBtn}
         accessibilityLabel={`Excluir transação ${label}`}
@@ -152,16 +186,20 @@ function CategoryPickerModal({
   transaction,
   onClose,
   onSelect,
+  onEdit,
   isUpdating,
 }: {
   visible: boolean;
   transaction: TransactionResponse | null;
   onClose: () => void;
   onSelect: (category: string) => void;
+  onEdit: (transaction: TransactionResponse) => void;
   isUpdating: boolean;
 }) {
+  const categories = useCategories();
   if (!transaction) return null;
-  const label = transaction.merchant ?? transaction.description ?? transaction.bank;
+  const label = getTransactionTitle(transaction);
+  const currentKey = toCategoryKey(transaction.category);
   return (
     <Modal
       visible={visible}
@@ -169,24 +207,24 @@ function CategoryPickerModal({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <Pressable style={styles.modalOverlay} onPress={onClose}>
-        <Pressable style={styles.modalSheet} onPress={() => undefined}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Fechar" style={styles.modalOverlay} onPress={onClose}>
+        <Pressable accessible={false} style={styles.modalSheet} onPress={() => undefined}>
           {/* Handle */}
           <View style={styles.modalHandle} />
 
           {/* Title */}
-          <Text style={styles.modalTitle}>Editar categoria</Text>
+          <Text style={styles.modalTitle} accessibilityRole="header">Editar categoria</Text>
           <Text style={styles.modalSubtitle} numberOfLines={1}>
             {label}
           </Text>
-          <Text style={styles.modalAmount}>{formatBRL(transaction.amount)}</Text>
+          <Text style={styles.modalAmount} accessibilityLabel={spokenBRL(transaction.amount)}>{formatBRL(transaction.amount)}</Text>
 
           {/* Categories list */}
           <ScrollView style={styles.categoriesScroll} showsVerticalScrollIndicator={false}>
-            {PREDEFINED_CATEGORIES.map((cat) => {
-              const selected = cat.value === transaction.category;
+            {categories.map((cat) => {
+              const selected = cat.value === currentKey;
               return (
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="radio" accessibilityState={{ selected }}
                   key={cat.value}
                   style={[styles.categoryItem, selected && styles.categoryItemSelected]}
                   onPress={() => !isUpdating && onSelect(cat.value)}
@@ -209,8 +247,17 @@ function CategoryPickerModal({
             })}
           </ScrollView>
 
+          <TouchableOpacity accessibilityRole="button"
+            style={styles.cancelBtn}
+            onPress={() => onEdit(transaction)}
+            disabled={isUpdating}
+            accessibilityLabel="Editar transação"
+          >
+            <Text style={[styles.cancelText, { color: PRIMARY }]}>Editar transação</Text>
+          </TouchableOpacity>
+
           {/* Cancel */}
-          <TouchableOpacity style={styles.cancelBtn} onPress={onClose} disabled={isUpdating}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar" style={styles.cancelBtn} onPress={onClose} disabled={isUpdating}>
             <Text style={styles.cancelText}>Fechar</Text>
           </TouchableOpacity>
         </Pressable>
@@ -227,21 +274,32 @@ export default function TransactionsScreen() {
   const [selectedTx, setSelectedTx] = useState<TransactionResponse | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [notifPermission, setNotifPermission] = useState<boolean | null>(null);
+  // Conferida a cada volta à tela e ao app (a aba fica montada; a permissão muda fora do app).
+  const notifPermission = useNotificationPermission();
+  const captureConsent = useConsentStore((state) => state.record.capture);
+  const captureBanner = captureBannerText(captureConsent, notifPermission);
 
-  useEffect(() => {
-    if (Platform.OS === 'android' && isNotificationBridgeAvailable()) {
-      checkNotificationListenerPermission().then(setNotifPermission);
-    }
-  }, []);
-
-  const { data, isLoading, isError, refetch } = useQuery<GetTransactionsResponse>({
-    queryKey: ['transactions', 1, 20],
-    queryFn: async () => {
-      const res = await transactionsApiClient.list({ page: 1, pageSize: 20 });
+  const {
+    data,
+    isLoading,
+    isError,
+    error: loadError,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery<GetTransactionsResponse, Error, { pages: GetTransactionsResponse[] }, string[], number>({
+    queryKey: ['transactions', 'list'],
+    initialPageParam: 1,
+    queryFn: async ({ pageParam }) => {
+      const res = await transactionsApiClient.list({ page: pageParam, pageSize: TRANSACTIONS_PAGE_SIZE });
       return res.data;
     },
+    getNextPageParam: (lastPage, allPages) => getNextTransactionsPage(lastPage, allPages),
   });
+
+  const transactions = flattenTransactionPages(data?.pages);
+  const totalCount = data?.pages[0]?.totalCount;
 
   const { mutate: updateCategory, isPending: isUpdating } = useMutation({
     mutationFn: ({ id, category }: { id: string; category: string }) =>
@@ -254,7 +312,7 @@ export default function TransactionsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível atualizar a categoria. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível atualizar a categoria. Tente novamente.'));
     },
   });
 
@@ -269,15 +327,40 @@ export default function TransactionsScreen() {
     },
     onError: (error) => {
       if (isCoupleRequiredError(error)) return;
-      toast.error('Não foi possível excluir a transação. Tente novamente.');
+      toast.error(getApiErrorMessage(error, 'Não foi possível excluir a transação. Tente novamente.'));
     },
   });
 
+  // Puxar para atualizar volta à primeira página (em vez de rebuscar todas as já carregadas).
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    queryClient.setQueryData<{ pages: GetTransactionsResponse[]; pageParams: number[] }>(
+      ['transactions', 'list'],
+      (old) => (old ? { pages: old.pages.slice(0, 1), pageParams: old.pageParams.slice(0, 1) } : old),
+    );
     await refetch();
     setRefreshing(false);
-  }, [refetch]);
+  }, [queryClient, refetch]);
+
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const handleEdit = useCallback((item: TransactionResponse) => {
+    setModalVisible(false);
+    setSelectedTx(null);
+    router.push({
+      pathname: '/(main)/transactions/edit',
+      params: {
+        id: item.id,
+        amount: String(item.amount),
+        description: item.description ?? '',
+        merchant: item.merchant ?? '',
+        category: item.category,
+        eventTimestampUtc: item.eventTimestampUtc,
+      },
+    } as any);
+  }, []);
 
   const handleTxPress = useCallback((item: TransactionResponse) => {
     setSelectedTx(item);
@@ -300,7 +383,7 @@ export default function TransactionsScreen() {
 
   const handleLongPress = useCallback(
     (item: TransactionResponse) => {
-      const label = item.merchant ?? item.description ?? item.bank;
+      const label = getTransactionTitle(item);
       Alert.alert(
         'Excluir transação',
         `Tem certeza que deseja excluir esta transação?\n\n${label} — ${formatBRL(item.amount)}`,
@@ -328,12 +411,12 @@ export default function TransactionsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Transações</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Transações</Text>
         <View style={styles.headerRight}>
-          {data && (
-            <Text style={styles.headerCount}>{data.totalCount} no total</Text>
+          {totalCount != null && (
+            <Text style={styles.headerCount}>{totalCount} no total</Text>
           )}
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.addBtn}
             onPress={() => router.push('/(main)/transactions/new' as any)}
             accessibilityLabel="Adicionar transação manualmente"
@@ -342,7 +425,7 @@ export default function TransactionsScreen() {
             <Ionicons name="add" size={20} color="#fff" />
             <Text style={styles.addBtnLabel}>Nova</Text>
           </TouchableOpacity>
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.importBtn}
             onPress={() => router.push('/(main)/ocr-upload' as any)}
             accessibilityLabel="Importar extrato via OCR"
@@ -354,11 +437,23 @@ export default function TransactionsScreen() {
       </View>
 
       {/* Notification permission banner */}
-      {notifPermission === false && (
+      {captureBanner !== null && (
         <View style={styles.permissionBanner}>
           <Ionicons name="notifications-off-outline" size={18} color={WARNING} />
-          <Text style={styles.bannerText}>Captura de notificações desativada</Text>
-          <TouchableOpacity onPress={openNotificationListenerSettings}>
+          <Text style={styles.bannerText}>{captureBanner}</Text>
+          <TouchableOpacity
+            onPress={() => {
+              // Sem aceite registrado, ativar passa primeiro pela tela de consentimento.
+              if (useConsentStore.getState().record.capture.acceptedAt === null) {
+                router.push('/(main)/settings/capture-consent' as any);
+              } else {
+                openNotificationListenerSettings();
+              }
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Ativar a captura de notificações"
+            style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center' }}
+          >
             <Text style={styles.bannerAction}>Ativar</Text>
           </TouchableOpacity>
         </View>
@@ -370,7 +465,7 @@ export default function TransactionsScreen() {
       {/* Error state */}
       {isError && !isLoading && (
         <ErrorState
-          message="Erro ao carregar transações"
+          message={getApiErrorMessage(loadError, 'Erro ao carregar transações.')}
           onRetry={handleRefresh}
         />
       )}
@@ -378,7 +473,7 @@ export default function TransactionsScreen() {
       {/* Data / empty state */}
       {!isLoading && !isError && (
         <FlatList
-          data={data?.items ?? []}
+          data={transactions}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <TransactionRow
@@ -386,6 +481,7 @@ export default function TransactionsScreen() {
               currentUserId={currentUserId}
               onPress={handleTxPress}
               onLongPress={handleLongPress}
+              onEdit={handleEdit}
               onDelete={handleDeletePress}
             />
           )}
@@ -401,8 +497,21 @@ export default function TransactionsScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={ACCENT} />
           }
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View style={styles.listFooter} accessibilityLabel="Carregando mais transações">
+                <ActivityIndicator size="small" color={ACCENT} />
+              </View>
+            ) : !hasNextPage && transactions.length > 0 ? (
+              <View style={styles.listFooter}>
+                <Text style={styles.listFooterText}>Fim da lista</Text>
+              </View>
+            ) : null
+          }
           contentContainerStyle={
-            (data?.items?.length ?? 0) === 0 ? styles.flatListEmpty : styles.flatListContent
+            transactions.length === 0 ? styles.flatListEmpty : styles.flatListContent
           }
           showsVerticalScrollIndicator={false}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -415,6 +524,7 @@ export default function TransactionsScreen() {
         transaction={selectedTx}
         onClose={handleCloseModal}
         onSelect={handleCategorySelect}
+        onEdit={handleEdit}
         isUpdating={isUpdating}
       />
     </SafeAreaView>
@@ -435,6 +545,8 @@ const styles = StyleSheet.create({
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerCount: { fontSize: 13, color: MUTED },
   importBtn: {
+    minHeight: 44,
+    minWidth: 44,
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -443,6 +555,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtn: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
@@ -456,6 +569,8 @@ const styles = StyleSheet.create({
   loadingText: { color: MUTED, marginTop: 12, fontSize: 14 },
   flatListContent: { paddingHorizontal: 16, paddingBottom: 24 },
   flatListEmpty: { flex: 1, justifyContent: 'center' },
+  listFooter: { paddingVertical: 20, alignItems: 'center' },
+  listFooterText: { color: MUTED, fontSize: 13 },
   separator: { height: 1, backgroundColor: BORDER, marginHorizontal: 16 },
   txRow: {
     flexDirection: 'row',
@@ -475,6 +590,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   txDetails: { flex: 1, marginRight: 8 },
+  txSubtitle: { fontSize: 12, color: MUTED, marginTop: 1 },
   txTitle: { fontSize: 14, fontWeight: '600', color: TEXT },
   txMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 6 },
   txCategory: { fontSize: 12, color: MUTED },

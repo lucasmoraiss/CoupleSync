@@ -1,6 +1,7 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.Transactions.Commands;
@@ -12,14 +13,13 @@ namespace CoupleSync.Application.Transactions.Commands;
 /// </summary>
 public sealed class CreateManualTransactionCommandHandler
 {
-    private const string ManualBank = "MANUAL";
+    private const string ManualBank = TransactionEventIngest.ManualBank;
 
     private readonly ITransactionRepository _transactionRepository;
     private readonly INotificationCaptureRepository _ingestRepository;
     private readonly IDateTimeProvider _clock;
     private readonly IAlertPolicyService _alertPolicyService;
     private readonly INotificationEventRepository _notificationEventRepository;
-    private readonly INotificationSettingsRepository _notificationSettingsRepository;
     private readonly ILogger<CreateManualTransactionCommandHandler> _logger;
 
     public CreateManualTransactionCommandHandler(
@@ -28,7 +28,6 @@ public sealed class CreateManualTransactionCommandHandler
         IDateTimeProvider clock,
         IAlertPolicyService alertPolicyService,
         INotificationEventRepository notificationEventRepository,
-        INotificationSettingsRepository notificationSettingsRepository,
         ILogger<CreateManualTransactionCommandHandler> logger)
     {
         _transactionRepository = transactionRepository;
@@ -36,17 +35,19 @@ public sealed class CreateManualTransactionCommandHandler
         _clock = clock;
         _alertPolicyService = alertPolicyService;
         _notificationEventRepository = notificationEventRepository;
-        _notificationSettingsRepository = notificationSettingsRepository;
         _logger = logger;
     }
 
     public async Task<Transaction> HandleAsync(CreateManualTransactionCommand cmd, CancellationToken ct)
     {
-        if (cmd.CoupleId == Guid.Empty) throw new AppException("INVALID_INPUT", "CoupleId is required.", 400);
-        if (cmd.UserId == Guid.Empty) throw new AppException("INVALID_INPUT", "UserId is required.", 400);
-        if (cmd.Amount <= 0) throw new AppException("INVALID_INPUT", "Amount must be greater than zero.", 400);
-        if (string.IsNullOrWhiteSpace(cmd.Currency)) throw new AppException("INVALID_INPUT", "Currency is required.", 400);
-        if (string.IsNullOrWhiteSpace(cmd.Category)) throw new AppException("INVALID_INPUT", "Category is required.", 400);
+        if (cmd.CoupleId == Guid.Empty) throw new AppException("INVALID_INPUT", "O casal é obrigatório.", 400);
+        if (cmd.UserId == Guid.Empty) throw new AppException("INVALID_INPUT", "O usuário é obrigatório.", 400);
+        if (cmd.Amount <= 0) throw new AppException("INVALID_INPUT", "O valor deve ser maior que zero.", 400);
+        var currency = CurrencyRules.TryNormalize(cmd.Currency)
+            ?? throw new AppException("INVALID_CURRENCY", CurrencyRules.InvalidMessage, 400);
+        if (string.IsNullOrWhiteSpace(cmd.Category)) throw new AppException("INVALID_INPUT", "A categoria é obrigatória.", 400);
+        var category = TransactionCategories.TryNormalize(cmd.Category)
+            ?? throw new AppException("INVALID_CATEGORY", TransactionCategories.InvalidMessage, 400);
 
         var now = _clock.UtcNow;
         var eventTs = cmd.EventTimestampUtc == default ? now : cmd.EventTimestampUtc;
@@ -56,7 +57,7 @@ public sealed class CreateManualTransactionCommandHandler
             userId: cmd.UserId,
             bank: ManualBank,
             amount: cmd.Amount,
-            currency: cmd.Currency,
+            currency: currency,
             eventTimestamp: eventTs,
             description: cmd.Description,
             merchant: cmd.Merchant,
@@ -75,11 +76,11 @@ public sealed class CreateManualTransactionCommandHandler
             fingerprint: fingerprint,
             bank: ManualBank,
             amount: cmd.Amount,
-            currency: cmd.Currency.Trim().ToUpperInvariant(),
+            currency: currency,
             eventTimestampUtc: eventTs,
             description: cmd.Description,
             merchant: cmd.Merchant,
-            category: cmd.Category.Trim(),
+            category: category,
             ingestEventId: ingest.Id,
             createdAtUtc: now);
 
@@ -91,13 +92,9 @@ public sealed class CreateManualTransactionCommandHandler
         {
             var nowUtc = _clock.UtcNow;
             var since = nowUtc.AddDays(-30);
-            // No row in notification_settings means the user never changed anything: the defaults
-            // (every alert enabled) apply, exactly as GET /notifications/settings reports them.
-            var settings = await _notificationSettingsRepository.GetByUserIdAsync(cmd.UserId, cmd.CoupleId, ct)
-                ?? NotificationSettings.Create(cmd.UserId, cmd.CoupleId, nowUtc);
             var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(cmd.CoupleId, since, ct);
             var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
-                cmd.CoupleId, cmd.UserId, transaction, recentTransactions, settings, nowUtc, ct);
+                cmd.CoupleId, transaction, recentTransactions, nowUtc, ct);
             if (alertEvents.Count > 0)
             {
                 await _notificationEventRepository.AddRangeAsync(alertEvents, ct);

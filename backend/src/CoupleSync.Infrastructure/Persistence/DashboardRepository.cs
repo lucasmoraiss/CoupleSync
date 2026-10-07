@@ -1,5 +1,6 @@
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Dashboard;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Infrastructure.Persistence;
@@ -22,6 +23,7 @@ public sealed class DashboardRepository : IDashboardRepository
         var baseQuery = _dbContext.Transactions
             .AsNoTracking()
             .Where(t => t.CoupleId == coupleId
+                && t.Currency == CurrencyRules.Brl
                 && t.EventTimestampUtc >= startDate
                 && t.EventTimestampUtc <= endDate);
 
@@ -49,7 +51,7 @@ public sealed class DashboardRepository : IDashboardRepository
                 .ToListAsync(ct);
 
             var expensesByCategoryLocal = rows
-                .GroupBy(r => r.Category)
+                .GroupBy(r => TransactionCategories.NormalizeOrOther(r.Category))
                 .ToDictionary(g => g.Key, g => g.Sum(r => r.Amount));
 
             var partnerBreakdownLocal = rows
@@ -80,7 +82,9 @@ public sealed class DashboardRepository : IDashboardRepository
         return new DashboardAggregates(
             transactionCount,
             totalExpenses,
-            categoryRows.ToDictionary(x => x.Category, x => x.Total),
+            categoryRows
+                .GroupBy(x => TransactionCategories.NormalizeOrOther(x.Category))
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.Total)),
             partnerRows.Select(x => new PartnerBreakdownItem(x.UserId, x.Total)).ToList());
     }
 }

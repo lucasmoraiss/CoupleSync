@@ -5,10 +5,12 @@ namespace CoupleSync.Application.Goals.Queries;
 public sealed class GetGoalsQueryHandler
 {
     private readonly IGoalRepository _repository;
+    private readonly GoalProgressReader _progressReader;
 
-    public GetGoalsQueryHandler(IGoalRepository repository)
+    public GetGoalsQueryHandler(IGoalRepository repository, GoalProgressReader progressReader)
     {
         _repository = repository;
+        _progressReader = progressReader;
     }
 
     public async Task<GetGoalsResult> HandleAsync(GetGoalsQuery query, CancellationToken cancellationToken)
@@ -18,19 +20,10 @@ public sealed class GetGoalsQueryHandler
             query.IncludeArchived,
             cancellationToken);
 
+        var progress = await _progressReader.ReadAsync(query.CoupleId, goals.ToList(), cancellationToken);
+
         var items = goals
-            .Select(g => new GoalDto(
-                g.Id,
-                g.CreatedByUserId,
-                g.Title,
-                g.Description,
-                g.TargetAmount,
-                g.CurrentAmount,
-                g.Currency,
-                g.Deadline,
-                g.Status,
-                g.CreatedAtUtc,
-                g.UpdatedAtUtc))
+            .Select(g => GoalDto.From(g, progress[g.Id]))
             .ToList();
 
         return new GetGoalsResult(totalCount, items);

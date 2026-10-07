@@ -1,5 +1,12 @@
 // Lógica pura da tela de revisão do extrato (sem React Native), testável com Jest.
-import type { OcrCandidateEdit, OcrCandidateResponse, OcrConfirmRequest } from '@/types/api';
+import type {
+  OcrCandidateEdit,
+  OcrCandidateResponse,
+  OcrConfirmRequest,
+  OcrOpenImport,
+} from '@/types/api';
+import { toCategoryKey } from '@/modules/transactions/categories';
+import { amountCentsError, centsFromDigits } from '@/utils/amount';
 
 /** Linha editável da revisão. */
 export interface ReviewRow {
@@ -16,10 +23,9 @@ export interface ReviewRow {
 /** Erros de validação por índice do candidato; cada mensagem é exibida na própria linha. */
 export type ReviewRowErrors = Record<number, { description?: string; amount?: string }>;
 
-/** Converte o texto do campo de valor ("1.234,56") em centavos (123456). */
+/** Converte o texto do campo de valor ("1.234,56") em centavos (123456), limitado ao teto da API. */
 export function parseBRLInput(value: string): number {
-  const digits = value.replace(/[^\d]/g, '');
-  return digits ? Number(digits) : 0;
+  return centsFromDigits(value);
 }
 
 export function formatBRLInput(cents: number): string {
@@ -38,7 +44,8 @@ export function candidateToRow(c: OcrCandidateResponse): ReviewRow {
     date: c.date,
     confidence: c.confidence,
     duplicateSuspected: c.duplicateSuspected,
-    category: c.suggestedCategory ?? '',
+    // Só categoria canônica segue na linha; qualquer outra grafia vira a chave, o resto fica sem categoria.
+    category: toCategoryKey(c.suggestedCategory) ?? '',
   };
 }
 
@@ -93,8 +100,10 @@ export function validateReviewRows(
         rowErrors.description = `A descrição deve ter no máximo ${DESCRIPTION_MAX_LENGTH} caracteres.`;
       }
     }
-    if (changes.amountCents !== undefined && !(changes.amountCents > 0)) {
-      rowErrors.amount = 'Informe um valor maior que zero.';
+    if (changes.amountCents !== undefined) {
+      // Mesma regra da API: maior que zero e até R$ 999.999.999,99.
+      const amountError = amountCentsError(changes.amountCents);
+      if (amountError) rowErrors.amount = amountError;
     }
 
     if (rowErrors.description || rowErrors.amount) {
@@ -113,14 +122,15 @@ export function validateReviewRows(
 export function buildOcrConfirmRequest(
   rows: readonly ReviewRow[],
   candidates: readonly OcrCandidateResponse[],
+  options: { keepJobOpen?: boolean } = {},
 ): OcrConfirmRequest {
   const originals = indexCandidates(candidates);
   const selected = rows.filter((r) => r.selected);
 
   const selectedIndices = selected.map((r) => r.index);
   const categoryOverrides = selected
-    .filter((r) => r.category.trim().length > 0)
-    .map((r) => ({ index: r.index, category: r.category.trim() }));
+    .map((r) => ({ index: r.index, category: toCategoryKey(r.category) }))
+    .filter((o): o is { index: number; category: string } => o.category !== null);
 
   const candidateEdits: OcrCandidateEdit[] = [];
   for (const row of selected) {
@@ -137,5 +147,93 @@ export function buildOcrConfirmRequest(
     selectedIndices,
     categoryOverrides,
     ...(candidateEdits.length > 0 ? { candidateEdits } : {}),
+    // Só "confirmar e continuar depois" envia; sem ele a importação fecha (a chamada de sempre).
+    ...(options.keepJobOpen ? { keepJobOpen: true } : {}),
   };
+}
+
+/** Quantas linhas da revisão ficaram sem seleção. */
+export function unselectedCount(rows: readonly ReviewRow[]): number {
+  return rows.filter((r) => !r.selected).length;
+}
+
+/** Texto da confirmação de "Confirmar e finalizar": o que não foi selecionado é descartado. */
+export function finishConfirmMessage(unselected: number): string {
+  return unselected === 1
+    ? 'A transação não selecionada será descartada e a importação será encerrada.'
+    : `As ${unselected} transações não selecionadas serão descartadas e a importação será encerrada.`;
+}
+
+/** Corpo para descartar de vez as linhas que sobraram (a importação fecha quando não resta pendente). */
+export function buildDiscardRestRequest(pendingIndices: readonly number[]): OcrConfirmRequest {
+  return { selectedIndices: [], discardedIndices: pendingIndices, keepJobOpen: true };
+}
+
+/** Texto de uma importação aberta na lista da tela de importar extrato. */
+export function openImportSummary(item: OcrOpenImport): { title: string; pending: string } {
+  const noun = item.pendingLines === 1 ? 'transação pendente' : 'transações pendentes';
+  return {
+    title: item.fileName && item.fileName.trim() ? item.fileName : 'Extrato',
+    pending: `${item.pendingLines} de ${item.totalLines} ${noun}`,
+  };
+}
+
+// ─── Estado da revisão por importação (MOB-06) ───────────────────────────────
+
+/** Linhas da revisão de UMA importação (uploadId); `seeded` diz se já foram montadas a partir da API. */
+export interface ReviewSession {
+  readonly uploadId: string;
+  readonly rows: ReviewRow[];
+  readonly seeded: boolean;
+}
+
+export function emptyReviewSession(uploadId: string): ReviewSession {
+  return { uploadId, rows: [], seeded: false };
+}
+
+/**
+ * Estado que vale para o uploadId atual: se o guardado é de outra importação, volta vazio.
+ * Assim a tela nunca mostra (nem confirma) linhas da importação anterior.
+ */
+export function sessionFor(session: ReviewSession, uploadId: string): ReviewSession {
+  return session.uploadId === uploadId ? session : emptyReviewSession(uploadId);
+}
+
+export interface ReviewLoadState {
+  /** Há uma resposta (desta visita ou guardada de uma visita anterior). */
+  readonly hasData: boolean;
+  /** Uma busca está em andamento. */
+  readonly isFetching: boolean;
+  /** A última busca falhou. */
+  readonly isError: boolean;
+  /** As linhas desta visita já foram preenchidas. */
+  readonly seeded: boolean;
+}
+
+/**
+ * Cada visita à revisão busca as linhas de novo (a tela é remontada e a consulta usa refetchOnMount "always").
+ * Enquanto a busca não termina pode existir, no cache, a resposta da visita ANTERIOR: preencher a partir dela
+ * mostraria como pendentes linhas que já foram importadas. As linhas só são preenchidas com a resposta que
+ * chegou para esta visita: sem busca em andamento e sem erro.
+ */
+export function shouldSeedReview(state: ReviewLoadState): boolean {
+  return state.hasData && !state.isFetching && !state.isError && !state.seeded;
+}
+
+/** A tela mostra "carregando" até as linhas desta visita estarem preenchidas (nunca as da visita anterior). */
+export function isReviewLoading(state: ReviewLoadState): boolean {
+  return !state.isError && !state.seeded && (state.isFetching || !state.hasData);
+}
+
+/** Linhas a revisar: só as que ainda estão pendentes (as já confirmadas ou descartadas não voltam). */
+export function seedReviewRows(candidates: readonly OcrCandidateResponse[]): ReviewRow[] {
+  return candidates
+    .filter((c) => (c.lineState ?? 'Pending') === 'Pending')
+    .map(candidateToRow);
+}
+
+/** "3 entradas não importadas"; vazio quando não há entradas. */
+export function creditsLabel(count: number): string {
+  if (count <= 0) return '';
+  return count === 1 ? '1 entrada não importada' : `${count} entradas não importadas`;
 }

@@ -9,10 +9,18 @@ public sealed class FakeAlertPolicyService : IAlertPolicyService
 
     public Task<IReadOnlyList<NotificationEvent>> EvaluatePostIngestAsync(
         Guid coupleId,
-        Guid userId,
         Transaction newTransaction,
         IReadOnlyList<Transaction> recentTransactions,
-        NotificationSettings settings,
+        DateTime nowUtc,
+        CancellationToken ct = default)
+    {
+        return Task.FromResult(EventsToReturn);
+    }
+
+    public Task<IReadOnlyList<NotificationEvent>> EvaluatePostImportAsync(
+        Guid coupleId,
+        IReadOnlyList<Transaction> importedTransactions,
+        IReadOnlyList<Transaction> recentTransactions,
         DateTime nowUtc,
         CancellationToken ct = default)
     {

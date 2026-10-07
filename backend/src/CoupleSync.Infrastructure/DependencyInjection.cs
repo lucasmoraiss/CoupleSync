@@ -4,6 +4,8 @@ using CoupleSync.Application.OcrImport;
 using CoupleSync.Domain.Interfaces;
 using CoupleSync.Infrastructure.BackgroundJobs;
 using CoupleSync.Infrastructure.Integrations.AzureDocumentIntelligence;
+using CoupleSync.Application.Common.Options;
+using CoupleSync.Infrastructure.Integrations.Email;
 using CoupleSync.Infrastructure.Integrations.Fcm;
 using CoupleSync.Infrastructure.Integrations.Gemini;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser;
@@ -27,8 +29,6 @@ public static class DependencyInjection
         services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(connectionString));
 
-        services.AddScoped<IQueryDbContext>(sp => sp.GetRequiredService<AppDbContext>());
-
         services.AddScoped<IAuthRepository, AuthRepository>();
         services.AddScoped<ICoupleRepository, CoupleRepository>();
         services.AddScoped<INotificationCaptureRepository, NotificationCaptureRepository>();
@@ -46,6 +46,7 @@ public static class DependencyInjection
         services.AddScoped<IReportsRepository, ReportsRepository>();
         services.AddScoped<ICategoryMatchingService, CategoryMatchingService>();
         services.AddScoped<ICoupleContext, HttpContextCoupleContext>();
+        services.AddScoped<ICoupleMembership, CoupleMembership>();
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
         services.AddScoped<ITokenHasher, Sha256TokenHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
@@ -53,6 +54,9 @@ public static class DependencyInjection
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
         services.AddSingleton<INotificationEventSanitizer, NotificationEventSanitizer>();
         services.AddSingleton<IFingerprintGenerator, TransactionFingerprintGenerator>();
+
+        services.AddSingleton<IVerificationCodeService, VerificationCodeService>();
+        services.AddEmailSending(configuration);
 
         services.Configure<FcmOptions>(configuration.GetSection("Fcm"));
         services.AddSingleton<IFcmAdapter, FcmAdapter>();

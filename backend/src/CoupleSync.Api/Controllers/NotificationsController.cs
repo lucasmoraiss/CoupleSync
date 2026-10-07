@@ -38,10 +38,10 @@ public sealed class NotificationsController : ControllerBase
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Token) || request.Token.Length > 512)
-            return BadRequest(new { code = "INVALID_TOKEN", message = "Token must be non-empty and at most 512 characters." });
+            throw new BadRequestException("INVALID_TOKEN", "O token deve ser preenchido e ter no máximo 512 caracteres.");
 
         if (!string.Equals(request.Platform, "android", StringComparison.OrdinalIgnoreCase))
-            return BadRequest(new { code = "UNSUPPORTED_PLATFORM", message = "Only 'android' platform is supported." });
+            throw new BadRequestException("UNSUPPORTED_PLATFORM", "Somente a plataforma 'android' é suportada.");
 
         var userId = GetAuthenticatedUserId();
         var coupleId = GetAuthenticatedCoupleId();
@@ -103,7 +103,7 @@ public sealed class NotificationsController : ControllerBase
         var claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier)
                       ?? User.FindFirstValue("sub");
         if (!Guid.TryParse(claimValue, out var userId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid user context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return userId;
     }
 
@@ -111,7 +111,7 @@ public sealed class NotificationsController : ControllerBase
     {
         var claimValue = User.FindFirstValue("couple_id");
         if (!Guid.TryParse(claimValue, out var coupleId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired couple context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return coupleId;
     }
 }

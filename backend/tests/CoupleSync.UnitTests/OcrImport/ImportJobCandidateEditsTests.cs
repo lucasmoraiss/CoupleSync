@@ -139,7 +139,6 @@ public sealed class ImportJobCandidateEditsTests
             ingests,
             new FakeAlertPolicyService(),
             new FakeNotificationEventRepository(),
-            new FakeNotificationSettingsRepository(),
             NullLogger<ImportJobService>.Instance);
 
         var candidates = Enumerable.Range(0, 4)

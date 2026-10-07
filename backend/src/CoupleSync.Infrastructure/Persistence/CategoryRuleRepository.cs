@@ -34,6 +34,6 @@ public sealed class CategoryRuleRepository : ICategoryRuleRepository
 
     public Task SaveChangesAsync(CancellationToken ct)
     {
-        return _dbContext.SaveChangesAsync(ct);
+        return DbSaveTranslator.SaveAsync(_dbContext, ct);
     }
 }

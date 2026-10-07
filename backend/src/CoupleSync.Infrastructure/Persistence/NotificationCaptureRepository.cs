@@ -25,30 +25,35 @@ public sealed class NotificationCaptureRepository : INotificationCaptureReposito
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
-        return _dbContext.SaveChangesAsync(cancellationToken);
+        return DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
+    }
+
+    // Manual entries and OCR imports also write ingest rows; the integration status is about
+    // notification capture only.
+    private IQueryable<TransactionEventIngest> CapturedFromNotifications(Guid coupleId)
+    {
+        return _dbContext.TransactionEventIngests
+            .IgnoreQueryFilters()
+            .Where(e => e.CoupleId == coupleId && !TransactionEventIngest.NonNotificationBanks.Contains(e.Bank));
     }
 
     public Task<int> CountByStatusAsync(Guid coupleId, IngestStatus status, CancellationToken cancellationToken)
     {
-        return _dbContext.TransactionEventIngests
-            .IgnoreQueryFilters()
-            .CountAsync(e => e.CoupleId == coupleId && e.Status == status, cancellationToken);
+        return CapturedFromNotifications(coupleId)
+            .CountAsync(e => e.Status == status, cancellationToken);
     }
 
     public Task<TransactionEventIngest?> GetLastByStatusAsync(Guid coupleId, IngestStatus status, CancellationToken cancellationToken)
     {
-        return _dbContext.TransactionEventIngests
-            .IgnoreQueryFilters()
-            .Where(e => e.CoupleId == coupleId && e.Status == status)
+        return CapturedFromNotifications(coupleId)
+            .Where(e => e.Status == status)
             .OrderByDescending(e => e.CreatedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
     }
 
     public Task<DateTime?> GetLastEventTimeAsync(Guid coupleId, CancellationToken cancellationToken)
     {
-        return _dbContext.TransactionEventIngests
-            .IgnoreQueryFilters()
-            .Where(e => e.CoupleId == coupleId)
+        return CapturedFromNotifications(coupleId)
             .OrderByDescending(e => e.CreatedAtUtc)
             .Select(e => (DateTime?)e.CreatedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);

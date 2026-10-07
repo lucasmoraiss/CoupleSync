@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The whole test process runs with globalization-invariant mode ON (no ICU, as in a minimal Alpine container):
+    InvariantGlobalization goes into this assembly's runtimeconfig.json, which the test host uses.
+    Anything in the API that silently depends on culture data (named cultures, Unicode normalization) fails here.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.12" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\TestEmailIsolation.cs" Link="TestEmailIsolation.cs" />
+    <!-- The same category cases the unit tests run with ICU, run again without it. -->
+    <Compile Include="..\CoupleSync.UnitTests\Domain\TransactionCategoriesTests.cs" Link="TransactionCategoriesTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CoupleSync.Api\CoupleSync.Api.csproj" />
+    <ProjectReference Include="..\..\src\CoupleSync.Infrastructure\CoupleSync.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

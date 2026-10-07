@@ -8,7 +8,7 @@ interface LoadingStateProps {
 
 export function LoadingState({ message = 'Carregando...' }: LoadingStateProps) {
   return (
-    <View style={styles.container}>
+    <View style={styles.container} accessible accessibilityRole="progressbar" accessibilityLabel={message || 'Carregando'} accessibilityLiveRegion="polite">
       <ActivityIndicator size="large" color={colors.primary} />
       {message ? <Text style={styles.message}>{message}</Text> : null}
     </View>

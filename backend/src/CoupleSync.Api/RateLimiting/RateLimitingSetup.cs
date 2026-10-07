@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Net;
 using System.Security.Claims;
-using System.Text.Json;
 using System.Threading.RateLimiting;
+using CoupleSync.Api.Errors;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
@@ -15,6 +15,13 @@ public static class RateLimitPolicies
     public const string AuthLogin = "auth-login";
     public const string AuthRegister = "auth-register";
     public const string CoupleJoin = "couple-join";
+    public const string AuthChangePassword = "auth-change-password";
+    public const string AuthLogout = "auth-logout";
+    public const string AuthRefresh = "auth-refresh";
+    public const string AuthForgotPassword = "auth-forgot-password";
+    public const string AuthResetPassword = "auth-reset-password";
+    public const string AuthConfirmEmail = "auth-confirm-email";
+    public const string AuthResendEmailVerification = "auth-resend-email-verification";
 }
 
 /// <summary>Bound to the <c>RateLimiting</c> configuration section (env: <c>RATELIMITING__AUTH__PERMITLIMIT</c> etc.).</summary>
@@ -27,6 +34,12 @@ public sealed class RateLimitingOptions
 
     /// <summary>POST /couples/join — per authenticated user.</summary>
     public FixedWindowSettings CoupleJoin { get; set; } = new();
+
+    /// <summary>
+    /// POST /auth/refresh — per client IP. Far above normal use (an app refreshes about every 15 minutes per
+    /// device, and several people may share one address) and still a ceiling for someone guessing tokens.
+    /// </summary>
+    public FixedWindowSettings Refresh { get; set; } = new() { PermitLimit = 60 };
 }
 
 public sealed class FixedWindowSettings
@@ -40,8 +53,6 @@ public static class RateLimitingSetup
 {
     public const string ForwardedHeadersSectionName = "ForwardedHeaders";
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     public static IServiceCollection AddCoupleSyncRateLimiting(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<RateLimitingOptions>(configuration.GetSection(RateLimitingOptions.SectionName));
@@ -54,8 +65,38 @@ public static class RateLimitingSetup
             limiter.AddPolicy(RateLimitPolicies.AuthLogin, context =>
                 CreatePartition($"ip:{GetClientIp(context)}", GetOptions(context).Auth));
 
+            // Own bucket: signing out must not eat the login budget (and vice versa).
+            limiter.AddPolicy(RateLimitPolicies.AuthLogout, context =>
+                CreatePartition($"ip:{GetClientIp(context)}", GetOptions(context).Auth));
+
+            // Anonymous like login, but called by every signed-in app in the background: its own, larger budget.
+            limiter.AddPolicy(RateLimitPolicies.AuthRefresh, context =>
+                CreatePartition($"refresh:ip:{GetClientIp(context)}", GetOptions(context).Refresh));
+
             limiter.AddPolicy(RateLimitPolicies.AuthRegister, context =>
                 CreatePartition($"ip:{GetClientIp(context)}", GetOptions(context).Auth));
+
+            // The current password is checked here, so a stolen access token must not be able to guess it freely.
+            limiter.AddPolicy(RateLimitPolicies.AuthChangePassword, context =>
+            {
+                var userId = context.User.FindFirstValue("user_id");
+                var key = string.IsNullOrWhiteSpace(userId) ? $"ip:{GetClientIp(context)}" : $"user:{userId}";
+                return CreatePartition($"change-password:{key}", GetOptions(context).Auth);
+            });
+
+            // Password reset: per client IP, one bucket per route (the per-address cap lives in CodeRequestThrottle).
+            limiter.AddPolicy(RateLimitPolicies.AuthForgotPassword, context =>
+                CreatePartition($"forgot-password:ip:{GetClientIp(context)}", GetOptions(context).Auth));
+
+            limiter.AddPolicy(RateLimitPolicies.AuthResetPassword, context =>
+                CreatePartition($"reset-password:ip:{GetClientIp(context)}", GetOptions(context).Auth));
+
+            // E-mail confirmation belongs to the signed-in user: per user, falling back to the IP.
+            limiter.AddPolicy(RateLimitPolicies.AuthConfirmEmail, context =>
+                CreatePartition($"confirm-email:{UserOrIpKey(context)}", GetOptions(context).Auth));
+
+            limiter.AddPolicy(RateLimitPolicies.AuthResendEmailVerification, context =>
+                CreatePartition($"resend-email-verification:{UserOrIpKey(context)}", GetOptions(context).Auth));
 
             limiter.AddPolicy(RateLimitPolicies.CoupleJoin, context =>
             {
@@ -125,6 +166,12 @@ public static class RateLimitingSetup
         }
     }
 
+    private static string UserOrIpKey(HttpContext context)
+    {
+        var userId = context.User.FindFirstValue("user_id");
+        return string.IsNullOrWhiteSpace(userId) ? $"ip:{GetClientIp(context)}" : $"user:{userId}";
+    }
+
     private static RateLimitingOptions GetOptions(HttpContext context)
         => context.RequestServices.GetRequiredService<IOptions<RateLimitingOptions>>().Value;
 
@@ -154,16 +201,10 @@ public static class RateLimitingSetup
             : 60;
 
         response.StatusCode = StatusCodes.Status429TooManyRequests;
-        response.ContentType = "application/json";
         response.Headers.RetryAfter = retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
 
-        var payload = new
-        {
-            code = "RATE_LIMIT_EXCEEDED",
-            message = "Too many attempts. Please wait a moment and try again.",
-            traceId = context.HttpContext.TraceIdentifier
-        };
-
-        await response.WriteAsync(JsonSerializer.Serialize(payload, JsonOptions), cancellationToken);
+        var (code, message) = ApiErrors.DescribeStatus(StatusCodes.Status429TooManyRequests);
+        await ApiErrors.WriteAsync(context.HttpContext, StatusCodes.Status429TooManyRequests, code, message,
+            cancellationToken: cancellationToken);
     }
 }

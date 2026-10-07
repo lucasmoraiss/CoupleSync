@@ -77,9 +77,10 @@ public sealed class InputValidationIntegrationTests
 
         var timestamp = DateTime.UtcNow.AddHours(-2).ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
 
+        // An absent currency means BRL (the installed app always sends it, but older clients may not).
         var withoutCurrency = await PostJsonAsync(client, "/api/v1/integrations/events",
             $$"""{"bank":"NUBANK","amount":10.5,"eventTimestamp":"{{timestamp}}"}""");
-        Assert.Equal(HttpStatusCode.BadRequest, withoutCurrency.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, withoutCurrency.StatusCode);
 
         var emptyBody = await PostJsonAsync(client, "/api/v1/integrations/events", "{}");
         Assert.Equal(HttpStatusCode.BadRequest, emptyBody.StatusCode);
@@ -159,7 +160,7 @@ public sealed class InputValidationIntegrationTests
         using var client = factory.CreateClient();
         await AuthenticateWithCoupleAsync(client);
 
-        var month = DateTime.UtcNow.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        var month = CoupleSync.Domain.ValueObjects.BrazilTime.MonthOf(DateTime.UtcNow);
         var create = await PostJsonAsync(client, "/api/v1/incomes",
             $$"""{"month":"{{month}}","name":"Salário","amount":5000,"currency":"BRL","isShared":false}""");
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
@@ -191,7 +192,7 @@ public sealed class InputValidationIntegrationTests
         var income = await SendJsonAsync(client, HttpMethod.Patch, "/api/v1/budgets/income", """{"grossIncome":1e20}""");
         Assert.Equal(HttpStatusCode.BadRequest, income.StatusCode);
 
-        var month = DateTime.UtcNow.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        var month = CoupleSync.Domain.ValueObjects.BrazilTime.MonthOf(DateTime.UtcNow);
         var plan = await PostJsonAsync(client, "/api/v1/budgets",
             $$"""{"month":"{{month}}","grossIncome":8000,"currency":"BRL"}""");
         Assert.Equal(HttpStatusCode.OK, plan.StatusCode);
@@ -264,8 +265,8 @@ public sealed class InputValidationIntegrationTests
         var onlyFutureStart = await client.GetAsync($"/api/v1/dashboard?startDate={futureStart}");
         Assert.Equal(HttpStatusCode.BadRequest, onlyFutureStart.StatusCode);
         var error = await onlyFutureStart.Content.ReadFromJsonAsync<ErrorDto>();
-        Assert.Equal("VALIDATION_ERROR", error!.Code);
-        Assert.Contains("startDate must not be after endDate", error.Message);
+        Assert.Equal("INVALID_DATE_RANGE", error!.Code);
+        Assert.Contains("data inicial", error.Message);
 
         var onlyPastEnd = await client.GetAsync($"/api/v1/dashboard?endDate={pastEnd}");
         Assert.Equal(HttpStatusCode.BadRequest, onlyPastEnd.StatusCode);

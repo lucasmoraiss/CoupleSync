@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 
@@ -15,7 +16,6 @@ public sealed class IngestNotificationEventCommandHandler
     private readonly IFingerprintGenerator _fingerprintGenerator;
     private readonly IAlertPolicyService _alertPolicyService;
     private readonly INotificationEventRepository _notificationEventRepository;
-    private readonly INotificationSettingsRepository _notificationSettingsRepository;
 
     public IngestNotificationEventCommandHandler(
         INotificationCaptureRepository repository,
@@ -25,8 +25,7 @@ public sealed class IngestNotificationEventCommandHandler
         ICategoryMatchingService categoryMatchingService,
         IFingerprintGenerator fingerprintGenerator,
         IAlertPolicyService alertPolicyService,
-        INotificationEventRepository notificationEventRepository,
-        INotificationSettingsRepository notificationSettingsRepository)
+        INotificationEventRepository notificationEventRepository)
     {
         _repository = repository;
         _sanitizer = sanitizer;
@@ -36,7 +35,6 @@ public sealed class IngestNotificationEventCommandHandler
         _fingerprintGenerator = fingerprintGenerator;
         _alertPolicyService = alertPolicyService;
         _notificationEventRepository = notificationEventRepository;
-        _notificationSettingsRepository = notificationSettingsRepository;
     }
 
     public async Task<IngestNotificationEventResult> HandleAsync(
@@ -101,7 +99,7 @@ public sealed class IngestNotificationEventCommandHandler
         {
             await _transactionRepository.SaveChangesAsync(cancellationToken);
         }
-        catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+        catch (UniqueViolationException)
         {
             // Concurrent duplicate: unique constraint on (couple_id, fingerprint) prevented insert.
             ingestEvent.MarkDuplicate();
@@ -114,17 +112,11 @@ public sealed class IngestNotificationEventCommandHandler
         {
             var nowUtc = _dateTimeProvider.UtcNow;
             var since = nowUtc.AddDays(-30);
-            // No row in notification_settings means the user never changed anything: the defaults
-            // (every alert enabled) apply, exactly as GET /notifications/settings reports them.
-            var settings = await _notificationSettingsRepository.GetByUserIdAsync(command.UserId, command.CoupleId, cancellationToken)
-                ?? NotificationSettings.Create(command.UserId, command.CoupleId, nowUtc);
             var recentTransactions = await _transactionRepository.GetRecentByCoupleAsync(command.CoupleId, since, cancellationToken);
             var alertEvents = await _alertPolicyService.EvaluatePostIngestAsync(
                 command.CoupleId,
-                command.UserId,
                 transaction,
                 recentTransactions,
-                settings,
                 nowUtc,
                 cancellationToken);
 

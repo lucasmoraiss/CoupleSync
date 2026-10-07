@@ -1,9 +1,10 @@
 using CoupleSync.Application.Common.Exceptions;
+using CoupleSync.Application.Common;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Income.Commands;
 using CoupleSync.Application.Income.Queries;
 using CoupleSync.Domain.Entities;
-using Microsoft.EntityFrameworkCore;
+using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Application.Income;
 
@@ -36,7 +37,7 @@ public sealed class IncomeService
         if (count >= MaxSourcesPerUserPerMonth)
             throw new UnprocessableEntityException(
                 "INCOME_SOURCE_LIMIT",
-                $"A user may have at most {MaxSourcesPerUserPerMonth} income sources per month.");
+                $"Cada pessoa pode ter no máximo {MaxSourcesPerUserPerMonth} fontes de renda por mês.");
 
         var now = _dateTimeProvider.UtcNow;
         var source = IncomeSource.Create(
@@ -47,13 +48,11 @@ public sealed class IncomeService
             await _repository.AddAsync(source, ct);
             await _repository.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex) when (
-            ex.InnerException?.Message.Contains("23505") == true
-            || ex.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true)
+        catch (UniqueViolationException)
         {
             throw new ConflictException(
                 "INCOME_SOURCE_DUPLICATE",
-                "An income source with this name already exists for this month.");
+                "Já existe uma fonte de renda com esse nome neste mês.");
         }
 
         return MapToDto(source);
@@ -67,10 +66,10 @@ public sealed class IncomeService
         CancellationToken ct)
     {
         var source = await _repository.GetByIdAsync(sourceId, coupleId, ct)
-            ?? throw new NotFoundException("INCOME_SOURCE_NOT_FOUND", "Income source not found.");
+            ?? throw new NotFoundException("INCOME_SOURCE_NOT_FOUND", "Fonte de renda não encontrada.");
 
         if (!source.CanBeEditedBy(userId))
-            throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "You can only edit your own or shared income sources.");
+            throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "Você só pode editar suas próprias fontes de renda ou as compartilhadas.");
 
         var now = _dateTimeProvider.UtcNow;
         source.Update(input.Name, input.Amount, input.IsShared, input.IsRecurring, now);
@@ -86,10 +85,10 @@ public sealed class IncomeService
         CancellationToken ct)
     {
         var source = await _repository.GetByIdAsync(sourceId, coupleId, ct)
-            ?? throw new NotFoundException("INCOME_SOURCE_NOT_FOUND", "Income source not found.");
+            ?? throw new NotFoundException("INCOME_SOURCE_NOT_FOUND", "Fonte de renda não encontrada.");
 
         if (!source.CanBeEditedBy(userId))
-            throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "You can only delete your own or shared income sources.");
+            throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "Você só pode excluir suas próprias fontes de renda ou as compartilhadas.");
 
         await _repository.DeleteAsync(source, ct);
         await _repository.SaveChangesAsync(ct);
@@ -101,14 +100,16 @@ public sealed class IncomeService
         string month,
         CancellationToken ct)
     {
-        var sources = await _repository.GetByMonthAsync(coupleId, month, ct);
+        var candidates = await _repository.GetCandidatesForMonthsAsync(coupleId, month, month, ct);
+        var sources = IncomeSchedule.EffectiveIn(candidates, month);
         var couple = await _coupleRepository.FindByIdWithMembersAsync(coupleId, ct);
 
-        var currentUserName = couple?.Members.FirstOrDefault(m => m.Id == userId)?.Name ?? "Você";
+        var currentUserName = couple?.Members.FirstOrDefault(m => m.UserId == userId)?.User.Name ?? "Você";
 
         // A group may have more than two members: every other member is a partner.
         var partners = (couple?.Members ?? [])
-            .Where(m => m.Id != userId)
+            .Where(m => m.UserId != userId)
+            .Select(m => m.User)
             .OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(m => m.Id)
             .ToList();
@@ -131,13 +132,13 @@ public sealed class IncomeService
                     .Where(s => s.UserId == partner.Id && !s.IsShared)
                     .Select(MapToDto)
                     .ToList();
-                return new IncomeGroupDto(partner.Id, partner.Name, partnerSources, partnerSources.Sum(s => s.Amount));
+                return new IncomeGroupDto(partner.Id, partner.Name, partnerSources, SumInReais(partnerSources));
             })
             .ToList();
 
-        var personalTotal = personalSources.Sum(s => s.Amount);
+        var personalTotal = SumInReais(personalSources);
         var partnersTotal = partnerGroups.Sum(g => g.Total);
-        var sharedTotal = sharedSources.Sum(s => s.Amount);
+        var sharedTotal = SumInReais(sharedSources);
 
         var personalGroup = new IncomeGroupDto(userId, currentUserName, personalSources, personalTotal);
 
@@ -173,9 +174,13 @@ public sealed class IncomeService
         CancellationToken ct)
     {
         var now = _dateTimeProvider.UtcNow;
-        var currentMonth = $"{now.Year:D4}-{now.Month:D2}";
+        var currentMonth = BrazilTime.MonthOf(now);
         return await GetMonthlyIncomeAsync(coupleId, userId, currentMonth, ct);
     }
+
+    // Sources stored in another currency stay listed but never enter a total in reais.
+    private static decimal SumInReais(IEnumerable<IncomeSourceDto> sources)
+        => sources.Where(s => CurrencyRules.IsBrl(s.Currency)).Sum(s => s.Amount);
 
     private static IncomeSourceDto MapToDto(IncomeSource source)
         => new(source.Id, source.UserId, source.Name, source.Amount, source.Currency,

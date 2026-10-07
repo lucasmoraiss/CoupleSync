@@ -14,7 +14,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { authApiClient } from '@/services/apiClient';
+import { getApiErrorMessage } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
+import { resetUserCaches } from '@/state/userData';
 import { colors } from '@/theme';
 
 export default function RegisterScreen() {
@@ -37,10 +39,7 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (password.length < 8) {
-      Alert.alert('Senha fraca', 'A senha deve ter pelo menos 8 caracteres.');
-      return;
-    }
+    // A regra da senha (tamanho, letra, número, senhas comuns) é só do servidor; ele diz o que falta.
 
     setLoading(true);
     try {
@@ -50,6 +49,7 @@ export default function RegisterScreen() {
         password,
       });
 
+      await resetUserCaches(); // segunda trava: nada de uma conta anterior sobrevive ao novo cadastro
       await useSessionStore.getState().setSession(
         data.accessToken,
         data.refreshToken,
@@ -61,21 +61,8 @@ export default function RegisterScreen() {
       // TODO(future): Email confirmation — send verification email on registration and require confirmation before full access
       router.replace('/couple-setup' as any);
     } catch (err: any) {
-      const status = err?.response?.status;
-      const data = err?.response?.data;
-      let msg = 'Erro ao criar conta. Tente novamente.';
-      if (status === 409) {
-        msg = 'Já existe uma conta com esse e-mail.';
-      } else if (status === 400 && data?.errors) {
-        // FluentValidation returns { errors: { FieldName: ["..."] } }
-        const fieldErrors: string[] = [];
-        if (data.errors.Password) fieldErrors.push('Senha: mínimo 8 caracteres.');
-        if (data.errors.Email) fieldErrors.push('E-mail inválido.');
-        if (data.errors.Name) fieldErrors.push('Nome é obrigatório.');
-        msg = fieldErrors.length > 0 ? fieldErrors.join('\n') : 'Dados inválidos.';
-      } else if (status === 400) {
-        msg = data?.message || data?.title || 'Dados inválidos.';
-      }
+      // 409 (e-mail já usado) e 400 (validação, uma mensagem por campo) vêm prontos da API.
+      const msg = getApiErrorMessage(err, 'Erro ao criar conta. Tente novamente.');
       if (__DEV__) console.log('[Register] Error:', { code: err?.code, status: err?.response?.status, message: err?.response?.data?.message ?? err?.message });
       Alert.alert('Erro', msg);
     } finally {
@@ -93,13 +80,13 @@ export default function RegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
-          <Text style={styles.title}>Criar conta</Text>
+          <Text style={styles.title} accessibilityRole="header">Criar conta</Text>
           <Text style={styles.subtitle}>Junte-se ao CoupleSync</Text>
         </View>
 
         <View style={styles.form}>
           <Text style={styles.label}>Nome</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Nome"
             style={styles.input}
             placeholder="Seu nome"
             placeholderTextColor={colors.placeholder}
@@ -110,7 +97,7 @@ export default function RegisterScreen() {
           />
 
           <Text style={styles.label}>E-mail</Text>
-          <TextInput
+          <TextInput accessibilityLabel="E-mail"
             style={styles.input}
             placeholder="seu@email.com"
             placeholderTextColor={colors.placeholder}
@@ -124,16 +111,16 @@ export default function RegisterScreen() {
 
           <Text style={styles.label}>Senha</Text>
           <View style={styles.inputWrapper}>
-            <TextInput
+            <TextInput accessibilityLabel="Senha"
               style={styles.inputField}
-              placeholder="Mínimo 8 caracteres"
+              placeholder="Mínimo 8 caracteres, com letras e números"
               placeholderTextColor={colors.placeholder}
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
               editable={!loading}
             />
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
               onPress={() => setShowPassword(!showPassword)}
               style={styles.eyeButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -144,7 +131,7 @@ export default function RegisterScreen() {
 
           <Text style={styles.label}>Confirmar senha</Text>
           <View style={styles.inputWrapper}>
-            <TextInput
+            <TextInput accessibilityLabel="Confirmar senha"
               style={styles.inputField}
               placeholder="Repita a senha"
               placeholderTextColor={colors.placeholder}
@@ -153,7 +140,7 @@ export default function RegisterScreen() {
               secureTextEntry={!showConfirmPassword}
               editable={!loading}
             />
-            <TouchableOpacity
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={showConfirmPassword ? 'Ocultar a confirmação de senha' : 'Mostrar a confirmação de senha'}
               onPress={() => setShowConfirmPassword(!showConfirmPassword)}
               style={styles.eyeButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -162,7 +149,7 @@ export default function RegisterScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Criar conta" accessibilityState={{ disabled: loading, busy: loading }}
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleRegister}
             disabled={loading}
@@ -175,7 +162,7 @@ export default function RegisterScreen() {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Já tenho conta: fazer login"
             style={styles.linkButton}
             onPress={() => router.back()}
             disabled={loading}
@@ -253,6 +240,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   linkButton: {
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
     marginTop: 24,
     paddingVertical: 8,

@@ -5,4 +5,5 @@ public sealed record UpdateGoalRequest(
     string? Description,
     decimal? TargetAmount,
     decimal? CurrentAmount,
-    DateTime? Deadline);
+    DateTime? Deadline,
+    decimal? ManualAmount = null);

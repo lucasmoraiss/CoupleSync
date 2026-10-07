@@ -7,7 +7,8 @@
 //    refresh token a cada uso; um segundo refresh em paralelo usaria um token já inválido);
 //  - a requisição original é repetida uma única vez com o token novo;
 //  - se o refresh for recusado, ou a repetição devolver 401, a sessão é encerrada;
-//  - rotas /api/v1/auth/* nunca entram nesse ciclo (as telas tratam os próprios 401).
+//  - rotas anônimas de /api/v1/auth/* (login, registro, refresh, recuperação de senha) nunca entram nesse ciclo
+//    (as telas tratam os próprios 401); as de sessão (me, confirm-email, resend-email-verification) entram.
 import type { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 export interface TokenPair {
@@ -30,11 +31,38 @@ export interface AuthRefreshDeps {
   saveTokens(tokens: TokenPair): Promise<void>;
   /** Limpa a sessão, avisa o usuário e leva ao login. */
   onSessionExpired(): Promise<void> | void;
+  /**
+   * Época da sessão: muda quando alguém entra ou sai da conta e quando o grupo ativo muda. Uma requisição lembra
+   * a época em que saiu; se o 401 chega numa época diferente, ela é de outra sessão (ou de outro grupo) e não é
+   * repetida com o token de quem está agora.
+   */
+  getSessionEpoch?(): number;
 }
 
 const AUTH_ROUTE_PREFIX = '/api/v1/auth';
 
-type RetriableConfig = InternalAxiosRequestConfig & { _retriedAfterRefresh?: boolean };
+// Rotas de /auth que exigem sessão e portanto passam pelo ciclo de refresh (um access token vencido não pode
+// derrubar a confirmação de e-mail). As demais (login, registro, refresh, recuperação de senha...) são anônimas.
+const SIGNED_IN_AUTH_ROUTES = [
+  '/api/v1/auth/me',
+  '/api/v1/auth/confirm-email',
+  '/api/v1/auth/resend-email-verification',
+];
+
+/** Só o caminho da requisição (sem origem, query string, fragmento nem barra final), para comparar caminhos exatos. */
+function pathOf(url: string): string {
+  return url
+    .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+/i, '')
+    .split(/[?#]/)[0]
+    .replace(/\/+$/, '');
+}
+
+function isAnonymousAuthRoute(url: string): boolean {
+  if (!url.includes(AUTH_ROUTE_PREFIX)) return false;
+  return !SIGNED_IN_AUTH_ROUTES.includes(pathOf(url));
+}
+
+type RetriableConfig = InternalAxiosRequestConfig & { _retriedAfterRefresh?: boolean; _sessionEpoch?: number };
 
 /** Resultado de uma tentativa de refresh compartilhada entre as requisições em espera. */
 type RefreshOutcome =
@@ -70,16 +98,30 @@ export function installAuthRefresh(instance: AxiosInstance, deps: AuthRefreshDep
     return expirationInFlight;
   }
 
+  const currentEpoch = () => deps.getSessionEpoch?.();
+
   async function runRefresh(refreshToken: string): Promise<RefreshOutcome> {
+    const epochAtStart = currentEpoch();
+    // O usuário saiu (ou entrou outro) enquanto o refresh estava em andamento: o resultado, positivo ou
+    // negativo, não vale para ninguém. Não grava tokens, não repete a requisição e não avisa "sessão expirada".
+    const sessionChanged = () =>
+      deps.getTokens().refreshToken !== refreshToken || currentEpoch() !== epochAtStart;
+
     let result: RefreshResult;
     try {
       result = await deps.requestRefresh(refreshToken);
     } catch (error) {
       if (isRefreshRejection(error)) {
+        // Recusa para uma sessão que já acabou não pode derrubar quem entrou depois.
+        if (sessionChanged()) return { kind: 'rejected' };
         await expireSession();
         return { kind: 'rejected' };
       }
       return { kind: 'unavailable', error };
+    }
+
+    if (sessionChanged()) {
+      return { kind: 'rejected' };
     }
 
     if (!result?.accessToken) {
@@ -91,6 +133,10 @@ export function installAuthRefresh(instance: AxiosInstance, deps: AuthRefreshDep
       accessToken: result.accessToken,
       refreshToken: result.refreshToken || refreshToken,
     });
+    // O logout pode ter chegado durante a gravação (a sessão guarda isso e descarta os tokens): não repete.
+    if (currentEpoch() !== epochAtStart) {
+      return { kind: 'rejected' };
+    }
     return { kind: 'renewed', accessToken: result.accessToken };
   }
 
@@ -115,6 +161,7 @@ export function installAuthRefresh(instance: AxiosInstance, deps: AuthRefreshDep
     if (accessToken) {
       config.headers.set('Authorization', bearer(accessToken));
     }
+    (config as RetriableConfig)._sessionEpoch = currentEpoch();
     return config;
   });
 
@@ -125,8 +172,14 @@ export function installAuthRefresh(instance: AxiosInstance, deps: AuthRefreshDep
       if (error?.response?.status !== 401 || !config) {
         return Promise.reject(error);
       }
-      if ((config.url ?? '').includes(AUTH_ROUTE_PREFIX)) {
-        return Promise.reject(error); // login/registro/refresh tratam os próprios 401
+      if (isAnonymousAuthRoute(config.url ?? '')) {
+        return Promise.reject(error); // login/registro/refresh/recuperação tratam os próprios 401
+      }
+
+      // 401 atrasado de uma requisição feita por OUTRA sessão (o usuário saiu e outro entrou): não há o que
+      // renovar nem repetir com o token de quem está agora, e a sessão atual não tem culpa.
+      if (config._sessionEpoch !== undefined && config._sessionEpoch !== currentEpoch()) {
+        return Promise.reject(error);
       }
 
       // A repetição com o token novo também foi recusada: não há novo ciclo.

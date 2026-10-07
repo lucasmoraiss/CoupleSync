@@ -7,8 +7,6 @@ public sealed class PatchTransactionCategoryRequestValidator : AbstractValidator
 {
     public PatchTransactionCategoryRequestValidator()
     {
-        RuleFor(x => x.Category)
-            .NotEmpty()
-            .MaximumLength(64);
+        RuleFor(x => x.Category).CanonicalCategory();
     }
 }

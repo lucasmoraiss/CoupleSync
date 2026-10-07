@@ -42,11 +42,11 @@ public sealed class CoupleIntegrationSmokeTests
         var payload = await response.Content.ReadFromJsonAsync<CreateCoupleDto>();
         Assert.NotNull(payload);
         Assert.NotEqual(Guid.Empty, payload!.CoupleId);
-        Assert.Equal(6, payload.JoinCode.Length);
+        Assert.Equal(8, payload.JoinCode.Length);
     }
 
     [Fact]
-    public async Task CreateCouple_WhenUserAlreadyInCouple_ShouldReturnConflict()
+    public async Task CreateCouple_WhenUserAlreadyHasAGroup_CreatesAnother_AndJoiningOnesOwnGroupIsAConflict()
     {
         await using var factory = new CoupleIntegrationWebApplicationFactory();
         using var client = factory.CreateClient();
@@ -57,10 +57,15 @@ public sealed class CoupleIntegrationSmokeTests
         var first = await client.PostAsJsonAsync("/api/v1/couples", new { });
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
 
+        // A user may be in several groups: a second one is created (it becomes the active group).
         var second = await client.PostAsJsonAsync("/api/v1/couples", new { });
-        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        var secondGroup = await second.Content.ReadFromJsonAsync<CreateCoupleDto>();
 
-        var payload = await second.Content.ReadFromJsonAsync<ErrorDto>();
+        var joinOwn = await client.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = secondGroup!.JoinCode });
+        Assert.Equal(HttpStatusCode.Conflict, joinOwn.StatusCode);
+
+        var payload = await joinOwn.Content.ReadFromJsonAsync<ErrorDto>();
         Assert.NotNull(payload);
         Assert.Equal("USER_ALREADY_IN_COUPLE", payload!.Code);
     }
@@ -195,13 +200,15 @@ public sealed class CoupleIntegrationSmokeTests
         var joinResponse = await clientB.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = created!.JoinCode });
         Assert.Equal(HttpStatusCode.OK, joinResponse.StatusCode);
 
+        // As the app does: from here on it uses the token that came with the creation (the one that names the group).
+        clientA.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", created.AccessToken);
         var meResponse = await clientA.GetAsync("/api/v1/couples/me");
         Assert.Equal(HttpStatusCode.OK, meResponse.StatusCode);
 
         var mePayload = await meResponse.Content.ReadFromJsonAsync<GetCoupleMeDto>();
         Assert.NotNull(mePayload);
         Assert.NotEqual(Guid.Empty, mePayload!.CoupleId);
-        Assert.Equal(6, mePayload.JoinCode.Length);
+        Assert.Equal(8, mePayload.JoinCode.Length);
         Assert.True(mePayload.Members.Count >= 2);
     }
 
@@ -222,7 +229,7 @@ public sealed class CoupleIntegrationSmokeTests
 
     private sealed record AuthUserDto(Guid Id, string Email, string Name);
 
-    private sealed record CreateCoupleDto(Guid CoupleId, string JoinCode);
+    private sealed record CreateCoupleDto(Guid CoupleId, string JoinCode, string AccessToken = "");
 
     private sealed record JoinCoupleDto(Guid CoupleId, IReadOnlyCollection<CoupleMemberDto> Members);
 

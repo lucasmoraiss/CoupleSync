@@ -29,7 +29,7 @@ public sealed class UpdateGoalRequestValidatorTests
         var result = new UpdateGoalRequestValidator(Clock).Validate(new UpdateGoalRequest(null, null, null, null, null));
 
         Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, e => e.ErrorMessage == "At least one field must be provided for update.");
+        Assert.Contains(result.Errors, e => e.ErrorMessage == "Informe pelo menos um campo para atualizar.");
     }
 
     [Fact]
@@ -63,6 +63,29 @@ public sealed class UpdateGoalRequestValidatorTests
         Assert.Equal(
             create.Errors.Single(e => e.PropertyName == nameof(CreateGoalRequest.Deadline)).ErrorMessage,
             update.Errors.Single(e => e.PropertyName == nameof(UpdateGoalRequest.Deadline)).ErrorMessage);
+    }
+
+    // "Hoje" do prazo é o dia de Brasília: às 22h de 15/10 em Brasília já é 16/10 em UTC.
+    [Fact]
+    public void Deadline_TodayInBrasiliaIsAccepted_EvenWhenUtcAlreadyRolledOver()
+    {
+        var clock = new FixedDateTimeProvider(new DateTime(2026, 10, 16, 1, 0, 0, DateTimeKind.Utc)); // 15/10 22:00 BRT
+        var today = new DateTime(2026, 10, 15, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert.True(new UpdateGoalRequestValidator(clock).Validate(new UpdateGoalRequest(null, null, null, null, today)).IsValid);
+        Assert.True(new CreateGoalRequestValidator(clock).Validate(new CreateGoalRequest("Viagem", null, 1000m, "BRL", today)).IsValid);
+    }
+
+    [Fact]
+    public void Deadline_YesterdayInBrasiliaIsRejected_EvenWhenUtcIsStillOnTheSameDay()
+    {
+        var clock = new FixedDateTimeProvider(new DateTime(2026, 10, 15, 2, 0, 0, DateTimeKind.Utc)); // 14/10 23:00 BRT
+        var yesterdayBrt = new DateTime(2026, 10, 13, 12, 0, 0, DateTimeKind.Utc);
+        var todayBrt = new DateTime(2026, 10, 14, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert.False(new CreateGoalRequestValidator(clock).Validate(new CreateGoalRequest("Viagem", null, 1000m, "BRL", yesterdayBrt)).IsValid);
+        Assert.True(new CreateGoalRequestValidator(clock).Validate(new CreateGoalRequest("Viagem", null, 1000m, "BRL", todayBrt)).IsValid);
+        Assert.False(new UpdateGoalRequestValidator(clock).Validate(new UpdateGoalRequest(null, null, null, null, yesterdayBrt)).IsValid);
     }
 
     [Fact]

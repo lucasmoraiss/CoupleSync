@@ -7,11 +7,16 @@ namespace CoupleSync.Application.Goals.Commands;
 public sealed class UpdateGoalCommandHandler
 {
     private readonly IGoalRepository _repository;
+    private readonly GoalProgressReader _progressReader;
     private readonly IDateTimeProvider _dateTimeProvider;
 
-    public UpdateGoalCommandHandler(IGoalRepository repository, IDateTimeProvider dateTimeProvider)
+    public UpdateGoalCommandHandler(
+        IGoalRepository repository,
+        GoalProgressReader progressReader,
+        IDateTimeProvider dateTimeProvider)
     {
         _repository = repository;
+        _progressReader = progressReader;
         _dateTimeProvider = dateTimeProvider;
     }
 
@@ -20,30 +25,26 @@ public sealed class UpdateGoalCommandHandler
         var goal = await _repository.GetByIdAsync(command.Id, command.CoupleId, cancellationToken);
 
         if (goal is null)
-            throw new NotFoundException("GOAL_NOT_FOUND", "Goal not found.");
+            throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
         if (goal.Status == Domain.Entities.GoalStatus.Archived)
-            throw new ConflictException("GOAL_ARCHIVED", "Cannot update an archived goal.");
+            throw new ConflictException("GOAL_ARCHIVED", "Não é possível editar uma meta arquivada.");
 
         var now = _dateTimeProvider.UtcNow;
         goal.Update(command.Title, command.Description, command.TargetAmount, command.Deadline, now);
 
-        if (command.CurrentAmount.HasValue)
-            goal.UpdateCurrentAmount(command.CurrentAmount.Value, now);
+        if (command.ManualAmount.HasValue)
+        {
+            goal.UpdateCurrentAmount(command.ManualAmount.Value, now);
+        }
+        else if (command.CurrentAmount.HasValue)
+        {
+            var linked = (await _progressReader.ReadAsync(goal, cancellationToken)).LinkedAmount;
+            goal.UpdateCurrentAmount(Math.Max(0m, command.CurrentAmount.Value - linked), now);
+        }
 
         await _repository.SaveChangesAsync(cancellationToken);
 
-        return new GoalDto(
-            goal.Id,
-            goal.CreatedByUserId,
-            goal.Title,
-            goal.Description,
-            goal.TargetAmount,
-            goal.CurrentAmount,
-            goal.Currency,
-            goal.Deadline,
-            goal.Status,
-            goal.CreatedAtUtc,
-            goal.UpdatedAtUtc);
+        return GoalDto.From(goal, await _progressReader.ReadAsync(goal, cancellationToken));
     }
 }

@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -56,6 +57,7 @@ public sealed class TransactionRepository : ITransactionRepository
 
         var items = await query
             .OrderByDescending(t => t.EventTimestampUtc)
+            .ThenByDescending(t => t.Id) // imports share timestamps: without a tie-breaker pages can skip or repeat rows
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
@@ -79,11 +81,23 @@ public sealed class TransactionRepository : ITransactionRepository
         return Task.CompletedTask;
     }
 
-    public async Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
+    public async Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(
+        Guid coupleId,
+        IReadOnlyCollection<Guid> goalIds,
+        CancellationToken ct)
     {
-        return await _dbContext.Transactions
-            .Where(t => t.GoalId == goalId && t.CoupleId == coupleId)
+        // Materialise before grouping: SQLite cannot translate Sum(decimal) to SQL.
+        var rows = await _dbContext.Transactions
+            .Where(t => t.CoupleId == coupleId
+                        && t.GoalId != null
+                        && goalIds.Contains(t.GoalId.Value)
+                        && t.Currency == CurrencyRules.Brl)
+            .Select(t => new { GoalId = t.GoalId!.Value, t.Amount })
             .ToListAsync(ct);
+
+        return rows
+            .GroupBy(r => r.GoalId)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.Amount));
     }
 
     public async Task<IReadOnlyList<Transaction>> GetRecentByCoupleAsync(Guid coupleId, DateTime since, CancellationToken ct)
@@ -109,18 +123,19 @@ public sealed class TransactionRepository : ITransactionRepository
         // Sum(decimal) to SQL, so we apply the aggregation in LINQ to Objects.
         var rows = await _dbContext.Transactions
             .Where(t => t.CoupleId == coupleId
+                        && t.Currency == CurrencyRules.Brl
                         && t.EventTimestampUtc >= startUtc
                         && t.EventTimestampUtc < endUtc)
             .Select(t => new { t.Category, t.Amount })
             .ToListAsync(ct);
 
         return rows
-            .GroupBy(r => r.Category)
+            .GroupBy(r => TransactionCategories.NormalizeOrOther(r.Category))
             .ToDictionary(g => g.Key, g => g.Sum(r => r.Amount));
     }
 
     public Task SaveChangesAsync(CancellationToken ct)
     {
-        return _dbContext.SaveChangesAsync(ct);
+        return DbSaveTranslator.SaveAsync(_dbContext, ct);
     }
 }

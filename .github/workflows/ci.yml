@@ -66,6 +66,13 @@ jobs:
           name: unit-test-results
           path: backend/tests/CoupleSync.UnitTests/TestResults/*.trx
 
+      # Runs with globalization-invariant mode on (no ICU), as in a minimal container.
+      - name: Test — Invariant globalization
+        run: >
+          dotnet test backend/tests/CoupleSync.InvariantGlobalizationTests/CoupleSync.InvariantGlobalizationTests.csproj
+          --no-build --configuration Release
+          --logger "trx;LogFileName=invariant-results.trx"
+
       - name: Test — Integration
         run: >
           dotnet test backend/tests/CoupleSync.IntegrationTests/CoupleSync.IntegrationTests.csproj
@@ -92,6 +99,23 @@ jobs:
           name: e2e-test-results
           path: backend/tests/CoupleSync.E2ETests/TestResults/*.trx
 
+      # Starts its own PostgreSQL container (Testcontainers; ubuntu runners have Docker) and ignores DATABASE_URL.
+      # COUPLESYNC_REQUIRE_POSTGRES_TESTS=1 turns a missing Docker into a failure instead of a skip.
+      - name: Test — PostgreSQL (Testcontainers)
+        env:
+          COUPLESYNC_REQUIRE_POSTGRES_TESTS: "1"
+        run: >
+          dotnet test backend/tests/CoupleSync.PostgresTests/CoupleSync.PostgresTests.csproj
+          --no-build --configuration Release
+          --logger "trx;LogFileName=postgres-results.trx"
+
+      - name: Upload PostgreSQL test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-test-results
+          path: backend/tests/CoupleSync.PostgresTests/TestResults/*.trx
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -117,5 +141,17 @@ jobs:
         with:
           extra_args: --only-verified
 
-      - name: Validate Docker build
+      # The image is what gets deployed, and it can fail where every test above passes (it once shipped without
+      # ICU and the API did not start). Build it and run it for real against a throwaway PostgreSQL container:
+      # health endpoints, sign-up, group, transactions with accented categories, a validation error in Portuguese.
+      - name: Docker image — build
         run: docker build --file backend/Dockerfile --tag couplesync-api:ci-check backend/
+
+      - name: Docker image — smoke test
+        run: bash scripts/api-image-smoke-test.sh couplesync-api:ci-check
+
+      # Same image with culture data switched off: the code must not depend on the host having ICU.
+      - name: Docker image — smoke test without culture data
+        env:
+          SMOKE_FORCE_INVARIANT: "1"
+        run: bash scripts/api-image-smoke-test.sh couplesync-api:ci-check

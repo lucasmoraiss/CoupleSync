@@ -1,15 +1,27 @@
 // AC-011: Typed Axios API client with Authorization interceptor and 401 handler (refresh + retry)
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { router } from 'expo-router';
-import { useSessionStore } from '@/state/sessionStore';
+import { getSessionEpoch, useSessionStore } from '@/state/sessionStore';
+import { clearUserData } from '@/state/userData';
+import { clearGroupScopedQueries, queryClient } from '@/services/queryClient';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { installAuthRefresh } from './authRefresh';
+import { handleSessionExpired } from './sessionExpiry';
+import { getDevicePushToken } from './deviceToken';
+import { getApiErrorCode } from './apiError';
+import { decideCoupleRequired } from './coupleRequired';
 import type {
   AuthResponse,
+  AuthUserResponse,
+  ForgotPasswordResponse,
   RefreshResponse,
   CreateCoupleResponse,
   JoinCoupleResponse,
   GetCoupleMeResponse,
+  LeaveCoupleResponse,
+  MyGroupsResponse,
+  SwitchCoupleResponse,
+  RegenerateJoinCodeResponse,
   GoalDto,
   GetGoalsResponse,
   GoalsProgressSummaryResponse,
@@ -33,9 +45,11 @@ import type {
   OcrResultsResponse,
   OcrConfirmRequest,
   OcrConfirmResponse,
+  OcrOpenImportsResponse,
   ChatHistoryItem,
   ChatResponse,
   SpendingByCategoryResponse,
+  CategoriesResponse,
   MonthlyTrendsResponse,
 } from '@/types/api';
 
@@ -63,15 +77,14 @@ axiosInstance.interceptors.response.use(
     if (axios.isCancel(error)) {
       return Promise.reject(error);
     }
-    // AC-609: Surface COUPLE_REQUIRED with dedicated message
-    if (
-      error?.response?.status === 403 &&
-      error?.response?.data?.code === 'COUPLE_REQUIRED'
-    ) {
-      showToastGlobal(
-        'Conecte-se com seu parceiro primeiro para usar este recurso',
-        'warning',
-      );
+    // AC-609: Surface COUPLE_REQUIRED with the server's message. A late answer to a request sent by a previous
+    // session or for the previous group (the epoch changed since) says nothing about the group active now.
+    const coupleRequired = decideCoupleRequired(error, error?.config?._sessionEpoch, getSessionEpoch());
+    if (coupleRequired.handle) {
+      showToastGlobal(coupleRequired.message, 'warning');
+      // O grupo guardado não vale mais (ex.: removido por outro membro): esquece-o e volta à configuração.
+      void useSessionStore.getState().clearCouple();
+      clearGroupScopedQueries(queryClient);
       router.replace('/(auth)/couple-setup' as any);
     }
     return Promise.reject(error);
@@ -86,6 +99,7 @@ installAuthRefresh(axiosInstance, {
     const { accessToken, refreshToken } = useSessionStore.getState();
     return { accessToken, refreshToken };
   },
+  getSessionEpoch,
   // Plain axios (no interceptors): the refresh call must not carry the expired Bearer token
   // nor re-enter the 401 handling.
   requestRefresh: async (refreshToken) => {
@@ -98,11 +112,17 @@ installAuthRefresh(axiosInstance, {
   },
   saveTokens: ({ accessToken, refreshToken }) =>
     useSessionStore.getState().setTokens(accessToken, refreshToken),
-  onSessionExpired: async () => {
-    await useSessionStore.getState().clearSession();
-    showToastGlobal('Sua sessão expirou. Entre novamente.', 'warning');
-    router.replace('/login' as any);
-  },
+  onSessionExpired: () =>
+    handleSessionExpired({
+      getRefreshToken: () => useSessionStore.getState().refreshToken,
+      getDevicePushToken,
+      clearUserData,
+      notifySignedOut: () => {
+        showToastGlobal('Sua sessão expirou. Entre novamente.', 'warning');
+        router.replace('/login' as any);
+      },
+      revokeOnServer: (refreshToken, devicePushToken) => authApiClient.logout(refreshToken, devicePushToken),
+    }),
 });
 
 /** Returns true when the error is a 403 with code COUPLE_REQUIRED (toast already shown globally). */
@@ -110,7 +130,7 @@ export function isCoupleRequiredError(error: unknown): boolean {
   return (
     axios.isAxiosError(error) &&
     error.response?.status === 403 &&
-    error.response?.data?.code === 'COUPLE_REQUIRED'
+    getApiErrorCode(error) === 'COUPLE_REQUIRED'
   );
 }
 
@@ -118,6 +138,17 @@ export function isCoupleRequiredError(error: unknown): boolean {
 interface LoginRequest {
   email: string;
   password: string;
+}
+
+interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+interface ResetPasswordRequest {
+  email: string;
+  code: string;
+  newPassword: string;
 }
 
 interface RegisterRequest {
@@ -132,6 +163,32 @@ export const authApiClient = {
 
   register: (data: RegisterRequest): Promise<AxiosResponse<AuthResponse>> =>
     axiosInstance.post<AuthResponse>('/api/v1/auth/register', data),
+  /** Revoga o refresh token no servidor (responde 204 mesmo se ele já não valer). Não precisa de sessão válida. */
+  logout: (refreshToken: string, deviceToken?: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.post<void>('/api/v1/auth/logout', { refreshToken, deviceToken }, { timeout: 8000 }),
+
+  /** Troca a senha; devolve o novo par de tokens (os refresh tokens dos outros aparelhos deixam de valer). */
+  changePassword: (data: ChangePasswordRequest): Promise<AxiosResponse<RefreshResponse>> =>
+    axiosInstance.post<RefreshResponse>('/api/v1/auth/change-password', data),
+
+  /** Pede o código de redefinição por e-mail. Resposta igual exista ou não a conta; 503 EMAIL_NOT_CONFIGURED se o envio está desligado. */
+  forgotPassword: (email: string): Promise<AxiosResponse<ForgotPasswordResponse>> =>
+    axiosInstance.post<ForgotPasswordResponse>('/api/v1/auth/forgot-password', { email }),
+
+  /** Define a senha nova com o código do e-mail (204). Todos os aparelhos precisam entrar de novo. */
+  resetPassword: (data: ResetPasswordRequest): Promise<AxiosResponse<void>> =>
+    axiosInstance.post<void>('/api/v1/auth/reset-password', data),
+
+  /** Usuário logado, com `emailVerified`. */
+  getMe: (): Promise<AxiosResponse<AuthUserResponse>> => axiosInstance.get<AuthUserResponse>('/api/v1/auth/me'),
+
+  /** Confirma o e-mail do usuário logado com o código recebido (204). */
+  confirmEmail: (code: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.post<void>('/api/v1/auth/confirm-email', { code }),
+
+  /** Envia um novo código de confirmação (204); o anterior deixa de valer. */
+  resendEmailVerification: (): Promise<AxiosResponse<void>> =>
+    axiosInstance.post<void>('/api/v1/auth/resend-email-verification'),
   // O refresh não é exposto aqui: é chamado só pelo tratamento de 401 (installAuthRefresh acima).
 };
 
@@ -149,6 +206,26 @@ export const coupleApiClient = {
 
   getMyCouple: (): Promise<AxiosResponse<GetCoupleMeResponse>> =>
     axiosInstance.get<GetCoupleMeResponse>('/api/v1/couples/me'),
+
+  /** Sai do grupo ativo; devolve um novo par de tokens e qual grupo ficou ativo (outro grupo do usuário, ou nenhum). */
+  leave: (): Promise<AxiosResponse<LeaveCoupleResponse>> =>
+    axiosInstance.post<LeaveCoupleResponse>('/api/v1/couples/leave'),
+
+  /** Os grupos de quem está logado (só os dele) e qual está ativo. */
+  listMine: (): Promise<AxiosResponse<MyGroupsResponse>> =>
+    axiosInstance.get<MyGroupsResponse>('/api/v1/couples'),
+
+  /** Torna ativo outro grupo do usuário; devolve um novo par de tokens, já do grupo escolhido. */
+  switchTo: (coupleId: string): Promise<AxiosResponse<SwitchCoupleResponse>> =>
+    axiosInstance.post<SwitchCoupleResponse>('/api/v1/couples/switch', { coupleId }),
+
+  /** Só o dono. O membro removido perde o acesso na hora. */
+  removeMember: (memberUserId: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.delete<void>(`/api/v1/couples/members/${memberUserId}`),
+
+  /** Só o dono. O código anterior deixa de valer na hora. */
+  regenerateJoinCode: (): Promise<AxiosResponse<RegenerateJoinCodeResponse>> =>
+    axiosInstance.post<RegenerateJoinCodeResponse>('/api/v1/couples/join-code'),
 };
 
 // --- Dashboard API ---
@@ -188,11 +265,12 @@ export const transactionsApiClient = {
     return axiosInstance.get<GetTransactionsResponse>(`/api/v1/transactions${query ? `?${query}` : ''}`);
   },
 
-  getById: (id: string): Promise<AxiosResponse<TransactionResponse>> =>
-    axiosInstance.get<TransactionResponse>(`/api/v1/transactions/${id}`),
-
   updateCategory: (id: string, category: string): Promise<AxiosResponse<TransactionResponse>> =>
     axiosInstance.patch<TransactionResponse>(`/api/v1/transactions/${id}/category`, { category }),
+
+  /** Edição parcial: só os campos enviados mudam; descrição vazia limpa a descrição. */
+  update: (id: string, data: UpdateTransactionBody): Promise<AxiosResponse<TransactionResponse>> =>
+    axiosInstance.patch<TransactionResponse>(`/api/v1/transactions/${id}`, data),
 
   /** Creates a transaction manually (without relying on OCR or push notifications). */
   createManual: (data: CreateManualTransactionBody): Promise<AxiosResponse<TransactionResponse>> =>
@@ -201,6 +279,15 @@ export const transactionsApiClient = {
   delete: (id: string): Promise<AxiosResponse<void>> =>
     axiosInstance.delete<void>(`/api/v1/transactions/${id}`),
 };
+
+export interface UpdateTransactionBody {
+  amount?: number;
+  description?: string;
+  merchant?: string;
+  /** Instante UTC (ISO) da data/hora de Brasília escolhida. */
+  eventTimestampUtc?: string;
+  category?: string;
+}
 
 export interface CreateManualTransactionBody {
   amount: number;
@@ -224,7 +311,8 @@ interface UpdateGoalRequest {
   title?: string;
   description?: string;
   targetAmount?: number;
-  currentAmount?: number;
+  /** Valor guardado manualmente (o `currentAmount` legado é o total e não deve mais ser enviado). */
+  manualAmount?: number;
   deadline?: string;
 }
 
@@ -323,6 +411,9 @@ export const ocrApiClient = {
 
   confirm: (uploadId: string, data: OcrConfirmRequest): Promise<AxiosResponse<OcrConfirmResponse>> =>
     axiosInstance.post<OcrConfirmResponse>(`/api/v1/ocr/${uploadId}/confirm`, data),
+
+  getOpenImports: (): Promise<AxiosResponse<OcrOpenImportsResponse>> =>
+    axiosInstance.get<OcrOpenImportsResponse>('/api/v1/ocr/open'),
 };
 
 // --- AI Chat API ---
@@ -332,6 +423,12 @@ export const chatApiClient = {
     history: ChatHistoryItem[]
   ): Promise<AxiosResponse<ChatResponse>> =>
     axiosInstance.post<ChatResponse>('/api/v1/ai/chat', { message, history }),
+};
+
+// --- Categories API (lista canônica; o app mantém uma cópia embutida como reserva) ---
+export const categoriesApiClient = {
+  list: (): Promise<AxiosResponse<CategoriesResponse>> =>
+    axiosInstance.get<CategoriesResponse>('/api/v1/categories'),
 };
 
 // --- Reports API ---

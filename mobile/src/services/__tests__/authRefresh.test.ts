@@ -41,12 +41,22 @@ function createHarness(options: HarnessOptions = {}) {
   const calls: Call[] = [];
   let releaseRefresh: (() => void) | null = null;
   let holdRefresh = false;
+  let releaseRequest: (() => void) | null = null;
+  let holdNextRequest = false;
+  let epoch = 1;
 
   const instance: AxiosInstance = axios.create({
     baseURL: 'http://api.test',
     adapter: async (config) => {
       const authorization = (config.headers.get('Authorization') as string | undefined) ?? null;
       calls.push({ url: config.url ?? '', authorization });
+      if (holdNextRequest) {
+        // Resposta atrasada: o 401 (se for o caso) só chega quando o teste liberar.
+        holdNextRequest = false;
+        await new Promise<void>((resolve) => {
+          releaseRequest = resolve;
+        });
+      }
       // Deixa o event loop girar para que requisições "simultâneas" se sobreponham de fato
       await new Promise((resolve) => setImmediate(resolve));
       if (authorization === `Bearer ${server.acceptedAccessToken}`) {
@@ -87,6 +97,7 @@ function createHarness(options: HarnessOptions = {}) {
     requestRefresh,
     saveTokens,
     onSessionExpired,
+    getSessionEpoch: () => epoch,
   });
 
   return {
@@ -97,6 +108,17 @@ function createHarness(options: HarnessOptions = {}) {
     requestRefresh,
     saveTokens,
     onSessionExpired,
+    /** Logout seguido (ou não) de outro login: a época sobe. */
+    changeSession: (next?: { accessToken: string; refreshToken: string; userId: string }) => {
+      epoch += 1;
+      session.accessToken = next?.accessToken ?? null;
+      session.refreshToken = next?.refreshToken ?? null;
+      if (next) session.userId = next.userId;
+    },
+    holdNextRequest: () => {
+      holdNextRequest = true;
+    },
+    releaseRequest: () => releaseRequest?.(),
     holdRefresh: () => {
       holdRefresh = true;
     },
@@ -245,6 +267,38 @@ describe('A03 — renovação de sessão no 401', () => {
     expect(h.calls).toHaveLength(2);
   });
 
+  it('as rotas de /auth que exigem sessão (me, confirm-email) renovam o token como qualquer outra', async () => {
+    const h = createHarness();
+
+    const me = await statusOf(h.instance.get('/api/v1/auth/me'));
+    const confirm = await statusOf(h.instance.post('/api/v1/auth/confirm-email', { code: '123456' }));
+
+    expect([me, confirm]).toEqual(['ok', 'ok']);
+    expect(h.requestRefresh).toHaveBeenCalledTimes(1); // o segundo já saiu com o token renovado
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+  });
+
+  it('só os caminhos exatos de sessão renovam o token: um /auth/me-qualquer-coisa futuro continua anônimo', async () => {
+    const h = createHarness();
+
+    const lookalike = await statusOf(h.instance.get('/api/v1/auth/me-outra-rota'));
+    const nested = await statusOf(h.instance.get('/api/v1/auth/me/extra'));
+
+    expect([lookalike, nested]).toEqual([401, 401]);
+    expect(h.requestRefresh).not.toHaveBeenCalled();
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+  });
+
+  it('com query string ou URL absoluta, o caminho exato de sessão ainda renova o token', async () => {
+    const h = createHarness();
+
+    const withQuery = await statusOf(h.instance.get('/api/v1/auth/me?x=1'));
+    const absolute = await statusOf(h.instance.get('http://api.test/api/v1/auth/me'));
+
+    expect([withQuery, absolute]).toEqual(['ok', 'ok']);
+    expect(h.requestRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it('sem refresh token guardado, encerra a sessão sem chamar o refresh', async () => {
     const h = createHarness({ session: { accessToken: 'access-1', refreshToken: null } });
 
@@ -267,6 +321,26 @@ describe('A03 — renovação de sessão no 401', () => {
     expect(h.calls).toHaveLength(1);
   });
 
+  it('refresh que termina depois do logout não grava tokens, não repete a requisição nem avisa sessão expirada', async () => {
+    const h = createHarness();
+    h.holdRefresh();
+
+    const pending = statusOf(h.instance.get('/api/v1/dashboard'));
+    await flush();
+    await flush();
+    expect(h.requestRefresh).toHaveBeenCalledTimes(1);
+
+    // O usuário sai enquanto o refresh está em andamento.
+    h.session.accessToken = null;
+    h.session.refreshToken = null;
+    h.releaseRefresh();
+
+    expect(await pending).toBe(401);
+    expect(h.saveTokens).not.toHaveBeenCalled();
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+    expect(h.calls).toHaveLength(1); // nenhuma repetição com o token novo
+  });
+
   it('quando o refresh não devolve refresh token, mantém o anterior', async () => {
     const h = createHarness({ refreshResult: { accessToken: 'access-2', refreshToken: null } });
 
@@ -286,6 +360,69 @@ describe('A03 — renovação de sessão no 401', () => {
 
     expect(status).toBe(403);
     expect(h.requestRefresh).not.toHaveBeenCalled();
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+  });
+});
+
+describe('sessões diferentes (logout e novo login no meio de uma requisição)', () => {
+  it('refresh recusado depois do logout não derruba o usuário que entrou em seguida', async () => {
+    const h = createHarness({ session: { accessToken: 'access-1', refreshToken: 'refresh-velho' } });
+    h.holdRefresh();
+
+    const pending = statusOf(h.instance.get('/api/v1/dashboard'));
+    await flush();
+    await flush();
+    expect(h.requestRefresh).toHaveBeenCalledTimes(1); // recusado pelo servidor (token já rotacionado)
+
+    // Sai e outro usuário entra enquanto o refresh do primeiro está em andamento.
+    h.changeSession({ accessToken: 'access-B', refreshToken: 'refresh-B', userId: 'user-B' });
+    h.releaseRefresh();
+
+    expect(await pending).toBe(401);
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+    expect(h.session.accessToken).toBe('access-B'); // a sessão do usuário B continua intacta
+  });
+
+  it('401 atrasado de uma requisição do usuário A não é repetido com o token do usuário B', async () => {
+    const h = createHarness();
+    h.holdNextRequest();
+
+    const pending = statusOf(h.instance.get('/api/v1/transactions')); // sai com o token do usuário A
+    await flush();
+    h.changeSession({ accessToken: 'access-B', refreshToken: 'refresh-B', userId: 'user-B' });
+    h.releaseRequest(); // o servidor responde 401 só agora
+
+    expect(await pending).toBe(401);
+    expect(h.requestRefresh).not.toHaveBeenCalled(); // não usa o refresh token de B
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+    expect(h.calls).toHaveLength(1); // não houve repetição com o token de B
+    expect(h.session.accessToken).toBe('access-B');
+  });
+
+  it('401 atrasado depois de logout sem novo login também não faz nada', async () => {
+    const h = createHarness();
+    h.holdNextRequest();
+
+    const pending = statusOf(h.instance.get('/api/v1/transactions'));
+    await flush();
+    h.changeSession();
+    h.releaseRequest();
+
+    expect(await pending).toBe(401);
+    expect(h.requestRefresh).not.toHaveBeenCalled();
+    expect(h.onSessionExpired).not.toHaveBeenCalled();
+  });
+
+  it('o logout durante a gravação dos tokens novos impede a repetição da requisição', async () => {
+    const h = createHarness();
+    h.saveTokens.mockImplementationOnce(async () => {
+      h.changeSession(); // logout chega enquanto os tokens são gravados
+    });
+
+    const status = await statusOf(h.instance.get('/api/v1/dashboard'));
+
+    expect(status).toBe(401);
+    expect(h.calls).toHaveLength(1);
     expect(h.onSessionExpired).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 // Manual transaction entry screen — allows the user to add an expense by hand,
 // independent of OCR / push-notification parsing. Extends existing flows, does NOT replace.
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState } from 'react';
 import {
   View,
@@ -14,15 +15,18 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { transactionsApiClient } from '@/services/apiClient';
 import { PREDEFINED_CATEGORIES } from '@/modules/transactions/categories';
+import { useCategories } from '@/modules/transactions/useCategories';
+import { parseAmountText } from '@/utils/amount';
+import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 
-export default function NewTransactionScreen() {
+function NewTransactionScreen() {
   const queryClient = useQueryClient();
+  const categories = useCategories();
 
   const [amountText, setAmountText] = useState('');
   const [description, setDescription] = useState('');
@@ -30,32 +34,14 @@ export default function NewTransactionScreen() {
   const [category, setCategory] = useState<string>(PREDEFINED_CATEGORIES[0].value);
   const [submitting, setSubmitting] = useState(false);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      if (!submitting) {
-        setAmountText('');
-        setDescription('');
-        setMerchant('');
-        setCategory(PREDEFINED_CATEGORIES[0].value);
-      }
-    }, [submitting])
-  );
-
-  const parseAmount = (raw: string): number | null => {
-    // Accept both "12,34" and "12.34"
-    const normalized = raw.replace(/\s/g, '').replace(',', '.');
-    const n = Number(normalized);
-    if (!Number.isFinite(n) || n <= 0) return null;
-    // Round to 2 decimals
-    return Math.round(n * 100) / 100;
-  };
-
   const handleSubmit = async () => {
-    const amount = parseAmount(amountText);
-    if (amount === null) {
-      Alert.alert('Valor inválido', 'Informe um valor positivo (ex: 42,90).');
+    // Mesma regra da API: maior que zero, até R$ 999.999.999,99 e no máximo duas casas decimais.
+    const parsed = parseAmountText(amountText);
+    if (!parsed.ok) {
+      Alert.alert('Valor inválido', parsed.message);
       return;
     }
+    const amount = parsed.value;
     if (!category) {
       Alert.alert('Categoria', 'Selecione uma categoria.');
       return;
@@ -80,10 +66,9 @@ export default function NewTransactionScreen() {
         queryClient.invalidateQueries({ queryKey: ['budget'] }),
       ]);
 
-      router.back();
+      goToParent('transactions/new');
     } catch (err: any) {
-      const apiMsg = err?.response?.data?.message;
-      Alert.alert('Erro', apiMsg ?? 'Não foi possível registrar a transação.');
+      Alert.alert('Erro', getApiErrorMessage(err, 'Não foi possível registrar a transação.'));
     } finally {
       setSubmitting(false);
     }
@@ -97,15 +82,15 @@ export default function NewTransactionScreen() {
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.headerRow}>
-            <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button">
+            <Pressable accessibilityLabel="Voltar" onPress={() => goToParent('transactions/new')} hitSlop={12} accessibilityRole="button">
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </Pressable>
-            <Text style={styles.title}>Nova transação</Text>
+            <Text style={styles.title} accessibilityRole="header">Nova transação</Text>
             <View style={{ width: 24 }} />
           </View>
 
           <Text style={styles.label}>Valor (R$)</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Valor em reais"
             style={styles.input}
             keyboardType="decimal-pad"
             placeholder="0,00"
@@ -116,7 +101,7 @@ export default function NewTransactionScreen() {
           />
 
           <Text style={styles.label}>Descrição (opcional)</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Descrição"
             style={styles.input}
             placeholder="Ex: Mercado"
             placeholderTextColor={colors.placeholder}
@@ -126,7 +111,7 @@ export default function NewTransactionScreen() {
           />
 
           <Text style={styles.label}>Estabelecimento (opcional)</Text>
-          <TextInput
+          <TextInput accessibilityLabel="Estabelecimento"
             style={styles.input}
             placeholder="Ex: Pão de Açúcar"
             placeholderTextColor={colors.placeholder}
@@ -137,10 +122,10 @@ export default function NewTransactionScreen() {
 
           <Text style={styles.label}>Categoria</Text>
           <View style={styles.categoryGrid}>
-            {PREDEFINED_CATEGORIES.map((c) => {
+            {categories.map((c) => {
               const selected = category === c.value;
               return (
-                <Pressable
+                <Pressable accessibilityLabel={`Categoria ${c.label}`}
                   key={c.value}
                   style={[styles.categoryChip, selected && styles.categoryChipActive]}
                   onPress={() => setCategory(c.value)}
@@ -162,7 +147,7 @@ export default function NewTransactionScreen() {
             })}
           </View>
 
-          <Pressable
+          <Pressable accessibilityLabel="Salvar transação"
             style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
             onPress={handleSubmit}
             disabled={submitting}
@@ -179,6 +164,9 @@ export default function NewTransactionScreen() {
     </SafeAreaView>
   );
 }
+
+// Aba oculta: cada visita começa com o formulário vazio.
+export default resetOnFocus(NewTransactionScreen);
 
 const styles = StyleSheet.create({
   container: {
@@ -225,6 +213,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   categoryChip: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,

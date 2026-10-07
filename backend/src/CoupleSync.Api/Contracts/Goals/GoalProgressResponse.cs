@@ -8,4 +8,6 @@ public sealed record GoalProgressResponse(
     decimal ProgressPercent,
     bool IsAchieved,
     double DaysRemaining,
-    string Status);
+    string Status,
+    decimal ManualAmount,
+    decimal LinkedAmount);

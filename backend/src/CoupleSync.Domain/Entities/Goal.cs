@@ -1,4 +1,5 @@
 using CoupleSync.Domain.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Domain.Entities;
 
@@ -60,22 +61,22 @@ public sealed class Goal : ICoupleScoped
         DateTime createdAtUtc)
     {
         if (string.IsNullOrWhiteSpace(title) || title.Length > 128)
-            throw new ArgumentException("Title must be a non-empty string of at most 128 characters.", nameof(title));
+            throw new ArgumentException("O título é obrigatório e deve ter no máximo 128 caracteres.", nameof(title));
 
         if (targetAmount <= 0)
-            throw new ArgumentException("TargetAmount must be greater than zero.", nameof(targetAmount));
+            throw new ArgumentException("O valor da meta deve ser maior que zero.", nameof(targetAmount));
 
         if (string.IsNullOrWhiteSpace(currency) || currency.Length < 2 || currency.Length > 3)
-            throw new ArgumentException("Currency must be 2-3 characters.", nameof(currency));
+            throw new ArgumentException("A moeda deve ter de 2 a 3 caracteres.", nameof(currency));
 
         if (deadline.Kind == DateTimeKind.Unspecified)
             deadline = DateTime.SpecifyKind(deadline, DateTimeKind.Utc);
 
-        if (deadline.Date < createdAtUtc.Date)
-            throw new ArgumentException("Deadline must not be in the past.", nameof(deadline));
+        if (deadline.Date < BrazilTime.ToLocal(createdAtUtc).Date)
+            throw new ArgumentException("O prazo não pode estar no passado.", nameof(deadline));
 
         if (description is not null && description.Length > 512)
-            throw new ArgumentException("Description must be at most 512 characters.", nameof(description));
+            throw new ArgumentException("A descrição deve ter no máximo 512 caracteres.", nameof(description));
 
         return new Goal(Guid.NewGuid(), coupleId, createdByUserId, title, description, targetAmount, currency, deadline, createdAtUtc);
     }
@@ -85,21 +86,21 @@ public sealed class Goal : ICoupleScoped
         if (title is not null)
         {
             if (string.IsNullOrWhiteSpace(title) || title.Length > 128)
-                throw new ArgumentException("Title must be a non-empty string of at most 128 characters.", nameof(title));
+                throw new ArgumentException("O título é obrigatório e deve ter no máximo 128 caracteres.", nameof(title));
             Title = title;
         }
 
         if (description is not null)
         {
             if (description.Length > 512)
-                throw new ArgumentException("Description must be at most 512 characters.", nameof(description));
+                throw new ArgumentException("A descrição deve ter no máximo 512 caracteres.", nameof(description));
             Description = description;
         }
 
         if (targetAmount is not null)
         {
             if (targetAmount.Value <= 0)
-                throw new ArgumentException("TargetAmount must be greater than zero.", nameof(targetAmount));
+                throw new ArgumentException("O valor da meta deve ser maior que zero.", nameof(targetAmount));
             TargetAmount = targetAmount.Value;
         }
 
@@ -108,8 +109,8 @@ public sealed class Goal : ICoupleScoped
             var d = deadline.Value;
             if (d.Kind == DateTimeKind.Unspecified)
                 d = DateTime.SpecifyKind(d, DateTimeKind.Utc);
-            if (d.Date < nowUtc.Date)
-                throw new ArgumentException("Deadline must not be in the past.", nameof(deadline));
+            if (d.Date < BrazilTime.ToLocal(nowUtc).Date)
+                throw new ArgumentException("O prazo não pode estar no passado.", nameof(deadline));
             Deadline = d;
         }
 
@@ -119,7 +120,7 @@ public sealed class Goal : ICoupleScoped
     public void UpdateCurrentAmount(decimal currentAmount, DateTime nowUtc)
     {
         if (currentAmount < 0)
-            throw new ArgumentException("CurrentAmount must be non-negative.", nameof(currentAmount));
+            throw new ArgumentException("O valor atual não pode ser negativo.", nameof(currentAmount));
         CurrentAmount = currentAmount;
         UpdatedAtUtc = nowUtc;
     }

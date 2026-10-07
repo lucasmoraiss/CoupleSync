@@ -7,11 +7,16 @@ namespace CoupleSync.Application.Goals.Commands;
 public sealed class ArchiveGoalCommandHandler
 {
     private readonly IGoalRepository _repository;
+    private readonly GoalProgressReader _progressReader;
     private readonly IDateTimeProvider _dateTimeProvider;
 
-    public ArchiveGoalCommandHandler(IGoalRepository repository, IDateTimeProvider dateTimeProvider)
+    public ArchiveGoalCommandHandler(
+        IGoalRepository repository,
+        GoalProgressReader progressReader,
+        IDateTimeProvider dateTimeProvider)
     {
         _repository = repository;
+        _progressReader = progressReader;
         _dateTimeProvider = dateTimeProvider;
     }
 
@@ -20,24 +25,13 @@ public sealed class ArchiveGoalCommandHandler
         var goal = await _repository.GetByIdAsync(command.Id, command.CoupleId, cancellationToken);
 
         if (goal is null)
-            throw new NotFoundException("GOAL_NOT_FOUND", "Goal not found.");
+            throw new NotFoundException("GOAL_NOT_FOUND", "Meta não encontrada.");
 
         var now = _dateTimeProvider.UtcNow;
         goal.Archive(now);
 
         await _repository.SaveChangesAsync(cancellationToken);
 
-        return new GoalDto(
-            goal.Id,
-            goal.CreatedByUserId,
-            goal.Title,
-            goal.Description,
-            goal.TargetAmount,
-            goal.CurrentAmount,
-            goal.Currency,
-            goal.Deadline,
-            goal.Status,
-            goal.CreatedAtUtc,
-            goal.UpdatedAtUtc);
+        return GoalDto.From(goal, await _progressReader.ReadAsync(goal, cancellationToken));
     }
 }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CoupleSync.Domain.Entities;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Infrastructure.Persistence.Seeders;
@@ -31,7 +32,7 @@ public sealed class CategoryRulesSeeder
             if (existingSet.Contains(entry.Keyword))
                 continue;
 
-            var rule = new CategoryRule(Guid.NewGuid(), entry.Keyword, entry.Category, entry.Priority, true);
+            var rule = new CategoryRule(Guid.NewGuid(), entry.Keyword, TransactionCategories.NormalizeOrOther(entry.Category), entry.Priority, true);
             await _dbContext.CategoryRules.AddAsync(rule, ct);
             existingSet.Add(entry.Keyword);
         }

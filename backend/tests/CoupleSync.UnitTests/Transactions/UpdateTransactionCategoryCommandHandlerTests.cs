@@ -42,8 +42,8 @@ public sealed class UpdateTransactionCategoryCommandHandlerTests
             CancellationToken.None);
 
         Assert.Equal(transaction.Id, result.Id);
-        Assert.Equal("Alimentação", result.Category);
-        Assert.Equal("Alimentação", transaction.Category);
+        Assert.Equal("ALIMENTACAO", result.Category);
+        Assert.Equal("ALIMENTACAO", transaction.Category);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class UpdateTransactionCategoryCommandHandlerTests
         var handler = BuildHandler(repo);
 
         var result = await handler.HandleAsync(
-            new UpdateTransactionCategoryCommand(transaction.Id, coupleId, "Mercado"),
+            new UpdateTransactionCategoryCommand(transaction.Id, coupleId, "Compras"),
             CancellationToken.None);
 
         Assert.Equal(transaction.Id, result.Id);
@@ -86,7 +86,29 @@ public sealed class UpdateTransactionCategoryCommandHandlerTests
         Assert.Equal(timestamp, result.EventTimestampUtc);
         Assert.Equal("Grocery", result.Description);
         Assert.Equal("Carrefour", result.Merchant);
-        Assert.Equal("Mercado", result.Category);
+        Assert.Equal("COMPRAS", result.Category);
+    }
+
+    [Theory]
+    [InlineData("Mercado")]
+    [InlineData("")]
+    [InlineData("Alimentação extra")]
+    public async Task HandleAsync_CategoryOutsideTheCanonicalList_Throws400AndKeepsTheCategory(string category)
+    {
+        var repo = new FakeTransactionRepository();
+        var coupleId = Guid.NewGuid();
+        var transaction = Transaction.Create(
+            coupleId, Guid.NewGuid(), "fp-invalid", "ITAU", 10m, "BRL",
+            DateTime.UtcNow, "x", null, "LAZER", Guid.NewGuid(), DateTime.UtcNow);
+        await repo.AddTransactionAsync(transaction, CancellationToken.None);
+
+        var ex = await Assert.ThrowsAsync<AppException>(() => BuildHandler(repo).HandleAsync(
+            new UpdateTransactionCategoryCommand(transaction.Id, coupleId, category), CancellationToken.None));
+
+        Assert.Equal("INVALID_CATEGORY", ex.Code);
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Contains("ALIMENTACAO", ex.Message);
+        Assert.Equal("LAZER", transaction.Category);
     }
 
     [Fact]
@@ -107,8 +129,8 @@ public sealed class UpdateTransactionCategoryCommandHandlerTests
             new UpdateTransactionCategoryCommand(transaction.Id, coupleId, "Transporte"),
             CancellationToken.None);
 
-        Assert.Equal("Transporte", result.Category);
-        Assert.Equal("Transporte", transaction.Category);
+        Assert.Equal("TRANSPORTE", result.Category);
+        Assert.Equal("TRANSPORTE", transaction.Category);
     }
 
     [Fact]

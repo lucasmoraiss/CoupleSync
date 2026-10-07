@@ -19,12 +19,16 @@ public sealed class InterBankParser : IBankStatementParser
         @"Banco Inter|bancointer\.com\.br|BANCO INTER",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    // O Regex agora tem um limitador rigoroso no Grupo 2:
-    // (?:(?!\d{2}\s+de|\d{2}/\d{2}).){1,120}?
+    // O Regex tem um limitador rigoroso no Grupo 2:
+    // (?:(?!<nova data>).){1,120}?
     // Significa: "Pegue até 120 caracteres, desde que NENHUM deles inicie uma nova data".
+    // Uma data completa ("07/09/2026", "07 de set. 2026") é sempre data. Já "DD/MM" só é data quando abre a
+    // linha, segue o valor anterior ou vem colada no texto anterior (página inteira em uma linha só, ex.:
+    // "Banco Inter S.A.07/09 ..."); separada por espaço de uma palavra ("Parcela 03/10", "Clara 02/06 lentes")
+    // é parcela ou parte da descrição, nunca a data do lançamento. Depois do valor, a letra D/C não pode continuar em uma palavra.
     private static readonly Regex JammedTransactionPattern = new(
-        @"(\d{2}\s+de\s+[a-zA-Z]{3}\.?\s+\d{4}|\d{2}/\d{2}/\d{4}|\d{2}/\d{2})((?:(?!\d{2}\s+de|\d{2}/\d{2}).){1,120}?)([-+]*\s*R\$\s*[\d\.]+,\d{2}(?:\s+[DC])?)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        @"(\d{2}\s+de\s+[a-zA-Z]{3}\.?\s+\d{4}|\d{2}/\d{2}/\d{4}|(?<=^[ \t]*|,\d{2}\s*|,\d{2}\s+[DC]\s*|[^\s\d/])\d{2}/\d{2}(?![\d/]))((?:(?!\d{2}\s+de\s+[a-zA-Z]{3}|\d{2}/\d{2}/\d{4}|\n[ \t]*\d{2}/\d{2}(?![\d/])).){1,120}?)([-+]*\s*R\$\s*[\d\.]+,\d{2}(?:\s+[DC](?![A-Za-z]))?)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Multiline);
 
     private static readonly Dictionary<string, int> MonthMap = new(StringComparer.OrdinalIgnoreCase)
     {

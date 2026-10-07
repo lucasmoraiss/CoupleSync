@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -16,9 +17,7 @@ public sealed class OcrProcessingService
     private static readonly TimeSpan BatchClassificationTimeout = TimeSpan.FromSeconds(15);
 
     internal static readonly string[] DefaultCategories =
-    [
-        "Alimentação", "Transporte", "Lazer", "Saúde", "Moradia", "Educação", "Outros"
-    ];
+        TransactionCategories.All.Select(c => c.Label).ToArray();
 
     public OcrProcessingService(
         ITransactionRepository transactionRepository,
@@ -38,12 +37,10 @@ public sealed class OcrProcessingService
     public async Task<IReadOnlyList<OcrCandidate>> ParseAndDeduplicateAsync(
         Guid coupleId,
         string rawOcrJson,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool aiCategorizationConsent = false)
     {
         var candidates = ParseCandidates(rawOcrJson);
-
-        // Filter out Credit-type transactions (bill payments, not purchases)
-        candidates.RemoveAll(c => c.Type == TransactionType.Credit);
 
         foreach (var c in candidates)
         {
@@ -51,9 +48,16 @@ public sealed class OcrProcessingService
             c.Amount = Math.Abs(c.Amount);
         }
 
-        // Re-index after filtering
+        // Credits (entradas, bill payments) are kept so the review can say they were not imported, but
+        // they are never importable: they get no fingerprint, no category, and come after every debit so
+        // the debit indices stay 0..n-1 exactly as before.
+        var credits = candidates.Where(c => c.Type == TransactionType.Credit).ToList();
+        candidates.RemoveAll(c => c.Type == TransactionType.Credit);
+
         for (int i = 0; i < candidates.Count; i++)
             candidates[i].Index = i;
+        for (int i = 0; i < credits.Count; i++)
+            credits[i].Index = candidates.Count + i;
 
         // Identical lines inside one statement are distinct purchases (e.g. two rides of the same
         // price on the same day). The n-th repetition gets an occurrence ordinal in its fingerprint;
@@ -71,8 +75,11 @@ public sealed class OcrProcessingService
             c.DuplicateSuspected = await _transactionRepository.FingerprintExistsAsync(c.Fingerprint, coupleId, ct);
         }
 
-        await ClassifyCandidatesAsync(coupleId, candidates, ct);
+        // Descriptions only go to the AI classifier (Gemini) when the uploader accepted the AI disclosure.
+        if (aiCategorizationConsent)
+            await ClassifyCandidatesAsync(coupleId, candidates, ct);
 
+        candidates.AddRange(credits);
         return candidates;
     }
 
@@ -98,24 +105,26 @@ public sealed class OcrProcessingService
         {
             if (batchCts.IsCancellationRequested) break;
 
-            candidate.SuggestedCategory = await _categoryClassifier.SuggestCategoryAsync(
+            var suggested = await _categoryClassifier.SuggestCategoryAsync(
                 candidate.Description, categories, batchCts.Token);
+
+            // Only canonical categories leave here; anything else the classifier invents is dropped.
+            candidate.SuggestedCategory = TransactionCategories.TryNormalize(suggested);
         }
     }
 
     private async Task<IReadOnlyList<string>> GetAvailableCategoriesAsync(Guid coupleId, CancellationToken ct)
     {
-        var now = DateTime.UtcNow;
-        var currentMonth = $"{now.Year:D4}-{now.Month:D2}";
+        var currentMonth = BrazilTime.MonthOf(DateTime.UtcNow);
         var plan = await _budgetRepository.GetByMonthAsync(coupleId, currentMonth, ct);
 
         if (plan?.Allocations.Count > 0)
         {
             var categories = plan.Allocations
-                .Select(a => a.Category.Trim())
-                .Where(c => !string.IsNullOrWhiteSpace(c))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(30)
+                .Select(a => TransactionCategories.TryNormalize(a.Category))
+                .OfType<string>()
+                .Distinct(StringComparer.Ordinal)
+                .Select(TransactionCategories.Label)
                 .ToList();
 
             if (categories.Count > 0)
@@ -158,7 +167,7 @@ public sealed class OcrProcessingService
             {
                 var dateStr = vDate.GetString();
                 if (!string.IsNullOrEmpty(dateStr)
-                    && DateTime.TryParse(dateStr, out var parsed))
+                    && DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
                 {
                     transactionDate = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
                 }
@@ -236,7 +245,9 @@ public sealed class OcrProcessingService
     {
         // The first occurrence keeps the original format so that transactions imported before the
         // ordinal existed are still recognised as duplicates on re-import.
-        var normalized = $"{coupleId}|{date:yyyy-MM-dd}|{amount:F2}|{description.ToLowerInvariant().Trim()}";
+        // Invariant on purpose: the hash is stored, so it must not change with the host culture.
+        var normalized = string.Create(CultureInfo.InvariantCulture,
+            $"{coupleId}|{date:yyyy-MM-dd}|{amount:F2}|{description.ToLowerInvariant().Trim()}");
         if (occurrence > 1)
             normalized += $"|#{occurrence}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
@@ -261,7 +272,7 @@ public sealed class OcrProcessingService
 
             DateTime date = DateTime.UtcNow;
             if (tx.TryGetProperty("date", out var dateEl)
-                && DateTime.TryParse(dateEl.GetString(), out var parsedDate))
+                && DateTime.TryParse(dateEl.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
             {
                 date = DateTime.SpecifyKind(parsedDate, DateTimeKind.Utc);
             }

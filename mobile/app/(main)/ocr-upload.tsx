@@ -1,6 +1,11 @@
 // AC-121, AC-129, AC-130: OCR upload screen — PDF file picker + status polling.
 // Only PDF is offered: the server's default parser handles digital PDF statements only and
 // rejects images (IMAGE_NOT_SUPPORTED), so camera and image selection are not exposed.
+import { aiConsentForUpload, appendAiConsent, shouldResetUploadOnRevisit } from '@/modules/ocr/uploadForm';
+import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
+import { goToParent, useOnRefocus } from '@/navigation/resetOnFocus';
+import { isAiChatAllowedNow } from '@/modules/privacy/consentStore';
+import { getApiErrorMessage } from '@/services/apiError';
 import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
@@ -8,16 +13,21 @@ import {
   StyleSheet,
   SafeAreaView,
   TouchableOpacity,
+  ScrollView,
+  Alert,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import axios from 'axios';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ocrApiClient } from '@/services/apiClient';
 import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
+import { ocrFailureMessage } from '@/modules/ocr/failureMessage';
+import { buildDiscardRestRequest, openImportSummary } from '@/modules/ocr/confirmRequest';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -43,6 +53,58 @@ type ScreenState =
 
 export default function OcrUploadScreen() {
   const [state, setState] = useState<ScreenState>({ phase: 'idle' });
+  const queryClient = useQueryClient();
+
+  // Imports with lines still waiting for review (confirmed "to continue later", or left unfinished).
+  const openImports = useQuery({
+    queryKey: ['ocr-open-imports'],
+    queryFn: () => ocrApiClient.getOpenImports().then((r) => r.data.imports),
+    staleTime: 0,
+  });
+
+  // The tab stays mounted: look again every time the screen comes back into focus.
+  const refetchOpenImports = openImports.refetch;
+  useFocusEffect(
+    useCallback(() => {
+      refetchOpenImports();
+    }, [refetchOpenImports]),
+  );
+
+  // Ao voltar à tela, o erro de uma tentativa anterior some; envio ou processamento em andamento continuam.
+  useOnRefocus(() => setState((current) => (shouldResetUploadOnRevisit(current.phase) ? { phase: 'idle' } : current)));
+
+  const handleReopen = useCallback((uploadId: string) => {
+    router.push(`/(main)/ocr-review?uploadId=${uploadId}` as any);
+  }, []);
+
+  const handleDiscardRest = useCallback(
+    (uploadId: string) => {
+      Alert.alert(
+        'Descartar o restante',
+        'As transações que ainda não foram importadas serão descartadas e a importação será encerrada.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Descartar',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const results = await ocrApiClient.getResults(uploadId);
+                const pending = results.data.candidates
+                  .filter((c) => (c.lineState ?? 'Pending') === 'Pending')
+                  .map((c) => c.index);
+                await ocrApiClient.confirm(uploadId, buildDiscardRestRequest(pending));
+              } catch (err) {
+                Alert.alert('Importação', getApiErrorMessage(err, 'Não foi possível descartar. Tente novamente.'));
+              }
+              queryClient.invalidateQueries({ queryKey: ['ocr-open-imports'] });
+            },
+          },
+        ],
+      );
+    },
+    [queryClient],
+  );
   const isMounted = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
   // Incremented on every new upload attempt; lets async callbacks discard stale results
@@ -80,29 +142,7 @@ export default function OcrUploadScreen() {
         if (status === 'Failed') {
           if (!isMounted.current) return;
           if (__DEV__) console.log('[OCR] Failed:', { errorCode, status });
-          let errorMessage: string;
-          if (errorCode === 'quota_exhausted') {
-            const dateStr = quotaResetDate
-              ? new Date(quotaResetDate).toLocaleDateString('pt-BR', {
-                  day: '2-digit',
-                  month: '2-digit',
-                  year: 'numeric',
-                })
-              : '—';
-            errorMessage = `OCR indisponível este mês. Cota atingida. Tente novamente em ${dateStr}.`;
-          } else if (errorCode === 'PDF_ENCRYPTED') {
-            errorMessage = 'O PDF está protegido por senha. Por enquanto, exporte o extrato sem senha e tente novamente. (Suporte a senha será adicionado em breve.)';
-          } else if (errorCode === 'IMAGE_NOT_SUPPORTED') {
-            errorMessage = 'Este arquivo não pôde ser lido como PDF. Envie o extrato bancário em PDF.';
-          } else if (errorCode === 'PDF_TOO_SHORT') {
-            errorMessage = 'O PDF parece ser uma imagem digitalizada. Envie um extrato em PDF digital (texto selecionável).';
-          } else if (errorCode === 'NO_TRANSACTIONS_FOUND') {
-            errorMessage = 'Nenhuma transação encontrada. Verifique se o PDF é um extrato bancário válido.';
-          } else if (errorCode === 'BANK_FORMAT_UNKNOWN') {
-            errorMessage = 'Formato do banco não reconhecido. Tente um extrato de outro banco ou cadastre as transações manualmente.';
-          } else {
-            errorMessage = 'Falha no processamento. Tente novamente.';
-          }
+          const errorMessage = ocrFailureMessage(errorCode, quotaResetDate);
           setState({ phase: 'error', message: errorMessage });
           return;
         }
@@ -158,6 +198,7 @@ export default function OcrUploadScreen() {
         type: PDF_MIME_TYPE,
         name: fileName,
       } as any);
+      appendAiConsent(formData, aiConsentForUpload(AI_FEATURE_ENABLED, isAiChatAllowedNow()));
 
       try {
         const res = await ocrApiClient.upload(formData, controller.signal);
@@ -175,22 +216,7 @@ export default function OcrUploadScreen() {
           setState({ phase: 'idle' });
           return;
         }
-        let message: string;
-        if (!err?.response) {
-          message = 'Sem conexão. Verifique sua internet e tente novamente.';
-        } else {
-          const data = err.response.data;
-          const isObj = typeof data === 'object' && data !== null;
-          if (isObj && typeof (data as any).message === 'string') {
-            message = (data as any).message;
-          } else if (isObj && typeof (data as any).error === 'string') {
-            message = (data as any).error;
-          } else if (err.response.statusText) {
-            message = err.response.statusText;
-          } else {
-            message = 'Falha ao enviar o arquivo. Tente novamente.';
-          }
-        }
+        const message = getApiErrorMessage(err, 'Falha ao enviar o arquivo. Tente novamente.');
         setState({ phase: 'error', message });
       }
     },
@@ -229,14 +255,14 @@ export default function OcrUploadScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
+        <TouchableOpacity accessibilityRole="button"
           style={styles.backBtn}
-          onPress={() => router.back()}
+          onPress={() => goToParent('ocr-upload')}
           accessibilityLabel="Voltar"
         >
           <Ionicons name="arrow-back" size={22} color={TEXT} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Importar extrato</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Importar extrato</Text>
         <View style={styles.backBtn} />
       </View>
 
@@ -244,12 +270,12 @@ export default function OcrUploadScreen() {
       {state.phase === 'idle' && (
         <View style={styles.body}>
           <Ionicons name="cloud-upload-outline" size={56} color={ACCENT} style={styles.icon} />
-          <Text style={styles.title}>Importar extrato em PDF</Text>
+          <Text style={styles.title} accessibilityRole="header">Importar extrato em PDF</Text>
           <Text style={styles.subtitle}>
             Selecione o extrato bancário em PDF para importar as transações automaticamente.
           </Text>
 
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.optionBtn}
             onPress={handleFilePicker}
             accessibilityLabel="Selecionar arquivo PDF"
@@ -262,6 +288,41 @@ export default function OcrUploadScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={MUTED} />
           </TouchableOpacity>
+
+          {(openImports.data ?? []).length > 0 ? (
+            <View style={styles.openSection}>
+              <Text style={styles.openTitle}>Importações para continuar</Text>
+              <ScrollView style={styles.openList} showsVerticalScrollIndicator={false}>
+                {(openImports.data ?? []).map((item) => {
+                  const summary = openImportSummary(item);
+                  return (
+                    <View key={item.uploadId} style={styles.openCard}>
+                      <Text style={styles.openName} numberOfLines={1}>{summary.title}</Text>
+                      <Text style={styles.openMeta}>
+                        {new Date(item.createdAtUtc).toLocaleDateString('pt-BR')} · {summary.pending}
+                      </Text>
+                      <View style={styles.openActions}>
+                        <TouchableOpacity accessibilityRole="button"
+                          style={styles.openPrimary}
+                          onPress={() => handleReopen(item.uploadId)}
+                          accessibilityLabel={`Revisar ${summary.title}`}
+                        >
+                          <Text style={styles.openPrimaryText}>Revisar</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity accessibilityRole="button"
+                          style={styles.openSecondary}
+                          onPress={() => handleDiscardRest(item.uploadId)}
+                          accessibilityLabel={`Descartar o restante de ${summary.title}`}
+                        >
+                          <Text style={styles.openSecondaryText}>Descartar o restante</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          ) : null}
         </View>
       )}
 
@@ -269,7 +330,7 @@ export default function OcrUploadScreen() {
       {state.phase === 'uploading' && (
         <View style={styles.body}>
           <LoadingState message="Enviando arquivo..." />
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button"
             style={styles.cancelBtn}
             onPress={handleCancelUpload}
             accessibilityLabel="Cancelar envio"
@@ -308,7 +369,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 16,
   },
-  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  backBtn: { minHeight: 44, minWidth: 44, width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
   body: {
     flex: 1,
@@ -335,6 +396,24 @@ const styles = StyleSheet.create({
   optionText: { flex: 1 },
   optionLabel: { fontSize: 15, fontWeight: '600', color: TEXT },
   optionHint: { fontSize: 12, color: MUTED, marginTop: 2 },
+  openSection: { width: '100%', marginTop: 20, maxHeight: 260 },
+  openTitle: { fontSize: 14, fontWeight: '700', color: TEXT, marginBottom: 8 },
+  openList: { flexGrow: 0 },
+  openCard: {
+    backgroundColor: CARD,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 12,
+    marginBottom: 8,
+  },
+  openName: { fontSize: 14, fontWeight: '600', color: TEXT },
+  openMeta: { fontSize: 12, color: MUTED, marginTop: 2 },
+  openActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  openPrimary: { minHeight: 44, backgroundColor: PRIMARY, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  openPrimaryText: { color: TEXT, fontSize: 13, fontWeight: '600' },
+  openSecondary: { minHeight: 44, borderRadius: 8, borderWidth: 1, borderColor: BORDER, paddingHorizontal: 14, paddingVertical: 8 },
+  openSecondaryText: { color: MUTED, fontSize: 13 },
   statusText: { fontSize: 16, fontWeight: '600', color: TEXT, marginTop: 20 },
   statusHint: { fontSize: 13, color: MUTED, marginTop: 8, textAlign: 'center' },
   errorTitle: { fontSize: 18, fontWeight: '700', color: TEXT, marginBottom: 12, textAlign: 'center' },

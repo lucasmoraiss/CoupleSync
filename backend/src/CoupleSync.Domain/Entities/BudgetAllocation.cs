@@ -41,13 +41,13 @@ public sealed class BudgetAllocation
         DateTime createdAtUtc)
     {
         if (string.IsNullOrWhiteSpace(category) || category.Length > 64)
-            throw new ArgumentException("Category must be a non-empty string of at most 64 characters.", nameof(category));
+            throw new ArgumentException("A categoria é obrigatória e deve ter no máximo 64 caracteres.", nameof(category));
 
         if (allocatedAmount < 0)
-            throw new ArgumentException("AllocatedAmount must be zero or greater.", nameof(allocatedAmount));
+            throw new ArgumentException("O valor alocado não pode ser negativo.", nameof(allocatedAmount));
 
         if (string.IsNullOrWhiteSpace(currency) || currency.Length < 2 || currency.Length > 3)
-            throw new ArgumentException("Currency must be 2-3 characters.", nameof(currency));
+            throw new ArgumentException("A moeda deve ter de 2 a 3 caracteres.", nameof(currency));
 
         if (createdAtUtc.Kind == DateTimeKind.Unspecified)
             createdAtUtc = DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc);

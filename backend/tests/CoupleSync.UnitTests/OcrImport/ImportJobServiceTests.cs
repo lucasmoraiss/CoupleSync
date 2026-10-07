@@ -29,8 +29,7 @@ public sealed class ImportJobServiceTests
         var ingestRepo = new FakeNotificationCaptureRepository();
         var alertPolicy = new FakeAlertPolicyService();
         var notifEventRepo = new FakeNotificationEventRepository();
-        var notifSettingsRepo = new FakeNotificationSettingsRepository();
-        return new ImportJobService(jobRepo, storage, dateTime, txnRepo, ingestRepo, alertPolicy, notifEventRepo, notifSettingsRepo, NullLogger<ImportJobService>.Instance);
+        return new ImportJobService(jobRepo, storage, dateTime, txnRepo, ingestRepo, alertPolicy, notifEventRepo, NullLogger<ImportJobService>.Instance);
     }
 
     // ── UploadAsync ────────────────────────────────────────────────────────
@@ -211,7 +210,7 @@ public sealed class ImportJobServiceTests
         var created = await svc.ConfirmCandidatesAsync(id, CoupleId, UserId, [0, 1], null, CancellationToken.None);
 
         Assert.NotNull(created);
-        Assert.All(created!.Created, t => Assert.Equal("Alimentação", t.Category));
+        Assert.All(created!.Created, t => Assert.Equal("ALIMENTACAO", t.Category));
     }
 
     [Fact]
@@ -229,7 +228,27 @@ public sealed class ImportJobServiceTests
         var created = await svc.ConfirmCandidatesAsync(id, CoupleId, UserId, [0, 1], null, CancellationToken.None);
 
         Assert.NotNull(created);
-        Assert.All(created!.Created, t => Assert.Equal("Outros", t.Category));
+        Assert.All(created!.Created, t => Assert.Equal("OUTROS", t.Category));
+    }
+
+    [Fact]
+    [Trait("Category", "AutoCategorization")]
+    public async Task ConfirmCandidatesAsync_UnknownFreeTextOverride_BecomesOutros_InsteadOfFailing()
+    {
+        var svc = BuildService(out var repo, out var txnRepo);
+        var stream = new MemoryStream(JpegBytes);
+        var id = await svc.UploadAsync(CoupleId, UserId, stream, "image/jpeg", CancellationToken.None);
+
+        var job = repo.Jobs[0];
+        job.MarkProcessing(FixedNow);
+        job.MarkReady(BuildCandidatesJson(2, suggestedCategory: "Alimentação"), FixedNow);
+
+        // The installed app lets the user type any text for the category.
+        var overrides = new Dictionary<int, string> { { 0, "Mercado" }, { 1, " transporte " } };
+        var created = await svc.ConfirmCandidatesAsync(id, CoupleId, UserId, [0, 1], overrides, CancellationToken.None);
+
+        Assert.Equal("OUTROS", created!.Created[0].Category);
+        Assert.Equal("TRANSPORTE", created.Created[1].Category);
     }
 
     [Fact]
@@ -248,8 +267,8 @@ public sealed class ImportJobServiceTests
         var created = await svc.ConfirmCandidatesAsync(id, CoupleId, UserId, [0, 1], overrides, CancellationToken.None);
 
         Assert.NotNull(created);
-        Assert.Equal("Saúde", created!.Created[0].Category);
-        Assert.Equal("Transporte", created!.Created[1].Category);
+        Assert.Equal("SAUDE", created!.Created[0].Category);
+        Assert.Equal("TRANSPORTE", created!.Created[1].Category);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────
@@ -314,8 +333,19 @@ internal sealed class FakeImportJobRepository : IImportJobRepository
 
     public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
 
+    public Task ReloadAsync(ImportJob job, CancellationToken ct) => Task.CompletedTask;
+
     public Task<IReadOnlyList<ImportJob>> GetPendingAsync(int limit, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<ImportJob>>(Jobs.Where(j => j.Status == ImportJobStatus.Pending).Take(limit).ToList());
+
+    public Task<IReadOnlyList<ImportJob>> GetReadyByCoupleAsync(Guid coupleId, int limit, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ImportJob>>(
+            Jobs.Where(j => j.CoupleId == coupleId && j.Status == ImportJobStatus.Ready)
+                .OrderByDescending(j => j.CreatedAtUtc).Take(limit).ToList());
+
+    public Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ImportJob>>(
+            Jobs.Where(j => j.Status == ImportJobStatus.Processing && j.UpdatedAtUtc <= cutoffUtc).Take(limit).ToList());
 }
 
 internal sealed class FakeDateTimeProvider : IDateTimeProvider
@@ -357,8 +387,8 @@ internal sealed class FakeTransactionRepository : ITransactionRepository
     public Task DeleteAsync(Transaction transaction, CancellationToken ct)
         => Task.CompletedTask;
 
-    public Task<IReadOnlyList<Transaction>> GetByGoalIdAsync(Guid goalId, Guid coupleId, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<Transaction>>([]);
+    public Task<Dictionary<Guid, decimal>> GetLinkedAmountsByGoalAsync(Guid coupleId, IReadOnlyCollection<Guid> goalIds, CancellationToken ct)
+        => Task.FromResult(new Dictionary<Guid, decimal>());
 
     public Task<IReadOnlyList<Transaction>> GetRecentByCoupleAsync(Guid coupleId, DateTime since, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<Transaction>>([]);

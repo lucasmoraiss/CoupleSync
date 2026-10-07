@@ -7,10 +7,13 @@ public sealed class FakeIncomeSourceRepository : IIncomeSourceRepository
 {
     public List<IncomeSource> Sources { get; } = new();
 
-    public Task<IReadOnlyList<IncomeSource>> GetByMonthAsync(Guid coupleId, string month, CancellationToken ct)
+    public Task<IReadOnlyList<IncomeSource>> GetCandidatesForMonthsAsync(
+        Guid coupleId, string fromMonth, string toMonth, CancellationToken ct)
     {
         IReadOnlyList<IncomeSource> result = Sources
-            .Where(s => s.CoupleId == coupleId && s.Month == month)
+            .Where(s => s.CoupleId == coupleId
+                && string.CompareOrdinal(s.Month, toMonth) <= 0
+                && (s.IsRecurring || string.CompareOrdinal(s.Month, fromMonth) >= 0))
             .OrderBy(s => s.CreatedAtUtc)
             .ToList();
         return Task.FromResult(result);

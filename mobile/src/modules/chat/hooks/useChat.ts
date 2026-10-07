@@ -1,4 +1,5 @@
 // AC-AI-Chat: Ephemeral chat state hook — history lives only for the session
+import { getApiErrorMessage } from '@/services/apiError';
 import { useState, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { chatApi } from '../api/chatApi';
@@ -38,14 +39,7 @@ export function useChat(): UseChatReturn {
       setError(null);
     },
     onError: (err: any) => {
-      const status = err?.response?.status;
-      if (status === 404) {
-        setError('AI Chat não disponível');
-      } else if (status === 429) {
-        setError('Limite atingido, tente novamente em breve');
-      } else {
-        setError('Erro ao enviar mensagem. Tente novamente.');
-      }
+      setError(getApiErrorMessage(err, 'Erro ao enviar mensagem. Tente novamente.'));
     },
   });
 

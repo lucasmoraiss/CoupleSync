@@ -4,4 +4,4 @@ namespace CoupleSync.Api.Contracts.Budget;
 public sealed record CreateBudgetPlanRequest(
     string Month,
     decimal GrossIncome,
-    string Currency);
+    string? Currency);

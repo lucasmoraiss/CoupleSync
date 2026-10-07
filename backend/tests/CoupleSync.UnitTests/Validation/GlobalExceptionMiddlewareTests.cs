@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CoupleSync.Api.Middleware;
+using CoupleSync.Application.Reports;
 using CoupleSync.Application.Dashboard;
 using CoupleSync.Domain.Entities;
 using CoupleSync.UnitTests.Support;
@@ -40,7 +41,7 @@ public sealed class GlobalExceptionMiddlewareTests
 
         Assert.Equal(StatusCodes.Status400BadRequest, status);
         Assert.Equal("VALIDATION_ERROR", body.GetProperty("code").GetString());
-        Assert.Equal("Name must be a non-empty string of at most 64 characters.", body.GetProperty("message").GetString());
+        Assert.Equal("O nome é obrigatório e deve ter no máximo 64 caracteres.", body.GetProperty("message").GetString());
         Assert.True(body.TryGetProperty("traceId", out _));
     }
 
@@ -56,22 +57,21 @@ public sealed class GlobalExceptionMiddlewareTests
 
         Assert.Equal(StatusCodes.Status400BadRequest, status);
         Assert.Equal("VALIDATION_ERROR", body.GetProperty("code").GetString());
-        Assert.Equal("Amount must be greater than zero.", body.GetProperty("message").GetString());
+        Assert.Equal("O valor deve ser maior que zero.", body.GetProperty("message").GetString());
     }
 
     [Fact]
     public async Task ApplicationArgumentException_Returns400()
     {
-        var handler = new GetDashboardQueryHandler(
-            new FakeDashboardRepository(),
+        // The Application layer rejects an out-of-range month count with an ArgumentOutOfRangeException (the repository is never reached).
+        var service = new ReportsService(
+            null!,
+            null!,
             new FixedDateTimeProvider(new DateTime(2026, 10, 5, 12, 0, 0, DateTimeKind.Utc)));
 
         var (status, body) = await InvokeAsync(async _ =>
         {
-            // Only startDate, in a future month: the default end (end of current month) is before it.
-            await handler.HandleAsync(
-                new GetDashboardQuery(Guid.NewGuid(), new DateTime(2026, 12, 1, 0, 0, 0, DateTimeKind.Utc), null),
-                CancellationToken.None);
+            await service.GetSpendingByCategoryAsync(Guid.NewGuid(), 0, CancellationToken.None);
         });
 
         Assert.Equal(StatusCodes.Status400BadRequest, status);
@@ -91,7 +91,7 @@ public sealed class GlobalExceptionMiddlewareTests
 
         Assert.Equal(StatusCodes.Status500InternalServerError, status);
         Assert.Equal("INTERNAL_SERVER_ERROR", body.GetProperty("code").GetString());
-        Assert.Equal("An unexpected error occurred.", body.GetProperty("message").GetString());
+        Assert.Equal("Ocorreu um erro inesperado. Tente novamente em instantes.", body.GetProperty("message").GetString());
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public sealed class GlobalExceptionMiddlewareTests
         var (status, body) = await InvokeAsync(_ => throw new ArgumentException("leaky internal detail"));
 
         Assert.Equal(StatusCodes.Status500InternalServerError, status);
-        Assert.Equal("An unexpected error occurred.", body.GetProperty("message").GetString());
+        Assert.Equal("Ocorreu um erro inesperado. Tente novamente em instantes.", body.GetProperty("message").GetString());
     }
 
     [Fact]

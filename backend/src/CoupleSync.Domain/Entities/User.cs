@@ -20,9 +20,17 @@ public sealed class User
 
     public Guid Id { get; private set; }
 
-    public Guid? CoupleId { get; private set; }
+    /// <summary>The most groups one user may belong to at the same time.</summary>
+    public const int MaxGroups = 5;
 
-    public DateTime? CoupleJoinedAtUtc { get; private set; }
+    /// <summary>
+    /// The group the user is working in (it goes into the access token). Only a pointer: belonging to the
+    /// group is decided by the membership rows, never by this value.
+    /// </summary>
+    public Guid? ActiveCoupleId { get; private set; }
+
+    /// <summary>When the user joined the active group; null when no group is active.</summary>
+    public DateTime? ActiveCoupleJoinedAtUtc { get; private set; }
 
     public string Email { get; private set; } = string.Empty;
 
@@ -34,31 +42,48 @@ public sealed class User
 
     public bool IsActive { get; private set; }
 
-    public Couple? Couple { get; private set; }
+    /// <summary>True once the user typed the code sent to their e-mail. Existing accounts start false and keep working.</summary>
+    public bool EmailVerified { get; private set; }
 
     public static User Create(EmailAddress email, string name, string passwordHash, DateTime createdAtUtc)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new ArgumentException("Name is required.", nameof(name));
+            throw new ArgumentException("O nome é obrigatório.", nameof(name));
         }
 
         if (string.IsNullOrWhiteSpace(passwordHash))
         {
-            throw new ArgumentException("Password hash is required.", nameof(passwordHash));
+            throw new ArgumentException("A senha é obrigatória.", nameof(passwordHash));
         }
 
         return new User(Guid.NewGuid(), email.Value, name.Trim(), passwordHash, createdAtUtc);
     }
 
-    public void AssignCouple(Guid coupleId, DateTime coupleJoinedAtUtc)
+    public void SetActiveCouple(Guid coupleId, DateTime joinedAtUtc)
     {
-        if (CoupleId.HasValue)
+        ActiveCoupleId = coupleId;
+        ActiveCoupleJoinedAtUtc = joinedAtUtc;
+    }
+
+    public void ClearActiveCouple()
+    {
+        ActiveCoupleId = null;
+        ActiveCoupleJoinedAtUtc = null;
+    }
+
+    public void ChangePasswordHash(string passwordHash)
+    {
+        if (string.IsNullOrWhiteSpace(passwordHash))
         {
-            throw new InvalidOperationException("User is already assigned to a couple.");
+            throw new ArgumentException("A senha é obrigatória.", nameof(passwordHash));
         }
 
-        CoupleId = coupleId;
-        CoupleJoinedAtUtc = coupleJoinedAtUtc;
+        PasswordHash = passwordHash;
+    }
+
+    public void MarkEmailVerified()
+    {
+        EmailVerified = true;
     }
 }

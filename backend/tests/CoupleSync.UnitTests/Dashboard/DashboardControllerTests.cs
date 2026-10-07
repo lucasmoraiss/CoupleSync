@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using CoupleSync.Api.Controllers;
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Dashboard;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -42,10 +43,10 @@ public class DashboardControllerTests
         var endDate = new DateTime(2023, 01, 01, 0, 0, 0, DateTimeKind.Utc);
 
         // Act
-        var result = await _controller.GetDashboard(startDate, endDate, CancellationToken.None);
+        var act = () => _controller.GetDashboard(startDate, endDate, CancellationToken.None);
 
         // Assert
-        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
-        Assert.Equal("startDate must not be after endDate", badRequestResult.Value);
+        var ex = await Assert.ThrowsAsync<BadRequestException>(act);
+        Assert.Equal("INVALID_DATE_RANGE", ex.Code);
     }
 }

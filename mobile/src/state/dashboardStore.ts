@@ -1,15 +1,11 @@
 // AC-004: Client-side dashboard store — holds selected period range (Zustand, client state only)
 import { create } from 'zustand';
+import { registerUserDataCleaner } from './userData';
 
-function formatDate(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
+// Vazio = mês corrente. Quem decide qual é o mês corrente é o servidor (fuso America/Sao_Paulo);
+// o aparelho não calcula o período, para os dois nunca discordarem.
 function currentMonthRange(): { startDate: string; endDate: string } {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  return { startDate: formatDate(start), endDate: formatDate(now) };
+  return { startDate: '', endDate: '' };
 }
 
 interface DashboardStore {
@@ -28,3 +24,5 @@ export const useDashboardStore = create<DashboardStore>((set) => {
     resetToCurrentMonth: () => set(currentMonthRange()),
   };
 });
+
+registerUserDataCleaner(() => useDashboardStore.getState().resetToCurrentMonth());

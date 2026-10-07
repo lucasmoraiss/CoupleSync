@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -79,8 +80,113 @@ public sealed class AuthRepository : IAuthRepository
         return affectedRows == 1;
     }
 
+    public async Task<bool> RevokeRefreshTokenByHashAsync(string tokenHash, CancellationToken cancellationToken)
+    {
+        var affectedRows = await _dbContext.RefreshTokens
+            .Where(x => x.TokenHash == tokenHash)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        return affectedRows > 0;
+    }
+
+    public Task<int> RevokeRefreshTokensByUserIdAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return _dbContext.RefreshTokens
+            .Where(x => x.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
+
+    public Task<EmailCode?> FindEmailCodeAsync(Guid userId, string purpose, CancellationToken cancellationToken)
+    {
+        return _dbContext.EmailCodes
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.UserId == userId && x.Purpose == purpose, cancellationToken);
+    }
+
+    public async Task<EmailCodeReissueResult> TryReissueEmailCodeAsync(
+        Guid userId,
+        string purpose,
+        string codeHash,
+        DateTime expiresAtUtc,
+        DateTime now,
+        int maxPerWindow,
+        TimeSpan window,
+        CancellationToken cancellationToken)
+    {
+        var windowCutoff = now - window;
+
+        // One statement: the cap check and the increment are the same atomic UPDATE (row-locked on PostgreSQL), so
+        // concurrent requests cannot all pass the check at the same count. SET expressions read the pre-update row.
+        var affectedRows = await _dbContext.EmailCodes
+            .Where(x => x.UserId == userId
+                && x.Purpose == purpose
+                && (x.IssueWindowStartedAtUtc <= windowCutoff || x.IssueCount < maxPerWindow))
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.CodeHash, codeHash)
+                    .SetProperty(x => x.ExpiresAtUtc, expiresAtUtc)
+                    .SetProperty(x => x.CreatedAtUtc, now)
+                    .SetProperty(x => x.Attempts, 0)
+                    .SetProperty(x => x.IssueCount, x => x.IssueWindowStartedAtUtc <= windowCutoff ? 1 : x.IssueCount + 1)
+                    .SetProperty(x => x.IssueWindowStartedAtUtc, x => x.IssueWindowStartedAtUtc <= windowCutoff ? now : x.IssueWindowStartedAtUtc),
+                cancellationToken);
+
+        if (affectedRows > 0)
+        {
+            return EmailCodeReissueResult.Reissued;
+        }
+
+        var exists = await _dbContext.EmailCodes.AnyAsync(x => x.UserId == userId && x.Purpose == purpose, cancellationToken);
+        return exists ? EmailCodeReissueResult.LimitReached : EmailCodeReissueResult.NoCode;
+    }
+
+    public async Task AddEmailCodeAsync(EmailCode code, CancellationToken cancellationToken)
+    {
+        _dbContext.EmailCodes.Add(code);
+        try
+        {
+            await DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
+        }
+        catch (DataStoreException)
+        {
+            _dbContext.Entry(code).State = EntityState.Detached;
+            throw;
+        }
+    }
+
+    public async Task<bool> TryRegisterEmailCodeAttemptAsync(Guid codeId, int maxAttempts, CancellationToken cancellationToken)
+    {
+        var affectedRows = await _dbContext.EmailCodes
+            .Where(x => x.Id == codeId && x.Attempts < maxAttempts)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.Attempts, x => x.Attempts + 1), cancellationToken);
+
+        return affectedRows == 1;
+    }
+
+    public async Task<bool> ConsumeEmailCodeAsync(Guid codeId, string verifiedCodeHash, CancellationToken cancellationToken)
+    {
+        var affectedRows = await _dbContext.EmailCodes
+            .Where(x => x.Id == codeId && x.CodeHash == verifiedCodeHash)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        return affectedRows == 1;
+    }
+
+    public async Task ExecuteInTransactionAsync(Func<Task> action, CancellationToken cancellationToken)
+    {
+        if (_dbContext.Database.CurrentTransaction is not null)
+        {
+            await action();
+            return;
+        }
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await action(); // an exception skips the commit; disposing the transaction rolls everything back
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
-        return _dbContext.SaveChangesAsync(cancellationToken);
+        return DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
     }
 }

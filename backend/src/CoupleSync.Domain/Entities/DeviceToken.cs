@@ -34,7 +34,7 @@ public sealed class DeviceToken : ICoupleScoped
     public static DeviceToken Create(Guid userId, Guid coupleId, string token, DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(token))
-            throw new ArgumentException("Token must not be null or empty.", nameof(token));
+            throw new ArgumentException("O token não pode ser vazio.", nameof(token));
 
         return new DeviceToken(Guid.NewGuid(), userId, coupleId, token, "android", nowUtc);
     }
@@ -42,9 +42,22 @@ public sealed class DeviceToken : ICoupleScoped
     public void UpdateLastSeen(string token, DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(token))
-            throw new ArgumentException("Token must not be null or empty.", nameof(token));
+            throw new ArgumentException("O token não pode ser vazio.", nameof(token));
 
         Token = token;
         LastSeenAtUtc = nowUtc;
+    }
+
+    /// <summary>The user left the group the device was registered under; the registration follows the user.</summary>
+    public void MoveToCouple(Guid coupleId)
+    {
+        CoupleId = coupleId;
+    }
+
+    /// <summary>The device now belongs to this user's current couple, with this token.</summary>
+    public void Refresh(Guid coupleId, string token, DateTime nowUtc)
+    {
+        UpdateLastSeen(token, nowUtc);
+        CoupleId = coupleId;
     }
 }

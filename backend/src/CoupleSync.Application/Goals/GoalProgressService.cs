@@ -6,21 +6,21 @@ namespace CoupleSync.Application.Goals;
 
 public sealed class GoalProgressService : IGoalProgressService
 {
-    public GoalProgressResult Compute(Goal goal, decimal contributedAmount, DateTime nowUtc)
+    public GoalProgressResult Compute(Goal goal, decimal linkedAmount, DateTime nowUtc)
     {
-        var progressPercent = Math.Clamp(contributedAmount / goal.TargetAmount * 100m, 0m, 100m);
-
-        var isAchieved = contributedAmount >= goal.TargetAmount;
+        var progress = GoalProgressBreakdown.From(goal, linkedAmount);
         var daysRemaining = (goal.Deadline - nowUtc).TotalDays;
 
         return new GoalProgressResult(
             goal.Id,
             goal.Title,
             goal.TargetAmount,
-            contributedAmount,
-            progressPercent,
-            isAchieved,
+            progress.TotalAmount,
+            progress.ProgressPercent,
+            progress.IsAchieved,
             daysRemaining,
-            goal.Status);
+            goal.Status,
+            progress.ManualAmount,
+            progress.LinkedAmount);
     }
 }

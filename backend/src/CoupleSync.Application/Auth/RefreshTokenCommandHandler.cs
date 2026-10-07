@@ -75,6 +75,6 @@ public sealed class RefreshTokenCommandHandler
     [DoesNotReturn]
     private static void ThrowInvalidSession()
     {
-        throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired session.");
+        throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
     }
 }

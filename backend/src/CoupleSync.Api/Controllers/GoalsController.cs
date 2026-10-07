@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using System.Security.Claims;
 using CoupleSync.Api.Contracts.Goals;
 using CoupleSync.Api.Filters;
@@ -67,7 +68,7 @@ public sealed class GoalsController : ControllerBase
                 request.Title,
                 request.Description,
                 request.TargetAmount,
-                request.Currency ?? "BRL",
+                CurrencyRules.NormalizeOrBrl(request.Currency),
                 deadline),
             cancellationToken);
 
@@ -154,7 +155,7 @@ public sealed class GoalsController : ControllerBase
         }
 
         var result = await _updateHandler.HandleAsync(
-            new UpdateGoalCommand(id, coupleId, request.Title, request.Description, request.TargetAmount, request.CurrentAmount, deadline),
+            new UpdateGoalCommand(id, coupleId, request.Title, request.Description, request.TargetAmount, request.CurrentAmount, deadline, request.ManualAmount),
             cancellationToken);
 
         return Ok(MapToResponse(result));
@@ -211,19 +212,22 @@ public sealed class GoalsController : ControllerBase
             result.ProgressPercent,
             result.IsAchieved,
             result.DaysRemaining,
-            result.Status.ToString()));
+            result.Status.ToString(),
+            result.ManualAmount,
+            result.LinkedAmount));
     }
 
     private static GoalResponse MapToResponse(Application.Goals.Queries.GoalDto g)
         => new(g.Id, g.CreatedByUserId, g.Title, g.Description,
                g.TargetAmount, g.CurrentAmount, g.Currency, g.Deadline, g.Status.ToString(),
-               g.CreatedAtUtc, g.UpdatedAtUtc);
+               g.CreatedAtUtc, g.UpdatedAtUtc,
+               g.ManualAmount, g.LinkedAmount, g.ProgressPercent, g.IsAchieved);
 
     private Guid GetAuthenticatedCoupleId()
     {
         var claimValue = User.FindFirstValue("couple_id");
         if (!Guid.TryParse(claimValue, out var coupleId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired couple context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return coupleId;
     }
 
@@ -231,7 +235,7 @@ public sealed class GoalsController : ControllerBase
     {
         var claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!Guid.TryParse(claimValue, out var userId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired user context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return userId;
     }
 }

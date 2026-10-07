@@ -1,3 +1,4 @@
+using CoupleSync.Domain.ValueObjects;
 using System.Security.Claims;
 using CoupleSync.Api.Contracts.Budget;
 using CoupleSync.Api.Filters;
@@ -40,7 +41,7 @@ public sealed class BudgetController : ControllerBase
             coupleId,
             request.Month,
             request.GrossIncome,
-            request.Currency,
+            CurrencyRules.NormalizeOrBrl(request.Currency),
             cancellationToken);
 
         return Ok(MapToResponse(dto));
@@ -60,7 +61,7 @@ public sealed class BudgetController : ControllerBase
         var dto = await _budgetService.GetCurrentPlanAsync(coupleId, cancellationToken);
 
         if (dto is null)
-            return NotFound(new { code = "BUDGET_PLAN_NOT_FOUND", message = "No budget plan for the current month." });
+            throw new NotFoundException("BUDGET_PLAN_NOT_FOUND", "Nenhum orçamento para o mês atual.");
 
         return Ok(MapToResponse(dto));
     }
@@ -80,7 +81,7 @@ public sealed class BudgetController : ControllerBase
         var dto = await _budgetService.GetPlanAsync(coupleId, month, cancellationToken);
 
         if (dto is null)
-            return NotFound(new { code = "BUDGET_PLAN_NOT_FOUND", message = $"No budget plan for month '{month}'." });
+            throw new NotFoundException("BUDGET_PLAN_NOT_FOUND", $"Nenhum orçamento para o mês '{month}'.");
 
         return Ok(MapToResponse(dto));
     }
@@ -101,7 +102,7 @@ public sealed class BudgetController : ControllerBase
         var coupleId = GetAuthenticatedCoupleId();
 
         var inputs = request.Allocations
-            .Select(a => new AllocationInput(a.Category, a.AllocatedAmount, a.Currency))
+            .Select(a => new AllocationInput(a.Category, a.AllocatedAmount, CurrencyRules.NormalizeOrBrl(a.Currency)))
             .ToList();
 
         var dto = await _budgetService.ReplaceAllocationsAsync(
@@ -124,7 +125,7 @@ public sealed class BudgetController : ControllerBase
         CancellationToken cancellationToken)
     {
         var coupleId = GetAuthenticatedCoupleId();
-        var currency = request.Currency ?? "BRL";
+        var currency = CurrencyRules.NormalizeOrBrl(request.Currency);
 
         var dto = await _budgetService.UpdateIncomeAsync(
             coupleId,
@@ -156,7 +157,7 @@ public sealed class BudgetController : ControllerBase
     {
         var claimValue = User.FindFirstValue("couple_id");
         if (!Guid.TryParse(claimValue, out var coupleId))
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired couple context.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         return coupleId;
     }
 }

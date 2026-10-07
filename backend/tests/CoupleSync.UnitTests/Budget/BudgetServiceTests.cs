@@ -1,5 +1,6 @@
 using CoupleSync.Application.Budget;
 using CoupleSync.Application.Budget.Commands;
+using CoupleSync.Application.Budget.Queries;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Domain.Entities;
 using CoupleSync.UnitTests.Support;
@@ -69,15 +70,15 @@ public sealed class BudgetServiceTests
 
         var allocations = new List<AllocationInput>
         {
-            new("Food", 1000m, "BRL"),
-            new("Transport", 500m, "BRL")
+            new("ALIMENTACAO", 1000m, "BRL"),
+            new("TRANSPORTE", 500m, "BRL")
         };
 
         var result = await service.ReplaceAllocationsAsync(coupleId, plan.Id, allocations, CancellationToken.None);
 
         Assert.Equal(2, result.Allocations.Count);
-        Assert.Contains(result.Allocations, a => a.Category == "Food" && a.AllocatedAmount == 1000m);
-        Assert.Contains(result.Allocations, a => a.Category == "Transport" && a.AllocatedAmount == 500m);
+        Assert.Contains(result.Allocations, a => a.Category == "ALIMENTACAO" && a.AllocatedAmount == 1000m);
+        Assert.Contains(result.Allocations, a => a.Category == "TRANSPORTE" && a.AllocatedAmount == 500m);
     }
 
     [Fact]
@@ -106,8 +107,8 @@ public sealed class BudgetServiceTests
 
         var allocations = new List<AllocationInput>
         {
-            new("Food", 1000m, "BRL"),
-            new("Food", 500m, "BRL") // duplicate
+            new("ALIMENTACAO", 1000m, "BRL"),
+            new("ALIMENTACAO", 500m, "BRL") // duplicate
         };
 
         var ex = await Assert.ThrowsAsync<UnprocessableEntityException>(() =>
@@ -125,7 +126,7 @@ public sealed class BudgetServiceTests
 
         var allocations = new List<AllocationInput>
         {
-            new("Food", 1000m, "USD") // mismatch: plan is BRL, allocation is USD
+            new("ALIMENTACAO", 1000m, "USD") // mismatch: plan is BRL, allocation is USD
         };
 
         var ex = await Assert.ThrowsAsync<UnprocessableEntityException>(() =>
@@ -143,7 +144,7 @@ public sealed class BudgetServiceTests
 
         var allocations = new List<AllocationInput>
         {
-            new("Food", 500m, "BRL")
+            new("ALIMENTACAO", 500m, "BRL")
         };
 
         var ex = await Assert.ThrowsAsync<NotFoundException>(() =>
@@ -161,10 +162,10 @@ public sealed class BudgetServiceTests
         var coupleId = Guid.NewGuid();
         var plan = SeedPlan(repo, coupleId);
 
-        // Add a "Food" allocation to the plan
-        plan.Allocations.Add(BudgetAllocation.Create(plan.Id, "Food", 1000m, "BRL", FixedNow));
+        // Add a "ALIMENTACAO" allocation to the plan
+        plan.Allocations.Add(BudgetAllocation.Create(plan.Id, "ALIMENTACAO", 1000m, "BRL", FixedNow));
 
-        // Add a transaction in April 2026 for the "Food" category
+        // Add a transaction in April 2026 for the "ALIMENTACAO" category
         var tx = Transaction.Create(
             coupleId,
             Guid.NewGuid(),
@@ -175,7 +176,7 @@ public sealed class BudgetServiceTests
             new DateTime(2026, 4, 10, 0, 0, 0, DateTimeKind.Utc),
             "Groceries",
             "Supermarket",
-            "Food",
+            "ALIMENTACAO",
             Guid.NewGuid(),
             FixedNow);
         txRepo.Transactions.Add(tx);
@@ -183,7 +184,7 @@ public sealed class BudgetServiceTests
         var result = await service.GetPlanAsync(coupleId, FixedMonth, CancellationToken.None);
 
         Assert.NotNull(result);
-        var foodAlloc = result!.Allocations.Single(a => a.Category == "Food");
+        var foodAlloc = result!.Allocations.Single(a => a.Category == "ALIMENTACAO");
         Assert.Equal(300m, foodAlloc.ActualSpent);
         Assert.Equal(700m, foodAlloc.Remaining);
     }
@@ -216,9 +217,9 @@ public sealed class BudgetServiceTests
 
         var allocations = new List<AllocationInput>
         {
-            new("Food", 1000m, "BRL"),
-            new("Transport", 500m, "BRL"),
-            new("Bills", 1500m, "BRL")
+            new("ALIMENTACAO", 1000m, "BRL"),
+            new("TRANSPORTE", 500m, "BRL"),
+            new("MORADIA", 1500m, "BRL")
         };
 
         var dto = await service.ReplaceAllocationsAsync(coupleId, plan.Id, allocations, CancellationToken.None);
@@ -226,5 +227,20 @@ public sealed class BudgetServiceTests
 
         // 5000 - (1000 + 500 + 1500) = 2000
         Assert.Equal(2000m, gap);
+    }
+
+    [Fact]
+    public void ComputeGap_IgnoresAllocationsInAnotherCurrency_AndIncomeOfANonBrlPlan()
+    {
+        var (service, _, _) = Build();
+        var id = Guid.NewGuid();
+        BudgetAllocationDto Alloc(decimal amount, string currency) => new(Guid.NewGuid(), "LAZER", amount, currency, 0m, amount);
+        BudgetPlanDto Plan(string currency, params BudgetAllocationDto[] allocations) => new(
+            id, id, "2026-04", 5000m, currency, allocations, 0m, FixedNow, FixedNow);
+
+        Assert.Equal(4000m, service.ComputeGap(Plan("BRL", Alloc(1000m, "BRL"), Alloc(900m, "USD"))));
+        Assert.Equal(4000m, service.ComputeGap(Plan("brl", Alloc(1000m, "brl"))));
+        Assert.Equal(0m, service.ComputeGap(Plan("USD")));
+        Assert.Equal(-1000m, service.ComputeGap(Plan("USD", Alloc(1000m, "BRL"))));
     }
 }

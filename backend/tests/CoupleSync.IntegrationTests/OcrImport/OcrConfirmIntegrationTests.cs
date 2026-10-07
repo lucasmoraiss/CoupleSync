@@ -139,7 +139,7 @@ public sealed class OcrConfirmIntegrationTests
 
         Assert.Equal(3, items.Count);
         Assert.Equal(150m, items["Mercado do bairro"].GetProperty("amount").GetDecimal());
-        Assert.Equal("Alimentação", items["Mercado do bairro"].GetProperty("category").GetString());
+        Assert.Equal("ALIMENTACAO", items["Mercado do bairro"].GetProperty("category").GetString());
         Assert.Equal(25.9m, items["FARM 22"].GetProperty("amount").GetDecimal());
         Assert.Equal(18.5m, items["PADARIA"].GetProperty("amount").GetDecimal());
 

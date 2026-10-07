@@ -4,6 +4,12 @@ export interface AuthUserResponse {
   readonly id: string;
   readonly email: string;
   readonly name: string;
+  /** Ausente em servidor antigo. Conta não confirmada continua funcionando por inteiro. */
+  readonly emailVerified?: boolean;
+}
+
+export interface ForgotPasswordResponse {
+  readonly message: string;
 }
 
 export interface AuthResponse {
@@ -16,6 +22,8 @@ export interface CreateCoupleResponse {
   readonly coupleId: string;
   readonly joinCode: string;
   readonly accessToken: string;
+  /** Só vem quando o usuário não tinha refresh token válido (ex.: foi removido de um grupo). */
+  readonly refreshToken?: string | null;
 }
 
 export interface CoupleMemberResponse {
@@ -28,6 +36,8 @@ export interface JoinCoupleResponse {
   readonly coupleId: string;
   readonly members: readonly CoupleMemberResponse[];
   readonly accessToken: string;
+  /** Só vem quando o usuário não tinha refresh token válido (ex.: foi removido de um grupo). */
+  readonly refreshToken?: string | null;
 }
 
 export interface GetCoupleMeResponse {
@@ -35,6 +45,49 @@ export interface GetCoupleMeResponse {
   readonly joinCode: string;
   readonly createdAtUtc: string;
   readonly members: readonly CoupleMemberResponse[];
+  /** Quem criou (ou herdou) o grupo; só ele remove membros e gera novo código. Ausente em servidor antigo. */
+  readonly ownerUserId?: string | null;
+  /** Fim da validade do código de convite (UTC). Ausente em servidor antigo. */
+  readonly joinCodeExpiresAtUtc?: string;
+}
+
+export interface LeaveCoupleResponse {
+  readonly accessToken: string;
+  readonly refreshToken: string;
+  /** Grupo que ficou ativo depois da saída (outro grupo do usuário) ou null. Ausente em servidor antigo. */
+  readonly activeCoupleId?: string | null;
+}
+
+export interface MyGroupMemberResponse {
+  readonly userId: string;
+  readonly name: string;
+}
+
+/** Um dos grupos do usuário. Grupos não têm nome próprio: `name` descreve quem mais está nele. */
+export interface MyGroupResponse {
+  readonly coupleId: string;
+  readonly name: string;
+  readonly isOwner: boolean;
+  readonly isActive: boolean;
+  readonly joinedAtUtc: string;
+  readonly members: readonly MyGroupMemberResponse[];
+}
+
+export interface MyGroupsResponse {
+  readonly activeCoupleId: string | null;
+  readonly maxGroups: number;
+  readonly groups: readonly MyGroupResponse[];
+}
+
+export interface SwitchCoupleResponse {
+  readonly coupleId: string;
+  readonly accessToken: string;
+  readonly refreshToken: string;
+}
+
+export interface RegenerateJoinCodeResponse {
+  readonly joinCode: string;
+  readonly joinCodeExpiresAtUtc: string;
 }
 
 export interface GoalDto {
@@ -43,12 +96,19 @@ export interface GoalDto {
   readonly title: string;
   readonly description: string | null;
   readonly targetAmount: number;
+  /** Progresso unificado: valor guardado manualmente + transações vinculadas. */
   readonly currentAmount: number;
   readonly currency: string;
   readonly deadline: string;
   readonly status: string;
   readonly createdAtUtc: string;
   readonly updatedAtUtc: string;
+  /** Parte guardada manualmente (ausente em servidor antigo: currentAmount já era só o manual). */
+  readonly manualAmount?: number;
+  /** Parte vinda das transações vinculadas. */
+  readonly linkedAmount?: number;
+  readonly progressPercent?: number;
+  readonly isAchieved?: boolean;
 }
 
 export interface GoalProgressSummaryItem {
@@ -59,6 +119,8 @@ export interface GoalProgressSummaryItem {
   readonly progressPercent: number;
   readonly isAchieved: boolean;
   readonly deadline: string;
+  readonly manualAmount?: number;
+  readonly linkedAmount?: number;
 }
 
 export interface GoalsProgressSummaryResponse {
@@ -121,6 +183,17 @@ export interface GetCashFlowResponse {
   readonly categoryBreakdown: Record<string, number>;
   readonly assumptions: string;
   readonly generatedAtUtc: string;
+  /** Mês corrente no fuso do Brasil ("AAAA-MM"). */
+  readonly month: string;
+  /** Renda do mês: fontes de renda do grupo, com as recorrentes já aplicadas. */
+  readonly monthIncome: number;
+  readonly monthSpentToDate: number;
+  /** Média diária usada na previsão (do mês atual; com menos de 3 dias, a do mês anterior). */
+  readonly forecastDailyAverage: number;
+  readonly remainingDays: number;
+  readonly forecastRemainingSpend: number;
+  /** Saldo previsto ao fim do mês = renda − gasto até hoje − gasto previsto dos dias restantes. */
+  readonly projectedMonthEndBalance: number;
 }
 
 export interface NotificationSettingsResponse {
@@ -261,10 +334,22 @@ export interface OcrCandidateResponse {
   readonly confidence: number;
   readonly duplicateSuspected: boolean;
   readonly suggestedCategory?: string;
+  /** O que já aconteceu com a linha; a API antiga não envia (tudo pendente). */
+  readonly lineState?: 'Pending' | 'Confirmed' | 'Discarded';
+}
+
+/** Entrada (crédito) do extrato: aparece na revisão só como informação, nunca é importada. */
+export interface OcrCreditResponse {
+  readonly date: string;
+  readonly description: string;
+  readonly amount: number;
+  readonly currency: string;
 }
 
 export interface OcrResultsResponse {
   readonly candidates: readonly OcrCandidateResponse[];
+  readonly credits?: readonly OcrCreditResponse[];
+  readonly creditsCount?: number;
 }
 
 export interface OcrCategoryOverride {
@@ -283,10 +368,31 @@ export interface OcrConfirmRequest {
   readonly selectedIndices: readonly number[];
   readonly categoryOverrides?: readonly OcrCategoryOverride[];
   readonly candidateEdits?: readonly OcrCandidateEdit[];
+  /** true: as linhas não selecionadas ficam pendentes para confirmar depois; omitido, a importação fecha. */
+  readonly keepJobOpen?: boolean;
+  /** Linhas descartadas de vez (deixam de manter a importação aberta). */
+  readonly discardedIndices?: readonly number[];
 }
 
 export interface OcrConfirmResponse {
   readonly transactionsCreated: number;
+  readonly duplicatesSkipped?: number;
+  /** Linhas ainda pendentes depois desta chamada (0 = importação fechada). */
+  readonly remainingLines?: number;
+}
+
+/** Importação com linhas ainda por revisar, listada na tela de importar extrato. */
+export interface OcrOpenImport {
+  readonly uploadId: string;
+  readonly fileName?: string | null;
+  readonly createdAtUtc: string;
+  readonly pendingLines: number;
+  readonly totalLines: number;
+  readonly creditsCount: number;
+}
+
+export interface OcrOpenImportsResponse {
+  readonly imports: readonly OcrOpenImport[];
 }
 
 // --- AI Chat ---
@@ -297,6 +403,16 @@ export interface ChatHistoryItem {
 
 export interface ChatResponse {
   readonly reply: string;
+}
+
+// --- Categories ---
+export interface CategoryItemResponse {
+  readonly key: string;
+  readonly label: string;
+}
+
+export interface CategoriesResponse {
+  readonly categories: readonly CategoryItemResponse[];
 }
 
 // --- Reports ---

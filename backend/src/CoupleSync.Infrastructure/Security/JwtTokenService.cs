@@ -31,7 +31,8 @@ public sealed class JwtTokenService : IJwtTokenService
         {
             new(JwtRegisteredClaimNames.Sub, userId),
             new("user_id", userId),
-            new("couple_id", user.CoupleId?.ToString() ?? string.Empty),
+            // The active group. It only selects which group the request is about: membership is checked per request.
+            new("couple_id", user.ActiveCoupleId?.ToString() ?? string.Empty),
             new("roles", "[]"),
             new("name", user.Name),
             new("email", user.Email)

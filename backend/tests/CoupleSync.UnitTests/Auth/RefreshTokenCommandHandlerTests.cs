@@ -105,7 +105,7 @@ public sealed class RefreshTokenCommandHandlerTests
             () => handler.HandleAsync(new RefreshTokenCommand(rawRefreshToken), CancellationToken.None));
 
         Assert.Equal("UNAUTHORIZED", exception.Code);
-        Assert.Equal("Invalid or expired session.", exception.Message);
+        Assert.Equal("Sessão inválida ou expirada. Entre novamente.", exception.Message);
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public sealed class RefreshTokenCommandHandlerTests
             () => handler.HandleAsync(new RefreshTokenCommand(rawRefreshToken), CancellationToken.None));
 
         Assert.Equal("UNAUTHORIZED", exception.Code);
-        Assert.Equal("Invalid or expired session.", exception.Message);
+        Assert.Equal("Sessão inválida ou expirada. Entre novamente.", exception.Message);
         Assert.Equal(1, repository.RotateRefreshTokenIfMatchCalls);
     }
 
@@ -160,7 +160,7 @@ public sealed class RefreshTokenCommandHandlerTests
             () => handler.HandleAsync(new RefreshTokenCommand(rawRefreshToken), CancellationToken.None));
 
         Assert.Equal("UNAUTHORIZED", exception.Code);
-        Assert.Equal("Invalid or expired session.", exception.Message);
+        Assert.Equal("Sessão inválida ou expirada. Entre novamente.", exception.Message);
     }
 
     [Fact]
@@ -186,7 +186,7 @@ public sealed class RefreshTokenCommandHandlerTests
             () => handler.HandleAsync(new RefreshTokenCommand(rawRefreshToken), CancellationToken.None));
 
         Assert.Equal("UNAUTHORIZED", exception.Code);
-        Assert.Equal("Invalid or expired session.", exception.Message);
+        Assert.Equal("Sessão inválida ou expirada. Entre novamente.", exception.Message);
     }
 
     private static RefreshTokenCommandHandler CreateHandler(

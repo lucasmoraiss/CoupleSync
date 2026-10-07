@@ -10,7 +10,7 @@ namespace CoupleSync.UnitTests.Transactions;
 public sealed class GetTransactionsQueryHandlerTests
 {
     private static GetTransactionsQueryHandler BuildHandler(FakeTransactionRepository? repo = null, AppDbContext? dbContext = null)
-        => new(repo ?? new FakeTransactionRepository(), dbContext ?? BuildDbContext());
+        => new(repo ?? new FakeTransactionRepository(), new CoupleRepository(dbContext ?? BuildDbContext()));
 
     private static AppDbContext BuildDbContext()
     {
@@ -23,7 +23,7 @@ public sealed class GetTransactionsQueryHandlerTests
 
     private static Transaction BuildTransaction(
         Guid coupleId,
-        string category = "Alimentação",
+        string category = "ALIMENTACAO",
         DateTime? eventTimestamp = null)
     {
         return Transaction.Create(
@@ -105,9 +105,9 @@ public sealed class GetTransactionsQueryHandlerTests
         var repo = new FakeTransactionRepository();
         var coupleId = Guid.NewGuid();
 
-        await repo.AddTransactionAsync(BuildTransaction(coupleId, "Alimentação"), CancellationToken.None);
-        await repo.AddTransactionAsync(BuildTransaction(coupleId, "Transporte"), CancellationToken.None);
-        await repo.AddTransactionAsync(BuildTransaction(coupleId, "Alimentação"), CancellationToken.None);
+        await repo.AddTransactionAsync(BuildTransaction(coupleId, "ALIMENTACAO"), CancellationToken.None);
+        await repo.AddTransactionAsync(BuildTransaction(coupleId, "TRANSPORTE"), CancellationToken.None);
+        await repo.AddTransactionAsync(BuildTransaction(coupleId, "ALIMENTACAO"), CancellationToken.None);
 
         var handler = BuildHandler(repo);
 
@@ -116,7 +116,7 @@ public sealed class GetTransactionsQueryHandlerTests
             CancellationToken.None);
 
         Assert.Equal(2, result.TotalCount);
-        Assert.All(result.Items, item => Assert.Equal("Alimentação", item.Category));
+        Assert.All(result.Items, item => Assert.Equal("ALIMENTACAO", item.Category));
     }
 
     [Fact]
@@ -215,7 +215,7 @@ public sealed class GetTransactionsQueryHandlerTests
 
         var transaction = Transaction.Create(
             coupleId, userId, "fp-test", "NUBANK", 250.50m, "BRL",
-            timestamp, "Coffee", "Starbucks", "Alimentação", Guid.NewGuid(), DateTime.UtcNow);
+            timestamp, "Coffee", "Starbucks", "ALIMENTACAO", Guid.NewGuid(), DateTime.UtcNow);
 
         await repo.AddTransactionAsync(transaction, CancellationToken.None);
         var handler = BuildHandler(repo, dbContext);
@@ -234,7 +234,7 @@ public sealed class GetTransactionsQueryHandlerTests
         Assert.Equal(timestamp, item.EventTimestampUtc);
         Assert.Equal("Coffee", item.Description);
         Assert.Equal("Starbucks", item.Merchant);
-        Assert.Equal("Alimentação", item.Category);
+        Assert.Equal("ALIMENTACAO", item.Category);
     }
 
     [Fact]

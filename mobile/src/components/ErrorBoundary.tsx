@@ -37,11 +37,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>{this.props.fallbackTitle ?? 'Algo deu errado'}</Text>
+        <Text style={styles.title} accessibilityRole="header">{this.props.fallbackTitle ?? 'Algo deu errado'}</Text>
         <Text style={styles.subtitle}>
           Não foi possível renderizar esta tela. Tente novamente.
         </Text>
-        <Pressable style={styles.btn} onPress={this.reset} accessibilityRole="button">
+        <Pressable accessibilityLabel="Tentar novamente" style={styles.btn} onPress={this.reset} accessibilityRole="button">
           <Text style={styles.btnText}>Tentar novamente</Text>
         </Pressable>
       </View>
@@ -69,6 +69,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   btn: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     backgroundColor: colors.primary,

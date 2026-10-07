@@ -35,7 +35,7 @@ export function Toast({ message, variant, translateY, onDismiss, bottomOffset }:
       accessibilityRole="alert"
       accessibilityLiveRegion={variant === 'error' ? 'assertive' : 'polite'}
     >
-      <TouchableOpacity
+      <TouchableOpacity accessibilityRole="button"
         style={styles.inner}
         onPress={onDismiss}
         activeOpacity={0.85}

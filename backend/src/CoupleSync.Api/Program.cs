@@ -1,5 +1,6 @@
 using CoupleSync.Application.AiChat;
 using System.Text;
+using CoupleSync.Api.Errors;
 using CoupleSync.Api.Health;
 using CoupleSync.Api.Middleware;
 using CoupleSync.Api.RateLimiting;
@@ -48,8 +49,21 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<RegisterCommandHandler>();
 builder.Services.AddScoped<LoginCommandHandler>();
 builder.Services.AddScoped<RefreshTokenCommandHandler>();
+builder.Services.AddScoped<LogoutCommandHandler>();
+builder.Services.AddScoped<ChangePasswordCommandHandler>();
+builder.Services.AddScoped<EmailCodeFlow>();
+builder.Services.AddScoped<RequestPasswordResetCommandHandler>();
+builder.Services.AddScoped<ResetPasswordCommandHandler>();
+builder.Services.AddScoped<ConfirmEmailCommandHandler>();
+builder.Services.AddScoped<ResendEmailVerificationCommandHandler>();
+builder.Services.AddScoped<GetCurrentUserQueryHandler>();
 builder.Services.AddScoped<CreateCoupleCommandHandler>();
 builder.Services.AddScoped<JoinCoupleCommandHandler>();
+builder.Services.AddScoped<LeaveCoupleCommandHandler>();
+builder.Services.AddScoped<SwitchCoupleCommandHandler>();
+builder.Services.AddScoped<GetMyGroupsQueryHandler>();
+builder.Services.AddScoped<RemoveCoupleMemberCommandHandler>();
+builder.Services.AddScoped<RegenerateJoinCodeCommandHandler>();
 builder.Services.AddScoped<GetCoupleMeQueryHandler>();
 builder.Services.AddScoped<IngestNotificationEventCommandHandler>();
 builder.Services.AddScoped<GetIntegrationStatusQueryHandler>();
@@ -58,6 +72,7 @@ builder.Services.AddScoped<UpdateTransactionCategoryCommandHandler>();
 builder.Services.AddScoped<LinkTransactionToGoalCommandHandler>();
 builder.Services.AddScoped<CreateManualTransactionCommandHandler>();
 builder.Services.AddScoped<DeleteTransactionCommandHandler>();
+builder.Services.AddScoped<UpdateTransactionCommandHandler>();
 builder.Services.AddScoped<GetDashboardQueryHandler>();
 builder.Services.AddScoped<CreateGoalCommandHandler>();
 builder.Services.AddScoped<UpdateGoalCommandHandler>();
@@ -68,6 +83,7 @@ builder.Services.AddScoped<GetGoalByIdQueryHandler>();
 builder.Services.AddScoped<GetGoalProgressQueryHandler>();
 builder.Services.AddScoped<GetGoalsProgressSummaryQueryHandler>();
 builder.Services.AddScoped<IGoalProgressService, GoalProgressService>();
+builder.Services.AddScoped<GoalProgressReader>();
 builder.Services.AddScoped<GetCashFlowQueryHandler>();
 builder.Services.AddScoped<RegisterDeviceTokenCommandHandler>();
 builder.Services.AddScoped<UpdateNotificationSettingsCommandHandler>();
@@ -80,8 +96,11 @@ builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<ChatContextService>();
 builder.Services.AddScoped<GeminiChatService>();
 
-builder.Services.AddControllers()
-    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter()));
+ValidationLocalization.Configure();
+builder.Services.AddControllers(ValidationLocalization.ConfigureModelBinding)
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter()))
+    // Binding/validation failures (400 of [ApiController]) use the same error format as everything else.
+    .ConfigureApiBehaviorOptions(options => options.InvalidModelStateResponseFactory = InvalidModelStateResponse.Create);
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 

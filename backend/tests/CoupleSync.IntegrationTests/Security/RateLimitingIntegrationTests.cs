@@ -43,6 +43,7 @@ public sealed class RateLimitingIntegrationTests
         Assert.Equal(HttpStatusCode.TooManyRequests, sixth.StatusCode);
         var error = await sixth.Content.ReadFromJsonAsync<ErrorDto>();
         Assert.Equal("RATE_LIMIT_EXCEEDED", error!.Code);
+        Assert.Equal("Muitas tentativas. Aguarde um instante e tente novamente.", error.Message);
         Assert.False(string.IsNullOrWhiteSpace(error.Message));
         Assert.False(string.IsNullOrWhiteSpace(error.TraceId));
         Assert.True(sixth.Headers.Contains("Retry-After"));
@@ -111,16 +112,124 @@ public sealed class RateLimitingIntegrationTests
     }
 
     [Fact]
-    public async Task Refresh_IsNotRateLimited()
+    public async Task Logout_SixthAttemptFromTheSameIp_Returns429_WithoutUsingTheLoginBudget()
     {
         await using var factory = new RateLimitWebApplicationFactory();
         using var client = factory.CreateClient();
 
-        for (var attempt = 1; attempt <= 12; attempt++)
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            var response = await client.PostAsJsonAsync("/api/v1/auth/logout", new { RefreshToken = $"token-{attempt}" });
+            Assert.True(HttpStatusCode.NoContent == response.StatusCode, $"attempt {attempt}: got {(int)response.StatusCode}");
+        }
+
+        var sixth = await client.PostAsJsonAsync("/api/v1/auth/logout", new { RefreshToken = "token-6" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, sixth.StatusCode);
+        Assert.Equal("RATE_LIMIT_EXCEEDED", (await sixth.Content.ReadFromJsonAsync<ErrorDto>())!.Code);
+
+        // Login keeps its own budget.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(client, "nobody@example.com", "WrongPass123!")).StatusCode);
+    }
+
+    [Fact]
+    public async Task ForgotAndResetPassword_SixthRequestFromTheSameIp_Returns429_EachRouteWithItsOwnBudget()
+    {
+        await using var factory = new RateLimitWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            // E-mail sending is off in tests: 503 proves the request got past the limiter.
+            var forgot = await client.PostAsJsonAsync("/api/v1/auth/forgot-password", new { Email = "nobody@example.com" });
+            Assert.True(HttpStatusCode.ServiceUnavailable == forgot.StatusCode, $"forgot {attempt}: got {(int)forgot.StatusCode}");
+        }
+
+        var sixth = await client.PostAsJsonAsync("/api/v1/auth/forgot-password", new { Email = "nobody@example.com" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, sixth.StatusCode);
+        Assert.Equal("RATE_LIMIT_EXCEEDED", (await sixth.Content.ReadFromJsonAsync<ErrorDto>())!.Code);
+
+        var reset = await client.PostAsJsonAsync("/api/v1/auth/reset-password",
+            new { Email = "nobody@example.com", Code = "123456", NewPassword = "NovaSenha456" });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, reset.StatusCode);
+
+        for (var attempt = 2; attempt <= 5; attempt++)
+        {
+            await client.PostAsJsonAsync("/api/v1/auth/reset-password",
+                new { Email = "nobody@example.com", Code = "123456", NewPassword = "NovaSenha456" });
+        }
+
+        var sixthReset = await client.PostAsJsonAsync("/api/v1/auth/reset-password",
+            new { Email = "nobody@example.com", Code = "123456", NewPassword = "NovaSenha456" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, sixthReset.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChangePassword_SixthAttemptByTheSameUser_Returns429_AndOtherUsersAreNotAffected()
+    {
+        await using var factory = new RateLimitWebApplicationFactory();
+        using var attacker = factory.CreateClient();
+        using var bystander = factory.CreateClient();
+        attacker.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", await RegisterAndGetTokenAsync(attacker));
+        bystander.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", await RegisterAndGetTokenAsync(bystander));
+
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            var response = await attacker.PostAsJsonAsync("/api/v1/auth/change-password",
+                new { CurrentPassword = "WrongGuess123", NewPassword = "NovaSenha456" });
+            Assert.True(HttpStatusCode.BadRequest == response.StatusCode, $"attempt {attempt}: got {(int)response.StatusCode}");
+        }
+
+        var sixth = await attacker.PostAsJsonAsync("/api/v1/auth/change-password",
+            new { CurrentPassword = "WrongGuess123", NewPassword = "NovaSenha456" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, sixth.StatusCode);
+
+        var other = await bystander.PostAsJsonAsync("/api/v1/auth/change-password",
+            new { CurrentPassword = "WrongGuess123", NewPassword = "NovaSenha456" });
+        Assert.Equal(HttpStatusCode.BadRequest, other.StatusCode);
+    }
+
+    [Fact]
+    public async Task Refresh_HasItsOwnGenerousBudgetPerIp_SeparateFromLogin()
+    {
+        await using var factory = new RateLimitWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        // 60 per minute per IP by default: an app refreshes about every 15 minutes, and testers may share an address.
+        for (var attempt = 1; attempt <= 60; attempt++)
         {
             var response = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { RefreshToken = $"invalid-token-{attempt}" });
             Assert.True(HttpStatusCode.Unauthorized == response.StatusCode, $"attempt {attempt}: got {(int)response.StatusCode}");
         }
+
+        var next = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { RefreshToken = "invalid-token-61" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, next.StatusCode);
+        Assert.Equal("RATE_LIMIT_EXCEEDED", (await next.Content.ReadFromJsonAsync<ErrorDto>())!.Code);
+        Assert.True(next.Headers.Contains("Retry-After"));
+
+        // Login keeps its own budget.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(client, "nobody@example.com", "WrongPass123!")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Refresh_LimitIsConfigurable_AndDoesNotFollowTheAuthLimit()
+    {
+        await using var factory = new RateLimitWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["RateLimiting:Auth:PermitLimit"] = "1",
+            ["RateLimiting:Refresh:PermitLimit"] = "3"
+        });
+        using var client = factory.CreateClient();
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            var response = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { RefreshToken = $"invalid-token-{attempt}" });
+            Assert.True(HttpStatusCode.Unauthorized == response.StatusCode, $"attempt {attempt}: got {(int)response.StatusCode}");
+        }
+
+        var fourth = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { RefreshToken = "invalid-token-4" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, fourth.StatusCode);
     }
 
     [Fact]

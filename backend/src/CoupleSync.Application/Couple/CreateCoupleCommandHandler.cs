@@ -1,6 +1,9 @@
+using CoupleSync.Application.Auth;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Application.Common.Options;
 using CoupleSync.Domain.Entities;
+using Microsoft.Extensions.Options;
 
 namespace CoupleSync.Application.Couples;
 
@@ -12,13 +15,22 @@ public sealed class CreateCoupleCommandHandler
     private readonly ICoupleJoinCodeGenerator _joinCodeGenerator;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IJwtTokenService _jwtTokenService;
+    private readonly IAuthRepository _authRepository;
+    private readonly ITokenHasher _tokenHasher;
+    private readonly JwtOptions _jwtOptions;
 
     public CreateCoupleCommandHandler(
         ICoupleRepository coupleRepository,
         ICoupleJoinCodeGenerator joinCodeGenerator,
         IDateTimeProvider dateTimeProvider,
-        IJwtTokenService jwtTokenService)
+        IJwtTokenService jwtTokenService,
+        IAuthRepository authRepository,
+        ITokenHasher tokenHasher,
+        IOptions<JwtOptions> jwtOptions)
     {
+        _authRepository = authRepository;
+        _tokenHasher = tokenHasher;
+        _jwtOptions = jwtOptions.Value;
         _coupleRepository = coupleRepository;
         _joinCodeGenerator = joinCodeGenerator;
         _dateTimeProvider = dateTimeProvider;
@@ -27,17 +39,17 @@ public sealed class CreateCoupleCommandHandler
 
     public async Task<CreateCoupleResult> HandleAsync(CreateCoupleCommand command, CancellationToken cancellationToken)
     {
+        // Serialises this user's membership changes, so the limit below cannot be passed by parallel requests.
+        await using var change = await _coupleRepository.BeginMembershipChangeAsync(command.UserId, cancellationToken);
         var user = await _coupleRepository.FindUserByIdAsync(command.UserId, cancellationToken);
 
         if (user is null || !user.IsActive)
         {
-            throw new UnauthorizedException("UNAUTHORIZED", "Invalid or expired session.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Sessão inválida ou expirada. Entre novamente.");
         }
 
-        if (user.CoupleId.HasValue)
-        {
-            throw new ConflictException("USER_ALREADY_IN_COUPLE", "User is already in a couple.");
-        }
+        var groups = await _coupleRepository.GetGroupsOfUserAsync(user.Id, cancellationToken);
+        GroupLimit.EnsureRoomForOneMore(groups.Count);
 
         var now = _dateTimeProvider.UtcNow;
         var joinCode = await GenerateUniqueJoinCodeAsync(cancellationToken);
@@ -45,14 +57,18 @@ public sealed class CreateCoupleCommandHandler
         couple.AddMember(user, now);
 
         await _coupleRepository.AddCoupleAsync(couple, cancellationToken);
-        await _coupleRepository.SaveChangesAsync(cancellationToken);
 
-        // Regenerate JWT so the user's couple_id claim reflects the new couple membership.
-        // Without this, subsequent authenticated requests would fail COUPLE_REQUIRED checks
-        // until the user logs in again.
+        // A user removed from a group has no refresh token left; give them a working one (null when they already
+        // have one) so the session does not die at the next renewal. Saved together with the group.
+        var refreshTokenRaw = await RefreshTokenIssuer.EnsureAsync(
+            _authRepository, _tokenHasher, user.Id, now, _jwtOptions.RefreshTokenTtlDays, cancellationToken);
+        await _coupleRepository.SaveChangesAsync(cancellationToken);
+        await change.CommitAsync(cancellationToken);
+
+        // The new group is now the user's active one: the access token carries it in the couple_id claim.
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
 
-        return new CreateCoupleResult(couple.Id, couple.JoinCode, accessToken);
+        return new CreateCoupleResult(couple.Id, couple.JoinCode, accessToken, refreshTokenRaw);
     }
 
     private async Task<string> GenerateUniqueJoinCodeAsync(CancellationToken cancellationToken)
@@ -66,6 +82,6 @@ public sealed class CreateCoupleCommandHandler
             }
         }
 
-        throw new AppException("COUPLE_CODE_GENERATION_FAILED", "Unable to generate a unique join code.", 500);
+        throw new AppException("COUPLE_CODE_GENERATION_FAILED", "Não foi possível gerar o código de convite. Tente novamente.", 500);
     }
 }

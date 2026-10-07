@@ -21,18 +21,12 @@ public sealed class CreateGoalRequestValidator : AbstractValidator<CreateGoalReq
             .MaximumLength(512)
             .When(x => x.Description is not null);
 
-        RuleFor(x => x.TargetAmount)
-            .GreaterThan(0)
-            .LessThanOrEqualTo(MoneyRules.MaxAmount)
-            .Must(MoneyRules.HasAtMostTwoDecimals)
-            .WithMessage("TargetAmount must have at most two decimal places.");
+        RuleFor(x => x.TargetAmount).PositiveMoney();
 
-        RuleFor(x => x.Currency)
-            .Length(2, 3)
-            .When(x => x.Currency is not null);
+        RuleFor(x => x.Currency).BrlCurrency();
 
         RuleFor(x => x.Deadline)
-            .Must(d => d.Date >= _dateTimeProvider.UtcNow.Date)
+            .Must(d => d.Date >= BrazilTime.ToLocal(_dateTimeProvider.UtcNow).Date)
             .WithMessage("O prazo deve ser hoje ou uma data futura.");
     }
 }

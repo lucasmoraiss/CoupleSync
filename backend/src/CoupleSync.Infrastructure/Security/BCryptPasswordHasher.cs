@@ -4,6 +4,12 @@ namespace CoupleSync.Infrastructure.Security;
 
 public sealed class BCryptPasswordHasher : IPasswordHasher
 {
+    // Computed once, at the same work factor HashPassword uses.
+    private static readonly Lazy<string> DummyHashValue =
+        new(() => BCrypt.Net.BCrypt.HashPassword("couplesync-dummy-password-for-timing"));
+
+    public string DummyHash => DummyHashValue.Value;
+
     public string HashPassword(string password)
     {
         if (string.IsNullOrWhiteSpace(password))

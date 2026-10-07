@@ -5,8 +5,9 @@ namespace CoupleSync.Infrastructure.Security;
 
 public sealed class CryptoCoupleJoinCodeGenerator : ICoupleJoinCodeGenerator
 {
-    private const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    private const int JoinCodeLength = 6;
+    // No 0/O/1/I: the code is read aloud and typed by hand.
+    private const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private const int JoinCodeLength = 8;
 
     public string Generate()
     {

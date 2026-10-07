@@ -1,5 +1,6 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Application.Transactions.Commands;
 
@@ -19,9 +20,12 @@ public sealed class UpdateTransactionCategoryCommandHandler
         var transaction = await _repository.GetByIdAsync(command.TransactionId, command.CoupleId, cancellationToken);
 
         if (transaction is null)
-            throw new NotFoundException("TRANSACTION_NOT_FOUND", "Transaction not found.");
+            throw new NotFoundException("TRANSACTION_NOT_FOUND", "Transação não encontrada.");
 
-        transaction.UpdateCategory(command.Category);
+        var category = TransactionCategories.TryNormalize(command.Category)
+            ?? throw new AppException("INVALID_CATEGORY", TransactionCategories.InvalidMessage, 400);
+
+        transaction.UpdateCategory(category);
         await _repository.SaveChangesAsync(cancellationToken);
 
         return new UpdateTransactionCategoryResult(
