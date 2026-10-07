@@ -116,7 +116,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Entrar" accessibilityState={{ disabled: loading, busy: loading }}
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Acessar" accessibilityState={{ disabled: loading, busy: loading }}
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={loading}
@@ -125,7 +125,7 @@ export default function LoginScreen() {
             {loading ? (
               <ActivityIndicator color={colors.white} />
             ) : (
-              <Text style={styles.buttonText}>Entrar</Text>
+              <Text style={styles.buttonText}>Acessar</Text>
             )}
           </TouchableOpacity>
 
