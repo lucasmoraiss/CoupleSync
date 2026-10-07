@@ -1,2 +1,5 @@
 # Shell scripts run in Linux containers and CI: always LF, also on a Windows checkout.
 scripts/*.sh text eol=lf
+
+# Skill scripts run under bash (Git Bash, Linux, CI): always LF.
+.claude/skills/**/*.sh text eol=lf
