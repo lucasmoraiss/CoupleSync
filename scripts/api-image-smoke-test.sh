@@ -24,7 +24,7 @@ JWT_SECRET="smoke-$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head
 
 cleanup() {
   status=$?
-  if [ "$status" -ne 0 ]; then
+  if [ "$status" -ne 0 ] && docker inspect "$API" >/dev/null 2>&1; then
     echo "--- API container log (last 60 lines) ---"
     docker logs --tail 60 "$API" 2>&1 || true
   fi
@@ -68,11 +68,18 @@ echo "== starting throwaway PostgreSQL ($DB)"
 docker run --detach --name "$DB" --network "$NETWORK" \
   --env POSTGRES_USER=postgres --env "POSTGRES_PASSWORD=$DB_PASSWORD" --env POSTGRES_DB=couplesync_smoke \
   postgres:16-alpine >/dev/null
-for _ in $(seq 1 60); do
-  docker exec "$DB" pg_isready --username postgres --dbname couplesync_smoke >/dev/null 2>&1 && break
+# Ready over TCP (--host): during initialisation PostgreSQL briefly runs a temporary server that only listens
+# on the unix socket and is then restarted; checking the socket would report "ready" too early.
+db_ready() { docker exec "$DB" pg_isready --host 127.0.0.1 --username postgres --dbname couplesync_smoke >/dev/null 2>&1; }
+for _ in $(seq 1 120); do
+  db_ready && break
   sleep 1
 done
-docker exec "$DB" pg_isready --username postgres --dbname couplesync_smoke >/dev/null || fail "PostgreSQL did not become ready"
+if ! db_ready; then
+  echo "--- PostgreSQL container log (last 30 lines) ---"
+  docker logs --tail 30 "$DB" 2>&1 || true
+  fail "PostgreSQL did not become ready"
+fi
 
 EXTRA_ENV=(--env SMOKE_TEST=1)
 if [ "${SMOKE_FORCE_INVARIANT:-}" = "1" ]; then
