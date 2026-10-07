@@ -44,12 +44,25 @@ public static class CategoryNormalizationSql
 
     public const string BrlCurrency = CurrencyRules.Brl;
 
+    /// <summary>
+    /// Copies of the values this migration rewrites, taken before anything is changed. Plain tables outside the EF
+    /// model (not in the snapshot). IF NOT EXISTS keeps the first copy when the statements run again.
+    /// </summary>
+    public static IReadOnlyList<string> BackupStatements { get; } = new[]
+    {
+        "CREATE TABLE IF NOT EXISTS _backup_20261006_transactions_category AS SELECT id, category, currency FROM transactions",
+        "CREATE TABLE IF NOT EXISTS _backup_20261006_category_rules_category AS SELECT id, category FROM category_rules",
+        "CREATE TABLE IF NOT EXISTS _backup_20261006_budget_allocations AS " +
+        "SELECT id, budget_plan_id, category, currency, allocated_amount FROM budget_allocations",
+    };
+
     /// <summary>Statements run by the migration, in order.</summary>
     public static IReadOnlyList<string> UpStatements { get; } = Build();
 
     private static List<string> Build()
     {
-        var statements = new List<string>();
+        // The backups come first: nothing is rewritten before the original values are kept.
+        var statements = new List<string>(BackupStatements);
 
         // Currency: only the spelling of BRL is unified ("brl", " BRL"). Other currencies stay as they are.
         // Runs first so that "brl" and "BRL" allocations are the same currency when collisions are merged below.

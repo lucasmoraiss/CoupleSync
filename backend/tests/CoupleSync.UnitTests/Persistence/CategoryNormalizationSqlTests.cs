@@ -150,6 +150,14 @@ public sealed class CategoryNormalizationSqlTests : IDisposable
         Assert.Equal(
             new[] { "ALIMENTACAO", "LAZER", "OUTROS", "TRANSPORTE" },
             Query("SELECT category FROM category_rules ORDER BY keyword", 1).Select(r => r[0]).OrderBy(c => c, StringComparer.Ordinal));
+
+        // The backups keep the original spellings and currencies, one row per original row.
+        Assert.Equal(
+            new[] { "  ALIMENTAÇÃO ", "Alimentação", "Educação", "Mercado", "OUTROS", "Saúde", "alimentacao", "" }.OrderBy(c => c, StringComparer.Ordinal),
+            Query("SELECT category FROM _backup_20261006_transactions_category", 1).Select(r => r[0]!).OrderBy(c => c, StringComparer.Ordinal));
+        Assert.Equal(
+            new[] { "Alimentação", "Educação", "Lazer", "TRANSPORTE" }.OrderBy(c => c, StringComparer.Ordinal),
+            Query("SELECT category FROM _backup_20261006_category_rules_category", 1).Select(r => r[0]!).OrderBy(c => c, StringComparer.Ordinal));
     }
 
     // ── allocations: collisions are summed ───────────────────────────────
@@ -172,6 +180,22 @@ public sealed class CategoryNormalizationSqlTests : IDisposable
         Assert.Equal(
             new[] { ("ALIMENTACAO", 1750.3m), ("OUTROS", 175m), ("SAUDE", 300m) },
             rows.Select(r => (r[0]!, decimal.Parse(r[1]!, CultureInfo.InvariantCulture))));
+
+        // Every original allocation is kept, including the ones merged away, with the original spelling and amount.
+        var backup = Query("SELECT id, budget_plan_id, category, currency, allocated_amount FROM _backup_20261006_budget_allocations ORDER BY id", 5);
+        Assert.Equal(
+            new[]
+            {
+                ("00000000-0000-0000-0000-000000000b01", "Alimentação", 1000.10m),
+                ("00000000-0000-0000-0000-000000000b02", "ALIMENTACAO", 500.20m),
+                ("00000000-0000-0000-0000-000000000b03", "alimentacao ", 250.00m),
+                ("00000000-0000-0000-0000-000000000b04", "Saúde", 300m),
+                ("00000000-0000-0000-0000-000000000b05", "Educação", 100m),
+                ("00000000-0000-0000-0000-000000000b06", "Mercado", 50m),
+                ("00000000-0000-0000-0000-000000000b07", "Outros", 25m),
+            },
+            backup.Select(r => (r[0]!.ToLowerInvariant(), r[2]!, decimal.Parse(r[4]!, CultureInfo.InvariantCulture))));
+        Assert.All(backup, r => Assert.Equal(Plan1.ToString(), r[1]!.ToLowerInvariant()));
     }
 
     [Fact]
@@ -261,6 +285,24 @@ public sealed class CategoryNormalizationSqlTests : IDisposable
         Assert.Equal(2, first.Count);
         Assert.Equal(first.Select(r => string.Join('|', r)), second.Select(r => string.Join('|', r)));
         Assert.Equal("SAUDE", Query("SELECT category FROM transactions", 1).Single()[0]);
+    }
+
+    [Fact]
+    public void Migration_RunTwice_KeepsTheFirstBackup_NotTheNormalizedData()
+    {
+        InsertPlan(Plan1);
+        InsertAllocation("00000000-0000-0000-0000-000000000b01", Plan1, "Lazer", 1m, "2026-10-01 10:00:00", "brl");
+        InsertAllocation("00000000-0000-0000-0000-000000000b02", Plan1, "LAZER", 2m, "2026-10-01 10:05:00");
+        InsertTransaction("00000000-0000-0000-0000-000000000e01", "Saúde", "brl");
+
+        RunMigration();
+        RunMigration();
+
+        Assert.Equal(new[] { ("Saúde", "brl") }, Query("SELECT category, currency FROM _backup_20261006_transactions_category", 2).Select(r => (r[0]!, r[1]!)));
+        Assert.Equal(
+            new[] { ("Lazer", "brl", 1m), ("LAZER", "BRL", 2m) },
+            Query("SELECT category, currency, allocated_amount FROM _backup_20261006_budget_allocations ORDER BY id", 3)
+                .Select(r => (r[0]!, r[1]!, decimal.Parse(r[2]!, CultureInfo.InvariantCulture))));
     }
 
     [Fact]

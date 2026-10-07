@@ -12,6 +12,7 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
         {
             // Data-only migration (no schema change): categories converge to the canonical keys, colliding
             // allocations of one plan are summed, "brl" spellings become BRL. See CategoryNormalizationSql.
+            // The first statements copy the original values into _backup_20261006_* tables (outside the EF model).
             foreach (var statement in CategoryNormalizationSql.UpStatements)
             {
                 migrationBuilder.Sql(statement);
@@ -21,7 +22,8 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            // Irreversible on purpose: the original spellings and the merged allocations are not kept.
+            // Not reversed on purpose: the data stays normalized. The original values live in the _backup_20261006_* tables,
+            // which are left alone here.
         }
     }
 }

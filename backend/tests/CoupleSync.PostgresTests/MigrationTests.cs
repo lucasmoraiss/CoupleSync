@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -161,6 +162,45 @@ public sealed class MigrationTests
         var plan2 = await database.RowsAsync($"SELECT category, currency, allocated_amount FROM budget_allocations WHERE budget_plan_id = '{seed.Plan2}'");
         var single = Assert.Single(plan2);
         Assert.Equal(("ALIMENTACAO", "BRL", 300m), ((string)single[0]!, (string)single[1]!, (decimal)single[2]!));
+
+        // --- the backups hold the original spellings and amounts of every seeded row, merged-away ones included
+        var backupTransactions = (await database.RowsAsync(
+                "SELECT t.fingerprint, b.category, b.currency FROM _backup_20261006_transactions_category b JOIN transactions t ON t.id = b.id"))
+            .ToDictionary(r => (string)r[0]!, r => ((string)r[1]!, (string)r[2]!));
+        Assert.Equal(13, await database.ScalarAsync<long>("SELECT count(*) FROM _backup_20261006_transactions_category"));
+        Assert.Equal(13, backupTransactions.Count);
+        Assert.Equal(("Alimentação", "BRL"), backupTransactions["fp-1"]);
+        Assert.Equal(("alimentacao", "brl"), backupTransactions["fp-2"]);
+        Assert.Equal(("  ALIMENTAÇÃO ", "bRL"), backupTransactions["fp-3"]);
+        Assert.Equal(("saude", "Brl"), backupTransactions["fp-5"]);
+        Assert.Equal(("Mercado do bairro", "BRL"), backupTransactions["fp-7"]);
+        Assert.Equal(("Outros", "USD"), backupTransactions["fp-8"]);
+        Assert.Equal(("lazer", "EUR"), backupTransactions["fp-9"]);
+        Assert.Equal(("Casa", "BRL"), backupTransactions["fp-10"]);
+        Assert.Equal(("moradía", "brl"), backupTransactions["fp-12"]);
+
+        var backupRules = (await database.RowsAsync(
+                "SELECT r.keyword, b.category FROM _backup_20261006_category_rules_category b JOIN category_rules r ON r.id = b.id"))
+            .ToDictionary(r => (string)r[0]!, r => (string)r[1]!);
+        Assert.Equal(5, backupRules.Count);
+        Assert.Equal("alimentação", backupRules["ifood"]);
+        Assert.Equal("Saúde ", backupRules["drogaria"]);
+        Assert.Equal("xyz", backupRules["misterio"]);
+
+        var backupAllocations = (await database.RowsAsync(
+                "SELECT budget_plan_id, category, currency, allocated_amount FROM _backup_20261006_budget_allocations"))
+            .Select(r => $"{r[0]}|{r[1]}|{r[2]}|{((decimal)r[3]!).ToString("0.00", CultureInfo.InvariantCulture)}")
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(
+            new[]
+            {
+                $"{seed.Plan1}|Alimentação|brl|100.00", $"{seed.Plan1}|alimentacao|BRL|50.00", $"{seed.Plan1}|ALIMENTACAO|BRL|25.00",
+                $"{seed.Plan1}|Saúde|BRL|200.00", $"{seed.Plan1}|Lazer |USD|10.00", $"{seed.Plan1}|lazer|USD|5.00",
+                $"{seed.Plan1}|Lazer|BRL|20.00", $"{seed.Plan1}|Viagem|BRL|30.00", $"{seed.Plan1}|Presentes|BRL|40.00",
+                $"{seed.Plan2}|alimentacao|brl|300.00",
+            }.OrderBy(x => x, StringComparer.Ordinal),
+            backupAllocations);
 
         // --- currency spelling on every table (other currencies stay)
         foreach (var table in new[] { "budget_plans", "goals" })
