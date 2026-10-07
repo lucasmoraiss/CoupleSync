@@ -1,6 +1,6 @@
 // AC-003: Transactions list screen — FlatList + pull-to-refresh + inline category editor
 import { getApiErrorMessage } from '@/services/apiError';
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,6 @@ import {
   Pressable,
   ScrollView,
   Alert,
-  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -34,11 +33,9 @@ import {
 } from '@/modules/transactions/pagination';
 import type { TransactionResponse, GetTransactionsResponse } from '@/types/api';
 import { colors } from '@/theme';
-import {
-  checkNotificationListenerPermission,
-  openNotificationListenerSettings,
-  isNotificationBridgeAvailable,
-} from '@/modules/integrations/notification-capture/NotificationListenerBridge';
+import { openNotificationListenerSettings } from '@/modules/integrations/notification-capture/NotificationListenerBridge';
+import { useNotificationPermission } from '@/modules/integrations/notification-capture/useNotificationPermission';
+import { captureBannerText } from '@/modules/privacy/captureStatus';
 import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -277,13 +274,10 @@ export default function TransactionsScreen() {
   const [selectedTx, setSelectedTx] = useState<TransactionResponse | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [notifPermission, setNotifPermission] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    if (Platform.OS === 'android' && isNotificationBridgeAvailable()) {
-      checkNotificationListenerPermission().then(setNotifPermission);
-    }
-  }, []);
+  // Conferida a cada volta à tela e ao app (a aba fica montada; a permissão muda fora do app).
+  const notifPermission = useNotificationPermission();
+  const captureConsent = useConsentStore((state) => state.record.capture);
+  const captureBanner = captureBannerText(captureConsent, notifPermission);
 
   const {
     data,
@@ -443,10 +437,10 @@ export default function TransactionsScreen() {
       </View>
 
       {/* Notification permission banner */}
-      {notifPermission === false && (
+      {captureBanner !== null && (
         <View style={styles.permissionBanner}>
           <Ionicons name="notifications-off-outline" size={18} color={WARNING} />
-          <Text style={styles.bannerText}>Captura de notificações desativada</Text>
+          <Text style={styles.bannerText}>{captureBanner}</Text>
           <TouchableOpacity
             onPress={() => {
               // Sem aceite registrado, ativar passa primeiro pela tela de consentimento.

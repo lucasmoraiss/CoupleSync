@@ -20,22 +20,6 @@ beforeEach(async () => {
   await useSessionStore.getState().setSession('access-1', 'refresh-1', 'user-1', null);
 });
 
-describe('setAccessTokenAndCouple (criar/entrar no grupo)', () => {
-  it('guarda o refresh token novo quando a API devolve um (usuário removido de um grupo)', async () => {
-    await useSessionStore.getState().setAccessTokenAndCouple('access-2', 'couple-9', 'refresh-2');
-
-    expect(useSessionStore.getState().refreshToken).toBe('refresh-2');
-    expect(persisted()).toMatchObject({ accessToken: 'access-2', refreshToken: 'refresh-2', coupleId: 'couple-9' });
-  });
-
-  it.each([[undefined], [null], ['']])('mantém o refresh token atual quando a API devolve %p', async (value) => {
-    await useSessionStore.getState().setAccessTokenAndCouple('access-2', 'couple-9', value as string | null | undefined);
-
-    expect(useSessionStore.getState().refreshToken).toBe('refresh-1');
-    expect(persisted()).toMatchObject({ accessToken: 'access-2', refreshToken: 'refresh-1', coupleId: 'couple-9' });
-  });
-});
-
 describe('clearCouple (grupo guardado que o servidor não reconhece)', () => {
   it('esquece o grupo e mantém a sessão', async () => {
     await useSessionStore.getState().setCoupleId('couple-1');
@@ -75,8 +59,7 @@ function holdNextWrite() {
 describe('logout durante a gravação no armazenamento seguro', () => {
   it.each([
     ['setTokens', () => useSessionStore.getState().setTokens('access-2', 'refresh-2')],
-    ['leaveCouple', () => useSessionStore.getState().leaveCouple('access-2', 'refresh-2')],
-    ['setAccessTokenAndCouple', () => useSessionStore.getState().setAccessTokenAndCouple('access-2', 'couple-9', 'refresh-2')],
+    ['setActiveGroup', () => useSessionStore.getState().setActiveGroup('access-2', 'couple-9', 'refresh-2')],
     ['setCoupleId', () => useSessionStore.getState().setCoupleId('couple-9')],
   ])('%s: os tokens de quem saiu não voltam, nem na memória nem no armazenamento', async (_name, action) => {
     const release = holdNextWrite();

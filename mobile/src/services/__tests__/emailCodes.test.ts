@@ -6,6 +6,7 @@ import {
   isCompleteCode,
   isEmailNotConfigured,
   normalizeCode,
+  isEmailUnverified,
 } from '../emailCodes';
 
 function apiError(status: number, code: string, message: string) {
@@ -50,5 +51,18 @@ describe('códigos por e-mail', () => {
 
     expect(isEmailNotConfigured(error)).toBe(false);
     expect(getEmailFlowErrorMessage(error, 'fallback', RESET_UNAVAILABLE_MESSAGE)).toMatch(/conexão/);
+  });
+});
+
+describe('isEmailUnverified (M-M10)', () => {
+  it('só quando o servidor diz que o e-mail não foi confirmado', () => {
+    expect(isEmailUnverified({ emailVerified: false })).toBe(true);
+  });
+
+  it('confirmado, sem resposta ou resposta de servidor antigo (sem o campo): não oferece confirmar', () => {
+    expect(isEmailUnverified({ emailVerified: true })).toBe(false);
+    expect(isEmailUnverified(undefined)).toBe(false);
+    expect(isEmailUnverified(null)).toBe(false);
+    expect(isEmailUnverified({})).toBe(false);
   });
 });

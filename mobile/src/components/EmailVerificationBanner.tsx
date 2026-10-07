@@ -5,15 +5,15 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { authApiClient } from '@/services/apiClient';
+import { isEmailUnverified } from '@/services/emailCodes';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors } from '@/theme';
 
 export const ME_QUERY_KEY = ['auth-me'] as const;
 
-export function EmailVerificationBanner() {
+/** O servidor diz que o e-mail da conta ainda não foi confirmado. Usado pelo aviso do Painel e pelas Configurações. */
+export function useEmailUnverified(): boolean {
   const accessToken = useSessionStore((s) => s.accessToken);
-  const [dismissed, setDismissed] = useState(false);
-
   const { data } = useQuery({
     queryKey: ME_QUERY_KEY,
     queryFn: async () => (await authApiClient.getMe()).data,
@@ -21,8 +21,14 @@ export function EmailVerificationBanner() {
     retry: false,
     staleTime: 5 * 60_000,
   });
+  return isEmailUnverified(data);
+}
 
-  if (dismissed || !data || data.emailVerified !== false) return null;
+export function EmailVerificationBanner() {
+  const unverified = useEmailUnverified();
+  const [dismissed, setDismissed] = useState(false);
+
+  if (dismissed || !unverified) return null;
 
   return (
     <View style={styles.banner}>

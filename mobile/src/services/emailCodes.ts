@@ -30,3 +30,11 @@ export function isEmailNotConfigured(error: unknown): boolean {
 export function getEmailFlowErrorMessage(error: unknown, fallback: string, unavailableMessage: string): string {
   return isEmailNotConfigured(error) ? unavailableMessage : getApiErrorMessage(error, fallback);
 }
+
+/**
+ * O e-mail da conta ainda não foi confirmado? Só quando o servidor diz isso com todas as letras: sem resposta
+ * (servidor antigo, sem conexão) não se oferece confirmar.
+ */
+export function isEmailUnverified(me: { emailVerified?: boolean } | null | undefined): boolean {
+  return !!me && me.emailVerified === false;
+}

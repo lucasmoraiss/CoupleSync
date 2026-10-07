@@ -4,10 +4,12 @@ import * as SecureStore from 'expo-secure-store';
 
 const SECURE_STORE_KEY = 'couplesync_session';
 
-// Época da sessão: sobe quando uma sessão começa (login/hidratação) ou termina (logout/expiração).
+// Época da sessão: sobe quando uma sessão começa (login/hidratação), termina (logout/expiração) ou passa para
+// outro grupo (setActiveGroup: trocar, sair para outro grupo, criar ou entrar em mais um).
 // Quem grava de forma assíncrona (armazenamento seguro) anota a época antes e confere depois: se mudou,
 // o resultado é de uma sessão que já não existe e não pode voltar para a memória nem para o armazenamento.
-// Também serve ao cliente HTTP para não repetir, com o token de outro usuário, uma requisição de uma sessão anterior.
+// Também serve ao cliente HTTP para não repetir, com o token de outro usuário ou de outro grupo, uma requisição de
+// uma sessão anterior, e para ignorar a resposta atrasada (401, 403 "sem grupo") de uma delas.
 let sessionEpoch = 0;
 
 export function getSessionEpoch(): number {
@@ -29,12 +31,6 @@ interface SessionActions {
     coupleId: string | null
   ) => Promise<void>;
   setCoupleId: (coupleId: string) => Promise<void>;
-  /**
-   * Update the persisted access token and couple id atomically (used after create/join couple).
-   * The API also returns a refresh token when the user had none (e.g. after being removed from a group):
-   * when present it replaces the stored one; when absent the stored one is kept.
-   */
-  setAccessTokenAndCouple: (accessToken: string, coupleId: string, refreshToken?: string | null) => Promise<void>;
   /** The server says the user has no group (anymore): forget the stale group id, keep the session. */
   clearCouple: () => Promise<void>;
   /** Replace the token pair after a refresh, keeping userId and coupleId. No-op if there is no session. */
@@ -45,8 +41,6 @@ interface SessionActions {
    * group is never repeated with the new group's token. A missing refresh token keeps the stored one.
    */
   setActiveGroup: (accessToken: string, coupleId: string | null, refreshToken?: string | null) => Promise<void>;
-  /** After leaving the group: store the group-less token pair and forget the group. */
-  leaveCouple: (accessToken: string, refreshToken: string) => Promise<void>;
   clearSession: () => Promise<void>;
   hydrateFromStore: () => Promise<void>;
 }
@@ -107,22 +101,6 @@ export const useSessionStore = create<SessionStore>((set, get) => {
       set({ coupleId });
     },
 
-    setAccessTokenAndCouple: async (accessToken: string, coupleId: string, newRefreshToken?: string | null) => {
-      const state = get();
-      if (!state.userId) return;
-      const epoch = sessionEpoch;
-      const refreshToken = newRefreshToken || state.refreshToken;
-      const payload: SessionState = { ...state, accessToken, refreshToken, coupleId };
-      await SecureStore.setItemAsync(SECURE_STORE_KEY, JSON.stringify({
-        accessToken: payload.accessToken,
-        refreshToken: payload.refreshToken,
-        userId: payload.userId,
-        coupleId: payload.coupleId,
-      }));
-      if (!(await stillSameSession(epoch))) return;
-      set({ accessToken, refreshToken, coupleId });
-    },
-
     clearCouple: async () => {
       const state = get();
       // No session (already signed out) or no stale group to forget: nothing to write.
@@ -169,20 +147,6 @@ export const useSessionStore = create<SessionStore>((set, get) => {
       // Época e tokens mudam juntos: daqui em diante toda requisição já sai com o token do grupo novo.
       sessionEpoch += 1;
       set({ accessToken, refreshToken, coupleId });
-    },
-
-    leaveCouple: async (accessToken: string, refreshToken: string) => {
-      const state = get();
-      if (!state.userId) return;
-      const epoch = sessionEpoch;
-      await SecureStore.setItemAsync(SECURE_STORE_KEY, JSON.stringify({
-        accessToken,
-        refreshToken,
-        userId: state.userId,
-        coupleId: null,
-      }));
-      if (!(await stillSameSession(epoch))) return;
-      set({ accessToken, refreshToken, coupleId: null });
     },
 
     clearSession: async () => {

@@ -32,8 +32,9 @@ export interface AuthRefreshDeps {
   /** Limpa a sessão, avisa o usuário e leva ao login. */
   onSessionExpired(): Promise<void> | void;
   /**
-   * Época da sessão: muda quando alguém entra ou sai da conta. Uma requisição lembra a época em que saiu;
-   * se o 401 chega numa época diferente, ela é de outra sessão e não é repetida com o token de quem está agora.
+   * Época da sessão: muda quando alguém entra ou sai da conta e quando o grupo ativo muda. Uma requisição lembra
+   * a época em que saiu; se o 401 chega numa época diferente, ela é de outra sessão (ou de outro grupo) e não é
+   * repetida com o token de quem está agora.
    */
   getSessionEpoch?(): number;
 }

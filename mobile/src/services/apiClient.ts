@@ -9,6 +9,7 @@ import { installAuthRefresh } from './authRefresh';
 import { handleSessionExpired } from './sessionExpiry';
 import { getDevicePushToken } from './deviceToken';
 import { getApiErrorCode } from './apiError';
+import { decideCoupleRequired } from './coupleRequired';
 import type {
   AuthResponse,
   AuthUserResponse,
@@ -76,12 +77,11 @@ axiosInstance.interceptors.response.use(
     if (axios.isCancel(error)) {
       return Promise.reject(error);
     }
-    // AC-609: Surface COUPLE_REQUIRED with dedicated message
-    if (error?.response?.status === 403 && getApiErrorCode(error) === 'COUPLE_REQUIRED') {
-      showToastGlobal(
-        'Conecte-se com seu parceiro primeiro para usar este recurso',
-        'warning',
-      );
+    // AC-609: Surface COUPLE_REQUIRED with the server's message. A late answer to a request sent by a previous
+    // session or for the previous group (the epoch changed since) says nothing about the group active now.
+    const coupleRequired = decideCoupleRequired(error, error?.config?._sessionEpoch, getSessionEpoch());
+    if (coupleRequired.handle) {
+      showToastGlobal(coupleRequired.message, 'warning');
       // O grupo guardado não vale mais (ex.: removido por outro membro): esquece-o e volta à configuração.
       void useSessionStore.getState().clearCouple();
       clearGroupScopedQueries(queryClient);
@@ -264,9 +264,6 @@ export const transactionsApiClient = {
     const query = qs.toString();
     return axiosInstance.get<GetTransactionsResponse>(`/api/v1/transactions${query ? `?${query}` : ''}`);
   },
-
-  getById: (id: string): Promise<AxiosResponse<TransactionResponse>> =>
-    axiosInstance.get<TransactionResponse>(`/api/v1/transactions/${id}`),
 
   updateCategory: (id: string, category: string): Promise<AxiosResponse<TransactionResponse>> =>
     axiosInstance.patch<TransactionResponse>(`/api/v1/transactions/${id}/category`, { category }),
