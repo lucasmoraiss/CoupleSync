@@ -13,7 +13,7 @@ import android.os.Bundle;
  *
  * The text is in a format that the app's parser turns into an expense (pattern "nu-purchase" in
  * mobile/src/modules/integrations/notification-capture/notification-patterns.json). The merchant and the amount
- * are the ones the flow 07-captura-de-notificacao-conferir.yaml looks for: change them together.
+ * are the ones the flow partes/07-conferir-transacao-capturada.yaml looks for: change them together.
  * Invented data: no real person, card or purchase.
  */
 public final class PostNotificationActivity extends Activity {

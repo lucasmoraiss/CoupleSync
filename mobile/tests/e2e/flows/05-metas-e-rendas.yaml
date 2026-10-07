@@ -3,6 +3,8 @@ appId: com.couplesync.app
 name: 05 - Metas e rendas
 ---
 - evalScript: ${output.email = 'e2e-05-' + Date.now() + '@example.com'}
+# O prazo da meta tem de ser futuro: 31 de dezembro do ano seguinte ao da execução.
+- evalScript: ${output.anoDoPrazo = String(new Date().getFullYear() + 1)}
 - runFlow:
     file: comum/conta-com-grupo-no-painel.yaml
     env:
@@ -23,13 +25,13 @@ name: 05 - Metas e rendas
 - tapOn: "Valor alvo da meta"
 - inputText: "150000"
 - tapOn: "Prazo da meta"
-- inputText: "31122030"
+- inputText: ${'3112' + output.anoDoPrazo}
 - hideKeyboard
 - tapOn: "Criar meta"
 - extendedWaitUntil:
     visible: "Viagem E2E"
     timeout: 30000
-- assertVisible: "31/12/2030"
+- assertVisible: ${'31/12/' + output.anoDoPrazo}
 - assertVisible: "Editar meta Viagem E2E"
 - assertNotVisible: "Nenhuma meta ativa"
 
