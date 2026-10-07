@@ -37,6 +37,7 @@ github.com/pluggyai/meu-pluggy e docs.pluggy.ai):
 | Entrada das transações | Tudo passa pela revisão antes de entrar, com **Selecionar tudo** para confirmar num toque; a revisão destaca o que pode ser colisão com registro manual, de notificação ou de extrato. |
 | Escopo de dados | Despesas, entradas como renda do mês, saldos e fatura do cartão, investimentos (patrimônio), histórico retroativo. Tudo guardado com riqueza suficiente para a IA. |
 | Privacidade no grupo | Tudo o que uma pessoa conecta é do grupo: o parceiro vê contas, saldos, faturas e investimentos. Quem conectou é quem edita e desconecta. |
+| Quem sai do grupo | Sair do grupo ou ser removido retira o Open Finance da pessoa daquele grupo: a conexão é desconectada, as credenciais são apagadas na hora e os bancos, contas e saldos dela deixam de existir no grupo (a partir da fase 2, também o espelho). Transações e rendas já confirmadas ficam. Ela pode ligar os mesmos Item IDs em outro grupo. Decidido em 07/10/2026; é a issue #31, entregue antes da fase 2. |
 | Arquitetura | Camada própria `OpenFinance` na API com **espelho completo** dos dados do Pluggy; revisão e conciliação próprias; não reaproveita o job de importação de extrato. |
 
 ## 3. Modelo de dados
@@ -251,6 +252,7 @@ bancários importados** com confirmação em duas etapas.
 | # | Issue | Conteúdo | Pronto quando |
 | --- | --- | --- | --- |
 | 1 | Conexão e credenciais | Tabelas `bank_connections`, `bank_items`, `bank_accounts`; cifragem; `IPluggyClient` com auth, item, contas; rotas de testar, criar conexão, verificar item, status, desconectar; wizard passos 1–4; tela Open Finance em Configurações; cartão "Depende de você" com a variável do Render | Pessoa conecta e vê as contas encontradas |
+| 1b | Sair do grupo retira o Open Finance (issue #31) | Sair ou ser removido desconecta, apaga credenciais, itens e contas da pessoa no grupo; Item ID livre para outro grupo | Nada de quem saiu fica para trás |
 | 2 | Sincronização e revisão de despesas | `bank_transactions`, `sync_runs`; job; retroativo; mapa de categorias; rotas de sync e revisão (sem conciliação); wizard passo 5; tela Revisão do banco com selecionar tudo, confirmar, descartar, categoria; disparo ao abrir o app | Despesas entram sem digitar |
 | 3 | Conciliação | Regras 1–4 da seção 6; "É a mesma"/"É outra"; restaurar; apagar transação devolve ao espelho | Nada duplica |
 | 4 | Entradas e Contas | Entradas como renda do mês; `credit_card_bills`; tela Contas; "Faturas a vencer" no Painel | Vê saldos e o que vai vencer |
