@@ -2,18 +2,16 @@
 # cobranças dela e marcar "Não é recorrente".
 # A conta, o grupo e as três cobranças mensais (estabelecimento inventado) são criados pela API de teste antes de
 # o app abrir (scripts/09-semear-recorrencia.js): o Maestro roda na máquina que dirige o emulador, onde a API
-# responde em 127.0.0.1 (porta de scripts/app-e2e-api.sh).
+# responde em 127.0.0.1 (porta de scripts/app-e2e-api.sh; scripts/app-e2e-run-flows.sh passa o endereço em API_URL).
 appId: com.couplesync.app
 name: 09 - Assinaturas e recorrências
 env:
   SENHA: SenhaSegura123
-  API_URL: http://127.0.0.1:5000
 ---
 - runScript:
     file: scripts/09-semear-recorrencia.js
     env:
       SENHA: ${SENHA}
-      API_URL: ${API_URL}
 
 - launchApp:
     clearState: true
