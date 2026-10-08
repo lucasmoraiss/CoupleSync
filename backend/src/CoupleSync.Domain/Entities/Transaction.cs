@@ -1,4 +1,5 @@
 using CoupleSync.Domain.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Domain.Entities;
 
@@ -101,6 +102,31 @@ public sealed class Transaction : ICoupleScoped
         if (description is not null) Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
         if (merchant is not null) Merchant = string.IsNullOrWhiteSpace(merchant) ? null : merchant.Trim();
         if (eventTimestampUtc.HasValue) EventTimestampUtc = eventTimestampUtc.Value;
+    }
+
+    /// <summary>
+    /// Takes from the bank only what this transaction does not say yet: the merchant when it has none, and the
+    /// category when it has none or is <c>OUTROS</c>. Whatever the person wrote stays. True when something changed.
+    /// </summary>
+    public bool FillMissing(string? merchant, string? category)
+    {
+        var changed = false;
+        if (string.IsNullOrWhiteSpace(Merchant) && !string.IsNullOrWhiteSpace(merchant))
+        {
+            var text = merchant.Trim();
+            Merchant = text.Length > 512 ? text[..512] : text;
+            changed = true;
+        }
+
+        var known = TransactionCategories.TryNormalize(category);
+        if (known is not null && known != TransactionCategories.Other
+            && (string.IsNullOrWhiteSpace(Category) || TransactionCategories.NormalizeOrOther(Category) == TransactionCategories.Other))
+        {
+            Category = known;
+            changed = true;
+        }
+
+        return changed;
     }
 
     public void LinkToGoal(Guid? goalId)

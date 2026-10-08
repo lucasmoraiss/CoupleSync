@@ -711,6 +711,7 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.LinkedIncomeSourceId).HasColumnName("linked_income_source_id");
             entity.Property(x => x.MatchedTransactionId).HasColumnName("matched_transaction_id");
             entity.Property(x => x.AutoReason).HasColumnName("auto_reason").HasMaxLength(BankTransaction.MaxAutoReasonLength);
+            entity.Property(x => x.PersonDecidedAtUtc).HasColumnName("person_decided_at_utc");
             entity.Property(x => x.SuggestedCategory).HasColumnName("suggested_category").HasMaxLength(BankTransaction.MaxSuggestedCategoryLength);
             entity.Property(x => x.ReviewedAtUtc).HasColumnName("reviewed_at_utc");
             // The transaction exactly as Pluggy sent it. Never logged, never returned by the API.
@@ -720,6 +721,8 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
             entity.Ignore(x => x.IsExpense);
             entity.Ignore(x => x.AbsoluteAmount);
+            entity.Ignore(x => x.OpenToAutomaticRules);
+            entity.Ignore(x => x.CanBePairedAsTransfer);
 
             // A Pluggy transaction is mirrored once in the whole database: synchronising again never duplicates.
             entity.HasIndex(x => x.PluggyTransactionId).IsUnique();
@@ -729,6 +732,7 @@ public sealed class AppDbContext : DbContext
             entity.HasIndex(x => x.UserId);
             entity.HasIndex(x => x.LinkedTransactionId);
             entity.HasIndex(x => x.LinkedIncomeSourceId);
+            entity.HasIndex(x => x.MatchedTransactionId);
             entity.HasIndex(x => x.SyncRunId);
 
             entity.HasOne<Couple>()
@@ -750,6 +754,13 @@ public sealed class AppDbContext : DbContext
             entity.HasOne<Transaction>()
                 .WithMany()
                 .HasForeignKey(x => x.LinkedTransactionId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
+
+            // The same for a suspected duplicate: without the transaction there is nothing left to suspect.
+            entity.HasOne<Transaction>()
+                .WithMany()
+                .HasForeignKey(x => x.MatchedTransactionId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .IsRequired(false);
 
