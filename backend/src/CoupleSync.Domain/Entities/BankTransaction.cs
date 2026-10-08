@@ -192,7 +192,7 @@ public sealed class BankTransaction : ICoupleScoped
             ? BankTransactionStatus.Pending
             : BankTransactionStatus.Posted;
         BalanceAfter = snapshot.BalanceAfter;
-        RawJson = string.IsNullOrWhiteSpace(snapshot.RawJson) ? "{}" : snapshot.RawJson;
+        RawJson = string.IsNullOrWhiteSpace(snapshot.RawJson) ? "{}" : TextLimits.JsonWithoutNull(snapshot.RawJson);
         SyncRunId = syncRunId;
         UpdatedAtUtc = nowUtc;
     }

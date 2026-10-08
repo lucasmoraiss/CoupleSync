@@ -70,6 +70,9 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
     /// <summary>The daily scheduler ticks every 50 ms. Off by default (it would enqueue runs the tests did not ask for).</summary>
     public bool SchedulerOn { get; init; }
 
+    /// <summary>Changes the services of the API after everything else here (to put a failing one in the place of a real one).</summary>
+    public Action<IServiceCollection>? ConfigureServices { get; init; }
+
     /// <summary>The clock of the API: the real one, moved by <see cref="TestClock.Offset"/>.</summary>
     public TestClock Clock { get; } = new();
 
@@ -146,6 +149,8 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
             // Every call of the named client "Pluggy" lands on the in-memory fake: no network.
             if (LoopbackPluggyAddress is null)
                 services.AddHttpClient("Pluggy").ConfigurePrimaryHttpMessageHandler(() => Pluggy);
+
+            ConfigureServices?.Invoke(services);
 
             using var scope = services.BuildServiceProvider().CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

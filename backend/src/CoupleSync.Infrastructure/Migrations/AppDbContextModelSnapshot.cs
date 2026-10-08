@@ -478,6 +478,7 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasColumnName("raw_json");
 
                     b.Property<string>("ReviewState")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)")

@@ -704,7 +704,9 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.BillId).HasColumnName("bill_id").HasMaxLength(BankTransaction.MaxPluggyIdLength);
             entity.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(16).IsRequired();
             entity.Property(x => x.BalanceAfter).HasColumnName("balance_after").HasPrecision(18, 2);
-            entity.Property(x => x.ReviewState).HasColumnName("review_state").HasConversion<string>().HasMaxLength(16).IsRequired();
+            // The token: a review written over a state it did not read (confirm and discard of the same line at the
+            // same moment) is refused, so a line is never left discarded with a transaction created from it.
+            entity.Property(x => x.ReviewState).HasColumnName("review_state").HasConversion<string>().HasMaxLength(16).IsRequired().IsConcurrencyToken();
             entity.Property(x => x.LinkedTransactionId).HasColumnName("linked_transaction_id");
             entity.Property(x => x.LinkedIncomeSourceId).HasColumnName("linked_income_source_id");
             entity.Property(x => x.MatchedTransactionId).HasColumnName("matched_transaction_id");

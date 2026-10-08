@@ -63,6 +63,8 @@ public interface IBankSyncRepository
     /// Saves what a run did so far, unless the credentials of <paramref name="connection"/> are no longer the ones the
     /// run read (disconnected, connected again) or the connection is gone (the person left the group): then nothing
     /// at all is written and it fails with <c>ConcurrencyConflictException</c> or <c>ForeignKeyViolationException</c>.
+    /// A line someone reviewed after the run read it keeps that review (state and links): the run writes only what
+    /// comes from Pluggy over it, and does not delete it.
     /// </summary>
     Task SaveRunProgressAsync(BankConnection connection, CancellationToken ct);
 

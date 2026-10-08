@@ -1,8 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
 using CoupleSync.TestSupport;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using static CoupleSync.IntegrationTests.OpenFinance.OpenFinanceSyncKit;
 
 namespace CoupleSync.IntegrationTests.OpenFinance;
@@ -163,6 +167,43 @@ public sealed class OpenFinanceReviewTests
             await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync?historyMonths=5", null), HttpStatusCode.BadRequest, "VALIDATION_ERROR");
         Assert.Equal("O período deve ser de 3, 6 ou 12 meses.", refused.GetProperty("errors").GetProperty("historyMonths")[0].GetString());
         Assert.Equal(2, (await factory.RowsAsync("SELECT id FROM sync_runs")).Count);
+    }
+
+    [Fact]
+    public async Task Sync_WhenTheConnectionIsConnectedAgainWhileThePeriodIsBeingWritten_Answers409Changed_AndEnqueuesNothing()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana, historyMonths: 3);
+        // Between the moment the request read the connection and the moment it saves the period and the run, other
+        // credentials are stored (the person disconnected and connected again on another phone).
+        factory.BeforeNextSave = () => factory.ExecuteAsync(
+            "UPDATE bank_connections SET client_secret_encrypted = 'other-credentials' WHERE id = @id", ("@id", connectionId));
+
+        var answer = await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync?historyMonths=12", null);
+
+        await AssertErrorAsync(answer, HttpStatusCode.Conflict, "BANK_CONNECTION_CHANGED", "Esta conexão mudou enquanto a sincronização era pedida. Tente de novo.");
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM sync_runs"));
+        var connection = Assert.Single(await factory.RowsAsync("SELECT history_months, client_secret_encrypted FROM bank_connections"));
+        Assert.Equal(3L, connection["history_months"]);
+        Assert.Equal("other-credentials", connection["client_secret_encrypted"]);
+    }
+
+    [Fact]
+    public async Task Sync_WhenTheConnectionIsDeletedWhileTheRunIsBeingEnqueued_Answers404_AndEnqueuesNothing()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        // Between the moment the request read the connection and the moment it saves the run, the person leaves the
+        // group (which deletes everything of Open Finance that is theirs).
+        factory.BeforeNextSave = () => factory.ExecuteAsync(
+            "DELETE FROM bank_accounts; DELETE FROM bank_items; DELETE FROM bank_connections;");
+
+        var answer = await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null);
+
+        await AssertErrorAsync(answer, HttpStatusCode.NotFound, "BANK_CONNECTION_NOT_FOUND", "Conexão bancária não encontrada.");
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM sync_runs"));
     }
 
     [Fact]
@@ -835,10 +876,13 @@ public sealed class OpenFinanceReviewTests
     public async Task Confirm_RaisesTheBudgetAndLargeTransactionAlerts_ThatEveryOtherWayOfEnteringATransactionRaises_OnceForTheWholeConfirmation()
     {
         await using var factory = NewFactory();
+        // The budget is by month of Brazil: the clock of the API is put in the middle of a month, so that "a few
+        // minutes ago" is the same month whenever this test runs (also in the first minutes of a month).
+        var today = BrazilTime.ToLocal(DateTime.UtcNow);
+        factory.Clock.SetNow(BrazilTime.ToUtc(new DateTime(today.Year, today.Month, 15, 12, 0, 0)));
         var ana = await factory.RegisterAsync("Ana");
         var bruno = await factory.RegisterAsync("Bruno", ana.JoinCode);
         var connectionId = await ConnectWithBankAsync(ana);
-        // Of this month for sure (the budget is by month of Brazil): a few minutes ago.
         var moment = factory.Clock.UtcNow.AddMinutes(-5);
         factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId] = [];
         factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId] =
@@ -875,13 +919,141 @@ public sealed class OpenFinanceReviewTests
         // Two lines above the large-transaction limit: ONE summary for each member, not one per line.
         var large = events.Where(e => (string)e["alert_type"]! == "LargeTransaction").ToList();
         Assert.Equal(members, large.Select(e => (string)e["user_id"]!).Order());
-        Assert.All(large, e => Assert.Contains("2 transações de valor alto", (string)e["body"]!, StringComparison.Ordinal));
+        Assert.All(large, e =>
+        {
+            Assert.Equal("Transações de valor alto", e["title"]);
+            // They came from the review of the bank: the text does not say "importadas do extrato".
+            Assert.Equal("2 transações de valor alto foram confirmadas na revisão do banco, somando R$ 1.600,00.", e["body"]);
+        });
 
         Assert.Equal(4, events.Count);
 
         // A confirmation that creates nothing (the same lines again) raises nothing more.
         Assert.Equal(HttpStatusCode.OK, (await ConfirmAsync(ana, new { expenses = ids.Select(id => new { id }).ToArray() })).StatusCode);
         Assert.Equal(4, (await factory.RowsAsync(alertsSql)).Count);
+    }
+
+    [Fact]
+    public async Task WhenTheAlertsCannotBeEvaluated_TheConfirmationStands_AndTheAnswerIsStill200()
+    {
+        await using var factory = new OpenFinanceApiFactory
+        {
+            FastSync = true,
+            ConfigureServices = services =>
+            {
+                services.RemoveAll<IAlertPolicyService>();
+                services.AddScoped<IAlertPolicyService, BrokenAlertPolicy>();
+            },
+        };
+        var (ana, _) = await SyncedAsync(factory);
+        var restaurant = await LineIdAsync(factory, FakePluggyServer.RestaurantTransactionId);
+
+        var confirmed = await ConfirmAsync(ana, new { expenses = new[] { new { id = restaurant } } });
+
+        Assert.True(HttpStatusCode.OK == confirmed.StatusCode, await confirmed.Content.ReadAsStringAsync());
+        var created = Assert.Single((await JsonAsync(confirmed)).GetProperty("created").EnumerateArray());
+        // The transaction and the line were already stored when the alerts failed: nothing is undone.
+        var transaction = Assert.Single(await factory.RowsAsync("SELECT id FROM transactions"));
+        Assert.Equal(created.GetProperty("transactionId").GetGuid().ToString().ToUpperInvariant(), transaction["id"]);
+        var line = await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        Assert.Equal("Confirmed", line["review_state"]);
+        Assert.Equal(transaction["id"], line["linked_transaction_id"]);
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM notification_events"));
+        // The failure is logged by its kind only.
+        Assert.Contains(factory.Logs.Lines, l => l.Contains("Alert policy evaluation failed", StringComparison.Ordinal) && l.Contains("InvalidOperationException", StringComparison.Ordinal));
+        Assert.DoesNotContain(factory.Logs.Lines, l => l.Contains(BrokenAlertPolicy.Detail, StringComparison.Ordinal));
+    }
+
+    /// <summary>The evaluation of alerts failing (the tables of notifications out of reach, a defect in a rule).</summary>
+    private sealed class BrokenAlertPolicy : IAlertPolicyService
+    {
+        public const string Detail = "alert-failure-detail";
+
+        public Task<IReadOnlyList<NotificationEvent>> EvaluatePostIngestAsync(
+            Guid coupleId, Transaction newTransaction, IReadOnlyList<Transaction> recentTransactions, DateTime nowUtc, CancellationToken ct = default)
+            => throw new InvalidOperationException(Detail);
+
+        public Task<IReadOnlyList<NotificationEvent>> EvaluatePostImportAsync(
+            Guid coupleId, IReadOnlyList<Transaction> importedTransactions, IReadOnlyList<Transaction> recentTransactions, DateTime nowUtc, CancellationToken ct = default)
+            => throw new InvalidOperationException(Detail);
+
+        public Task<IReadOnlyList<NotificationEvent>> EvaluatePostBankReviewAsync(
+            Guid coupleId, IReadOnlyList<Transaction> confirmedTransactions, IReadOnlyList<Transaction> recentTransactions, DateTime nowUtc, CancellationToken ct = default)
+            => throw new InvalidOperationException(Detail);
+    }
+
+    [Fact]
+    public async Task ConfirmingALineThatSomeoneDiscardsAtTheSameMoment_Answers409_StoresNoTransaction_AndTheLineStaysDiscarded()
+    {
+        await using var factory = NewFactory();
+        var (ana, _) = await SyncedAsync(factory);
+        var bruno = await factory.RegisterAsync("Bruno", ana.JoinCode);
+        var restaurant = await LineIdAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        // Between the moment Ana's confirmation read the line and the moment it saves, Bruno discards it.
+        factory.BeforeNextSave = async () =>
+        {
+            var discarded = await ConfirmAsync(bruno, new { discard = new[] { restaurant } });
+            Assert.True(HttpStatusCode.OK == discarded.StatusCode, await discarded.Content.ReadAsStringAsync());
+        };
+
+        var confirmed = await ConfirmAsync(ana, new { expenses = new[] { new { id = restaurant } } });
+
+        await AssertErrorAsync(confirmed, HttpStatusCode.Conflict, "BANK_REVIEW_CONFLICT", "A revisão mudou enquanto era confirmada. Atualize e tente de novo.");
+        // Nothing by halves: a discarded line never has a transaction.
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM transactions"));
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM transaction_event_ingests"));
+        var line = await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        Assert.Equal("Discarded", line["review_state"]);
+        Assert.Null(line["linked_transaction_id"]);
+    }
+
+    [Fact]
+    public async Task DiscardingALineThatSomeoneConfirmsAtTheSameMoment_Answers409_AndTheLineKeepsItsTransaction()
+    {
+        await using var factory = NewFactory();
+        var (ana, _) = await SyncedAsync(factory);
+        var bruno = await factory.RegisterAsync("Bruno", ana.JoinCode);
+        var restaurant = await LineIdAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        var ride = await LineIdAsync(factory, FakePluggyServer.RideTransactionId);
+        // Between the moment Ana's discard read the line and the moment it saves, Bruno confirms it.
+        factory.BeforeNextSave = async () =>
+        {
+            var confirmed = await ConfirmAsync(bruno, new { expenses = new[] { new { id = restaurant } } });
+            Assert.True(HttpStatusCode.OK == confirmed.StatusCode, await confirmed.Content.ReadAsStringAsync());
+        };
+
+        // Another line goes in the same request: nothing of a request that lost is stored.
+        var discarded = await ConfirmAsync(ana, new { discard = new[] { restaurant, ride } });
+
+        await AssertErrorAsync(discarded, HttpStatusCode.Conflict, "BANK_REVIEW_CONFLICT", "A revisão mudou enquanto era confirmada. Atualize e tente de novo.");
+        var transaction = Assert.Single(await factory.RowsAsync("SELECT id FROM transactions"));
+        var line = await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        Assert.Equal("Confirmed", line["review_state"]);
+        Assert.Equal(transaction["id"], line["linked_transaction_id"]);
+        Assert.Equal("Pending", (await MirrorRowAsync(factory, FakePluggyServer.RideTransactionId))["review_state"]);
+    }
+
+    [Fact]
+    public async Task RestoringALineThatSomeoneRestoresAndConfirmsAtTheSameMoment_Answers409_AndTheLineKeepsItsTransaction()
+    {
+        await using var factory = NewFactory();
+        var (ana, _) = await SyncedAsync(factory);
+        var bruno = await factory.RegisterAsync("Bruno", ana.JoinCode);
+        var restaurant = await LineIdAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        Assert.Equal(HttpStatusCode.OK, (await ConfirmAsync(ana, new { discard = new[] { restaurant } })).StatusCode);
+        factory.BeforeNextSave = async () =>
+        {
+            Assert.Equal(HttpStatusCode.OK, (await bruno.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { restaurant })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await ConfirmAsync(bruno, new { expenses = new[] { new { id = restaurant } } })).StatusCode);
+        };
+
+        var restored = await ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { restaurant });
+
+        await AssertErrorAsync(restored, HttpStatusCode.Conflict, "BANK_REVIEW_CONFLICT", "A revisão mudou enquanto era alterada. Atualize e tente de novo.");
+        var transaction = Assert.Single(await factory.RowsAsync("SELECT id FROM transactions"));
+        var line = await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        Assert.Equal("Confirmed", line["review_state"]);
+        Assert.Equal(transaction["id"], line["linked_transaction_id"]);
     }
 
     [Fact]

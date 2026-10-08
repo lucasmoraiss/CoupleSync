@@ -216,6 +216,61 @@ public sealed class OpenFinanceSyncTests
         Assert.Equal("ALIMENTACAO", (await MirrorRowAsync(factory, FakePluggyServer.OtherAccountTransactionId))["suggested_category"]);
     }
 
+    [Theory]
+    // The app already installed sends 3 with the new credentials, whatever was chosen before; the new one sends nothing.
+    [InlineData(3)]
+    [InlineData(null)]
+    public async Task ConnectingAgain_AConnectionAlreadySynchronised_KeepsThePeriodChosen_AndABankAddedLaterIsAskedThatPeriod(int? periodSent)
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana, historyMonths: 12);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+
+        // "Desconectar" and "Conectar de novo" (the way out of a connection with error).
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
+        var body = new Dictionary<string, object?>
+        {
+            ["label"] = "Bancos da Ana",
+            ["clientId"] = FakePluggyServer.ClientId,
+            ["clientSecret"] = FakePluggyServer.ClientSecret,
+        };
+        if (periodSent is { } sent) body["historyMonths"] = sent;
+        var again = await ana.Client.PostAsJsonAsync($"{Base}/connections", body);
+
+        Assert.True(HttpStatusCode.Created == again.StatusCode, await again.Content.ReadAsStringAsync());
+        var connection = await JsonAsync(again);
+        Assert.Equal(connectionId, connection.GetProperty("id").GetGuid());
+        Assert.Equal(12, connection.GetProperty("historyMonths").GetInt32());
+        Assert.Equal(12L, Assert.Single(await factory.RowsAsync("SELECT history_months FROM bank_connections"))["history_months"]);
+
+        // A bank added after that gets the 12 months the person chose, not 3.
+        await AddItemAsync(ana, connectionId, FakePluggyServer.OtherItemWithAccounts);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+
+        Assert.Equal(
+            Text(BrazilDay(factory.Clock.UtcNow).AddMonths(-12)),
+            Assert.Single(factory.Pluggy.WindowsAsked(FakePluggyServer.OtherCheckingAccountId)).From);
+    }
+
+    [Fact]
+    public async Task ConnectingAgain_AConnectionNeverSynchronised_TakesThePeriodSent()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana, historyMonths: 12);
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
+
+        // Nothing was read yet: the period is still a choice.
+        Assert.Equal(connectionId, await ConnectAsync(ana, historyMonths: 6));
+
+        Assert.Equal(6L, Assert.Single(await factory.RowsAsync("SELECT history_months FROM bank_connections"))["history_months"]);
+        await SyncAsync(factory, ana, connectionId);
+        Assert.Equal(
+            Text(BrazilDay(factory.Clock.UtcNow).AddMonths(-6)),
+            factory.Pluggy.WindowsAsked(FakePluggyServer.CheckingAccountId)[0].From);
+    }
+
     [Fact]
     public async Task ABankThatCouldNotBeReadForWeeks_WhileTheConnectionKeptSynchronising_IsAskedFromItsOwnLastTransaction_NoGap()
     {
@@ -627,6 +682,118 @@ public sealed class OpenFinanceSyncTests
         Assert.Equal(new[] { "Compra 1", "Compra 2", "Compra 3" }, factory.Classifier.Asked);
         var suggested = (await MirrorAsync(factory)).Select(r => (string)r["suggested_category"]!).ToList();
         Assert.Equal(new[] { "LAZER", "LAZER", "LAZER", "OUTROS", "OUTROS" }, suggested);
+    }
+
+    [Fact]
+    public async Task TheFifteenSecondsOfTheAi_CountOnlyTheTimeSpentWithTheAi_NotTheTimePluggyTakes()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var day = DateTime.UtcNow.Date.AddDays(-1);
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId] = [];
+        factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId] = Enumerable.Range(1, 4)
+            .Select(i => new FakeTransaction($"c1b2c3d4-0000-4000-8000-{i:D12}", day.AddMinutes(i), -i) { Description = $"Compra {i}" })
+            .ToList();
+        factory.Classifier.Answer = "Lazer";
+        // Pluggy is slow today: each list of transactions takes 40 seconds (of the clock of the API) to arrive.
+        factory.Pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path == "/transactions") factory.Clock.Advance(TimeSpan.FromSeconds(40));
+            return Task.CompletedTask;
+        };
+        // The AI itself answers in 6 seconds.
+        factory.Classifier.OnAsked = () => factory.Clock.Advance(TimeSpan.FromSeconds(6));
+
+        var run = await SyncAsync(factory, ana, connectionId, aiConsent: true);
+
+        Assert.Equal("Done", run["status"]);
+        // The wait for Pluggy took nothing of the 15 seconds: asked at 0 s, 6 s and 12 s of AI time; the fourth is over the limit.
+        Assert.Equal(new[] { "Compra 1", "Compra 2", "Compra 3" }, factory.Classifier.Asked);
+        var suggested = (await MirrorAsync(factory)).Select(r => (string)r["suggested_category"]!).ToList();
+        Assert.Equal(new[] { "LAZER", "LAZER", "LAZER", "OUTROS" }, suggested);
+    }
+
+    // ---------------------------------------------------------------- a review at the same moment as a run
+
+    [Fact]
+    public async Task ALineConfirmedWhileARunWasRefreshingIt_KeepsTheReviewAndTheLink_TakesWhatPluggySaysNow_AndTheRunEndsWell()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        var restaurant = Guid.Parse((string)(await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId))["id"]!);
+        var listed = factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId];
+        var index = listed.FindIndex(t => t.Id == FakePluggyServer.RestaurantTransactionId);
+        listed[index] = listed[index] with { Description = "Cantina Exemplo Centro" };
+        // The run has read the lines of the checking account and is about to save them when someone confirms one.
+        var once = 0;
+        factory.Pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path != "/transactions"
+                || !request.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal)
+                || Interlocked.Exchange(ref once, 1) == 1)
+            {
+                return Task.CompletedTask;
+            }
+
+            factory.BeforeNextSave = async () =>
+            {
+                var confirmed = await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { expenses = new[] { new { id = restaurant } } });
+                Assert.True(HttpStatusCode.OK == confirmed.StatusCode, await confirmed.Content.ReadAsStringAsync());
+            };
+            return Task.CompletedTask;
+        };
+
+        var run = await SyncAsync(factory, ana, connectionId);
+
+        Assert.True("Done" == (string)run["status"]!, $"{run["error_code"]}: {run["error_message"]}");
+        var line = await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        Assert.Equal("Confirmed", line["review_state"]);
+        var transaction = Assert.Single(await factory.RowsAsync("SELECT id FROM transactions"));
+        Assert.Equal(transaction["id"], line["linked_transaction_id"]);
+        Assert.NotNull(line["reviewed_at_utc"]);
+        Assert.Equal("Cantina Exemplo Centro", line["description"]);
+        Assert.Equal(run["id"], line["sync_run_id"]);
+        Assert.NotNull(Assert.Single(await factory.RowsAsync("SELECT last_sync_at_utc FROM bank_connections"))["last_sync_at_utc"]);
+    }
+
+    [Fact]
+    public async Task ALineThatVanishedAtTheBank_DiscardedWhileTheRunWasRemovingIt_StaysAsThePersonLeftIt()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        var pending = Guid.Parse((string)(await MirrorRowAsync(factory, FakePluggyServer.CardPendingTransactionId))["id"]!);
+        // The pre-authorisation falls at the bank; the run sees that and is about to take the line out of the mirror
+        // when someone discards it in the review.
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId].RemoveAll(t => t.Id == FakePluggyServer.CardPendingTransactionId);
+        var once = 0;
+        factory.Pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path != "/transactions"
+                || !request.Query.Contains(FakePluggyServer.CreditCardAccountId, StringComparison.Ordinal)
+                || Interlocked.Exchange(ref once, 1) == 1)
+            {
+                return Task.CompletedTask;
+            }
+
+            factory.BeforeNextSave = async () =>
+            {
+                var discarded = await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { pending } });
+                Assert.True(HttpStatusCode.OK == discarded.StatusCode, await discarded.Content.ReadAsStringAsync());
+            };
+            return Task.CompletedTask;
+        };
+
+        var run = await SyncAsync(factory, ana, connectionId);
+
+        Assert.True("Done" == (string)run["status"]!, $"{run["error_code"]}: {run["error_message"]}");
+        // Someone reviewed it: never touched by a run again.
+        Assert.Equal("Discarded", (await MirrorRowAsync(factory, FakePluggyServer.CardPendingTransactionId))["review_state"]);
+        Assert.Equal(5, (await MirrorAsync(factory)).Count);
     }
 
     // ---------------------------------------------------------------- the run never writes a connection that changed

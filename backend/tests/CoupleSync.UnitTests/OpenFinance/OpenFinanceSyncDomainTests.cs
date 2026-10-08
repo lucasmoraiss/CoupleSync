@@ -69,6 +69,35 @@ public sealed class OpenFinanceSyncDomainTests
     }
 
     [Fact]
+    public void TheNullCharacter_NeverReachesTheMirror_NeitherInTheTextsNorInTheRawJson()
+    {
+        // PostgreSQL refuses the character in varchar and its escape in jsonb: one such transaction would fail the
+        // save of the whole account at every synchronisation.
+        var snapshot = Snapshot(description: "Cantina\u0000 Exemplo") with
+        {
+            DescriptionRaw = "COMPRA\u0000 CANTINA",
+            MerchantName = "\u0000Cantina Exemplo Ltda",
+            PluggyCategory = "Eating\u0000 out",
+            // An escaped backslash followed by "u0000" is ordinary text, not the character: it stays ("note"). A real
+            // escape right after an escaped backslash goes, and the backslash stays ("tail").
+            RawJson = """{"id":"t-1","description":"Cantina\u0000 Exemplo","note":"a\\u0000b","tail":"x\\\u0000"}""",
+        };
+
+        var row = NewRow(snapshot);
+
+        Assert.Equal("Cantina Exemplo", row.Description);
+        Assert.Equal("COMPRA CANTINA", row.DescriptionRaw);
+        Assert.Equal("Cantina Exemplo Ltda", row.MerchantName);
+        Assert.Equal("Eating out", row.PluggyCategory);
+        Assert.Equal("""{"id":"t-1","description":"Cantina Exemplo","note":"a\\u0000b","tail":"x\\"}""", row.RawJson);
+        using var parsed = System.Text.Json.JsonDocument.Parse(row.RawJson);
+        Assert.Equal("a\\u0000b", parsed.RootElement.GetProperty("note").GetString());
+
+        // A text that is only the character is no text at all.
+        Assert.Null(NewRow(Snapshot(description: "\u0000")).Description);
+    }
+
+    [Fact]
     public void Discard_ClearsTheLink_AndRestore_BringsTheRowBackToTheReview()
     {
         var row = NewRow();
@@ -234,6 +263,24 @@ public sealed class OpenFinanceSyncDomainTests
         var window = SyncWindow.For(Connection(3, lastSync: new DateTime(2026, 10, 3, 14, 0, 0, DateTimeKind.Utc)), Now);
         DateOnly? last = lastDayOfAccount is null ? null : DateOnly.ParseExact(lastDayOfAccount, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
+        Assert.Equal(expectedFrom, window.FromFor(last).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Theory]
+    // The last successful synchronisation is older than the history (the connection went months without one): the
+    // window of the connection goes further back than the history, and it is asked whole. The limit of the history
+    // holds only the day that comes from the account's own last transaction.
+    [InlineData("2026-09-10", "2026-04-24")]
+    [InlineData("2026-03-01", "2026-04-24")]
+    // Never read (a bank added now): the history the person chose, not the old window of the connection.
+    [InlineData(null, "2026-07-07")]
+    public void WhenTheWindowOfTheConnectionIsOlderThanTheHistory_AnAccountAlreadyReadIsAskedThatWholeWindow(string? lastDayOfAccount, string expectedFrom)
+    {
+        var window = SyncWindow.For(Connection(3, lastSync: new DateTime(2026, 5, 1, 14, 0, 0, DateTimeKind.Utc)), Now);
+        DateOnly? last = lastDayOfAccount is null ? null : DateOnly.ParseExact(lastDayOfAccount, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        Assert.Equal(new DateOnly(2026, 4, 24), window.From);
+        Assert.Equal(new DateOnly(2026, 7, 7), window.HistoryFrom);
         Assert.Equal(expectedFrom, window.FromFor(last).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
     }
 

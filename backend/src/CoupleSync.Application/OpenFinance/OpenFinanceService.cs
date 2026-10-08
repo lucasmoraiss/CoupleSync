@@ -140,7 +140,11 @@ public sealed class OpenFinanceService
             else
             {
                 connection = existing;
-                connection.Connect(input.Label, encryptedId, encryptedSecret, hint, historyMonths, now);
+                // Connecting again is about the credentials. Once something was read, the period is the one the
+                // person chose for the first synchronisation: it goes on deciding how far back a bank added later
+                // is read, and the app (which always sends the default here) cannot take it back to 3 months.
+                var period = existing.LastSyncAtUtc is null ? historyMonths : existing.HistoryMonths;
+                connection.Connect(input.Label, encryptedId, encryptedSecret, hint, period, now);
                 _pluggy.ForgetConnection(connection.Id);
             }
 

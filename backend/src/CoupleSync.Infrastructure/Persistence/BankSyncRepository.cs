@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +15,11 @@ public sealed class BankSyncRepository : IBankSyncRepository
 
     private static readonly BankTransactionReviewState[] ReviewStates =
         [BankTransactionReviewState.Pending, BankTransactionReviewState.Discarded];
+
+    /// <summary>How many times the save of a run is tried while lines of it are being reviewed at the same moment.</summary>
+    private const int MaxSaveAttempts = 4;
+
+    private const int ReviewLookupChunk = 500;
 
     private readonly AppDbContext _dbContext;
 
@@ -130,7 +136,7 @@ public sealed class BankSyncRepository : IBankSyncRepository
 
         if (!IsPostgres() || _dbContext.Database.CurrentTransaction is not null)
         {
-            await DbSaveTranslator.SaveAsync(_dbContext, ct);
+            await SaveKeepingReviewsAsync(ct);
             return;
         }
 
@@ -140,9 +146,95 @@ public sealed class BankSyncRepository : IBankSyncRepository
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
         await _dbContext.Database.ExecuteSqlRawAsync(
             "SELECT 1 FROM bank_connections WHERE id = {0} FOR UPDATE", [connection.Id], ct);
-        await DbSaveTranslator.SaveAsync(_dbContext, ct);
+        await SaveKeepingReviewsAsync(ct);
         await transaction.CommitAsync(ct);
     }
+
+    /// <summary>
+    /// The save of a run. The review state of a line is its concurrency token, and a run never decides a review: when
+    /// someone reviewed a line after the run read it, the save is refused for that line; the run then takes the
+    /// review from the database (state and links), keeps a line it was about to remove, and saves again. Any other
+    /// refusal (the connection, the run itself) is the caller's to handle.
+    /// </summary>
+    private Task SaveKeepingReviewsAsync(CancellationToken ct)
+    {
+        var attempt = 1;
+        return DbSaveTranslator.SaveAsync(
+            _dbContext,
+            async (refusal, token) =>
+            {
+                if (refusal.Entries.Count == 0 || refusal.Entries.Any(e => e.Entity is not BankTransaction)) return false;
+
+                // People kept reviewing the same lines under every attempt: the run fails as any other failure of
+                // the store (not as a connection that changed) and the next one reads them again.
+                if (attempt++ == MaxSaveAttempts)
+                    throw new DataStoreException("The lines of the run kept being reviewed while it was saving them.", refusal);
+
+                await TakeReviewsFromStoreAsync(token);
+                return true;
+            },
+            ct);
+    }
+
+    /// <summary>
+    /// For every mirror row the pending save changes or deletes: the review stored now replaces the one the run read.
+    /// A row no longer there (the person left the group) is forgotten; a row to delete that someone reviewed stays.
+    /// </summary>
+    private async Task TakeReviewsFromStoreAsync(CancellationToken ct)
+    {
+        var entries = _dbContext.ChangeTracker.Entries<BankTransaction>()
+            .Where(e => e.State is EntityState.Modified or EntityState.Deleted)
+            .ToList();
+
+        var stored = new Dictionary<Guid, StoredReview>();
+        foreach (var ids in entries.Select(e => e.Entity.Id).Chunk(ReviewLookupChunk))
+        {
+            var rows = await _dbContext.BankTransactions
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(t => ids.Contains(t.Id))
+                .Select(t => new StoredReview(
+                    t.Id, t.ReviewState, t.LinkedTransactionId, t.LinkedIncomeSourceId, t.MatchedTransactionId, t.AutoReason, t.ReviewedAtUtc))
+                .ToListAsync(ct);
+            foreach (var row in rows) stored[row.Id] = row;
+        }
+
+        foreach (var entry in entries)
+        {
+            if (!stored.TryGetValue(entry.Entity.Id, out var review))
+            {
+                entry.State = EntityState.Detached;
+                continue;
+            }
+
+            // Only what was waiting for the review and for the bank is ever removed by a run.
+            if (entry.State == EntityState.Deleted && review.ReviewState != BankTransactionReviewState.Pending)
+                entry.State = EntityState.Unchanged;
+
+            Take(entry.Property(t => t.ReviewState), review.ReviewState);
+            Take(entry.Property(t => t.LinkedTransactionId), review.LinkedTransactionId);
+            Take(entry.Property(t => t.LinkedIncomeSourceId), review.LinkedIncomeSourceId);
+            Take(entry.Property(t => t.MatchedTransactionId), review.MatchedTransactionId);
+            Take(entry.Property(t => t.AutoReason), review.AutoReason);
+            Take(entry.Property(t => t.ReviewedAtUtc), review.ReviewedAtUtc);
+        }
+    }
+
+    /// <summary>The stored value becomes both what was read and what is kept: the save does not write the column.</summary>
+    private static void Take<TValue>(Microsoft.EntityFrameworkCore.ChangeTracking.PropertyEntry<BankTransaction, TValue> property, TValue stored)
+    {
+        property.OriginalValue = stored;
+        if (property.EntityEntry.State != EntityState.Deleted) property.CurrentValue = stored;
+    }
+
+    private sealed record StoredReview(
+        Guid Id,
+        BankTransactionReviewState ReviewState,
+        Guid? LinkedTransactionId,
+        Guid? LinkedIncomeSourceId,
+        Guid? MatchedTransactionId,
+        string? AutoReason,
+        DateTime? ReviewedAtUtc);
 
     public void DiscardChanges() => _dbContext.ChangeTracker.Clear();
 

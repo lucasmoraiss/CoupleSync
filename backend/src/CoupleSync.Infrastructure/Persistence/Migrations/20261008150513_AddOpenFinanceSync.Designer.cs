@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CoupleSync.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261008135845_AddOpenFinanceSync")]
+    [Migration("20261008150513_AddOpenFinanceSync")]
     partial class AddOpenFinanceSync
     {
         /// <inheritdoc />
@@ -481,6 +481,7 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                         .HasColumnName("raw_json");
 
                     b.Property<string>("ReviewState")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)")

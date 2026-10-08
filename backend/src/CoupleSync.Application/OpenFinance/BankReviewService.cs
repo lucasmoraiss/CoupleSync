@@ -214,7 +214,9 @@ public sealed class BankReviewService
         }
         catch (DataStoreException ex) when (ex is UniqueViolationException or ConcurrencyConflictException or ForeignKeyViolationException)
         {
-            // Another request confirmed the same line first (the unique fingerprint let one through), or the lines
+            // Another request confirmed the same line first (the unique fingerprint let one through), someone
+            // reviewed one of the lines after this request read it (the review state is the concurrency token of
+            // the line: confirming and discarding the same line at once, one of the two loses here), or the lines
             // went away with the person who left the group. Nothing of this request was stored.
             throw new ConflictException(ConflictCode, "A revisão mudou enquanto era confirmada. Atualize e tente de novo.");
         }
@@ -237,7 +239,7 @@ public sealed class BankReviewService
         {
             var nowUtc = _clock.UtcNow;
             var recentTransactions = await _transactions.GetRecentByCoupleAsync(coupleId, nowUtc.AddDays(-30), ct);
-            var alertEvents = await _alertPolicyService.EvaluatePostImportAsync(coupleId, created, recentTransactions, nowUtc, ct);
+            var alertEvents = await _alertPolicyService.EvaluatePostBankReviewAsync(coupleId, created, recentTransactions, nowUtc, ct);
             if (alertEvents.Count > 0)
             {
                 await _notificationEvents.AddRangeAsync(alertEvents, ct);

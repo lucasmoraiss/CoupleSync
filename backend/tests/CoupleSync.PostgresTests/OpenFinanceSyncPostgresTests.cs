@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 
 namespace CoupleSync.PostgresTests;
@@ -222,6 +223,44 @@ public sealed class OpenFinanceSyncPostgresTests
         Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions WHERE linked_transaction_id IS NOT NULL"));
     }
 
+    [PostgresFact]
+    public async Task ATransactionWithTheNullCharacter_IsMirroredWithoutIt_AndDoesNotFailTheRunOfTheAccount()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        // PostgreSQL refuses the character in varchar and its escape ("\u0000") in jsonb.
+        const string id = "c1b2c3d4-0000-4000-8000-00000000a0a0";
+        pluggy.Transactions[FakePluggyServer.CheckingAccountId].Add(
+            new FakeTransaction(id, DateTime.UtcNow.Date.AddDays(-2).AddHours(15), -15.00m)
+            {
+                Description = "Padaria\0 Modelo",
+                DescriptionRaw = "COMPRA\0 PADARIA MODELO",
+                MerchantName = "Padaria Modelo\0 Ltda",
+            });
+
+        var run = await SyncAsync(ana, connectionId);
+
+        Assert.True("Done" == run.GetProperty("status").GetString(), run.ToString());
+        Assert.Equal(6, run.GetProperty("transactionsNew").GetInt32());
+        var row = Assert.Single(await database.RowsAsync(
+            $"SELECT description, description_raw, merchant_name, raw_json->>'description', raw_json->'merchant'->>'name', raw_json->>'id' FROM bank_transactions WHERE pluggy_transaction_id = '{id}'"));
+        Assert.Equal("Padaria Modelo", row[0]);
+        Assert.Equal("COMPRA PADARIA MODELO", row[1]);
+        Assert.Equal("Padaria Modelo Ltda", row[2]);
+        // The raw transaction is still whole, only without the character.
+        Assert.Equal("Padaria Modelo", row[3]);
+        Assert.Equal("Padaria Modelo Ltda", row[4]);
+        Assert.Equal(id, row[5]);
+        // And it is an expense like any other in the review.
+        var month = await database.ScalarAsync<string>($"SELECT to_char(local_date, 'YYYY-MM') FROM bank_transactions WHERE pluggy_transaction_id = '{id}'");
+        var review = await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review?month={month}");
+        Assert.Contains(review.GetProperty("expenses").EnumerateArray(), e => e.GetProperty("description").GetString() == "Padaria Modelo");
+    }
+
     // ---------------------------------------------------------------- the review by month of Brazil
 
     [PostgresFact]
@@ -336,6 +375,127 @@ public sealed class OpenFinanceSyncPostgresTests
             await database.ScalarAsync<Guid>("SELECT id FROM transactions"),
             await database.ScalarAsync<Guid>("SELECT linked_transaction_id FROM bank_transactions WHERE id = @id", ("id", line)));
         Assert.Equal("Confirmed", await database.ScalarAsync<string>("SELECT review_state FROM bank_transactions WHERE id = @id", ("id", line)));
+    }
+
+    [PostgresFact]
+    public async Task ConfirmingAndDiscardingTheSameLineAtOnce_NeverLeavesADiscardedLineWithATransaction_NorAnythingByHalves()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var bruno = await OpenFinanceTests.RegisterAsync(factory, host, "Bruno", ana.JoinCode);
+        var connectionId = await ConnectWithBankAsync(ana);
+        await SyncAsync(ana, connectionId);
+        var account = await database.ScalarAsync<Guid>(
+            "SELECT id FROM bank_accounts WHERE pluggy_account_id = @account", ("account", FakePluggyServer.CheckingAccountId));
+        var day = DateTime.UtcNow.Date.AddDays(-1).AddHours(15);
+
+        var confirmedRounds = 0;
+        var discardedRounds = 0;
+        for (var round = 0; round < 30; round++)
+        {
+            var pluggyId = $"race-{round:D2}";
+            await InsertMirrorAsync(database, ana, account, pluggyId, day);
+            var line = await database.ScalarAsync<Guid>("SELECT id FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", pluggyId));
+            var transactionsBefore = await database.ScalarAsync<long>("SELECT count(*) FROM transactions");
+            var ingestsBefore = await database.ScalarAsync<long>("SELECT count(*) FROM transaction_event_ingests");
+
+            // Both of the group tap at the same moment: one confirms the line, the other discards it (three of each).
+            var answers = await Task.WhenAll(Enumerable.Range(0, 6).Select(i => i % 2 == 0
+                ? ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { expenses = new[] { new { id = line } } })
+                : bruno.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { line } })));
+
+            // Who loses is told so in the single format; never an error of the server.
+            foreach (var answer in answers)
+            {
+                var raw = await answer.Content.ReadAsStringAsync();
+                Assert.True(answer.StatusCode is HttpStatusCode.OK or HttpStatusCode.Conflict, $"{(int)answer.StatusCode}: {raw}");
+                if (answer.StatusCode != HttpStatusCode.Conflict) continue;
+                var error = JsonSerializer.Deserialize<JsonElement>(raw);
+                Assert.Contains(error.GetProperty("code").GetString(), new[] { "BANK_REVIEW_CONFLICT", "BANK_TRANSACTION_NOT_PENDING" });
+                Assert.False(string.IsNullOrWhiteSpace(error.GetProperty("message").GetString()));
+            }
+
+            Assert.Contains(answers, a => a.StatusCode == HttpStatusCode.OK);
+            var row = Assert.Single(await database.RowsAsync($"SELECT review_state, linked_transaction_id FROM bank_transactions WHERE id = '{line}'"));
+            var transactions = await database.ScalarAsync<long>("SELECT count(*) FROM transactions") - transactionsBefore;
+            var ingests = await database.ScalarAsync<long>("SELECT count(*) FROM transaction_event_ingests") - ingestsBefore;
+            var state = (string)row[0]!;
+            if (state == "Confirmed")
+            {
+                confirmedRounds++;
+                Assert.True(transactions == 1 && ingests == 1 && row[1] is Guid, $"round {round}: Confirmed with {transactions} transaction(s), link {row[1] ?? "null"}");
+                Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM transactions WHERE id = @id", ("id", (Guid)row[1]!)));
+            }
+            else
+            {
+                discardedRounds++;
+                Assert.True(
+                    state == "Discarded" && transactions == 0 && ingests == 0 && row[1] is null,
+                    $"round {round}: {state} with {transactions} transaction(s), link {row[1] ?? "null"}");
+            }
+        }
+
+        Assert.Equal(30, confirmedRounds + discardedRounds);
+    }
+
+    [PostgresFact]
+    public async Task AReviewInTheMiddleOfARun_IsKept_TheRunEndsWell_AndWhatVanishedAtTheBankButWasDiscardedStays()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        var saves = new SaveHook();
+        await using var host = WithOpenFinanceSync(factory, pluggy, database, saves);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        var restaurant = await database.ScalarAsync<Guid>("SELECT id FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.RestaurantTransactionId));
+        var pending = await database.ScalarAsync<Guid>("SELECT id FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.CardPendingTransactionId));
+        // What changes at the bank before the next run: a description, and the pre-authorisation of the card falls.
+        var listed = pluggy.Transactions[FakePluggyServer.CheckingAccountId];
+        var index = listed.FindIndex(t => t.Id == FakePluggyServer.RestaurantTransactionId);
+        listed[index] = listed[index] with { Description = "Cantina Exemplo Centro" };
+        pluggy.Transactions[FakePluggyServer.CreditCardAccountId].RemoveAll(t => t.Id == FakePluggyServer.CardPendingTransactionId);
+        // The run has read the lines of an account and is about to save them (the connection already locked, inside
+        // its transaction) when someone reviews one of them: confirms the restaurant, discards the one that fell.
+        pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path != "/transactions") return Task.CompletedTask;
+            if (request.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal))
+            {
+                saves.BeforeNextSave = async () =>
+                {
+                    var confirmed = await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { expenses = new[] { new { id = restaurant } } });
+                    Assert.True(HttpStatusCode.OK == confirmed.StatusCode, await confirmed.Content.ReadAsStringAsync());
+                };
+            }
+            else if (request.Query.Contains(FakePluggyServer.CreditCardAccountId, StringComparison.Ordinal))
+            {
+                saves.BeforeNextSave = async () =>
+                {
+                    var discarded = await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { pending } });
+                    Assert.True(HttpStatusCode.OK == discarded.StatusCode, await discarded.Content.ReadAsStringAsync());
+                };
+            }
+
+            return Task.CompletedTask;
+        };
+
+        var second = await InsertRunAsync(database, ana, connectionId, "Pending");
+        var run = await WaitAsync(ana, second);
+
+        Assert.True("Done" == run.GetProperty("status").GetString(), run.ToString());
+        var line = Assert.Single(await database.RowsAsync(
+            $"SELECT review_state, linked_transaction_id, description, sync_run_id FROM bank_transactions WHERE id = '{restaurant}'"));
+        Assert.Equal("Confirmed", line[0]);
+        Assert.Equal(await database.ScalarAsync<Guid>("SELECT id FROM transactions"), line[1]);
+        Assert.Equal("Cantina Exemplo Centro", line[2]);
+        Assert.Equal(second, line[3]);
+        Assert.Equal("Discarded", await database.ScalarAsync<string>("SELECT review_state FROM bank_transactions WHERE id = @id", ("id", pending)));
+        Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
     }
 
     [PostgresFact]
@@ -592,7 +752,8 @@ public sealed class OpenFinanceSyncPostgresTests
     // ---------------------------------------------------------------- support
 
     /// <summary>The API with a server key, the Pluggy client pointed at the fake and the synchronisation job looking at its queue every 50 ms.</summary>
-    private static DerivedTestHost WithOpenFinanceSync(PostgresApiFactory factory, FakePluggyServer pluggy)
+    private static DerivedTestHost WithOpenFinanceSync(
+        PostgresApiFactory factory, FakePluggyServer pluggy, TestDatabase? database = null, SaveHook? saves = null)
         => factory.WithTestHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -608,8 +769,35 @@ public sealed class OpenFinanceSyncPostgresTests
                 services.AddHttpClient("Pluggy").ConfigurePrimaryHttpMessageHandler(() => pluggy);
                 // The factory takes the job out of every host (a host without the key must not take runs): this one has it.
                 services.AddHostedService<OpenFinanceSyncJob>();
+
+                if (database is null || saves is null) return;
+                // The same database, with a hook before each save (what another request does in the meantime).
+                services.RemoveAll<DbContextOptions<AppDbContext>>();
+                services.RemoveAll<AppDbContext>();
+                services.AddDbContext<AppDbContext>(options =>
+                {
+                    database.Server.Guard(database.ConnectionString);
+                    options.UseNpgsql(database.ConnectionString).AddInterceptors(saves);
+                });
             });
         });
+
+    /// <summary>Runs once, right before the next save of the API.</summary>
+    private sealed class SaveHook : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        public Func<Task>? BeforeNextSave { get; set; }
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var hook = BeforeNextSave;
+            BeforeNextSave = null;
+            if (hook is not null) await hook();
+            return await base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
 
     private static async Task<Guid> ConnectWithBankAsync(TestUser user, int historyMonths = 3, string itemId = FakePluggyServer.ItemWithAccounts)
     {

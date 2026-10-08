@@ -53,6 +53,7 @@ public sealed class SyncConnectionService
 
     private const int LookupChunk = 400;
 
+    /// <summary>The time one run may spend waiting for the AI classifier: only its answers count, nothing else of the run.</summary>
     private static readonly TimeSpan AiTimeBudget = TimeSpan.FromSeconds(15);
 
     private static readonly IReadOnlyList<string> CategoryLabels = TransactionCategories.All.Select(c => c.Label).ToList();
@@ -216,7 +217,7 @@ public sealed class SyncConnectionService
 
         var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret, connection.ClientSecretEncrypted!);
         var window = SyncWindow.For(connection, _clock.UtcNow);
-        var ai = new AiBudget(run.AiCategorizationConsent ? MaxAiSuggestionsPerRun : 0, _clock.UtcNow + AiTimeBudget);
+        var ai = new AiBudget(run.AiCategorizationConsent ? MaxAiSuggestionsPerRun : 0, AiTimeBudget);
 
         var itemsRead = 0;
         foreach (var item in items)
@@ -405,8 +406,9 @@ public sealed class SyncConnectionService
         if (mapped is not null) return mapped;
 
         var description = transaction.Description ?? transaction.DescriptionRaw;
-        if (string.IsNullOrWhiteSpace(description) || !ai.TryTake(_clock.UtcNow)) return TransactionCategories.Other;
+        if (string.IsNullOrWhiteSpace(description) || !ai.TryTake()) return TransactionCategories.Other;
 
+        var asked = _clock.UtcNow;
         try
         {
             var suggested = await _classifier.SuggestCategoryAsync(description.Trim(), CategoryLabels, ct);
@@ -416,6 +418,10 @@ public sealed class SyncConnectionService
         {
             ai.Stop(); // the classifier is optional: a failure of it never fails the synchronisation
             return TransactionCategories.Other;
+        }
+        finally
+        {
+            ai.Spend(_clock.UtcNow - asked);
         }
     }
 
@@ -505,22 +511,32 @@ public sealed class SyncConnectionService
         public string Code { get; }
     }
 
+    /// <summary>
+    /// What one run may ask of the AI classifier: a number of calls, and a time that only the calls themselves use
+    /// up (what Pluggy and the database take does not count).
+    /// </summary>
     private sealed class AiBudget
     {
         private int _calls;
-        private readonly DateTime _deadlineUtc;
+        private TimeSpan _timeLeft;
 
-        public AiBudget(int calls, DateTime deadlineUtc)
+        public AiBudget(int calls, TimeSpan time)
         {
             _calls = calls;
-            _deadlineUtc = deadlineUtc;
+            _timeLeft = time;
         }
 
-        public bool TryTake(DateTime nowUtc)
+        public bool TryTake()
         {
-            if (_calls <= 0 || nowUtc > _deadlineUtc) return false;
+            if (_calls <= 0 || _timeLeft <= TimeSpan.Zero) return false;
             _calls--;
             return true;
+        }
+
+        /// <summary>Takes the time one call took out of what is left.</summary>
+        public void Spend(TimeSpan taken)
+        {
+            if (taken > TimeSpan.Zero) _timeLeft -= taken;
         }
 
         public void Stop() => _calls = 0;
@@ -547,8 +563,10 @@ public sealed record SyncWindow(DateOnly From, DateOnly HistoryFrom, DateOnly To
     /// <summary>
     /// The first day to ask for one account, given the day (in Brazil) of the last transaction the mirror has of it.
     /// None: the account was never read (also a bank added later), so the whole history the person chose. Otherwise
-    /// the earlier of the window of the connection and that day minus the overlap, never further back than the
-    /// history: an account that went unread for weeks while the connection kept synchronising leaves no gap.
+    /// the earlier of two days: the window of the connection, and that last day minus the overlap, so that an
+    /// account that went unread for weeks while the connection kept synchronising leaves no gap. Only the second is
+    /// held at the history: the window of the connection is asked whole, even when it starts before the history
+    /// (the connection went longer than that without a successful synchronisation, and those days were never read).
     /// </summary>
     public DateOnly FromFor(DateOnly? lastDayOfAccount)
     {
