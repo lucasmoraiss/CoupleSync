@@ -417,6 +417,11 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
             ["INTERNAL_JOBS_SECRET"] = "segredo-de-jobs",
             ["AI__ApiKey"] = "chave-de-ia-2",
             ["ANTHROPIC_API_KEY"] = "chave-de-ia-3",
+            // The AI gateway (issue #37): the key of each provider and the settings that name it.
+            ["GROQ_API_KEY"] = "chave-de-ia-4",
+            ["Ai__OpenAiCompatible__0__ApiKeyVariable"] = "GROQ_API_KEY",
+            ["Ai__OpenAiCompatible__0__BaseUrl"] = "https://provedor.invalid/v1",
+            ["Ai__Chains__Chat__0"] = "groq",
             ["SEGREDO_QUE_AINDA_NAO_EXISTE"] = "valor-novo",
         };
         var extractor = new ChildProcessPdfTextExtractor(Options());
@@ -428,9 +433,10 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
         {
             "OPENFINANCE_ENCRYPTION_KEY", "OpenFinance__EncryptionKey", "PLUGGY_CLIENT_ID", "PLUGGY_CLIENT_SECRET",
             "OpenFinance__PluggyClientSecret", "INTERNAL_JOBS_SECRET", "AI__ApiKey", "ANTHROPIC_API_KEY", "SEGREDO_QUE_AINDA_NAO_EXISTE",
+            "GROQ_API_KEY", "Ai__OpenAiCompatible__0__ApiKeyVariable", "Ai__OpenAiCompatible__0__BaseUrl", "Ai__Chains__Chat__0",
         })
             Assert.DoesNotContain(forbidden, names);
-        Assert.DoesNotContain(startInfo.Environment.Values, v => v is not null && (v.StartsWith("chave-") || v.StartsWith("segredo") || v.StartsWith("id-") || v == "valor-novo"));
+        Assert.DoesNotContain(startInfo.Environment.Values, v => v is not null && (v.StartsWith("chave-") || v.StartsWith("segredo") || v.StartsWith("id-") || v == "valor-novo" || v == "GROQ_API_KEY" || v == "groq" || v.Contains("provedor.invalid")));
         Assert.Equal("/usr/bin", startInfo.Environment["PATH"]);
     }
 
