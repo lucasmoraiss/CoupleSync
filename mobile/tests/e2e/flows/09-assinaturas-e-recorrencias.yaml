@@ -1,5 +1,5 @@
 # Abrir "Assinaturas e recorrências" pelo cartão do Painel, ver a assinatura que o servidor encontrou, abrir as
-# cobranças dela e marcar "Não é recorrente".
+# cobranças dela e marcar "Não é recorrente"; no fim, abrir a mesma tela pela entrada fixa de Configurações.
 # A conta, o grupo e as três cobranças mensais (estabelecimento inventado) são criados pela API de teste antes de
 # o app abrir (scripts/09-semear-recorrencia.js): o Maestro roda na máquina que dirige o emulador, onde a API
 # responde em 127.0.0.1 (porta de scripts/app-e2e-api.sh; scripts/app-e2e-run-flows.sh passa o endereço em API_URL).
@@ -65,3 +65,14 @@ env:
     visible: "Recorrências: zero reais por mês.*"
     timeout: 30000
 - assertNotVisible: "Algo deu errado"
+
+# A segunda entrada, fixa: Configurações > "Assinaturas e contas fixas" abre a mesma tela.
+- tapOn: "Configurações"
+- extendedWaitUntil:
+    visible: "Abrir assinaturas e contas fixas.*"
+    timeout: 30000
+- tapOn: "Abrir assinaturas e contas fixas.*"
+- extendedWaitUntil:
+    visible: "Streaming E2E, 39 reais e 90 centavos por mês. marcada como não recorrente.*"
+    timeout: 30000
+- assertVisible: "Assinaturas e recorrências"

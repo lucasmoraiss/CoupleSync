@@ -22,7 +22,9 @@ import { formatBrazilDate } from '@/utils/brazilDateTime';
 import {
   RECURRING_EMPTY_TEXT,
   RECURRING_HINT,
+  RECURRING_NOT_LISTED_NOTE,
   RECURRING_QUERY_KEY,
+  RECURRING_STALE_TEXT,
   RECURRING_TITLE,
   RECURRING_TOTALS_NOTE,
   amountText,
@@ -79,7 +81,18 @@ function Charges({ id }: { id: string }) {
 
 function RecurringScreen() {
   const queryClient = useQueryClient();
-  const { data, isLoading, isError, error, refetch, isRefetching } = useRecurring();
+  const { data, isLoading, isError, error, refetch } = useRecurring();
+  /** O indicador de "puxar para atualizar" só aparece quando a pessoa puxa (não a cada consulta de fundo). */
+  const [pulling, setPulling] = useState(false);
+  const pull = async () => {
+    const epoch = getSessionEpoch();
+    setPulling(true);
+    try {
+      await refetch();
+    } finally {
+      if (getSessionEpoch() === epoch) setPulling(false);
+    }
+  };
   /** O item aberto (um por vez). */
   const [openId, setOpenId] = useState<string | null>(null);
   /** Uma correção por vez. */
@@ -110,7 +123,7 @@ function RecurringScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} tintColor={colors.primaryLight} />}
+        refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => void pull()} tintColor={colors.primaryLight} />}
       >
         <TouchableOpacity style={styles.backRow} onPress={leave} accessibilityRole="button" accessibilityLabel="Voltar para o Painel">
           <Ionicons name="chevron-back" size={20} color={colors.primaryLight} />
@@ -125,11 +138,14 @@ function RecurringScreen() {
           <ErrorState message={getApiErrorMessage(error, 'Não foi possível carregar as recorrências.')} onRetry={() => void refetch()} />
         )}
 
+        {isError && !!data && <Text style={styles.stale} accessibilityRole="alert">{RECURRING_STALE_TEXT}</Text>}
+
         {data && !isLoading && isRecurringEmpty(data) && (
           <View style={styles.emptyBox}>
             <Ionicons name="repeat-outline" size={48} color={colors.textMuted} />
             <Text style={styles.emptyText}>{RECURRING_EMPTY_TEXT}</Text>
             <Text style={styles.muted}>Conforme as transações entram, as assinaturas, contas fixas e parcelas aparecem aqui sozinhas.</Text>
+            <Text style={styles.muted}>{RECURRING_NOT_LISTED_NOTE}</Text>
           </View>
         )}
 
@@ -147,6 +163,7 @@ function RecurringScreen() {
             </View>
             <Text style={styles.note}>{RECURRING_TOTALS_NOTE}</Text>
             <Text style={styles.note}>{RECURRING_HINT}</Text>
+            <Text style={styles.note}>{RECURRING_NOT_LISTED_NOTE}</Text>
 
             {sections.map((section) => (
               <View key={section.key} style={styles.section}>
@@ -227,6 +244,7 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: 20, fontWeight: '800', color: colors.text },
   note: { fontSize: 13, color: colors.textMuted, marginTop: 8, lineHeight: 19 },
   muted: { fontSize: 13, color: colors.textMuted, marginTop: 4, lineHeight: 19 },
+  stale: { fontSize: 13, color: colors.warning, marginBottom: 12, lineHeight: 19 },
   emptyBox: { alignItems: 'center', paddingVertical: 40, paddingHorizontal: 12 },
   emptyText: { fontSize: 16, fontWeight: '600', color: colors.text, textAlign: 'center', marginTop: 16, marginBottom: 8, lineHeight: 22 },
   section: { marginTop: 24 },

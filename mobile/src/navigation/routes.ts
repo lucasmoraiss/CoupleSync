@@ -22,7 +22,7 @@ export const PARENT_ROUTE = {
   'chat/index': '/',
   // Revisão do banco (Open Finance): aberta do atalho da tela de Transações e do fim do wizard.
   'openfinance/review': '/(main)/transactions',
-  // Assinaturas e recorrências: aberta do cartão do Painel.
+  // Assinaturas e recorrências: aberta do cartão do Painel e de Configurações > "Assinaturas e contas fixas".
   'recurring/index': '/',
 } as const;
 

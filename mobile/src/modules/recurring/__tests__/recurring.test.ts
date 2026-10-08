@@ -5,8 +5,16 @@ import * as path from 'path';
 import { PARENT_ROUTE } from '@/navigation/routes';
 import type { RecurringItemResponse, RecurringListResponse } from '@/types/api';
 import {
+  RECURRING_CARD_EMPTY_LABEL,
+  RECURRING_CARD_EMPTY_TEXT,
+  RECURRING_CARD_ERROR_LABEL,
+  RECURRING_CARD_ERROR_TEXT,
   RECURRING_EMPTY_TEXT,
+  RECURRING_ENTRY_LABEL,
+  RECURRING_NOT_LISTED_NOTE,
   RECURRING_QUERY_KEY,
+  RECURRING_STALE_TEXT,
+  RECURRING_TOTALS_NOTE,
   amountText,
   dateLabel,
   isRecurringEmpty,
@@ -143,6 +151,10 @@ describe('marcas de um item', () => {
     expect(itemBadges(item({ override: 'Cancelled', flags: ['ChargedAfterCancel'] }))).toEqual(['cobrou de novo depois de cancelada']);
     expect(itemBadges(item({ status: 'SuspectedDormant' }))).toEqual(['sem cobrança recente']);
     expect(itemBadges(item({ status: 'Stopped' }))).toEqual(['parou de ser cobrada']);
+    // Cobrou de novo depois de cancelada: as duas marcas juntas se contradiziam.
+    expect(itemBadges(item({ override: 'Cancelled', status: 'Stopped', flags: ['ChargedAfterCancel'] }))).toEqual([
+      'cobrou de novo depois de cancelada',
+    ]);
   });
 
   it('item sem nada de especial não tem marca (nem quebra sem o campo flags)', () => {
@@ -284,15 +296,55 @@ describe('a tela, o cartão e as rotas (código lido do arquivo)', () => {
     expect(screen).not.toMatch(/Intl\.NumberFormat/);
   });
 
-  it('o cartão do Painel abre a tela, só existe com a resposta do servidor e some em erro', () => {
+  it('o cartão do Painel nunca some em silêncio: total, vazio que explica, erro com "tentar de novo"', () => {
+    // Com a resposta em mãos (mesmo que a última consulta tenha falhado): o total, ou o vazio que diz o que vai aparecer.
     expect(dashboard).toMatch(
-      /\{recurring\.data && !recurring\.isError && \(\s*<TouchableOpacity[\s\S]{0,200}router\.push\('\/\(main\)\/recurring' as any\)[\s\S]{0,200}accessibilityLabel=\{recurringCardLabel\(recurring\.data\)\}/,
+      /\{recurring\.data \? \(\s*<TouchableOpacity[\s\S]{0,200}router\.push\('\/\(main\)\/recurring' as any\)[\s\S]{0,200}accessibilityLabel=\{isRecurringEmpty\(recurring\.data\) \? RECURRING_CARD_EMPTY_LABEL : recurringCardLabel\(recurring\.data\)\}/,
     );
-    expect(dashboard).toMatch(/\{recurringCardText\(recurring\.data\)\}/);
+    expect(dashboard).toMatch(/\{isRecurringEmpty\(recurring\.data\) \? RECURRING_CARD_EMPTY_TEXT : recurringCardText\(recurring\.data\)\}/);
+    // Em erro, sem resposta: o estado de erro com o botão que consulta de novo.
+    expect(dashboard).toMatch(
+      /\) : recurring\.isError \? \(\s*<TouchableOpacity[\s\S]{0,200}onPress=\{\(\) => void recurring\.refetch\(\)\}[\s\S]{0,200}accessibilityLabel=\{RECURRING_CARD_ERROR_LABEL\}[\s\S]{0,300}\{RECURRING_CARD_ERROR_TEXT\}[\s\S]{0,200}Tentar de novo/,
+    );
+    // Carregando: o cartão já ocupa o lugar dele.
+    expect(dashboard).toMatch(/\) : \(\s*<View style=\{styles\.aiCard\}[\s\S]{0,300}Carregando as recorrências/);
+    expect(dashboard).not.toMatch(/recurring\.data && !recurring\.isError/);
     expect(dashboard.match(/\(main\)\/recurring/g)).toHaveLength(1);
     // O Painel fica montado: pergunta de novo a cada volta e ao puxar para atualizar.
     expect(dashboard).toMatch(/useOnRefocus\(\(\) => void recurring\.refetch\(\{ cancelRefetch: false \}\)\);/);
     expect(dashboard).toMatch(/const recurringRefresh = recurring\.refetch\(\);[\s\S]{0,200}await recurringRefresh;/);
+  });
+
+  it('os textos do cartão dizem a verdade nos dois estados novos', () => {
+    expect(RECURRING_CARD_EMPTY_TEXT).toBe('Assinaturas e contas fixas aparecem aqui depois de 3 cobranças parecidas');
+    expect(RECURRING_CARD_EMPTY_LABEL).toBe(
+      'Assinaturas e contas fixas: ainda não há histórico suficiente. Elas aparecem aqui depois de 3 cobranças parecidas. Abrir assinaturas e recorrências',
+    );
+    expect(RECURRING_CARD_ERROR_TEXT).toBe('Não foi possível carregar as recorrências');
+    expect(RECURRING_CARD_ERROR_LABEL).toBe('Não foi possível carregar as recorrências. Tentar de novo');
+  });
+
+  it('há uma segunda entrada, fixa, em Configurações: "Assinaturas e contas fixas"', () => {
+    const settings = read('app/(main)/settings/index.tsx');
+    expect(RECURRING_ENTRY_LABEL).toBe('Assinaturas e contas fixas');
+    expect(settings).toMatch(
+      /<TouchableOpacity\s+style=\{styles\.menuItem\}\s+onPress=\{\(\) => router\.push\('\/\(main\)\/recurring' as any\)\}\s+accessibilityLabel="Abrir assinaturas e contas fixas: o que o grupo paga todo mês"\s+accessibilityRole="button"\s*>\s*<Text style=\{styles\.menuText\}>\{RECURRING_ENTRY_LABEL\}<\/Text>/,
+    );
+  });
+
+  it('a tela avisa quando mostra a lista antiga, e o indicador de puxar só aparece quando a pessoa puxa', () => {
+    expect(RECURRING_STALE_TEXT).toBe('Não foi possível atualizar agora. Esta é a última lista carregada.');
+    expect(screen).toMatch(/\{isError && !!data && <Text style=\{styles\.stale\} accessibilityRole="alert">\{RECURRING_STALE_TEXT\}<\/Text>\}/);
+    expect(screen).toMatch(/refreshing=\{pulling\}/);
+    expect(screen).not.toMatch(/refreshing=\{isRefetching\}/);
+  });
+
+  it('as notas dizem o que entra no total e o que nunca aparece na lista', () => {
+    expect(RECURRING_TOTALS_NOTE).toBe(
+      'Soma de assinaturas, contas fixas e parcelas confirmadas. Cobrança anual entra no mês como 1/12; de um parcelamento, "Em 12 meses" é só o que falta pagar. Pequenos gastos frequentes, parcelas prováveis e itens ocultos não entram.',
+    );
+    expect(RECURRING_NOT_LISTED_NOTE).toBe('Pix e transferências para pessoas não aparecem aqui, mesmo que se repitam.');
+    expect(screen.match(/\{RECURRING_NOT_LISTED_NOTE\}/g)).toHaveLength(2);
   });
 
   it('as três rotas da API são as do contrato', () => {

@@ -9,7 +9,21 @@ export const RECURRING_TITLE = 'Assinaturas e recorrências';
 export const RECURRING_EMPTY_TEXT = 'Ainda não há histórico suficiente: precisamos de 3 cobranças parecidas';
 export const RECURRING_HINT = 'Toque em um item para ver as cobranças e corrigir o que estiver errado.';
 export const RECURRING_TOTALS_NOTE =
-  'Soma de assinaturas, contas fixas e parcelas. Pequenos gastos frequentes e itens ocultos não entram.';
+  'Soma de assinaturas, contas fixas e parcelas confirmadas. Cobrança anual entra no mês como 1/12; de um parcelamento, "Em 12 meses" é só o que falta pagar. Pequenos gastos frequentes, parcelas prováveis e itens ocultos não entram.';
+/** O que nunca vira item (regra de privacidade do servidor): a tela diz, para o vazio não parecer defeito. */
+export const RECURRING_NOT_LISTED_NOTE = 'Pix e transferências para pessoas não aparecem aqui, mesmo que se repitam.';
+/** A lista na tela é antiga: a última consulta falhou. */
+export const RECURRING_STALE_TEXT = 'Não foi possível atualizar agora. Esta é a última lista carregada.';
+
+/** O nome da entrada fixa da tela (Configurações). */
+export const RECURRING_ENTRY_LABEL = 'Assinaturas e contas fixas';
+/** O cartão do Painel sem nenhuma recorrência: diz o que vai aparecer ali. */
+export const RECURRING_CARD_EMPTY_TEXT = 'Assinaturas e contas fixas aparecem aqui depois de 3 cobranças parecidas';
+export const RECURRING_CARD_EMPTY_LABEL =
+  'Assinaturas e contas fixas: ainda não há histórico suficiente. Elas aparecem aqui depois de 3 cobranças parecidas. Abrir assinaturas e recorrências';
+/** O cartão do Painel quando a consulta falhou e não há lista para mostrar. */
+export const RECURRING_CARD_ERROR_TEXT = 'Não foi possível carregar as recorrências';
+export const RECURRING_CARD_ERROR_LABEL = 'Não foi possível carregar as recorrências. Tentar de novo';
 
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'] as const;
 
@@ -92,7 +106,8 @@ export function itemBadges(item: RecurringItemResponse): string[] {
   if (item.variableAmount) badges.push('valor variável');
   if (item.kind === 'Installment' && item.confidence === 'Low') badges.push('parcela provável');
   if (item.status === 'SuspectedDormant') badges.push('sem cobrança recente');
-  if (item.status === 'Stopped') badges.push('parou de ser cobrada');
+  // Cancelada que voltou a cobrar: a série antiga continua "parada", mas dizer isso junto contradiz o aviso.
+  if (item.status === 'Stopped' && !flags.includes('ChargedAfterCancel')) badges.push('parou de ser cobrada');
   return badges;
 }
 

@@ -11,6 +11,7 @@ import { useNotificationPermission } from '@/modules/integrations/notification-c
 import { useEmailUnverified } from '@/components/EmailVerificationBanner';
 import { useMyGroups } from '@/modules/couple/useMyGroups';
 import { captureDestinationText } from '@/modules/couple/groups';
+import { RECURRING_ENTRY_LABEL } from '@/modules/recurring/recurring';
 
 export default function SettingsScreen() {
   const capture = useConsentStore((state) => state.record.capture);
@@ -95,6 +96,16 @@ export default function SettingsScreen() {
             accessibilityRole="button"
           >
             <Text style={styles.menuText}>Alertas</Text>
+            <Text style={styles.menuArrow}>›</Text>
+          </TouchableOpacity>
+          <View style={styles.divider} />
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => router.push('/(main)/recurring' as any)}
+            accessibilityLabel="Abrir assinaturas e contas fixas: o que o grupo paga todo mês"
+            accessibilityRole="button"
+          >
+            <Text style={styles.menuText}>{RECURRING_ENTRY_LABEL}</Text>
             <Text style={styles.menuArrow}>›</Text>
           </TouchableOpacity>
           <View style={styles.divider} />
