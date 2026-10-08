@@ -436,6 +436,22 @@ describe('a consulta que falha é tentada de novo sozinha', () => {
     expect(mockGetStatus).toHaveBeenCalledTimes(1 + AI_STATUS_RETRY_DELAYS_MS.length);
   });
 
+  it('"Verificar agora" depois da falha: o aviso volta a "verificando" enquanto a consulta não responde', async () => {
+    await signIn('user-1');
+    mockGetStatus.mockRejectedValue(NETWORK_DOWN);
+    await useAiStatusStore.getState().refresh();
+    for (const delay of AI_STATUS_RETRY_DELAYS_MS) await jest.advanceTimersByTimeAsync(delay);
+    const server = pendingStatus();
+    mockGetStatus.mockReturnValue(server.promise);
+
+    const checking = useAiStatusStore.getState().refresh();
+
+    expect(aiStatusNotice(forSession().status, forSession().loadFailed, loadForSession().retrying)).toBe('checking');
+    server.release({ data: status() });
+    await checking;
+    expect(aiStatusNotice(forSession().status, forSession().loadFailed, loadForSession().retrying)).toBe('none');
+  });
+
   it('a tentativa marcada não roda depois de sair da conta, nem para o grupo seguinte', async () => {
     await signIn('user-1', 'couple-1');
     mockGetStatus.mockRejectedValue(NETWORK_DOWN);

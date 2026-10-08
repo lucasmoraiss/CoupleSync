@@ -188,6 +188,9 @@ export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, ge
     refresh: () => {
       // Pedido explícito (foco, puxar para atualizar, botão): consulta agora, sem esperar a tentativa marcada.
       cancelRetry();
+      // Quem tocou em "Verificar agora" vê que a consulta recomeçou, em vez do aviso de falha parado.
+      const owner = sessionOwner();
+      if (owner && owns(owner) && get().loadFailed) set({ loadFailed: false, retrying: false });
       return startRead(0);
     },
     activate: () => write(() => aiApiClient.accept(AI_CONSENT_VERSION)),
