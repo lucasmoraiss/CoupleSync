@@ -250,7 +250,10 @@ case "$api_log" in *'PDF worker finished (exit code 0'*'ok=True'*) ;; *) fail "t
 # not a limit of the whole process): the API, process 1 of the container, must never be the one that goes.
 case "$api_log" in *'PDF worker finished (exit code 0'*'oom score adj=1000'*) ;; *) fail "the PDF worker did not raise its own out-of-memory score (no 'oom score adj=1000' in the API log)" ;; esac
 
-workers="$(docker exec "$API" sh -c 'ps' | grep -c -e '--pdf-worker' || true)"
+# The list of processes must really have been read (the API itself is in it): a failed `docker exec` is not "no worker".
+processes="$(docker exec "$API" ps)" || fail "could not list the processes of the API container"
+case "$processes" in *CoupleSync.Api.dll*) ;; *) fail "the process list of the API container does not show the API: it cannot be trusted" ;; esac
+workers="$(printf '%s\n' "$processes" | grep -c -e '--pdf-worker' || true)"
 echo "PDF worker processes still running in the container: $workers"
 [ "$workers" = "0" ] || fail "a PDF worker process was left running"
 
