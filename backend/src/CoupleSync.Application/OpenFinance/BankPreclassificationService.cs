@@ -22,8 +22,9 @@ public sealed record ArrivedBankLine(BankTransaction Row, string? PayerName)
 /// <item>an expense that looks like a transaction the app already has: it stays waiting, pointing to that one.</item>
 /// </list>
 /// Only lines <see cref="BankTransaction.OpenToAutomaticRules"/>, in reais and with a value. What is ignored was
-/// settled at the bank: a line the bank may still change or drop is never ignored. Nothing is saved here: the run
-/// saves, and a line someone reviewed meanwhile keeps that review.
+/// settled at the bank: a line the bank may still change or drop is never ignored. A purchase on a credit card is
+/// never a leg of a transfer. Nothing is saved here: the run saves; when someone reviewed a line meanwhile, that
+/// review stays and the run decides again about the others (<see cref="IBankSyncRepository.SaveRunProgressAsync"/>).
 /// </summary>
 public sealed class BankPreclassificationService
 {
@@ -47,9 +48,17 @@ public sealed class BankPreclassificationService
     /// <summary>
     /// Decides about <paramref name="lines"/>, all of <paramref name="account"/> (of the bank named
     /// <paramref name="connectorName"/>), looking at the whole group <paramref name="coupleId"/>.
+    /// <paramref name="leaving"/> are the lines of the account this same reading takes out of the mirror (the bank no
+    /// longer lists them): the transaction one of them was suspected of repeating is free for the line that replaces
+    /// it (a pending purchase the bank settled under another id).
     /// </summary>
     public async Task ApplyAsync(
-        Guid coupleId, BankAccount account, string? connectorName, IReadOnlyList<ArrivedBankLine> lines, CancellationToken ct)
+        Guid coupleId,
+        BankAccount account,
+        string? connectorName,
+        IReadOnlyList<ArrivedBankLine> lines,
+        IReadOnlyCollection<BankTransaction> leaving,
+        CancellationToken ct)
     {
         // Oldest first, so that the same data always pairs the same way.
         var open = lines
@@ -63,9 +72,17 @@ public sealed class BankPreclassificationService
         var lastDay = open.Max(l => l.Row.LocalDate);
         var settled = open.Where(l => l.Row.Status == BankTransactionStatus.Posted).ToList();
 
-        IReadOnlyList<BankTransaction> otherLegs = settled.Count > 0
-            ? await _sync.GetTransferCandidatesForJobAsync(coupleId, settled.Min(l => l.Row.LocalDate), settled.Max(l => l.Row.LocalDate), ct)
-            : [];
+        // A purchase on a credit card is never a leg: neither the line that arrives nor the one that waits.
+        var mayBeLegs = settled.Where(l => BankReconciliationRules.CanBeTransferLeg(FactsOf(l.Row), account.Type)).ToList();
+        IReadOnlyList<BankTransaction> otherLegs = [];
+        if (mayBeLegs.Count > 0)
+        {
+            var accountTypes = await _sync.GetAccountTypesForJobAsync(coupleId, ct);
+            otherLegs = (await _sync.GetTransferCandidatesForJobAsync(
+                    coupleId, mayBeLegs.Min(l => l.Row.LocalDate), mayBeLegs.Max(l => l.Row.LocalDate), ct))
+                .Where(c => BankReconciliationRules.CanBeTransferLeg(FactsOf(c), accountTypes.GetValueOrDefault(c.BankAccountId)))
+                .ToList();
+        }
 
         IReadOnlyList<string?> holdersOfOtherAccounts =
             settled.Any(l => !l.Row.IsExpense && !string.IsNullOrWhiteSpace(l.PayerName))
@@ -81,6 +98,7 @@ public sealed class BankPreclassificationService
                 coupleId,
                 BrazilTime.ToUtc(firstDay.AddDays(-BankReconciliationRules.DuplicateDayTolerance).ToDateTime(TimeOnly.MinValue)),
                 BrazilTime.ToUtc(lastDay.AddDays(BankReconciliationRules.DuplicateDayTolerance + 1).ToDateTime(TimeOnly.MinValue)),
+                leaving.Where(l => l.MatchedTransactionId is not null).Select(l => l.Id).ToList(),
                 ct)).ToList()
             : [];
 
@@ -96,7 +114,9 @@ public sealed class BankPreclassificationService
                 // A leg already paired is no longer one to pair: each leg pairs with one other only. The other leg may
                 // have arrived first and been ignored as a bill payment (the accounts of a bank are read one after
                 // the other): the pair is a transfer all the same, whatever the order of arrival.
-                var otherLeg = BankReconciliationRules.FindTransferCounterpart(facts, otherLegs.Where(c => c.CanBePairedAsTransfer), FactsOf);
+                var otherLeg = BankReconciliationRules.CanBeTransferLeg(facts, account.Type)
+                    ? BankReconciliationRules.FindTransferCounterpart(facts, otherLegs.Where(c => c.CanBePairedAsTransfer), FactsOf)
+                    : null;
                 if (otherLeg is not null)
                 {
                     row.PairAsTransfer(now);

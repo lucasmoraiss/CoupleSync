@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CoupleSync.Domain.ValueObjects;
 using CoupleSync.TestSupport;
@@ -28,8 +29,11 @@ public sealed class OpenFinanceReconciliationTests
         return factory;
     }
 
+    /// <summary>The day every date here is counted from, read once: a test that crosses midnight (UTC) still agrees with itself.</summary>
+    private static readonly DateTime Today = DateTime.UtcNow.Date;
+
     /// <summary>Noon in Brasília, some days ago (inside the first window of a connection, in a month that is over or not).</summary>
-    private static DateTime Noon(int daysAfterTheBase = 0) => DateTime.UtcNow.Date.AddDays(-10 + daysAfterTheBase).AddHours(15);
+    private static DateTime Noon(int daysAfterTheBase = 0) => Today.AddDays(-10 + daysAfterTheBase).AddHours(15);
 
     private static FakeTransaction Debit(string id, DateTime date, decimal amount, string description = "Compra Exemplo")
         => new(id, date, -amount) { Description = description };
@@ -106,6 +110,26 @@ public sealed class OpenFinanceReconciliationTests
         return await JsonAsync(response);
     }
 
+    /// <summary>
+    /// Right before the run saves what it read of <paramref name="account"/> (the lines, and what the rules decided
+    /// about them), <paramref name="meanwhile"/> happens, once. The counter says whether it did.
+    /// </summary>
+    private static StrongBox<int> BeforeTheRunSaves(OpenFinanceApiFactory factory, string account, Func<Task> meanwhile)
+    {
+        var happened = new StrongBox<int>(0);
+        factory.Pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path == "/transactions" && request.Query.Contains(account, StringComparison.Ordinal)
+                && Interlocked.Exchange(ref happened.Value, 1) == 0)
+            {
+                factory.BeforeNextSave = meanwhile;
+            }
+
+            return Task.CompletedTask;
+        };
+        return happened;
+    }
+
     /// <summary>Ana with a manual expense of R$ 25,00 and the same purchase arriving from the bank the next day.</summary>
     private static async Task<(Member Ana, Guid Connection, Guid Existing, Guid Line)> WithDuplicateAsync(
         OpenFinanceApiFactory factory, string? merchant = null, string category = "OUTROS")
@@ -153,7 +177,7 @@ public sealed class OpenFinanceReconciliationTests
         await using var factory = NewFactory();
         var (ana, connection) = await AnaAsync(factory);
         // 22:00 in Brasília: already the next day in UTC.
-        var lateEvening = DateTime.UtcNow.Date.AddDays(-10).AddDays(1).AddHours(1);
+        var lateEvening = Today.AddDays(-10).AddDays(1).AddHours(1);
         var near = await ManualAsync(ana, 31.00m, lateEvening, "Jantar");
         await ManualAsync(ana, 32.00m, lateEvening, "Bar");
         Bank(factory, Checking,
@@ -688,7 +712,8 @@ public sealed class OpenFinanceReconciliationTests
         Assert.Equal(1, once);
         // The review of the person is kept whole: the run did not write its decision over it.
         Assert.Equal(("Discarded", null, null), await StateAsync(factory, "t26-sent"));
-        Assert.Single(await factory.RowsAsync("SELECT id FROM bank_transactions WHERE pluggy_transaction_id = 't26-received'"));
+        // And the leg that arrived is not half a transfer: with nothing left to pair with, it waits like any other line.
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-received"));
     }
 
     // ================================================================ GET review
@@ -1188,5 +1213,283 @@ public sealed class OpenFinanceReconciliationTests
         Assert.Equal("Confirmed", (await MirrorRowAsync(factory, "t26-another"))["review_state"]);
         Assert.Equal("Confirmed", (await MirrorRowAsync(factory, "t26-plain"))["review_state"]);
         Assert.Equal("Discarded", (await MirrorRowAsync(factory, "t26-discard"))["review_state"]);
+    }
+
+    // ================================================================ what a run decides, against what happens meanwhile
+
+    [Fact]
+    public async Task APurchasePendingAtTheBank_SettledUnderAnotherId_IsStillASuspectedDuplicate()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var existing = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        Bank(factory, Checking, Debit("t26-authorised", Noon(1), 25.00m, "Padaria Exemplo") with { Status = "PENDING" });
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-authorised"));
+
+        // The bank settles the purchase under another id: the pending line is gone from its answer.
+        Bank(factory, Checking, Debit("t26-settled", Noon(1), 25.00m, "Padaria Exemplo"));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM bank_transactions WHERE pluggy_transaction_id = 't26-authorised'"));
+        // The line that left with this very reading does not hold the transaction any more.
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-settled"));
+        var review = await ReviewAsync(ana, Noon(1));
+        var shown = Find(review.GetProperty("expenses"), await LineIdAsync(factory, "t26-settled"))!.Value;
+        Assert.Equal("Posted", shown.GetProperty("bankStatus").GetString());
+        // With "match" the app leaves the line out of "Selecionar tudo": it is answered "the same" or "another one".
+        Assert.Equal(existing, shown.GetProperty("match").GetProperty("transactionId").GetGuid());
+        Assert.Equal(1, review.GetProperty("suspectedDuplicates").GetInt32());
+
+        // And the answer works: nothing is created.
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = shown.GetProperty("id").GetGuid() } } }));
+        Assert.Single(await factory.RowsAsync("SELECT id FROM transactions"));
+    }
+
+    [Fact]
+    public async Task APendingLineThatStaysAtTheBank_KeepsItsSuspicion_AndTheTransactionIsNotOfferedToAnotherLine()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var existing = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        Bank(factory, Checking, Debit("t26-authorised", Noon(1), 25.00m) with { Status = "PENDING" });
+        await DoneAsync(factory, ana, connection);
+
+        // Another purchase of the same value arrives; the pending one is still listed by the bank.
+        factory.Pluggy.Transactions[Checking].Add(Debit("t26-another", Noon(1).AddHours(1), 25.00m));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-authorised"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-another"));
+    }
+
+    [Fact]
+    public async Task ADiscardWhileTheRunSaves_UndoesNothingOfWhatTheRunDecidedAboutTheOtherLines_AndLeavesNoTransferByHalves()
+    {
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory);
+        var (bruno, brunoConnection) = await WithOtherBankAsync(factory, "Bruno Silva", ana.JoinCode);
+        var existing = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        Bank(factory, Checking, Debit("t26-sent-1", Noon(), 500.00m, "PIX ENVIADO"), Debit("t26-sent-2", Noon(), 600.00m, "PIX ENVIADO"));
+        // Bruno's bank has not settled his bill payment yet.
+        Bank(factory, OtherChecking,
+            new FakeTransaction("t26-bill", Noon(), -900.00m) { DescriptionRaw = "PAGAMENTO DE FATURA", Status = "PENDING" });
+        await DoneAsync(factory, ana, anaConnection);
+        await DoneAsync(factory, bruno, brunoConnection);
+        var sent2 = await LineIdAsync(factory, "t26-sent-2");
+        // Now it has, and both transfers and a purchase Ana typed by hand arrive with it.
+        Bank(factory, OtherChecking,
+            new FakeTransaction("t26-bill", Noon(), -900.00m) { DescriptionRaw = "PAGAMENTO DE FATURA" },
+            Credit("t26-received-1", Noon().AddHours(1), 500.00m, "PIX RECEBIDO"),
+            Credit("t26-received-2", Noon().AddHours(2), 600.00m, "PIX RECEBIDO"),
+            Debit("t26-padaria", Noon(1), 25.00m, "Padaria Exemplo"));
+        // The run has decided about all of them and is about to save when Ana discards one of the legs that waited.
+        var happened = BeforeTheRunSaves(factory, OtherChecking, async () =>
+        {
+            var discarded = await ConfirmAsync(ana, new { discard = new[] { sent2 } });
+            Assert.True(HttpStatusCode.OK == discarded.StatusCode, await discarded.Content.ReadAsStringAsync());
+        });
+
+        await DoneAsync(factory, bruno, brunoConnection);
+
+        Assert.Equal(1, happened.Value);
+        // The transfer nobody touched is whole, on both sides.
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-sent-1"));
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-received-1"));
+        // The leg Ana discarded is as she left it, and its other leg is not ignored alone.
+        Assert.Equal(("Discarded", null, null), await StateAsync(factory, "t26-sent-2"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-received-2"));
+        // What the run decided about the lines nobody touched is kept: the one the bank has just settled and the new one.
+        Assert.Equal(("Ignored", "BillPayment", null), await StateAsync(factory, "t26-bill"));
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-padaria"));
+        Assert.Equal("Posted", (await MirrorRowAsync(factory, "t26-bill"))["status"]);
+    }
+
+    [Fact]
+    public async Task ALegWithTwoCandidates_WhenTheFirstIsDiscardedWhileTheRunSaves_PairsWithTheOther()
+    {
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory);
+        var (bruno, brunoConnection) = await WithOtherBankAsync(factory, "Bruno Silva", ana.JoinCode);
+        Bank(factory, Checking, Debit("t26-out-1", Noon(), 50.00m), Debit("t26-out-2", Noon().AddHours(1), 50.00m));
+        Bank(factory, OtherChecking, Credit("t26-in", Noon().AddHours(2), 50.00m));
+        await DoneAsync(factory, ana, anaConnection);
+        var first = await LineIdAsync(factory, "t26-out-1");
+        var happened = BeforeTheRunSaves(factory, OtherChecking, async () =>
+        {
+            var discarded = await ConfirmAsync(ana, new { discard = new[] { first } });
+            Assert.True(HttpStatusCode.OK == discarded.StatusCode, await discarded.Content.ReadAsStringAsync());
+        });
+
+        await DoneAsync(factory, bruno, brunoConnection);
+
+        Assert.Equal(1, happened.Value);
+        Assert.Equal(("Discarded", null, null), await StateAsync(factory, "t26-out-1"));
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-in"));
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-out-2"));
+    }
+
+    [Fact]
+    public async Task ABillPaymentRestoredWhileTheRunPairsIt_StaysAsThePersonLeftIt_AndTheCreditOnTheCardIsNotIgnoredAlone()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        Bank(factory, Checking, Debit("t26-bill-out", Noon(), 1200.00m, "PAGAMENTO DE FATURA"));
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Ignored", "BillPayment", null), await StateAsync(factory, "t26-bill-out"));
+        var billOut = await LineIdAsync(factory, "t26-bill-out");
+        Bank(factory, Card, Credit("t26-bill-in", Noon(), 1200.00m, "Pagamento recebido"));
+        var happened = BeforeTheRunSaves(factory, Card, async () =>
+        {
+            var restored = await ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { billOut });
+            Assert.True(HttpStatusCode.OK == restored.StatusCode, await restored.Content.ReadAsStringAsync());
+        });
+
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(1, happened.Value);
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-bill-out"));
+        Assert.NotNull((await MirrorRowAsync(factory, "t26-bill-out"))["person_decided_at_utc"]);
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-bill-in"));
+    }
+
+    [Fact]
+    public async Task WhenWhoHeldTheOtherLegLeavesTheGroupWhileTheRunPairsIt_TheLegThatArrivedIsNotIgnoredAlone()
+    {
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory);
+        var (bruno, brunoConnection) = await WithOtherBankAsync(factory, "Bruno Silva", ana.JoinCode);
+        Bank(factory, OtherChecking, Credit("t26-received", Noon(), 500.00m));
+        await DoneAsync(factory, bruno, brunoConnection);
+        Bank(factory, Checking,
+            Debit("t26-sent", Noon(), 500.00m),
+            new FakeTransaction("t26-bill", Noon(), -900.00m) { DescriptionRaw = "PAGAMENTO DE FATURA" });
+        var happened = BeforeTheRunSaves(factory, Checking, async () =>
+        {
+            var left = await bruno.Client.PostAsJsonAsync("/api/v1/couples/leave", new { });
+            Assert.True(left.IsSuccessStatusCode, await left.Content.ReadAsStringAsync());
+        });
+
+        await DoneAsync(factory, ana, anaConnection);
+
+        Assert.Equal(1, happened.Value);
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM bank_transactions WHERE pluggy_transaction_id = 't26-received'"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-sent"));
+        Assert.Equal(("Ignored", "BillPayment", null), await StateAsync(factory, "t26-bill"));
+    }
+
+    [Fact]
+    public async Task WhenTheTransactionALineWasAboutToSuspectIsDeletedWhileTheRunSaves_NothingIsWrittenByHalves_AndTheNextRunLeavesTheLineWaiting()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var existing = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        Bank(factory, Checking, Debit("t26-padaria", Noon(1), 25.00m), Debit("t26-market", Noon(1), 80.00m));
+        var happened = BeforeTheRunSaves(factory, Checking, async () =>
+            Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"/api/v1/transactions/{existing}")).StatusCode));
+
+        var failed = await SyncAsync(factory, ana, connection);
+
+        // The line cannot point to a transaction that is gone: the save of the account is refused whole and the run
+        // says so. Nothing of that account was written.
+        Assert.Equal(1, happened.Value);
+        Assert.Equal("Failed", failed["status"]);
+        Assert.Empty(await MirrorAsync(factory));
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM transactions"));
+
+        // The next one reads the same lines as new: there is nothing left to suspect.
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-padaria"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-market"));
+    }
+
+    [Fact]
+    public async Task ItIsTheSame_AnsweredWhileTheTransactionIsBeingDeleted_LeavesTheLineAsDiscarded_VisibleAndRestorable()
+    {
+        await using var factory = NewFactory();
+        var (ana, _, existing, line) = await WithDuplicateAsync(factory);
+        // The deletion has read which lines point to the transaction (none yet) when the answer is stored; only
+        // then is the transaction deleted, and the link of the line goes with it.
+        factory.BeforeNextSave = async () =>
+        {
+            var answered = await ConfirmAsync(ana, new { reconcile = new[] { new { id = line } } });
+            Assert.True(HttpStatusCode.OK == answered.StatusCode, await answered.Content.ReadAsStringAsync());
+        };
+
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"/api/v1/transactions/{existing}")).StatusCode);
+
+        Assert.Null(factory.BeforeNextSave); // the answer did happen in the middle
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM transactions"));
+        Assert.Null((await MirrorRowAsync(factory, "t26-padaria"))["linked_transaction_id"]);
+        // Without its transaction the line is a discarded one: it is listed as such, never lost.
+        var review = await ReviewAsync(ana, Noon(1));
+        Assert.NotNull(Find(review.GetProperty("discarded"), line));
+        Assert.Null(Find(review.GetProperty("expenses"), line));
+        Assert.Null(Find(review.GetProperty("ignored"), line));
+        // Answering again finds nothing to answer; discarding it again is done already; it is not one to confirm yet.
+        Assert.Empty((await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = line } } }))).GetProperty("reconciled").EnumerateArray());
+        Assert.Equal(line, Assert.Single((await OkAsync(ConfirmAsync(ana, new { discard = new[] { line } }))).GetProperty("discarded").EnumerateArray()).GetGuid());
+        await AssertErrorAsync(await ConfirmAsync(ana, new { expenses = new[] { new { id = line } } }), HttpStatusCode.Conflict, "BANK_TRANSACTION_NOT_PENDING");
+
+        // And it comes back like any discarded line: restored, then confirmed as an expense.
+        var restored = await OkAsync(ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { line }));
+        Assert.Equal(line, Assert.Single(restored.GetProperty("restored").EnumerateArray()).GetGuid());
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-padaria"));
+        Assert.NotNull(Find((await ReviewAsync(ana, Noon(1))).GetProperty("expenses"), line));
+        var created = await OkAsync(ConfirmAsync(ana, new { expenses = new[] { new { id = line } } }));
+        Assert.Single(created.GetProperty("created").EnumerateArray());
+        Assert.Equal("Confirmed", (await MirrorRowAsync(factory, "t26-padaria"))["review_state"]);
+    }
+
+    [Fact]
+    public async Task ALineReconciledWithATransactionThatIsStillThere_IsNotListedAsDiscarded_NorRestored_NorDiscarded()
+    {
+        await using var factory = NewFactory();
+        var (ana, _, existing, line) = await WithDuplicateAsync(factory);
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = line } } }));
+
+        var review = await ReviewAsync(ana, Noon(1));
+        Assert.Empty(review.GetProperty("discarded").EnumerateArray());
+        var restored = await OkAsync(ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { line }));
+        Assert.Empty(restored.GetProperty("restored").EnumerateArray());
+        await AssertErrorAsync(await ConfirmAsync(ana, new { discard = new[] { line } }), HttpStatusCode.Conflict, "BANK_TRANSACTION_NOT_PENDING");
+
+        var row = await MirrorRowAsync(factory, "t26-padaria");
+        Assert.Equal(("Reconciled", Sql(existing)), ((string)row["review_state"]!, (string?)row["linked_transaction_id"]));
+    }
+
+    // ================================================================ a purchase on a credit card is never a leg of a transfer
+
+    [Fact]
+    public async Task APurchaseOnTheCardOfOne_AndMoneyReceivedByTheOtherOnTheSameDay_AreNotATransfer_InAnyOrderOfArrival()
+    {
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory);
+        var (bruno, brunoConnection) = await WithOtherBankAsync(factory, "Bruno Silva", ana.JoinCode);
+        Bank(factory, Card, Debit("t26-card-purchase", Noon(), 100.00m, "Loja Exemplo"));
+        Bank(factory, OtherChecking, Credit("t26-pix-in", Noon().AddHours(1), 100.00m, "PIX RECEBIDO"));
+
+        // The purchase waits; the credit arrives.
+        await DoneAsync(factory, ana, anaConnection);
+        await DoneAsync(factory, bruno, brunoConnection);
+
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-card-purchase"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-pix-in"));
+
+        // The other order: the credit waits; the purchase arrives.
+        factory.Pluggy.Transactions[OtherChecking].Add(Credit("t26-pix-in-2", Noon(1), 110.00m, "PIX RECEBIDO"));
+        await DoneAsync(factory, bruno, brunoConnection);
+        factory.Pluggy.Transactions[Card].Add(Debit("t26-card-purchase-2", Noon(1).AddHours(1), 110.00m, "Loja Exemplo"));
+        await DoneAsync(factory, ana, anaConnection);
+
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-card-purchase-2"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-pix-in-2"));
+
+        // Money that ENTERS the card is still the other leg of what left a checking account (the payment of the bill).
+        factory.Pluggy.Transactions[Checking].Add(Debit("t26-paid", Noon(2), 120.00m, "PIX ENVIADO"));
+        factory.Pluggy.Transactions[Card].Add(Credit("t26-paid-in", Noon(2), 120.00m, "Pagamento recebido"));
+        await DoneAsync(factory, ana, anaConnection);
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-paid"));
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-paid-in"));
     }
 }

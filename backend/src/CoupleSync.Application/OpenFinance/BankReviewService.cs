@@ -83,7 +83,7 @@ public sealed class BankReviewService
         var pending = await _sync.GetPendingExpensesAsync(coupleId, ct);
 
         var expenses = rows.Where(r => r.ReviewState == BankTransactionReviewState.Pending).ToList();
-        var discarded = rows.Where(r => r.ReviewState == BankTransactionReviewState.Discarded).ToList();
+        var discarded = rows.Where(r => r.CountsAsDiscarded).ToList();
         var matches = await _sync.GetTransactionSummariesAsync(
             expenses.Where(r => r.MatchedTransactionId is not null).Select(r => r.MatchedTransactionId!.Value).ToList(), coupleId, ct);
         var expenseLines = Order(expenses).Select(r => MapLine(r, names, matches)).ToList();
@@ -171,7 +171,7 @@ public sealed class BankReviewService
                 "Este lançamento ainda está pendente no banco. Ele poderá ser confirmado quando o banco o efetivar.");
 
         if (expenseIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Confirmed))
-            || discardIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Discarded))
+            || discardIds.Any(id => rows[id].ReviewState != BankTransactionReviewState.Pending && !rows[id].CountsAsDiscarded)
             || reconcileIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Reconciled)))
         {
             throw new ConflictException(NotPendingCode, "Este lançamento já foi revisado. Atualize a revisão e tente de novo.");
@@ -305,8 +305,9 @@ public sealed class BankReviewService
         {
             if (row.ReviewState == BankTransactionReviewState.Reconciled)
             {
-                // The same request sent twice. Without the link, the transaction was deleted meanwhile and the line
-                // is about to leave this state (or already left): there is nothing to answer for it.
+                // The same request sent twice. Without the link, the transaction was deleted at the very moment of
+                // the answer: the line counts as discarded (it is listed there and can be restored) and there is
+                // nothing to answer for it.
                 if (row.LinkedTransactionId is { } linked) reconciled.Add(new BankReviewReconciledDto(row.Id, linked));
                 continue;
             }
@@ -357,8 +358,8 @@ public sealed class BankReviewService
     }
 
     /// <summary>
-    /// Discarded and automatically ignored lines go back to waiting, and from then on no automatic rule decides about
-    /// them again. Lines in any other state stay as they are.
+    /// Discarded lines (<see cref="BankTransaction.CountsAsDiscarded"/>) and automatically ignored ones go back to
+    /// waiting, and from then on no automatic rule decides about them again. Lines in any other state stay as they are.
     /// </summary>
     public async Task<IReadOnlyList<Guid>> RestoreAsync(Guid coupleId, IReadOnlyList<Guid>? ids, CancellationToken ct)
     {
@@ -374,7 +375,7 @@ public sealed class BankReviewService
 
         var now = _clock.UtcNow;
         var restored = new List<Guid>();
-        foreach (var row in rows.Where(r => r.ReviewState is BankTransactionReviewState.Discarded or BankTransactionReviewState.Ignored))
+        foreach (var row in rows.Where(r => r.CountsAsDiscarded || r.ReviewState == BankTransactionReviewState.Ignored))
         {
             row.Restore(now);
             restored.Add(row.Id);

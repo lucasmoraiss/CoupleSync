@@ -38,6 +38,9 @@ public static class BankReconciliationRules
     /// <summary>The account type Pluggy gives a checking or savings account (a credit card is <c>CREDIT</c>).</summary>
     public const string BankAccountType = "BANK";
 
+    /// <summary>The account type Pluggy gives a credit card.</summary>
+    public const string CreditCardAccountType = "CREDIT";
+
     /// <summary>A name with fewer words than this says too little to tell one person from another.</summary>
     private const int MinWordsOfAName = 2;
 
@@ -76,6 +79,16 @@ public static class BankReconciliationRules
            && one.AccountId is { } first
            && other.AccountId is { } second
            && first != second;
+
+    /// <summary>
+    /// False for money that left a credit card: that is a purchase, never one leg of a transfer between accounts of
+    /// the group (a purchase of R$ 100,00 on the card of one and R$ 100,00 received by the other on the same day are
+    /// two different things). Money that ENTERS a card can be a leg: it is the payment of the bill, whose other leg
+    /// left a checking account. An account of a type nobody knows is not held back.
+    /// </summary>
+    public static bool CanBeTransferLeg(MoneyMovement movement, string? accountType)
+        => !(movement.Direction == MoneyDirection.Out
+             && string.Equals(accountType?.Trim(), CreditCardAccountType, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The first of <paramref name="candidates"/>, in the order given, that is the other leg of <paramref name="line"/>.</summary>
     public static T? FindTransferCounterpart<T>(MoneyMovement line, IEnumerable<T> candidates, Func<T, MoneyMovement> facts)

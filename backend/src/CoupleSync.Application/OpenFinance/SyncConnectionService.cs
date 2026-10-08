@@ -273,10 +273,14 @@ public sealed class SyncConnectionService
                 var from = window.FromFor(await _sync.GetLastTransactionDayAsync(account.Id, ct));
                 var transactions = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
                 var arrived = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
+                // What the bank no longer lists leaves first: the rules must not see, held by a line that is leaving,
+                // the transaction the line that replaces it looks like.
+                var leaving = await RemoveVanishedAsync(account, transactions, from, window.To, ct);
                 // Before anyone sees them: transfers between accounts of the group, bill payments and suspected duplicates.
-                await _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, ct);
-                await RemoveVanishedAsync(account, transactions, from, window.To, ct);
-                await SaveAsync(connection, ct);
+                Task DecideAsync(CancellationToken token)
+                    => _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, leaving, token);
+                await DecideAsync(ct);
+                await SaveAsync(connection, ct, DecideAsync);
             }
 
             return true;
@@ -386,19 +390,20 @@ public sealed class SyncConnectionService
     /// What the bank had not settled and no longer lists is gone at the bank (a pre-authorisation that fell, a
     /// pending purchase that got another id when it was settled): the line leaves the mirror, so that it does not
     /// wait for a review that can never confirm it. Only lines still pending at the bank AND still waiting for the
-    /// review, on days this reading covered whole; a line someone confirmed or discarded is never touched.
+    /// review, on days this reading covered whole; a line someone confirmed or discarded is never touched. Returns
+    /// the lines that leave.
     /// </summary>
-    private async Task RemoveVanishedAsync(
+    private async Task<IReadOnlyList<BankTransaction>> RemoveVanishedAsync(
         BankAccount account, IReadOnlyList<PluggyTransaction> transactions, DateOnly from, DateOnly to, CancellationToken ct)
     {
         // The first day asked is left out: Pluggy cuts the days in UTC, and a transaction of that day could be
         // missing from the answer only because of where the day begins.
         var fromUtc = DateTime.SpecifyKind(from.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
         var toUtc = DateTime.SpecifyKind(to.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
-        if (fromUtc >= toUtc) return;
+        if (fromUtc >= toUtc) return [];
 
         var candidates = await _sync.GetUnsettledWaitingAsync(account.Id, fromUtc, toUtc, ct);
-        if (candidates.Count == 0) return;
+        if (candidates.Count == 0) return [];
 
         var listed = transactions
             .Where(t => !string.IsNullOrWhiteSpace(t.Id))
@@ -410,6 +415,7 @@ public sealed class SyncConnectionService
                           && !listed.Contains(row.PluggyTransactionId))
             .ToList();
         if (vanished.Count > 0) _sync.RemoveTransactions(vanished);
+        return vanished;
     }
 
     /// <summary>
@@ -441,11 +447,11 @@ public sealed class SyncConnectionService
         }
     }
 
-    private async Task SaveAsync(BankConnection connection, CancellationToken ct)
+    private async Task SaveAsync(BankConnection connection, CancellationToken ct, Func<CancellationToken, Task>? decideAgain = null)
     {
         try
         {
-            await _sync.SaveRunProgressAsync(connection, ct);
+            await _sync.SaveRunProgressAsync(connection, decideAgain, ct);
         }
         catch (DataStoreException ex) when (ex is ConcurrencyConflictException or ForeignKeyViolationException)
         {
@@ -485,7 +491,7 @@ public sealed class SyncConnectionService
             try
             {
                 if (connection is not null)
-                    await _sync.SaveRunProgressAsync(connection, ct);
+                    await _sync.SaveRunProgressAsync(connection, decideAgain: null, ct);
                 else
                     await _sync.SaveChangesAsync(ct);
                 return;

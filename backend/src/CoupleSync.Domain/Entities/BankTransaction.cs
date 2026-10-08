@@ -67,8 +67,9 @@ public sealed record BankTransactionSnapshot(
 
 /// <summary>
 /// The mirror of one bank transaction as Pluggy delivers it (Open Finance). The review decides what becomes of it;
-/// nothing here is ever deleted by the review. A synchronisation refreshes only what comes from Pluggy, never
-/// <see cref="ReviewState"/> nor the links.
+/// nothing here is ever deleted by the review. A synchronisation refreshes what comes from Pluggy and decides, by
+/// the automatic rules, only about lines nobody reviewed (<see cref="OpenToAutomaticRules"/>); it never writes over
+/// a review of a person nor over the links.
 /// </summary>
 public sealed class BankTransaction : ICoupleScoped
 {
@@ -228,6 +229,33 @@ public sealed class BankTransaction : ICoupleScoped
     /// brought it back to the review.
     /// </summary>
     public bool OpenToAutomaticRules => ReviewState == BankTransactionReviewState.Pending && PersonDecidedAtUtc is null;
+
+    /// <summary>
+    /// True when the person said the line is the same as a transaction that is no longer there: it was deleted at the
+    /// very moment of the answer, and the store cleared the link. Nothing is left for the line to be the same as.
+    /// </summary>
+    public bool LostItsTransaction => ReviewState == BankTransactionReviewState.Reconciled && LinkedTransactionId is null;
+
+    /// <summary>
+    /// What the review treats as discarded (listed apart, can be restored): what the person discarded, and a line
+    /// that <see cref="LostItsTransaction"/>.
+    /// </summary>
+    public bool CountsAsDiscarded => ReviewState == BankTransactionReviewState.Discarded || LostItsTransaction;
+
+    /// <summary>
+    /// What an automatic rule decided about the line was not stored (the save was refused because someone reviewed
+    /// lines at that moment): the line waits again, as it arrived, for the rules to decide again. Never touches what
+    /// a person decided.
+    /// </summary>
+    public void ForgetAutomaticDecision()
+    {
+        if (PersonDecidedAtUtc is not null) return;
+        if (ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Ignored)) return;
+        ReviewState = BankTransactionReviewState.Pending;
+        AutoReason = null;
+        MatchedTransactionId = null;
+        ReviewedAtUtc = null;
+    }
 
     /// <summary>The row became a transaction of the app (also the answer "it is another one" to a suspected duplicate).</summary>
     public void Confirm(Guid transactionId, DateTime nowUtc)

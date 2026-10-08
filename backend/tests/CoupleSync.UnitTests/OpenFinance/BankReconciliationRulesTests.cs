@@ -88,6 +88,28 @@ public sealed class BankReconciliationRulesTests
         Assert.Null(BankReconciliationRules.FindTransferCounterpart(Out(500.00m), Array.Empty<MoneyMovement>(), c => c));
     }
 
+    [Theory]
+    [InlineData("CREDIT")]
+    [InlineData("credit")]
+    [InlineData(" Credit ")]
+    public void MoneyThatLeftACreditCard_IsAPurchase_NeverALegOfATransfer(string accountType)
+    {
+        Assert.False(BankReconciliationRules.CanBeTransferLeg(Out(100.00m), accountType));
+        // Money that enters the card is the payment of the bill: the other leg of what left a checking account.
+        Assert.True(BankReconciliationRules.CanBeTransferLeg(In(100.00m), accountType));
+    }
+
+    [Theory]
+    [InlineData("BANK")]
+    [InlineData("INVESTMENT")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void InAnyOtherAccount_BothWaysCanBeALegOfATransfer(string? accountType)
+    {
+        Assert.True(BankReconciliationRules.CanBeTransferLeg(Out(100.00m), accountType));
+        Assert.True(BankReconciliationRules.CanBeTransferLeg(In(100.00m), accountType));
+    }
+
     // ---------------------------------------------------------------- rule 2: bill payment
 
     [Theory]
@@ -253,6 +275,75 @@ public sealed class BankReconciliationRulesTests
                 new DateTime(2026, 10, 3, 15, 0, 0, DateTimeKind.Utc), amount, type, "BRL", "Padaria Exemplo", "COMPRA PADARIA EXEMPLO",
                 null, null, null, null, null, null, null, null, null, "POSTED", null, "{}"),
             "ALIMENTACAO", Guid.NewGuid(), Now);
+
+    [Fact]
+    public void ForgettingAnAutomaticDecision_PutsTheLineBackAsItArrived_AndNeverTouchesWhatAPersonDecided()
+    {
+        var ignored = NewRow();
+        ignored.IgnoreAutomatically(BankTransactionAutoReasons.BillPayment, Now);
+        ignored.ForgetAutomaticDecision();
+        Assert.Equal((BankTransactionReviewState.Pending, null, null, null), (ignored.ReviewState, ignored.AutoReason, ignored.MatchedTransactionId, ignored.ReviewedAtUtc));
+        Assert.True(ignored.OpenToAutomaticRules);
+
+        var paired = NewRow();
+        paired.PairAsTransfer(Now);
+        paired.ForgetAutomaticDecision();
+        Assert.Equal((BankTransactionReviewState.Pending, null, null), (paired.ReviewState, paired.AutoReason, paired.ReviewedAtUtc));
+
+        var suspected = NewRow();
+        suspected.MarkSuspectedDuplicate(Guid.NewGuid(), Now);
+        suspected.ForgetAutomaticDecision();
+        Assert.Equal((BankTransactionReviewState.Pending, null), (suspected.ReviewState, suspected.MatchedTransactionId));
+
+        // What a person decided stays exactly as it is.
+        var restored = NewRow();
+        restored.IgnoreAutomatically(BankTransactionAutoReasons.Transfer, Now);
+        restored.Restore(Now);
+        restored.ForgetAutomaticDecision();
+        Assert.Equal((BankTransactionReviewState.Pending, Now), (restored.ReviewState, restored.PersonDecidedAtUtc));
+
+        var transaction = Guid.NewGuid();
+        var confirmed = NewRow();
+        confirmed.Confirm(transaction, Now);
+        confirmed.ForgetAutomaticDecision();
+        Assert.Equal((BankTransactionReviewState.Confirmed, transaction, Now), (confirmed.ReviewState, confirmed.LinkedTransactionId, confirmed.ReviewedAtUtc));
+
+        var reconciled = NewRow();
+        reconciled.Reconcile(transaction, Now);
+        reconciled.ForgetAutomaticDecision();
+        Assert.Equal((BankTransactionReviewState.Reconciled, transaction, Now), (reconciled.ReviewState, reconciled.LinkedTransactionId, reconciled.ReviewedAtUtc));
+
+        var discarded = NewRow();
+        discarded.Discard(Now);
+        discarded.ForgetAutomaticDecision();
+        Assert.Equal((BankTransactionReviewState.Discarded, Now), (discarded.ReviewState, discarded.ReviewedAtUtc));
+    }
+
+    [Fact]
+    public void OnlyWhatThePersonDiscarded_CountsAsDiscarded_WhileALineStillHasItsTransaction()
+    {
+        var waiting = NewRow();
+        Assert.False(waiting.CountsAsDiscarded);
+
+        var discarded = NewRow();
+        discarded.Discard(Now);
+        Assert.True(discarded.CountsAsDiscarded);
+        Assert.False(discarded.LostItsTransaction);
+
+        // Reconciled and still pointing to its transaction: neither lost nor discarded.
+        var reconciled = NewRow();
+        reconciled.Reconcile(Guid.NewGuid(), Now);
+        Assert.False(reconciled.LostItsTransaction);
+        Assert.False(reconciled.CountsAsDiscarded);
+
+        var confirmed = NewRow();
+        confirmed.Confirm(Guid.NewGuid(), Now);
+        Assert.False(confirmed.CountsAsDiscarded);
+
+        var ignored = NewRow();
+        ignored.IgnoreAutomatically(BankTransactionAutoReasons.Transfer, Now);
+        Assert.False(ignored.CountsAsDiscarded);
+    }
 
     [Fact]
     public void IgnoredAutomatically_TheRowKeepsTheReason_AndRestoredItIsThePersonsForGood()

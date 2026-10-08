@@ -146,8 +146,9 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .ToList();
 
     public async Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(
-        Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, CancellationToken ct)
+        Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> leavingLineIds, CancellationToken ct)
     {
+        var leaving = leavingLineIds.ToList();
         // The value is compared in memory (the rules do it): SQLite keeps decimals as text.
         var rows = await _dbContext.Transactions
             .IgnoreQueryFilters()
@@ -157,7 +158,8 @@ public sealed class BankSyncRepository : IBankSyncRepository
                         && t.Source != TransactionSource.OpenFinance
                         && t.EventTimestampUtc >= fromUtc
                         && t.EventTimestampUtc < toUtcExclusive
-                        && !_dbContext.BankTransactions.Any(b => b.LinkedTransactionId == t.Id || b.MatchedTransactionId == t.Id))
+                        && !_dbContext.BankTransactions.Any(b =>
+                            (b.LinkedTransactionId == t.Id || b.MatchedTransactionId == t.Id) && !leaving.Contains(b.Id)))
             .Select(t => new { t.Id, t.Amount, t.Currency, t.EventTimestampUtc, t.Source, t.Bank })
             .ToListAsync(ct);
 
@@ -177,7 +179,14 @@ public sealed class BankSyncRepository : IBankSyncRepository
                 select new BankAccountHolder(account.Id, user.Id, user.Name))
             .ToListAsync(ct);
 
-    public async Task SaveRunProgressAsync(BankConnection connection, CancellationToken ct)
+    public async Task<IReadOnlyDictionary<Guid, string>> GetAccountTypesForJobAsync(Guid coupleId, CancellationToken ct)
+        => await _dbContext.BankAccounts
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(a => a.CoupleId == coupleId)
+            .ToDictionaryAsync(a => a.Id, a => a.Type, ct);
+
+    public async Task SaveRunProgressAsync(BankConnection connection, Func<CancellationToken, Task>? decideAgain, CancellationToken ct)
     {
         // Writing a column of the connection back, changed or not, puts its concurrency token (the stored secret)
         // in the WHERE of the save: with other credentials stored, or no row at all, nothing is written.
@@ -185,7 +194,7 @@ public sealed class BankSyncRepository : IBankSyncRepository
 
         if (!IsPostgres() || _dbContext.Database.CurrentTransaction is not null)
         {
-            await SaveKeepingReviewsAsync(ct);
+            await SaveKeepingReviewsAsync(decideAgain, ct);
             return;
         }
 
@@ -195,17 +204,21 @@ public sealed class BankSyncRepository : IBankSyncRepository
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
         await _dbContext.Database.ExecuteSqlRawAsync(
             "SELECT 1 FROM bank_connections WHERE id = {0} FOR UPDATE", [connection.Id], ct);
-        await SaveKeepingReviewsAsync(ct);
+        await SaveKeepingReviewsAsync(decideAgain, ct);
         await transaction.CommitAsync(ct);
     }
 
     /// <summary>
-    /// The save of a run. The review state of a line is its concurrency token, and a run never decides a review: when
-    /// someone reviewed a line after the run read it, the save is refused for that line; the run then takes the
-    /// review from the database (state and links), keeps a line it was about to remove, and saves again. Any other
+    /// The save of a run. The review state of a line is its concurrency token: when someone reviewed a line after the
+    /// run read it (or the line is gone), the save is refused for that line. The run then drops everything its
+    /// automatic rules had decided and not stored: the lines it was changing take the review the store has now (the
+    /// one the person gave, or the one they had before the rules), a line it was about to remove stays if it was
+    /// reviewed, and the new lines wait again. <paramref name="decideAgain"/> then decides over what is stored now,
+    /// and the save is tried again. Dropping only the line that was refused would leave the others decided over a
+    /// state that no longer exists: one leg of a transfer ignored and the other discarded by the person. Any other
     /// refusal (the connection, the run itself) is the caller's to handle.
     /// </summary>
-    private Task SaveKeepingReviewsAsync(CancellationToken ct)
+    private Task SaveKeepingReviewsAsync(Func<CancellationToken, Task>? decideAgain, CancellationToken ct)
     {
         var attempt = 1;
         return DbSaveTranslator.SaveAsync(
@@ -220,14 +233,18 @@ public sealed class BankSyncRepository : IBankSyncRepository
                     throw new DataStoreException("The lines of the run kept being reviewed while it was saving them.", refusal);
 
                 await TakeReviewsFromStoreAsync(token);
+                foreach (var added in _dbContext.ChangeTracker.Entries<BankTransaction>().Where(e => e.State == EntityState.Added).ToList())
+                    added.Entity.ForgetAutomaticDecision();
+                if (decideAgain is not null) await decideAgain(token);
                 return true;
             },
             ct);
     }
 
     /// <summary>
-    /// For every mirror row the pending save changes or deletes: the review stored now replaces the one the run read.
-    /// A row no longer there (the person left the group) is forgotten; a row to delete that someone reviewed stays.
+    /// For every mirror row the pending save changes or deletes: the review stored now replaces the one the run read
+    /// and whatever the run had decided about it. A row no longer there (the person left the group) is forgotten; a
+    /// row to delete that someone reviewed stays.
     /// </summary>
     private async Task TakeReviewsFromStoreAsync(CancellationToken ct)
     {
@@ -299,7 +316,9 @@ public sealed class BankSyncRepository : IBankSyncRepository
                         && t.Type == BankTransactionType.Debit
                         && t.LocalDate >= from
                         && t.LocalDate < toExclusive
-                        && ReviewStates.Contains(t.ReviewState))
+                        && (ReviewStates.Contains(t.ReviewState)
+                            // Said to be the same as a transaction that was deleted at that very moment: a discarded line.
+                            || (t.ReviewState == BankTransactionReviewState.Reconciled && t.LinkedTransactionId == null)))
             .ToListAsync(ct);
 
     public async Task<IReadOnlyList<BankTransaction>> GetIgnoredAsync(Guid coupleId, DateOnly from, DateOnly toExclusive, CancellationToken ct)

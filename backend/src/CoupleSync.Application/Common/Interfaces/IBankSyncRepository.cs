@@ -71,9 +71,15 @@ public interface IBankSyncRepository
     /// <summary>
     /// For the job: the transactions of the group, in reais and not come from the bank, whose instant is in
     /// [<paramref name="fromUtc"/>, <paramref name="toUtcExclusive"/>) and that no line of the mirror points to yet
-    /// (neither as its transaction nor as a suspected duplicate). Their day is the day in Brazil.
+    /// (neither as its transaction nor as a suspected duplicate). The lines <paramref name="leavingLineIds"/> do not
+    /// count: the run is taking them out of the mirror in this very save, and what they pointed to is free again.
+    /// Their day is the day in Brazil.
     /// </summary>
-    Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, CancellationToken ct);
+    Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(
+        Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> leavingLineIds, CancellationToken ct);
+
+    /// <summary>For the job: account id → the type Pluggy gives it (<c>BANK</c>, <c>CREDIT</c>), for every account of the group.</summary>
+    Task<IReadOnlyDictionary<Guid, string>> GetAccountTypesForJobAsync(Guid coupleId, CancellationToken ct);
 
     /// <summary>For the job: every account of the group with who connected it (its holder) and that person's name.</summary>
     Task<IReadOnlyList<BankAccountHolder>> GetAccountHoldersForJobAsync(Guid coupleId, CancellationToken ct);
@@ -83,16 +89,23 @@ public interface IBankSyncRepository
     /// run read (disconnected, connected again) or the connection is gone (the person left the group): then nothing
     /// at all is written and it fails with <c>ConcurrencyConflictException</c> or <c>ForeignKeyViolationException</c>.
     /// A line someone reviewed after the run read it keeps that review (state and links): the run writes only what
-    /// comes from Pluggy over it, and does not delete it.
+    /// comes from Pluggy over it, and does not delete it. When that happens, nothing the automatic rules decided in
+    /// this save is written as it was: every line the run was changing is back to the review the store has, every
+    /// new line is back to waiting, and <paramref name="decideAgain"/> runs over what is stored now before the save
+    /// is tried again (a decision about one line depends on the others: the two legs of a transfer, the transaction
+    /// one line only may suspect).
     /// </summary>
-    Task SaveRunProgressAsync(BankConnection connection, CancellationToken ct);
+    Task SaveRunProgressAsync(BankConnection connection, Func<CancellationToken, Task>? decideAgain, CancellationToken ct);
 
     /// <summary>Forgets every change not saved yet (after a failed save, before writing only the verdict of the run).</summary>
     void DiscardChanges();
 
     // ---------------------------------------------------------------- review
 
-    /// <summary>The expenses of the group whose day in Brazil is in [<paramref name="from"/>, <paramref name="toExclusive"/>), waiting or discarded.</summary>
+    /// <summary>
+    /// The expenses of the group whose day in Brazil is in [<paramref name="from"/>, <paramref name="toExclusive"/>),
+    /// waiting or discarded (<see cref="BankTransaction.CountsAsDiscarded"/>).
+    /// </summary>
     Task<IReadOnlyList<BankTransaction>> GetReviewExpensesAsync(Guid coupleId, DateOnly from, DateOnly toExclusive, CancellationToken ct);
 
     /// <summary>The lines of the group ignored automatically (money that left and money that came in) whose day in Brazil is in [<paramref name="from"/>, <paramref name="toExclusive"/>).</summary>
