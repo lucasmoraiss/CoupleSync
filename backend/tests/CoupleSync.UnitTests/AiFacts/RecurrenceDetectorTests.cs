@@ -441,6 +441,16 @@ public sealed class RecurrenceDetectorTests
         Assert.Empty(streams);
     }
 
+    /// <summary>A part number above the number of parts is never an instalment, alone or in a row, whatever the month.</summary>
+    [Fact]
+    public void APartNumberAboveTheTotal_IsNeverAnInstalment()
+    {
+        Assert.Empty(Detect([Row("LOJA 15/12", 150m, new DateOnly(2026, 10, 5), "COMPRAS")]));
+
+        var inARow = new[] { Row("LOJA 14/10", 150m, new DateOnly(2026, 9, 5), "COMPRAS"), Row("LOJA 15/10", 150m, new DateOnly(2026, 10, 5), "COMPRAS") };
+        Assert.DoesNotContain(Detect(inARow), s => s.Facts.Kind == RecurringKinds.Installment);
+    }
+
     [Fact]
     public void OneFreshMarkAlone_IsOnlyAProbableInstalment()
     {
