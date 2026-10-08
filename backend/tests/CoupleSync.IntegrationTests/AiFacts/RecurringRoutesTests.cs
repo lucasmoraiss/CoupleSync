@@ -307,7 +307,8 @@ public sealed class RecurringRoutesTests
         Assert.Equal(0, cancelled.GetProperty("subscriptions").GetArrayLength());
         var hidden = Assert.Single(cancelled.GetProperty("hidden").EnumerateArray());
         Assert.Equal("Cancelled", hidden.GetProperty("override").GetString());
-        Assert.Empty(hidden.GetProperty("flags").EnumerateArray());
+        // Only "New" (its first charge is 64 days old): nothing says it was charged again.
+        Assert.Equal(["New"], hidden.GetProperty("flags").EnumerateArray().Select(f => f.GetString()));
         Assert.Equal(0m, cancelled.GetProperty("monthlyTotal").GetDecimal());
 
         // The next month it is charged again.
@@ -502,6 +503,286 @@ public sealed class RecurringRoutesTests
         Assert.Equal(0, list.GetProperty("subscriptions").GetArrayLength());
     }
 
+    // ---------------------------------------------------------------- review round 1
+
+    /// <summary>
+    /// I1 — a yearly charge has two charges a year apart; a month after the renewal the first one leaves the 13
+    /// months the detector reads. The item stays, with its numbers, until the next renewal is late.
+    /// </summary>
+    [Fact]
+    public async Task AYearlyCharge_StaysInTheListAndInTheTotals_UntilTheNextRenewalIsLate()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        await ChargeAsync(ana.Client, "Seguro Exemplo", 1200m, new DateTime(2025, 9, 22, 15, 0, 0, DateTimeKind.Utc), "TRANSPORTE");
+        await ChargeAsync(ana.Client, "Seguro Exemplo", 1200m, Day(9, 22), "TRANSPORTE");
+        clock.UtcNow = Now.AddMinutes(1);
+        var first = Assert.Single((await ListAsync(ana.Client)).GetProperty("fixedBills").EnumerateArray());
+        var id = first.GetProperty("id").GetGuid();
+        Assert.Equal("Yearly", first.GetProperty("cadence").GetString());
+
+        // 31, 60, 160, 300 and 395 days after the renewal of 2026-09-22.
+        foreach (var day in new[] { new DateTime(2026, 10, 23), new DateTime(2026, 11, 21), new DateTime(2027, 3, 1), new DateTime(2027, 7, 19), new DateTime(2027, 10, 22) })
+        {
+            clock.UtcNow = DateTime.SpecifyKind(day.AddHours(15), DateTimeKind.Utc);
+            var list = await ListAsync(ana.Client);
+
+            Assert.True(list.GetProperty("fixedBills").GetArrayLength() == 1, $"the yearly item is gone on {day:yyyy-MM-dd}");
+            var item = list.GetProperty("fixedBills")[0];
+            Assert.Equal(id, item.GetProperty("id").GetGuid());
+            Assert.Equal("Active", item.GetProperty("status").GetString());
+            Assert.Equal(2, item.GetProperty("occurrences").GetInt32());
+            Assert.Equal("2026-09-22", item.GetProperty("lastSeen").GetString());
+            Assert.Equal("2027-09-22", item.GetProperty("nextExpected").GetString());
+            Assert.Equal(0, list.GetProperty("hidden").GetArrayLength());
+            Assert.Equal(100m, list.GetProperty("monthlyTotal").GetDecimal());
+            Assert.Equal(1200m, list.GetProperty("annualTotal").GetDecimal());
+            // The list says when it was calculated: the kept item does not make every request calculate again.
+            Assert.Equal(clock.UtcNow, DetectedAt(list));
+            Assert.Equal(Stamp(clock.UtcNow), Stamp(factory.Scalar<DateTime>("SELECT detected_at_utc FROM recurring_streams")));
+        }
+
+        // The renewal of 2027 never came: 396 days after the last charge the item leaves.
+        clock.UtcNow = new DateTime(2027, 10, 23, 15, 0, 0, DateTimeKind.Utc);
+        var late = await ListAsync(ana.Client);
+        Assert.Equal(0, late.GetProperty("fixedBills").GetArrayLength());
+        Assert.Equal(0, late.GetProperty("hidden").GetArrayLength());
+        Assert.Equal(0m, late.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM recurring_streams"));
+    }
+
+    [Fact]
+    public async Task AYearlyChargeThePersonCorrected_IsNotSentToHiddenAsStopped_AndIsTheSameItemAfterTheRenewal()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        await ChargeAsync(ana.Client, "Anuidade Exemplo", 120m, new DateTime(2025, 9, 22, 15, 0, 0, DateTimeKind.Utc), "LAZER");
+        await ChargeAsync(ana.Client, "Anuidade Exemplo", 120m, Day(9, 22), "LAZER");
+        clock.UtcNow = Now.AddMinutes(1);
+        var id = Assert.Single((await ListAsync(ana.Client)).GetProperty("subscriptions").EnumerateArray()).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, id, "FixedBill")).StatusCode);
+
+        clock.UtcNow = new DateTime(2027, 2, 10, 15, 0, 0, DateTimeKind.Utc);
+        var middle = await ListAsync(ana.Client);
+        var kept = Assert.Single(middle.GetProperty("fixedBills").EnumerateArray());
+        Assert.Equal(id, kept.GetProperty("id").GetGuid());
+        Assert.Equal("Active", kept.GetProperty("status").GetString());
+        Assert.Equal(0, middle.GetProperty("hidden").GetArrayLength());
+        Assert.Equal(10m, middle.GetProperty("monthlyTotal").GetDecimal());
+
+        // The renewal comes: the same item (and its correction) goes on.
+        clock.UtcNow = new DateTime(2027, 9, 22, 15, 0, 0, DateTimeKind.Utc);
+        await ChargeAsync(ana.Client, "Anuidade Exemplo", 120m, clock.UtcNow, "LAZER");
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var renewed = Assert.Single((await ListAsync(ana.Client)).GetProperty("fixedBills").EnumerateArray());
+        Assert.Equal(id, renewed.GetProperty("id").GetGuid());
+        Assert.Equal("2027-09-22", renewed.GetProperty("lastSeen").GetString());
+        Assert.Equal("FixedBill", renewed.GetProperty("override").GetString());
+    }
+
+    [Fact]
+    public async Task AYearlyChargeWhoseLastChargeWasDeleted_IsNotKept()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        await ChargeAsync(ana.Client, "Seguro Exemplo", 1200m, new DateTime(2025, 9, 22, 15, 0, 0, DateTimeKind.Utc), "TRANSPORTE");
+        var last = await ChargeAsync(ana.Client, "Seguro Exemplo", 1200m, Day(9, 22), "TRANSPORTE");
+        clock.UtcNow = Now.AddMinutes(1);
+        Assert.Equal(1, (await ListAsync(ana.Client)).GetProperty("fixedBills").GetArrayLength());
+
+        clock.UtcNow = new DateTime(2026, 11, 21, 15, 0, 0, DateTimeKind.Utc);
+        Assert.Equal(1, (await ListAsync(ana.Client)).GetProperty("fixedBills").GetArrayLength());
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Transactions}/{last}")).StatusCode);
+
+        var list = await ListAsync(ana.Client);
+        Assert.Equal(0, list.GetProperty("fixedBills").GetArrayLength());
+        Assert.Equal(0m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM recurring_streams"));
+    }
+
+    /// <summary>
+    /// I5 — the screen says of "Cancelei": "if it is charged again, it comes back with a notice". The charge that
+    /// comes back more than two months later does not continue the series, and still has to bring the item back.
+    /// </summary>
+    [Fact]
+    public async Task Cancelled_ComesBackToTheListAndToTheTotal_AlsoWhenTheChargeReturnsMonthsLater()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        foreach (var month in new[] { 8, 9, 10 })
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER");
+        clock.UtcNow = Now.AddMinutes(1);
+        var id = (await ListAsync(ana.Client)).GetProperty("subscriptions")[0].GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, id, "Cancelled")).StatusCode);
+
+        // 75 days without a charge: it stopped, and it is hidden because the person cancelled it.
+        clock.UtcNow = new DateTime(2026, 12, 19, 15, 0, 0, DateTimeKind.Utc);
+        var quiet = await ListAsync(ana.Client);
+        Assert.Equal(0, quiet.GetProperty("subscriptions").GetArrayLength());
+        Assert.Equal("Stopped", Assert.Single(quiet.GetProperty("hidden").EnumerateArray()).GetProperty("status").GetString());
+
+        // 76 days after the last charge it is charged again.
+        clock.UtcNow = new DateTime(2026, 12, 20, 15, 0, 0, DateTimeKind.Utc);
+        await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, clock.UtcNow, "LAZER");
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var charged = await ListAsync(ana.Client);
+
+        var item = Assert.Single(charged.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal(id, item.GetProperty("id").GetGuid());
+        Assert.Contains("ChargedAfterCancel", item.GetProperty("flags").EnumerateArray().Select(f => f.GetString()));
+        Assert.Equal(0, charged.GetProperty("hidden").GetArrayLength());
+        Assert.Equal(39.90m, charged.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(478.80m, charged.GetProperty("annualTotal").GetDecimal());
+
+        // "Cancelei" again: hidden again, without the notice, until a charge after this moment.
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, id, "Cancelled")).StatusCode);
+        clock.UtcNow = clock.UtcNow.AddHours(7);
+        var again = await ListAsync(ana.Client);
+        Assert.Equal(0, again.GetProperty("subscriptions").GetArrayLength());
+        Assert.Empty(Assert.Single(again.GetProperty("hidden").EnumerateArray()).GetProperty("flags").EnumerateArray());
+        Assert.Equal(0m, again.GetProperty("monthlyTotal").GetDecimal());
+    }
+
+    /// <summary>
+    /// Decision 1 (I4) — a statement line has no merchant: its description is the establishment. The row says where
+    /// the name came from, so that a name read from a description never goes to a provider (phase 4).
+    /// </summary>
+    [Fact]
+    public async Task WithoutAMerchant_TheDescriptionIsTheName_ForTheGroupItself_AndTheRowSaysWhereTheNameCameFrom()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        foreach (var month in new[] { 8, 9, 10 })
+        {
+            await ChargeAsync(ana.Client, null, 59.90m, Day(month, 5), "LAZER", description: "Clube Exemplo mensalidade");
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 6), "LAZER", description: "anotacao-particular-xyz");
+            // The same shop, once with a merchant and twice only with the description.
+            await ChargeAsync(ana.Client, month == 9 ? "Revista Exemplo" : null, 19.90m, Day(month, 7), "LAZER", description: "Revista Exemplo");
+            // A document in the description: no stream at all.
+            await ChargeAsync(ana.Client, null, 300m, Day(month, 8), "OUTROS", description: "Aula Exemplo 123.456.789-09");
+        }
+
+        clock.UtcNow = Now.AddMinutes(1);
+        var list = await ListAsync(ana.Client);
+
+        var names = list.GetProperty("subscriptions").EnumerateArray().Select(s => s.GetProperty("name").GetString()).Order().ToList();
+        Assert.Equal(["Clube Exemplo mensalidade", "Revista Exemplo", "Streaming Exemplo"], names);
+        Assert.Equal(0, list.GetProperty("fixedBills").GetArrayLength());
+        Assert.DoesNotContain("123.456.789-09", list.GetRawText());
+        Assert.DoesNotContain("anotacao-particular-xyz", list.GetRawText());
+        Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM recurring_streams WHERE display_name LIKE '%Aula%' OR merchant_key LIKE '%aula%'"));
+
+        Assert.Equal("description", factory.Scalar<string>("SELECT name_source FROM recurring_streams WHERE merchant_key = 'clube exemplo mensalidade'"));
+        Assert.Equal("merchant", factory.Scalar<string>("SELECT name_source FROM recurring_streams WHERE merchant_key = 'streaming exemplo'"));
+        // One charge whose text came from a description is enough.
+        Assert.Equal("description", factory.Scalar<string>("SELECT name_source FROM recurring_streams WHERE merchant_key = 'revista exemplo'"));
+
+        // The charges show what the list of transactions already shows to the group.
+        var clube = list.GetProperty("subscriptions").EnumerateArray().Single(s => s.GetProperty("name").GetString() == "Clube Exemplo mensalidade");
+        var charges = await ana.Client.GetFromJsonAsync<JsonElement>($"{Recurring}/{clube.GetProperty("id").GetGuid()}/transactions");
+        Assert.Equal(3, charges.GetProperty("transactions").GetArrayLength());
+        Assert.All(charges.GetProperty("transactions").EnumerateArray(), c => Assert.Equal("Clube Exemplo mensalidade", c.GetProperty("merchant").GetString()));
+    }
+
+    /// <summary>Decision 6 — who edits an old transaction sees the effect in the next request, like who deletes one.</summary>
+    [Fact]
+    public async Task EditingATransaction_ForcesTheRecalculation()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        var ids = new List<Guid>();
+        foreach (var month in new[] { 8, 9, 10 })
+            ids.Add(await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER"));
+        clock.UtcNow = Now.AddMinutes(1);
+        var before = Assert.Single((await ListAsync(ana.Client)).GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal(39.90m, before.GetProperty("lastAmount").GetDecimal());
+
+        // The amount (PATCH /transactions/{id}).
+        clock.UtcNow = Now.AddMinutes(2);
+        var patched = await ana.Client.PatchAsync($"{Transactions}/{ids[2]}", JsonContent.Create(new { Amount = 41.90m }));
+        Assert.True(patched.StatusCode == HttpStatusCode.OK, await patched.Content.ReadAsStringAsync());
+        clock.UtcNow = Now.AddMinutes(3);
+        var afterAmount = await ListAsync(ana.Client);
+        Assert.Equal(41.90m, Assert.Single(afterAmount.GetProperty("subscriptions").EnumerateArray()).GetProperty("lastAmount").GetDecimal());
+        Assert.Equal(clock.UtcNow, DetectedAt(afterAmount));
+
+        // No edit: no recalculation.
+        clock.UtcNow = Now.AddMinutes(4);
+        Assert.Equal(Now.AddMinutes(3), DetectedAt(await ListAsync(ana.Client)));
+
+        // The category (PATCH /transactions/{id}/category): the subscription becomes a fixed bill.
+        foreach (var transactionId in ids)
+        {
+            var recategorized = await ana.Client.PatchAsync($"{Transactions}/{transactionId}/category", JsonContent.Create(new { Category = "MORADIA" }));
+            Assert.True(recategorized.StatusCode == HttpStatusCode.OK, await recategorized.Content.ReadAsStringAsync());
+        }
+
+        clock.UtcNow = Now.AddMinutes(5);
+        var afterCategory = await ListAsync(ana.Client);
+        Assert.Equal(0, afterCategory.GetProperty("subscriptions").GetArrayLength());
+        Assert.Equal("MORADIA", Assert.Single(afterCategory.GetProperty("fixedBills").EnumerateArray()).GetProperty("category").GetString());
+
+        // The establishment (PATCH /transactions/{id}): the series loses a charge and is not a series any more.
+        var renamed = await ana.Client.PatchAsync($"{Transactions}/{ids[0]}", JsonContent.Create(new { Merchant = "Outra Loja Exemplo" }));
+        Assert.True(renamed.StatusCode == HttpStatusCode.OK, await renamed.Content.ReadAsStringAsync());
+        clock.UtcNow = Now.AddMinutes(6);
+        var afterName = await ListAsync(ana.Client);
+        Assert.Equal(0, afterName.GetProperty("fixedBills").GetArrayLength());
+        Assert.Equal(0, afterName.GetProperty("subscriptions").GetArrayLength());
+    }
+
+    /// <summary>
+    /// I2 — each person pays the same plan of the same service. Two items, each with its person; what one of them
+    /// says about theirs stays on theirs, and the charge of the other is not "charged again after cancelled".
+    /// </summary>
+    [Fact]
+    public async Task TheSamePlanOfEachPerson_IsTwoItems_AndTheCorrectionOfOneDoesNotMoveToTheOther()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
+        foreach (var month in new[] { 6, 7, 8, 9 })
+        {
+            await ChargeAsync(ana.Client, "Musica Exemplo", 21.90m, Day(month, 3), "LAZER");
+            await ChargeAsync(bruno.Client, "Musica Exemplo", 21.90m, Day(month, 17), "LAZER");
+        }
+
+        clock.UtcNow = Now.AddMinutes(1);
+        var list = await ListAsync(ana.Client);
+
+        var items = list.GetProperty("subscriptions").EnumerateArray().ToList();
+        Assert.Equal(2, items.Count);
+        Assert.Equal(["Ana Exemplo", "Bruno Exemplo"], items.Select(i => i.GetProperty("person").GetProperty("name").GetString()).Order());
+        Assert.Equal(43.80m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM recurring_streams WHERE merchant_key = 'musica exemplo'"));
+        Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM recurring_streams WHERE merchant_key = 'musica exemplo~2'"));
+        var ofAna = items.Single(i => i.GetProperty("person").GetProperty("userId").GetGuid() == ana.UserId).GetProperty("id").GetGuid();
+        var ofBruno = items.Single(i => i.GetProperty("person").GetProperty("userId").GetGuid() == bruno.UserId).GetProperty("id").GetGuid();
+
+        // Ana cancels hers. Bruno goes on paying his.
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, ofAna, "Cancelled")).StatusCode);
+        clock.UtcNow = Day(10, 17);
+        await ChargeAsync(bruno.Client, "Musica Exemplo", 21.90m, clock.UtcNow, "LAZER");
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var later = await ListAsync(bruno.Client);
+
+        var active = Assert.Single(later.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal(ofBruno, active.GetProperty("id").GetGuid());
+        Assert.Equal(5, active.GetProperty("occurrences").GetInt32());
+        Assert.Equal(JsonValueKind.Null, active.GetProperty("override").ValueKind);
+        var hidden = Assert.Single(later.GetProperty("hidden").EnumerateArray());
+        Assert.Equal(ofAna, hidden.GetProperty("id").GetGuid());
+        Assert.Equal("Cancelled", hidden.GetProperty("override").GetString());
+        Assert.Empty(hidden.GetProperty("flags").EnumerateArray());
+        Assert.Equal(21.90m, later.GetProperty("monthlyTotal").GetDecimal());
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private sealed record Member(HttpClient Client, Guid UserId, Guid CoupleId);
@@ -539,7 +820,7 @@ public sealed class RecurringRoutesTests
 
     /// <summary>One expense through the API, as the app creates it. Answers its id.</summary>
     private static async Task<Guid> ChargeAsync(
-        HttpClient client, string merchant, decimal amount, DateTime whenUtc, string category, string? description = null)
+        HttpClient client, string? merchant, decimal amount, DateTime whenUtc, string category, string? description = null)
     {
         var response = await client.PostAsJsonAsync(Transactions, new
         {

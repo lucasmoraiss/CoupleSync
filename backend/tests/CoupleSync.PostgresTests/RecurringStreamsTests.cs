@@ -25,7 +25,7 @@ public sealed class RecurringStreamsTests
 {
     // Named on purpose (never "the last one"): another delivery adding a migration must not change what is compared here.
     private const string MigrationBefore = "20261008185726_AddAiConsents";
-    private const string ThisMigration = "20261008201834_AddRecurringStreams";
+    private const string ThisMigration = "20261008213746_AddRecurringStreams";
     private const string Recurring = "/api/v1/ai/recurring";
 
     // Noon in Brasília of 2026-10-08.
@@ -82,6 +82,7 @@ public sealed class RecurringStreamsTests
                 ["couple_id"] = "uuid not null",
                 ["merchant_key"] = "character varying not null",
                 ["display_name"] = "character varying not null",
+                ["name_source"] = "character varying not null",
                 ["kind"] = "character varying not null",
                 ["variable_amount"] = "boolean not null",
                 ["cadence"] = "character varying not null",
@@ -158,9 +159,9 @@ public sealed class RecurringStreamsTests
 
         const string insert =
             """
-            INSERT INTO recurring_streams (id, couple_id, merchant_key, display_name, kind, variable_amount, cadence, category, median_amount, last_amount,
+            INSERT INTO recurring_streams (id, couple_id, merchant_key, display_name, name_source, kind, variable_amount, cadence, category, median_amount, last_amount,
                                            annual_cost, occurrences, missed_count, first_seen_local, last_seen_local, status, flags, confidence, detected_at_utc, updated_at_utc)
-            VALUES (@id, @couple, 'streaming exemplo', 'Outro', @kind, false, @cadence, 'LAZER', 1, 1, 12, 3, 0, DATE '2026-08-05', DATE '2026-10-05', 'Active', '', 'High', now(), now())
+            VALUES (@id, @couple, 'streaming exemplo', 'Outro', 'merchant', @kind, false, @cadence, 'LAZER', 1, 1, 12, 3, 0, DATE '2026-08-05', DATE '2026-10-05', 'Active', '', 'High', now(), now())
             """;
 
         var duplicate = await Assert.ThrowsAsync<PostgresException>(() => database.ExecuteAsync(
@@ -250,6 +251,89 @@ public sealed class RecurringStreamsTests
             DateOnly.FromDateTime(await database.ScalarAsync<DateTime>("SELECT next_expected_local::timestamp FROM recurring_streams WHERE display_name = 'Streaming Exemplo' AND couple_id = @couple", ("couple", ana.CoupleId!.Value))));
     }
 
+    /// <summary>
+    /// Review round 1 (I5, m8) — what SQLite cannot prove about the totals: the item the person cancelled and that
+    /// was charged again counts even while its series is "stopped" (the filter reads the flags with LIKE), and a
+    /// yearly amount that does not divide by 12 is rounded once, at the end.
+    /// </summary>
+    [PostgresFact]
+    public async Task TheTotals_CountACancelledItemThatWasChargedAgain_AndRoundAYearThatDoesNotDivideByTwelve()
+    {
+        var clock = new MovingClock(Now);
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        await using var host = WithTheClock(factory, clock);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        await SeedMonthlyAsync(ana.Client, "Streaming Exemplo", 39.90m, [8, 9, 10], "LAZER");
+        await ChargeAsync(ana.Client, "Seguro Exemplo", 1000m, new DateTime(2025, 11, 25, 15, 0, 0, DateTimeKind.Utc), "TRANSPORTE");
+        clock.UtcNow = Now.AddMinutes(1);
+        var first = await ListAsync(ana.Client);
+        Assert.Equal(39.90m, first.GetProperty("monthlyTotal").GetDecimal());
+        var id = first.GetProperty("subscriptions")[0].GetProperty("id").GetGuid();
+        var cancelled = await ana.Client.PatchAsync($"{Recurring}/{id}", JsonContent.Create(new Dictionary<string, string?> { ["override"] = "Cancelled" }));
+        Assert.Equal(HttpStatusCode.OK, cancelled.StatusCode);
+
+        // The insurance is renewed (a yearly charge of 1000: 83.3333… a month). 75 days after its last charge the
+        // subscription stopped; the day after, it is charged again.
+        clock.UtcNow = new DateTime(2026, 12, 19, 15, 0, 0, DateTimeKind.Utc);
+        await ChargeAsync(ana.Client, "Seguro Exemplo", 1000m, new DateTime(2026, 11, 25, 15, 0, 0, DateTimeKind.Utc), "TRANSPORTE");
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var quiet = await ListAsync(ana.Client);
+        Assert.Equal(83.33m, quiet.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(1, quiet.GetProperty("hidden").GetArrayLength());
+        clock.UtcNow = new DateTime(2026, 12, 20, 15, 0, 0, DateTimeKind.Utc);
+        await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, clock.UtcNow, "LAZER");
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+
+        var list = await ListAsync(ana.Client);
+
+        var item = Assert.Single(list.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal(id, item.GetProperty("id").GetGuid());
+        Assert.Equal(0, list.GetProperty("hidden").GetArrayLength());
+        Assert.Equal("Stopped,Cancelled,ChargedAfterCancel", await database.ScalarAsync<string>(
+            "SELECT status || ',' || user_override || ',' || flags FROM recurring_streams WHERE id = @id", ("id", id)));
+        // 39.90 + 1000 / 12 = 123.2333…
+        Assert.Equal(123.23m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(1478.80m, list.GetProperty("annualTotal").GetDecimal());
+    }
+
+    /// <summary>
+    /// Review round 1 (I3) — a transaction accepts 512 characters of merchant and of description; the columns of a
+    /// stream are shorter and PostgreSQL refuses what does not fit (SQLite does not). One long text must never make
+    /// the list of the whole group answer 500.
+    /// </summary>
+    [PostgresFact]
+    public async Task TextsLongerThanTheColumns_AreCut_AndTheListStillAnswers()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        await using var host = WithTheClock(factory);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        // 512 characters: many words, and an emoji (two UTF-16 units) right where the name shown is cut.
+        var words = string.Join(' ', Enumerable.Range(0, 60).Select(i => $"palavra{(char)('a' + i % 26)}"));
+        var longMerchant = (words[..119] + "\U0001F600 " + words)[..512];
+        var longNote = ("Compra anotada com muito detalhe " + words)[..500] + " 2/12";
+        Assert.Equal(512, longMerchant.Length);
+        await SeedMonthlyAsync(ana.Client, longMerchant, 39.90m, [8, 9, 10], "LAZER");
+        await ChargeAsync(ana.Client, null, 150m, Day(10, 2), "COMPRAS", description: longNote);                 // one mark: a probable instalment
+        await ChargeAsync(ana.Client, longMerchant[..500] + " 02/10", 90m, Day(9, 12), "COMPRAS");                       // a confirmed one
+        await ChargeAsync(ana.Client, longMerchant[..500] + " 03/10", 90m, Day(10, 5), "COMPRAS");
+
+        var response = await ana.Client.GetAsync(Recurring);
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var list = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, list.GetProperty("subscriptions").GetArrayLength());
+        Assert.Equal(2, list.GetProperty("installments").GetArrayLength());
+        Assert.Equal(3, await database.ScalarAsync<long>("SELECT count(*) FROM recurring_streams"));
+        Assert.True(await database.ScalarAsync<int>("SELECT max(char_length(merchant_key)) FROM recurring_streams") <= RecurringStream.MaxMerchantKeyLength);
+        Assert.True(await database.ScalarAsync<int>("SELECT max(char_length(display_name)) FROM recurring_streams") <= RecurringStream.MaxDisplayNameLength);
+        // The name of the subscription stops before the emoji, never in the middle of it.
+        Assert.Equal(words[..119], list.GetProperty("subscriptions")[0].GetProperty("name").GetString());
+        // And it goes on answering.
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.GetAsync(Recurring)).StatusCode);
+    }
+
     // ---------------------------------------------------------------- the group filter and deletions
 
     [PostgresFact]
@@ -320,6 +404,13 @@ public sealed class RecurringStreamsTests
             services.AddSingleton<IDateTimeProvider>(new FixedClock(Now));
         }));
 
+    private static DerivedTestHost WithTheClock(PostgresApiFactory factory, IDateTimeProvider clock)
+        => factory.WithTestHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IDateTimeProvider>();
+            services.AddSingleton(clock);
+        }));
+
     private static DateTime Day(int month, int day) => new(2026, month, day, 15, 0, 0, DateTimeKind.Utc);
 
     private static async Task<JsonElement> ListAsync(HttpClient client)
@@ -334,13 +425,14 @@ public sealed class RecurringStreamsTests
         foreach (var month in months) await ChargeAsync(client, merchant, amount, Day(month, 5), category);
     }
 
-    private static async Task<Guid> ChargeAsync(HttpClient client, string merchant, decimal amount, DateTime whenUtc, string category)
+    private static async Task<Guid> ChargeAsync(HttpClient client, string? merchant, decimal amount, DateTime whenUtc, string category, string? description = null)
     {
         var response = await client.PostAsJsonAsync("/api/v1/transactions", new
         {
             Amount = amount,
             Currency = "BRL",
             EventTimestampUtc = whenUtc,
+            Description = description,
             Merchant = merchant,
             Category = category,
         });
@@ -386,6 +478,13 @@ public sealed class RecurringStreamsTests
         public FixedClock(DateTime utcNow) => UtcNow = utcNow;
 
         public DateTime UtcNow { get; }
+    }
+
+    private sealed class MovingClock : IDateTimeProvider
+    {
+        public MovingClock(DateTime utcNow) => UtcNow = utcNow;
+
+        public DateTime UtcNow { get; set; }
     }
 
     private sealed class FixedCoupleContext : ICoupleContext

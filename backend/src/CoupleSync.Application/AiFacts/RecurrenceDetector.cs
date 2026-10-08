@@ -1,3 +1,4 @@
+using CoupleSync.Application.Ai;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
 
@@ -38,7 +39,26 @@ public sealed class RecurrenceOptions
     /// <summary>A chain has to hold at least this share of the similar charges of its period (otherwise it was picked out of a denser habit).</summary>
     public decimal MinChainCoverage { get; set; } = 0.6m;
 
-    public int NewWithinDays { get; set; } = 35;
+    /// <summary>
+    /// A stream is "new" while its first known charge is at most this old (Brasília days). A monthly series only
+    /// exists with its third charge, about 60 days after the first: the mark is shown from then until this limit.
+    /// </summary>
+    public int NewWithinDays { get; set; } = 90;
+
+    /// <summary>A single instalment mark is only shown, as probable, while it is this fresh.</summary>
+    public int ProbableInstallmentWithinDays { get; set; } = 35;
+
+    /// <summary>"Got more expensive" is shown while the new price has at most this many charges.</summary>
+    public int PriceIncreaseMaxCharges { get; set; } = 3;
+
+    /// <summary>
+    /// How many series of the same amount one establishment may have at the same time (the same plan paid by each
+    /// person of the couple). More than that is read as one habit, not as several commitments.
+    /// </summary>
+    public int MaxSeriesPerAmount { get; set; } = 2;
+
+    /// <summary>How many days a charge may be away from its day of the month for the series to count as "always on the same day".</summary>
+    public int SameDayToleranceDays { get; set; } = 3;
 
     public decimal DormantAfterIntervals { get; set; } = 1.5m;
 
@@ -80,8 +100,11 @@ public sealed record RecurrenceRow(
 /// <summary>One stream found: its key (without the suffix that tells two streams of the same shop apart), its facts and its charges.</summary>
 public sealed record DetectedStream(string MerchantKey, string Cadence, RecurringStreamFacts Facts, IReadOnlyList<Guid> TransactionIds);
 
-/// <summary>One charge of an establishment, for "was it charged again after the person cancelled?".</summary>
-public sealed record KeyCharge(DateTime TimestampUtc, decimal Amount);
+/// <summary>One charge of an establishment, for "was it charged again after the person cancelled?" and "is the last charge of a yearly stream still there?".</summary>
+public sealed record KeyCharge(Guid TransactionId, DateTime TimestampUtc, decimal Amount)
+{
+    public DateOnly LocalDate { get; } = DateOnly.FromDateTime(BrazilTime.ToLocal(TimestampUtc));
+}
 
 public sealed record DetectionResult(IReadOnlyList<DetectedStream> Streams, IReadOnlyDictionary<string, IReadOnlyList<KeyCharge>> ChargesByKey);
 
@@ -92,7 +115,11 @@ public sealed record DetectionResult(IReadOnlyList<DetectedStream> Streams, IRea
 /// </summary>
 public static class RecurrenceDetector
 {
-    private sealed record Keyed(RecurrenceRow Row, string Key, string Text)
+    /// <summary>The longest interval between two charges of a yearly stream (design 3.3, item 3).</summary>
+    public const int YearlyMaxIntervalDays = 395;
+
+    /// <param name="FromDescription">The transaction has no merchant: the text is its description, cleaned.</param>
+    private sealed record Keyed(RecurrenceRow Row, string Key, string Text, bool FromDescription)
     {
         public DateOnly Date => Row.LocalDate;
 
@@ -112,9 +139,20 @@ public static class RecurrenceDetector
             var text = row.Establishment;
             if (text is null) continue;
             if (PersonTransferRule.IsPersonTransfer(row.Merchant, row.Description, text)) continue;
+
+            // A name read from a description (a statement line, a note typed by the person) is free text: with a
+            // document, a phone, an e-mail or a Pix key in it the charge forms no stream at all; any other long
+            // number only leaves the name.
+            var fromDescription = string.IsNullOrWhiteSpace(row.Merchant);
+            if (fromDescription)
+            {
+                if (FactPackPrivacyFilter.HasDocumentOrContact(text)) continue;
+                text = FactPackPrivacyFilter.RemoveLongNumbers(text);
+            }
+
             var key = MerchantKey.Normalize(text);
             if (key.Length == 0 || key == MerchantKey.PersonTransfer) continue;
-            keyed.Add(new Keyed(row, key, text));
+            keyed.Add(new Keyed(row, key, text, fromDescription));
         }
 
         var streams = new List<DetectedStream>();
@@ -127,7 +165,7 @@ public static class RecurrenceDetector
             var pool = all.Where(k => !consumed.Contains(k.Row.Id)).ToList();
             if (pool.Count == 0) continue;
 
-            var found = DetectCadences(group.Key, pool, all, today, options);
+            var found = DetectCadences(group.Key, pool, today, options);
             streams.AddRange(found);
             if (found.Count == 0 && DetectFrequentSmallSpend(group.Key, pool, today, options) is { } habit) streams.Add(habit);
         }
@@ -136,7 +174,7 @@ public static class RecurrenceDetector
             .GroupBy(k => k.Key, StringComparer.Ordinal)
             .ToDictionary(
                 g => g.Key,
-                g => (IReadOnlyList<KeyCharge>)g.Select(k => new KeyCharge(k.Row.TimestampUtc, k.Amount)).ToList(),
+                g => (IReadOnlyList<KeyCharge>)g.Select(k => new KeyCharge(k.Row.Id, k.Row.TimestampUtc, k.Amount)).ToList(),
                 StringComparer.Ordinal);
         return new DetectionResult(streams, charges);
     }
@@ -193,7 +231,7 @@ public static class RecurrenceDetector
                 // One mark alone may be a date ("15/10"). It is only shown, as probable, while it is fresh and does
                 // not look like the day and month of the purchase itself.
                 var looksLikeDate = last.Total == last.Row.Date.Month;
-                if (looksLikeDate || daysSince > options.NewWithinDays || last.Number == last.Total) continue;
+                if (looksLikeDate || daysSince > options.ProbableInstallmentWithinDays || last.Number == last.Total) continue;
             }
 
             if (MonthIndex(today) > endMonth) continue;   // paid off
@@ -206,6 +244,7 @@ public static class RecurrenceDetector
 
             var facts = new RecurringStreamFacts(
                 DisplayName: DisplayName(MerchantKey.RemoveInstallmentMark(last.Row.Text)),
+                NameSource: NameSource(parts.Select(p => p.Row)),
                 Kind: RecurringKinds.Installment,
                 VariableAmount: false,
                 Category: ModeCategory(parts.Select(p => p.Row)),
@@ -261,7 +300,7 @@ public static class RecurrenceDetector
 
     // ---------------------------------------------------------------- cadences (3.3)
 
-    private static List<DetectedStream> DetectCadences(string key, List<Keyed> pool, List<Keyed> allOfKey, DateOnly today, RecurrenceOptions o)
+    private static List<DetectedStream> DetectCadences(string key, List<Keyed> pool, DateOnly today, RecurrenceOptions o)
     {
         var monthly = new CadenceSpec(RecurringCadences.Monthly, 25, 34, 53, 65, 30, o.MonthlyMinOccurrences, 12m);
         var weekly = new CadenceSpec(RecurringCadences.Weekly, 5, 9, 12, 16, 7, o.WeeklyMinOccurrences, 52m);
@@ -278,11 +317,12 @@ public static class RecurrenceDetector
         {
             foreach (var cluster in Cluster(remaining, o.VariableBillTolerance))
             {
-                var chain = BestChain(cluster, monthly, o);
-                if (chain is null) continue;
-                var median = Median(chain.Select(r => r.Amount));
-                var variable = chain.Any(r => !Within(r.Amount, median, o.AmountTolerance));
-                chosen.Add(new Chain(monthly, chain, CountMissed(chain, monthly), variable));
+                foreach (var chain in SeriesOf(cluster, monthly, o))
+                {
+                    var median = Median(chain.Select(r => r.Amount));
+                    var variable = chain.Any(r => !Within(r.Amount, median, o.AmountTolerance));
+                    chosen.Add(new Chain(monthly, chain, CountMissed(chain, monthly), variable));
+                }
             }
 
             RemoveUsed(remaining, chosen);
@@ -299,7 +339,8 @@ public static class RecurrenceDetector
                 var chain = RawChain(cluster, cadence);
                 if (chain.Count == 0) continue;
                 raw.Add(chain);
-                if (Covers(chain, cluster, o)) candidates.Add(new Chain(cadence, chain, CountMissed(chain, cadence), false));
+                foreach (var series in SeriesOf(cluster, cadence, o))
+                    candidates.Add(new Chain(cadence, series, CountMissed(series, cadence), false));
             }
 
             // One step of price: the old price in one cluster, the new one in another, the dates in the same rhythm.
@@ -327,11 +368,10 @@ public static class RecurrenceDetector
             chosen.Add(candidate);
         }
 
-        var firstOfKey = allOfKey[0].Date;
         return chosen
             .Where(c => c.Rows.Count >= c.Cadence.MinOccurrences)
-            .OrderBy(c => c.Rows[0].Date).ThenBy(c => c.Rows[0].Amount)
-            .Select(c => Build(key, c, category, utility, firstOfKey, today, o))
+            .OrderBy(c => c.Rows[0].Date).ThenBy(c => c.Rows[0].Amount).ThenBy(c => c.Rows[0].Row.Id)
+            .Select(c => Build(key, c, utility, today, o))
             .ToList();
     }
 
@@ -341,7 +381,7 @@ public static class RecurrenceDetector
         remaining.RemoveAll(r => ids.Contains(r.Row.Id));
     }
 
-    private static DetectedStream Build(string key, Chain chain, string keyCategory, bool utility, DateOnly firstOfKey, DateOnly today, RecurrenceOptions o)
+    private static DetectedStream Build(string key, Chain chain, bool utility, DateOnly today, RecurrenceOptions o)
     {
         var rows = chain.Rows;
         var cadence = chain.Cadence;
@@ -381,7 +421,8 @@ public static class RecurrenceDetector
                 if (newPrice > oldPrice)
                 {
                     previous = oldPrice;
-                    priceIncrease = true;
+                    // The price before stays as a fact; the mark is news, and goes away after a few charges.
+                    priceIncrease = current.Count <= o.PriceIncreaseMaxCharges;
                 }
             }
             else
@@ -419,7 +460,7 @@ public static class RecurrenceDetector
         }
 
         if (priceIncrease) flags.Add(RecurringFlags.PriceIncrease);
-        if (rows[0].Date == firstOfKey && rows[0].Date >= today.AddDays(-o.NewWithinDays)) flags.Add(RecurringFlags.New);
+        if (rows[0].Date >= today.AddDays(-o.NewWithinDays)) flags.Add(RecurringFlags.New);
 
         var next = cadence.Name switch
         {
@@ -432,6 +473,7 @@ public static class RecurrenceDetector
 
         var facts = new RecurringStreamFacts(
             DisplayName: DisplayName(last.Text),
+            NameSource: NameSource(rows),
             Kind: kind,
             VariableAmount: chain.Variable,
             Category: category,
@@ -487,6 +529,7 @@ public static class RecurrenceDetector
         if (pool[0].Date >= today.AddDays(-o.NewWithinDays)) flags.Add(RecurringFlags.New);
         var facts = new RecurringStreamFacts(
             DisplayName: DisplayName(window[^1].Text),
+            NameSource: NameSource(window),
             Kind: RecurringKinds.Habit,
             VariableAmount: false,
             Category: ModeCategory(window),
@@ -591,11 +634,84 @@ public static class RecurrenceDetector
         return LinkKind.None;
     }
 
-    /// <summary>The chain of the cluster for the cadence when it holds enough of the charges of its period; otherwise null.</summary>
-    private static List<Keyed>? BestChain(List<Keyed> cluster, CadenceSpec cadence, RecurrenceOptions o)
+    /// <summary>
+    /// The series of the cluster (charges of similar amount of one establishment) in the cadence. Usually one: the
+    /// longest chain, when it holds enough of the charges of its period. Two services of the same amount (the same
+    /// plan paid by each person of the couple, two subscriptions of the same price in an app shop) are told apart
+    /// in two ways, and only for the monthly and the yearly cadences:
+    /// by person — every person with charges has a series of their own, and the series run side by side;
+    /// by day — up to <see cref="RecurrenceOptions.MaxSeriesPerAmount"/> series, each always charged on its own day
+    /// of the month, that together leave almost nothing out. A purchase every 10 or 14 days fits neither.
+    /// </summary>
+    private static List<List<Keyed>> SeriesOf(List<Keyed> cluster, CadenceSpec cadence, RecurrenceOptions o)
     {
-        var chain = RawChain(cluster, cadence);
-        return chain.Count >= cadence.MinOccurrences && Covers(chain, cluster, o) ? chain : null;
+        var splits = cadence.Name != RecurringCadences.Weekly && o.MaxSeriesPerAmount > 1;
+        if (splits && SeriesByPerson(cluster, cadence, o) is { } byPerson) return byPerson;
+
+        var first = RawChain(cluster, cadence);
+        if (first.Count < cadence.MinOccurrences) return [];
+
+        if (splits)
+        {
+            var found = new List<List<Keyed>> { first };
+            var rest = Without(cluster, first);
+            while (found.Count < o.MaxSeriesPerAmount)
+            {
+                var next = RawChain(rest, cadence);
+                if (next.Count < cadence.MinOccurrences) break;
+                found.Add(next);
+                rest = Without(rest, next);
+            }
+
+            // Each series is measured against what is in no other series: what is left over is what must be rare.
+            if (found.Count > 1
+                && found.All(series => OnTheSameDay(series, o)
+                                       && Covers(series, Without(cluster, found.Where(other => !ReferenceEquals(other, series)).SelectMany(other => other)), o)))
+            {
+                return found;
+            }
+        }
+
+        return Covers(first, cluster, o) ? [first] : [];
+    }
+
+    private static List<List<Keyed>>? SeriesByPerson(List<Keyed> cluster, CadenceSpec cadence, RecurrenceOptions o)
+    {
+        var people = cluster.GroupBy(r => r.Row.UserId).OrderBy(g => g.Key).Select(g => g.ToList()).ToList();
+        if (people.Count < 2) return null;
+
+        var series = new List<List<Keyed>>();
+        foreach (var charges in people)
+        {
+            var chain = RawChain(charges, cadence);
+            if (chain.Count < cadence.MinOccurrences || !Covers(chain, charges, o)) return null;
+            series.Add(chain);
+        }
+
+        // Side by side: a series that only starts when the other ended is one service whose charges changed hands.
+        var latestStart = series.Max(chain => chain[0].Date);
+        var earliestEnd = series.Min(chain => chain[^1].Date);
+        return latestStart < earliestEnd ? series : null;
+    }
+
+    private static List<Keyed> Without(List<Keyed> rows, IEnumerable<Keyed> taken)
+    {
+        var ids = taken.Select(r => r.Row.Id).ToHashSet();
+        return rows.Where(r => !ids.Contains(r.Row.Id)).ToList();
+    }
+
+    /// <summary>True when every charge of the series is within a few days of the day of the month of the first one.</summary>
+    private static bool OnTheSameDay(List<Keyed> series, RecurrenceOptions o)
+    {
+        var first = series[0].Date;
+        foreach (var charge in series)
+        {
+            var months = (charge.Date.Year - first.Year) * 12 + charge.Date.Month - first.Month;
+            var distance = Enumerable.Range(months - 1, 3).Min(m => Math.Abs(charge.Date.DayNumber - first.AddMonths(m).DayNumber));
+            if (distance > o.SameDayToleranceDays) return false;
+        }
+
+        return true;
     }
 
     private static bool Covers(List<Keyed> chain, List<Keyed> cluster, RecurrenceOptions o)
@@ -694,10 +810,11 @@ public static class RecurrenceDetector
             .First().Key;
 
     private static string DisplayName(string text)
-    {
-        var name = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        return name.Length > RecurringStream.MaxDisplayNameLength ? name[..RecurringStream.MaxDisplayNameLength] : name;
-    }
+        => MerchantKey.Truncate(string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)), RecurringStream.MaxDisplayNameLength);
+
+    /// <summary>"description" as soon as one charge of the stream took its text from a description: the safe side for what may go to a provider.</summary>
+    private static string NameSource(IEnumerable<Keyed> rows)
+        => rows.Any(r => r.FromDescription) ? RecurringNameSources.Description : RecurringNameSources.Merchant;
 
     private static int MonthIndex(DateOnly date) => date.Year * 12 + date.Month - 1;
 

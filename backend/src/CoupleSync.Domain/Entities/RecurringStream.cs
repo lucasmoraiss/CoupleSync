@@ -56,9 +56,21 @@ public static class RecurringOverrides
     public static readonly IReadOnlyList<string> All = [NotRecurring, Cancelled, Subscription, FixedBill];
 }
 
+/// <summary>
+/// Where the name (and the key) of a stream came from. A name read from a description is shown to the group itself
+/// only: it never goes to an AI provider (design 3.8).
+/// </summary>
+public static class RecurringNameSources
+{
+    public const string Merchant = "merchant";
+    public const string Description = "description";
+}
+
 /// <summary>What the detector found for one stream: everything in a row that is recalculated.</summary>
+/// <param name="NameSource">One of <see cref="RecurringNameSources"/>.</param>
 public sealed record RecurringStreamFacts(
     string DisplayName,
+    string NameSource,
     string Kind,
     bool VariableAmount,
     string Category,
@@ -89,6 +101,7 @@ public sealed class RecurringStream : ICoupleScoped
 {
     public const int MaxMerchantKeyLength = 160;
     public const int MaxDisplayNameLength = 120;
+    public const int MaxNameSourceLength = 16;
 
     private readonly List<RecurringStreamItem> _items = [];
 
@@ -103,6 +116,12 @@ public sealed class RecurringStream : ICoupleScoped
     public string MerchantKey { get; private set; } = string.Empty;
 
     public string DisplayName { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// <see cref="RecurringNameSources"/>: "description" when the text of any charge of the stream came from the
+    /// description of the transaction (it had no merchant). Such a name never leaves the API towards a provider.
+    /// </summary>
+    public string NameSource { get; private set; } = RecurringNameSources.Description;
 
     /// <summary>The kind the detector gave it. The kind shown is <see cref="EffectiveKind"/>.</summary>
     public string Kind { get; private set; } = string.Empty;
@@ -171,13 +190,14 @@ public sealed class RecurringStream : ICoupleScoped
         => UserOverride is RecurringOverrides.Subscription or RecurringOverrides.FixedBill ? UserOverride : Kind;
 
     /// <summary>
-    /// Out of the active list: the person said it is not recurring, or cancelled it (and it was not charged again),
-    /// or it stopped being charged.
+    /// Out of the active list: the person said it is not recurring, or cancelled it, or it stopped being charged.
+    /// What the person cancelled and was charged again is never hidden — also when the charge came back so late that
+    /// the series itself is still "stopped".
     /// </summary>
     public bool IsHidden
         => UserOverride == RecurringOverrides.NotRecurring
-           || (UserOverride == RecurringOverrides.Cancelled && !FlagList.Contains(RecurringFlags.ChargedAfterCancel))
-           || Status == RecurringStatuses.Stopped;
+           || (!FlagList.Contains(RecurringFlags.ChargedAfterCancel)
+               && (UserOverride == RecurringOverrides.Cancelled || Status == RecurringStatuses.Stopped));
 
     public static RecurringStream Create(Guid coupleId, string merchantKey, string cadence, RecurringStreamFacts facts, DateTime nowUtc)
     {
@@ -195,7 +215,8 @@ public sealed class RecurringStream : ICoupleScoped
     /// <summary>A recalculation that found the stream again. What the person said about it is not touched.</summary>
     public void Apply(RecurringStreamFacts facts, DateTime nowUtc)
     {
-        DisplayName = facts.DisplayName.Length > MaxDisplayNameLength ? facts.DisplayName[..MaxDisplayNameLength] : facts.DisplayName;
+        DisplayName = Truncate(facts.DisplayName, MaxDisplayNameLength);
+        NameSource = facts.NameSource == RecurringNameSources.Merchant ? RecurringNameSources.Merchant : RecurringNameSources.Description;
         Kind = facts.Kind;
         VariableAmount = facts.VariableAmount;
         Category = facts.Category;
@@ -238,6 +259,16 @@ public sealed class RecurringStream : ICoupleScoped
         UpdatedAtUtc = AsUtc(nowUtc);
     }
 
+    /// <summary>
+    /// A recalculation that could not see the stream (a yearly charge has its first charge out of the months read
+    /// soon after the renewal) while it is still due: the row stays exactly as it is, only the instant is new.
+    /// </summary>
+    public void KeepAsDetected(DateTime nowUtc)
+    {
+        DetectedAtUtc = AsUtc(nowUtc);
+        UpdatedAtUtc = AsUtc(nowUtc);
+    }
+
     public void SetChargedAfterCancel(bool charged)
     {
         var flags = FlagList.Where(f => f != RecurringFlags.ChargedAfterCancel).ToList();
@@ -266,6 +297,13 @@ public sealed class RecurringStream : ICoupleScoped
         var present = _items.Select(i => i.TransactionId).ToHashSet();
         foreach (var id in wanted.Where(id => !present.Contains(id)))
             _items.Add(RecurringStreamItem.Create(CoupleId, Id, id));
+    }
+
+    /// <summary>Cut to the size of the column without splitting a surrogate pair (half an emoji is not valid text for the database).</summary>
+    private static string Truncate(string text, int maxLength)
+    {
+        if (text.Length <= maxLength) return text;
+        return text[..(char.IsHighSurrogate(text[maxLength - 1]) ? maxLength - 1 : maxLength)];
     }
 
     private static DateTime AsUtc(DateTime value)

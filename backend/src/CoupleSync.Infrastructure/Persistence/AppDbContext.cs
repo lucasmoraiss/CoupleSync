@@ -863,6 +863,8 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
             entity.Property(x => x.MerchantKey).HasColumnName("merchant_key").HasMaxLength(RecurringStream.MaxMerchantKeyLength).IsRequired();
             entity.Property(x => x.DisplayName).HasColumnName("display_name").HasMaxLength(RecurringStream.MaxDisplayNameLength).IsRequired();
+            // "merchant" or "description": a name read from a description never goes to an AI provider.
+            entity.Property(x => x.NameSource).HasColumnName("name_source").HasMaxLength(RecurringStream.MaxNameSourceLength).IsRequired();
             entity.Property(x => x.Kind).HasColumnName("kind").HasMaxLength(16).IsRequired();
             entity.Property(x => x.VariableAmount).HasColumnName("variable_amount").IsRequired();
             entity.Property(x => x.Cadence).HasColumnName("cadence").HasMaxLength(16).IsRequired();

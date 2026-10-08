@@ -19,6 +19,7 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                     couple_id = table.Column<Guid>(type: "uuid", nullable: false),
                     merchant_key = table.Column<string>(type: "character varying(160)", maxLength: 160, nullable: false),
                     display_name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
+                    name_source = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                     kind = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                     variable_amount = table.Column<bool>(type: "boolean", nullable: false),
                     cadence = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),

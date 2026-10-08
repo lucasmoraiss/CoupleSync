@@ -77,6 +77,18 @@ public static partial class FactPackPrivacyFilter
         return result;
     }
 
+    /// <summary>
+    /// True when the text carries what identifies a person or an account: an e-mail, a random Pix key, a document
+    /// (CPF, CNPJ) or a phone — the same patterns <see cref="FilterFreeText"/> removes, without the catch-all for
+    /// long numbers.
+    /// </summary>
+    public static bool HasDocumentOrContact(string? text)
+        => !string.IsNullOrEmpty(text)
+           && (Email().IsMatch(text) || Uuid().IsMatch(text) || ContactPatterns.Replace(text, Removed) != text);
+
+    /// <summary>The text without its runs of 6 or more digits (the catch-all of <see cref="FilterFreeText"/>), each one replaced by a space.</summary>
+    public static string RemoveLongNumbers(string text) => LongDigits().Replace(text, " ");
+
     /// <summary>Puts the first names back in a text of the model, when answering the app.</summary>
     public static string RestoreNames(string text, IReadOnlyList<AiPerson> people)
         => PersonMarker().Replace(text, match =>

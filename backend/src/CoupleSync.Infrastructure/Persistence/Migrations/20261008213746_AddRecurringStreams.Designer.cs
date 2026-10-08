@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CoupleSync.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261008201834_AddRecurringStreams")]
+    [Migration("20261008213746_AddRecurringStreams")]
     partial class AddRecurringStreams
     {
         /// <inheritdoc />
@@ -1333,6 +1333,12 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                     b.Property<int>("MissedCount")
                         .HasColumnType("integer")
                         .HasColumnName("missed_count");
+
+                    b.Property<string>("NameSource")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("name_source");
 
                     b.Property<DateOnly?>("NextExpectedLocal")
                         .HasColumnType("date")

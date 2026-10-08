@@ -63,14 +63,25 @@ public interface IRecurringStreamRepository
 /// </summary>
 public sealed class RecurrenceRunLog
 {
-    private readonly ConcurrentDictionary<Guid, (DateTime RanAtUtc, int TransactionCount)> _runs = new();
+    private readonly ConcurrentDictionary<Guid, (DateTime RanAtUtc, int TransactionCount, long Edits)> _runs = new();
+    private readonly ConcurrentDictionary<Guid, long> _edits = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _locks = new();
 
-    public (DateTime RanAtUtc, int TransactionCount)? Get(Guid coupleId)
+    public (DateTime RanAtUtc, int TransactionCount, long Edits)? Get(Guid coupleId)
         => _runs.TryGetValue(coupleId, out var run) ? run : null;
 
-    public void Set(Guid coupleId, DateTime ranAtUtc, int transactionCount)
-        => _runs[coupleId] = (ranAtUtc, transactionCount);
+    /// <param name="edits">What <see cref="EditsOf"/> answered before the transactions were read.</param>
+    public void Set(Guid coupleId, DateTime ranAtUtc, int transactionCount, long edits)
+        => _runs[coupleId] = (ranAtUtc, transactionCount, edits);
+
+    /// <summary>
+    /// A transaction of the group was edited (amount, date, establishment, description, category): the next request
+    /// for the list calculates again. Costs nothing here: no query, only a counter in memory.
+    /// </summary>
+    public void TransactionEdited(Guid coupleId) => _edits.AddOrUpdate(coupleId, 1, (_, count) => count + 1);
+
+    /// <summary>How many edits this process saw for the group.</summary>
+    public long EditsOf(Guid coupleId) => _edits.TryGetValue(coupleId, out var count) ? count : 0;
 
     public SemaphoreSlim LockOf(Guid coupleId) => _locks.GetOrAdd(coupleId, _ => new SemaphoreSlim(1, 1));
 }
@@ -207,6 +218,8 @@ public sealed class RecurrenceService
         try
         {
             var now = _clock.UtcNow;
+            // Read before the transactions: an edit that arrives during the calculation makes the next one due.
+            var edits = _runs.EditsOf(coupleId);
             var watermark = await _repository.GetWatermarkAsync(coupleId, ct);
             var remembered = _runs.Get(coupleId);
             var lastRun = remembered?.RanAtUtc ?? await _repository.GetLastDetectedAtAsync(coupleId, ct);
@@ -215,7 +228,8 @@ public sealed class RecurrenceService
                       || now - lastRun.Value >= TimeSpan.FromHours(_options.RefreshAfterHours)
                       || now < lastRun.Value
                       || (watermark.LatestCreatedAtUtc is { } latest && latest >= lastRun.Value)
-                      || (remembered is { } r && r.TransactionCount != watermark.Count);
+                      || (remembered is { } r && r.TransactionCount != watermark.Count)
+                      || edits != (remembered?.Edits ?? 0);
             if (!due) return lastRun!.Value;
 
             try
@@ -228,7 +242,7 @@ public sealed class RecurrenceService
                 _repository.Reset();
             }
 
-            _runs.Set(coupleId, now, watermark.Count);
+            _runs.Set(coupleId, now, watermark.Count, edits);
             return now;
         }
         finally
@@ -247,15 +261,21 @@ public sealed class RecurrenceService
         var existing = await _repository.GetForUpdateAsync(coupleId, ct);
         var unmatched = existing.ToList();
         var taken = existing.Select(e => (e.MerchantKey, e.Cadence)).ToHashSet();
+        // Which stream each charge belongs to after this calculation.
+        var ownerOfCharge = new Dictionary<Guid, Guid>();
 
         foreach (var group in result.Streams.GroupBy(d => (d.MerchantKey, d.Cadence)))
         {
             foreach (var detected in group.OrderBy(d => d.Facts.MedianAmount))
             {
-                // The stored stream of this establishment and cadence that is closest: the same kind first, then the amount.
+                // The stored stream of this establishment and cadence that is closest: the same kind first, then the
+                // one that already holds most of these charges (two streams of the same amount — the same plan of
+                // each person — must not swap what was said about them), then the amount.
+                var charges = detected.TransactionIds.ToHashSet();
                 var match = unmatched
                     .Where(e => e.Cadence == detected.Cadence && BaseKey(e.MerchantKey) == detected.MerchantKey)
                     .OrderBy(e => e.Kind == detected.Facts.Kind ? 0 : 1)
+                    .ThenByDescending(e => e.Items.Count(i => charges.Contains(i.TransactionId)))
                     .ThenBy(e => Math.Abs(e.MedianAmount - detected.Facts.MedianAmount))
                     .ThenBy(e => e.MerchantKey, StringComparer.Ordinal)
                     .FirstOrDefault();
@@ -275,11 +295,22 @@ public sealed class RecurrenceService
                 }
 
                 match.SetTransactions(detected.TransactionIds);
+                foreach (var transactionId in detected.TransactionIds) ownerOfCharge[transactionId] = match.Id;
             }
         }
 
         foreach (var gone in unmatched)
         {
+            // A yearly stream is two charges a year apart, and the detector reads 13 months: a month after the
+            // renewal the first charge is out of what is read and the stream cannot be found again. While its last
+            // charge is still there and the next one is not late, the row stays as it is.
+            if (IsYearlyStillDue(gone, result, today))
+            {
+                gone.KeepAsDetected(nowUtc);
+                foreach (var item in gone.Items) ownerOfCharge[item.TransactionId] = gone.Id;
+                continue;
+            }
+
             // Only what the person said something about is kept when the detector does not find it any more.
             if (gone.UserOverride is null) _repository.Remove(gone);
             else gone.MarkNotDetected(nowUtc);
@@ -288,14 +319,35 @@ public sealed class RecurrenceService
         foreach (var stream in existing.Where(e => e.UserOverride == RecurringOverrides.Cancelled && e.OverrideAtUtc is not null))
         {
             var tolerance = stream.VariableAmount ? _options.VariableBillTolerance : _options.AmountTolerance;
+            // A charge of another stream of the same establishment (the plan of the other person, of the same
+            // amount) is not this one being charged again.
             var chargedAgain = result.ChargesByKey.TryGetValue(BaseKey(stream.MerchantKey), out var charges)
                                && charges.Any(c => c.TimestampUtc > stream.OverrideAtUtc!.Value
                                                    && c.Amount >= stream.MedianAmount * (1 - tolerance)
-                                                   && c.Amount <= stream.MedianAmount * (1 + tolerance));
+                                                   && c.Amount <= stream.MedianAmount * (1 + tolerance)
+                                                   && (!ownerOfCharge.TryGetValue(c.TransactionId, out var owner) || owner == stream.Id));
             stream.SetChargedAfterCancel(chargedAgain);
         }
 
         await _repository.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// True for a yearly stream that this calculation did not find, whose last charge is still among the
+    /// transactions read (it was not deleted nor edited into something else) and whose next charge is not late yet
+    /// (the longest yearly interval, <see cref="RecurrenceDetector.YearlyMaxIntervalDays"/>).
+    /// </summary>
+    private bool IsYearlyStillDue(RecurringStream stream, DetectionResult result, DateOnly today)
+    {
+        if (stream.Cadence != RecurringCadences.Yearly || stream.Status == RecurringStatuses.Stopped) return false;
+        if (today.DayNumber - stream.LastSeenLocal.DayNumber > RecurrenceDetector.YearlyMaxIntervalDays) return false;
+
+        var chargesOfStream = stream.Items.Select(i => i.TransactionId).ToHashSet();
+        return result.ChargesByKey.TryGetValue(BaseKey(stream.MerchantKey), out var charges)
+               && charges.Any(c => c.LocalDate == stream.LastSeenLocal
+                                   && chargesOfStream.Contains(c.TransactionId)
+                                   && c.Amount >= stream.LastAmount * (1 - _options.AmountTolerance)
+                                   && c.Amount <= stream.LastAmount * (1 + _options.AmountTolerance));
     }
 
     private static string BaseKey(string merchantKey)

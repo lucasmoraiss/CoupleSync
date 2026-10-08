@@ -14,6 +14,12 @@ public static partial class MerchantKey
     /// <summary>The fixed label of a transfer to a person (design 3.8). It never forms a recurrence.</summary>
     public const string PersonTransfer = "transferencia_pessoa";
 
+    /// <summary>
+    /// The longest key. A transaction accepts 512 characters of text; the column of a stream holds 160, and the key
+    /// of an instalment plan ("#48x202609") and of a second stream of the same shop ("~2") are added to this one.
+    /// </summary>
+    public const int MaxLength = 120;
+
     /// <summary>What acquirers and wallets write before the name of the shop. Locked by a test.</summary>
     public static IReadOnlyList<string> AcquirerPrefixes { get; } =
         ["pg *", "pag*", "mp *", "mercadopago*", "pagseguro", "picpay*", "ifd*", "ec *"];
@@ -78,7 +84,40 @@ public static partial class MerchantKey
 
         var tokens = Tokens(text);
         RemoveLocationSuffix(tokens);
-        return string.Join(' ', tokens);
+        return Cut(tokens);
+    }
+
+    /// <summary>
+    /// The words joined, up to <see cref="MaxLength"/>: whole words only (a first word longer than the limit is cut
+    /// to it). The key only has a-z, 0-9 and spaces, so a cut never splits a character.
+    /// </summary>
+    private static string Cut(List<string> tokens)
+    {
+        var key = new StringBuilder();
+        foreach (var token in tokens)
+        {
+            if (key.Length == 0)
+            {
+                key.Append(token.Length > MaxLength ? token[..MaxLength] : token);
+                continue;
+            }
+
+            if (key.Length + 1 + token.Length > MaxLength) break;
+            key.Append(' ').Append(token);
+        }
+
+        return key.ToString();
+    }
+
+    /// <summary>
+    /// The text cut to <paramref name="maxLength"/> UTF-16 units without splitting a surrogate pair (half an emoji
+    /// cannot be stored: PostgreSQL only takes valid UTF-8).
+    /// </summary>
+    public static string Truncate(string text, int maxLength)
+    {
+        if (text.Length <= maxLength) return text;
+        var length = char.IsHighSurrogate(text[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return text[..length];
     }
 
     /// <summary>The text without the "03/10" (and the word "parc" before it), as the name shown for an instalment.</summary>
@@ -248,9 +287,16 @@ public static class PersonTransferRule
     /// <param name="description">The description of the transaction (never leaves the server).</param>
     /// <param name="establishment">The text used as establishment (the merchant, or the description when there is none).</param>
     public static bool IsPersonTransfer(string? merchant, string? description, string? establishment = null)
-        => HasMarker(merchant) || HasMarker(description) || IsPersonName(establishment ?? merchant);
+    {
+        // A note next to a merchant ("plano para a família") is not the name shown: there, "para" followed by an
+        // article is ordinary text. Where the text itself is the name, "para" always counts.
+        var descriptionIsANote = !string.IsNullOrWhiteSpace(merchant);
+        return HasMarker(merchant, note: false) || HasMarker(description, descriptionIsANote) || IsPersonName(establishment ?? merchant);
+    }
 
-    private static bool HasMarker(string? text)
+    private static readonly HashSet<string> Articles = new(StringComparer.Ordinal) { "a", "o", "as", "os", "um", "uma" };
+
+    private static bool HasMarker(string? text, bool note)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
         var tokens = MerchantKey.Tokens(MerchantKey.Fold(text));
@@ -259,6 +305,7 @@ public static class PersonTransferRule
             if (!MarkerSet.Contains(tokens[i])) continue;
             // "para " only says something when a name follows it ("para joao").
             if (tokens[i] == "para" && i == tokens.Count - 1) continue;
+            if (tokens[i] == "para" && note && Articles.Contains(tokens[i + 1])) continue;
             return true;
         }
 

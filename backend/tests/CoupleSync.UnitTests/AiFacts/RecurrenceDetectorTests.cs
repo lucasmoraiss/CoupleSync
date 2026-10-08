@@ -387,7 +387,8 @@ public sealed class RecurrenceDetectorTests
         var recent = Assert.Single(Detect(Series("Feira Exemplo", 80m, Today.AddDays(-28), 5, 7, "ALIMENTACAO")));
         Assert.Contains(RecurringFlags.New, recent.Facts.Flags);
 
-        var old = Assert.Single(Detect(Series("Feira Exemplo", 80m, Today.AddDays(-42), 7, 7, "ALIMENTACAO")));
+        // "New" lasts 90 days from the first known charge (review round 1, decision 3).
+        var old = Assert.Single(Detect(Series("Feira Exemplo", 80m, Today.AddDays(-91), 14, 7, "ALIMENTACAO")));
         Assert.DoesNotContain(RecurringFlags.New, old.Facts.Flags);
     }
 

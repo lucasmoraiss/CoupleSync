@@ -1331,6 +1331,12 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("missed_count");
 
+                    b.Property<string>("NameSource")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("name_source");
+
                     b.Property<DateOnly?>("NextExpectedLocal")
                         .HasColumnType("date")
                         .HasColumnName("next_expected_local");
