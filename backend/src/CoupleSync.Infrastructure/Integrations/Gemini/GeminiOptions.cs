@@ -13,6 +13,5 @@ public sealed class GeminiOptions
     public int ThinkingHeadroomTokens { get; set; } = DefaultThinkingHeadroomTokens;
 
     public int MaxTokens { get; set; } = 1024;
-    public bool Enabled { get; set; } = false;
     public string ApiKey { get; set; } = string.Empty;
 }

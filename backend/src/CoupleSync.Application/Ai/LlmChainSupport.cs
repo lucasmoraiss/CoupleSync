@@ -139,12 +139,6 @@ public sealed record LlmLinkState(bool ExhaustedToday, DateTime? PausedUntilUtc,
     }
 }
 
-/// <summary>Phase 1: there is no consent table yet; the chat is still behind the acceptance kept on the device.</summary>
-public sealed class DeviceAiConsentGate : IAiConsentGate
-{
-    public Task<bool> IsEnabledAsync(Guid? coupleId, CancellationToken ct) => Task.FromResult(true);
-}
-
 public sealed class SystemLlmWaiter : ILlmWaiter
 {
     public Task DelayAsync(TimeSpan delay, CancellationToken ct) => Task.Delay(delay, ct);

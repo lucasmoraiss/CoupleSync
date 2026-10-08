@@ -67,6 +67,10 @@ public static partial class FactPackPrivacyFilter
             return string.IsNullOrEmpty(firstName) ? "alguém do grupo" : firstName;
         });
 
+    /// <summary>True when the text names a person marker ({{B}}...) that belongs to nobody in the group.</summary>
+    public static bool MentionsUnknownPerson(string text, IReadOnlyList<AiPerson> people)
+        => PersonMarker().Matches(text).Any(match => people.All(p => p.Marker != match.Groups[1].Value));
+
     /// <summary>A, B, C... for members in the order given (oldest membership first).</summary>
     public static IReadOnlyList<AiPerson> AsPeople(IEnumerable<string> namesByJoinOrder)
         => namesByJoinOrder.Take(26).Select((name, index) => new AiPerson(((char)('A' + index)).ToString(), name)).ToList();

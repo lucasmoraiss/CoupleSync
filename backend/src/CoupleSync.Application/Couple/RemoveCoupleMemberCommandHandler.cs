@@ -91,6 +91,9 @@ public sealed class RemoveCoupleMemberCommandHandler
 
         var bankConnectionIds = await _coupleRepository.RemoveOpenFinanceOfMemberAsync(member.Id, coupleId, cancellationToken);
 
+        // Their acceptance of the AI analysis stops counting for the group, and their AI preferences there go.
+        await _coupleRepository.RemoveAiOfMemberAsync(member.Id, coupleId, _dateTimeProvider.UtcNow, cancellationToken);
+
         await _coupleRepository.SaveChangesAsync(cancellationToken);
         await change.CommitAsync(cancellationToken);
 

@@ -47,8 +47,9 @@ services:
       - key: Storage__BasePath
         value: /app/uploads
 
-      # Assistente de IA desligado por padrão. Para ligar: "true" e uma chave em GEMINI_API_KEY.
-      - key: AI_CHAT_ENABLED
+      # IA: fica disponível quando GEMINI_API_KEY tem valor; cada grupo ainda precisa ativar no app (o aceite fica no
+      # servidor). Interruptor de emergência: "true" aqui desliga toda a IA na hora, sem publicar o app de novo.
+      - key: Ai__Disabled
         value: "false"
       - key: GEMINI_API_KEY
         sync: false

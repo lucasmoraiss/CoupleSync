@@ -99,6 +99,7 @@ builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<OpenFinanceService>();
 builder.Services.AddScoped<ChatContextService>();
 builder.Services.AddScoped<AssistantChatService>();
+builder.Services.AddScoped<CoupleSync.Application.Ai.AiActivationService>();
 
 ValidationLocalization.Configure();
 builder.Services.AddControllers(ValidationLocalization.ConfigureModelBinding)

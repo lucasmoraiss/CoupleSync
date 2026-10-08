@@ -91,7 +91,7 @@ public static class DependencyInjection
         services.AddScoped<OcrProcessingService>();
         services.AddHostedService<OcrBackgroundJob>();
 
-        // AI Chat (feature-flagged — registered always so DI resolves, controller checks flag at runtime)
+        // AI Chat (registered always so DI resolves; whether it answers is decided per request: Ai__Disabled, keys, consent)
         services.Configure<GeminiOptions>(configuration.GetSection("Gemini"));
         // Apply GEMINI_MODEL env var override
         var geminiModel = configuration["GEMINI_MODEL"];
@@ -105,23 +105,22 @@ public static class DependencyInjection
         {
             services.PostConfigure<GeminiOptions>(opts => opts.ApiKey = geminiApiKey);
         }
-        // Apply AI_CHAT_ENABLED env var override
-        var aiChatEnabled = configuration["AI_CHAT_ENABLED"];
-        if (!string.IsNullOrWhiteSpace(aiChatEnabled))
-        {
-            services.PostConfigure<GeminiOptions>(opts =>
-                opts.Enabled = string.Equals(aiChatEnabled, "true", StringComparison.OrdinalIgnoreCase));
-        }
         services.AddHttpClient("Gemini", c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddScoped<IGeminiAdapter, GeminiChatAdapter>();
         services.AddSingleton<ChatRateLimiter>();
 
-        // AI auto-categorization: use real classifier only when AI_CHAT_ENABLED=true
-        if (!string.IsNullOrWhiteSpace(aiChatEnabled) &&
-            string.Equals(aiChatEnabled, "true", StringComparison.OrdinalIgnoreCase))
-            services.AddScoped<ICategoryClassifier, GeminiCategoryClassifier>();
-        else
-            services.AddScoped<ICategoryClassifier, NullCategoryClassifier>();
+        // AI auto-categorization: the real classifier only when the AI is not switched off (Ai__Disabled) and Gemini
+        // has a key. Decided when first used, from the final configuration. Whether a statement may be sent is
+        // decided per import, by the group's consent on the server.
+        services.AddScoped<GeminiCategoryClassifier>();
+        services.AddScoped<ICategoryClassifier>(provider =>
+        {
+            var ai = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<AiOptions>>().Value;
+            var gemini = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<GeminiOptions>>().Value;
+            return !ai.Disabled && !string.IsNullOrWhiteSpace(gemini.ApiKey)
+                ? provider.GetRequiredService<GeminiCategoryClassifier>()
+                : new NullCategoryClassifier();
+        });
 
         AddOpenFinance(services);
         AddAiGateway(services, configuration);
@@ -152,7 +151,9 @@ public static class DependencyInjection
 
         services.AddSingleton<LlmMinuteWindow>();
         services.AddSingleton<ILlmWaiter, SystemLlmWaiter>();
-        services.AddScoped<IAiConsentGate, DeviceAiConsentGate>();
+        services.AddScoped<IAiActivationRepository, AiActivationRepository>();
+        services.AddScoped<IAiConsentGate, ServerAiConsentGate>();
+        services.AddScoped<AiAvailability>();
         services.AddScoped<ILlmProviderCatalog, LlmProviderCatalog>();
         services.AddScoped<IAiUsageRepository, AiUsageRepository>();
         services.AddScoped<IAiPeopleReader, AiPeopleReader>();

@@ -31,6 +31,7 @@ public sealed class AssistantChatServiceTests : IDisposable
     private readonly ScriptedProvider _first = new(Gemini, Flash);
     private readonly ScriptedProvider _second = new(Gemini, Lite);
     private readonly ChatRateLimiter _limiter = new();
+    private IReadOnlyList<AiPerson> _people = People;
 
     public AssistantChatServiceTests() => _kit.Chain(AiChains.Assistant, _first, _second);
 
@@ -43,8 +44,11 @@ public sealed class AssistantChatServiceTests : IDisposable
         var transactions = new FakeTransactionRepository();
         var context = new ChatContextService(
             new BudgetService(budgets, transactions, clock), transactions, _goals, new CoupleSync.Application.Goals.GoalProgressReader(transactions), clock);
-        return new AssistantChatService(_kit.Gateway(), _kit.Catalog, context, new FixedPeople(People), _limiter);
+        return new AssistantChatService(_kit.Gateway(), Availability(_kit.Catalog), _kit.Consent, context, new FixedPeople(_people), _limiter);
     }
+
+    private AiAvailability Availability(ILlmProviderCatalog catalog)
+        => new(catalog, Microsoft.Extensions.Options.Options.Create(_kit.Options));
 
     private static LlmResult Answer(string text) => ScriptedProvider.OkResult(
         System.Text.Json.JsonSerializer.Serialize(new { answer = text, refs = Array.Empty<string>() }));
@@ -244,37 +248,84 @@ public sealed class AssistantChatServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task TheGroupBudget_AndTheGlobalCeiling_AnswerTheCodeTheInstalledAppKnows()
+    public async Task TheGroupBudget_AndTheGlobalCeiling_AnswerTheirOwnCodes()
     {
         _kit.Options.GroupDailyCalls = 1;
         await AskAsync();
 
         var group = await Assert.ThrowsAsync<ChatRateLimitException>(() => AskAsync());
-        Assert.Equal(("CHAT_RATE_LIMITED", 429), (group.Code, group.StatusCode));
+        Assert.Equal(("AI_DAILY_BUDGET_EXHAUSTED", 429), (group.Code, group.StatusCode));
         Assert.Equal("A cota de IA do grupo para hoje acabou. Volta à meia-noite.", group.Message);
 
         _kit.Options.GroupDailyCalls = 25;
         _kit.Options.GlobalDailyInteractiveCalls = 1;
         var global = await Assert.ThrowsAsync<ChatRateLimitException>(() => AskAsync());
-        Assert.Equal(("CHAT_RATE_LIMITED", 429), (global.Code, global.StatusCode));
+        Assert.Equal(("AI_GLOBAL_BUDGET_EXHAUSTED", 429), (global.Code, global.StatusCode));
         Assert.Equal("A IA do app atingiu o limite de uso de hoje. Volta à meia-noite. Os números do app continuam atualizados.", global.Message);
 
         Assert.Equal(1, _first.Calls);
     }
 
     [Fact]
-    public async Task TheEmergencySwitch_AnswersAiChatDisabled_AndNoKeyAnswers503()
+    public async Task TheEmergencySwitch_AndNoKeyAtAll_AnswerAiChatDisabled()
     {
         _kit.Options.Disabled = true;
         var disabled = await Assert.ThrowsAsync<NotFoundException>(() => AskAsync());
         Assert.Equal("AI_CHAT_DISABLED", disabled.Code);
 
         _kit.Options.Disabled = false;
-        var noKey = new AssistantChatService(_kit.Gateway(), new TestCatalog(), null!, new FixedPeople(People), _limiter);
-        var unavailable = await Assert.ThrowsAsync<AppException>(() => noKey.ChatAsync(_couple, "Oi", [], CancellationToken.None));
-        Assert.Equal(("CHAT_NOT_CONFIGURED", 503), (unavailable.Code, unavailable.StatusCode));
+        var noKey = new AssistantChatService(_kit.Gateway(), Availability(new TestCatalog()), _kit.Consent, null!, new FixedPeople(People), _limiter);
+        var unavailable = await Assert.ThrowsAsync<NotFoundException>(() => noKey.ChatAsync(_couple, "Oi", [], CancellationToken.None));
+        Assert.Equal(("AI_CHAT_DISABLED", 404), (unavailable.Code, unavailable.StatusCode));
 
         Assert.Equal(0, _first.Calls);
+    }
+
+    // ---------------------------------------------------------------- issue #38: consent and the group of one
+
+    [Fact]
+    public async Task AGroupThatDidNotSwitchTheAiOn_IsAiConsentRequired_403_BeforeTheHourlyLimitAndAnyProvider()
+    {
+        _kit.Consent.Enabled = false;
+
+        var ex = await Assert.ThrowsAsync<ForbiddenException>(() => AskAsync());
+
+        Assert.Equal(("AI_CONSENT_REQUIRED", 403), (ex.Code, ex.StatusCode));
+        Assert.Equal(0, _first.Calls);
+        // The refusal did not use up one of the 30 messages of the hour.
+        for (var i = 0; i < 30; i++) Assert.True(_limiter.IsAllowed(_couple));
+    }
+
+    [Fact]
+    public async Task TheSystemPrompt_NamesTheMarkersOfThisGroup_AndAGroupOfOneIsToldThereIsNobodyElse()
+    {
+        await AskAsync();
+        var couple = _first.Requests[^1].SystemPrompt;
+        Assert.Contains("{{A}} e {{B}}", couple);
+        Assert.DoesNotContain("uma única pessoa", couple);
+
+        _people = [new AiPerson("A", "Mariana Souza Lima")];
+        await AskAsync();
+        var alone = _first.Requests[^1].SystemPrompt;
+        Assert.Contains("uma única pessoa", alone);
+        Assert.Contains("{{A}}", alone);
+        Assert.DoesNotContain("{{B}}", alone);
+        Assert.Contains("não mencione parceiro", alone);
+        Assert.True(PromptText.EstimateTokens(alone) <= 800);
+    }
+
+    [Fact]
+    public async Task AnAnswerAboutAPersonWhoIsNotInTheGroup_IsRejected_NeverShownAsSomeoneOfTheGroup()
+    {
+        _people = [new AiPerson("A", "Mariana Souza Lima")];
+        _first.Then(Answer("Este mês foi bom para {{A}} e {{B}}."));
+        _second.Then(Answer("{{B}} gastou menos."));
+
+        var reply = await AskAsync();
+
+        Assert.Equal(AssistantChatService.RejectedAnswer, reply.Reply);
+        Assert.Null(reply.Provider);
+        Assert.DoesNotContain("alguém do grupo", reply.Reply);
     }
 
     private sealed class FixedPeople : IAiPeopleReader
