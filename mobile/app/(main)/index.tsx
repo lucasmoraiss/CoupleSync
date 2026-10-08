@@ -26,9 +26,10 @@ import { ErrorState } from '@/components/ErrorState';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { GroupSwitcher } from '@/components/GroupSwitcher';
 import { spokenBRL } from '@/utils/a11y';
-import { isAssistantVisible, shouldOpenWelcome, shouldShowActivationCard } from '@/modules/ai/aiStatus';
-import { useAiStatusStore, wasWelcomeShown } from '@/modules/ai/aiStatusStore';
+import { AI_STATUS_NOTICE_TEXT, aiStatusNotice, isAssistantVisible, shouldShowActivationCard } from '@/modules/ai/aiStatus';
+import { openWelcomeIfDue } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
+import { isCaptureConsentAhead } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -128,16 +129,25 @@ export default function DashboardScreen() {
 
   // Análise com IA: o status é consultado a cada vez que o Painel recebe foco. Quem ainda não respondeu à pergunta
   // (ou não viu que o outro membro ativou) é levado à tela de boas-vindas, uma vez por abertura do app.
-  const { status: aiStatus } = useAiStatus((fresh) => {
-    if (!shouldOpenWelcome(fresh, wasWelcomeShown())) return;
-    useAiStatusStore.getState().markWelcomeShown();
-    router.push('/(main)/ai/welcome' as any);
+  // Vale cada resposta do servidor (a do foco, a de uma nova tentativa depois de uma falha). Se o consentimento da
+  // captura vai abrir sozinho, ele vem primeiro e a pergunta da IA fica para a próxima volta ao Painel.
+  const ai = useAiStatus((fresh) => {
+    void openWelcomeIfDue(fresh, {
+      isFocused: ai.isFocused,
+      otherPromptPending: isCaptureConsentAhead,
+      open: () => router.push('/(main)/ai/welcome' as any),
+    });
   });
+  const aiStatus = ai.status;
+  // Sem status nenhum (nem o guardado no aparelho): o Painel diz o que está acontecendo com a IA, em vez de
+  // simplesmente não mostrar nada dela.
+  const aiNotice = aiStatusNotice(aiStatus, ai.loadFailed, ai.retrying);
 
   const [refreshing, setRefreshing] = React.useState(false);
   const handleRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    // Puxar para atualizar também consulta o status da IA (não só os números do Painel).
+    await Promise.all([refetch(), ai.refresh()]);
     setRefreshing(false);
   };
 
@@ -156,7 +166,7 @@ export default function DashboardScreen() {
             {data ? (
               <Text style={styles.subtitle}>{monthLabelFromIso(data.periodStart)}</Text>
             ) : (
-              <Text style={styles.subtitle}>Resumo financeiro do casal</Text>
+              <Text style={styles.subtitle}>Resumo financeiro do grupo</Text>
             )}
           </View>
           <View style={styles.headerActions}>
@@ -198,6 +208,24 @@ export default function DashboardScreen() {
             <Text style={styles.aiCardText}>Análise com IA desligada</Text>
             <Text style={styles.aiCardAction}>Ativar</Text>
           </TouchableOpacity>
+        )}
+
+        {/* O status da IA ainda não chegou e não há valor guardado: verificando, tentando de novo ou falhou. */}
+        {aiNotice !== 'none' && (
+          <View style={styles.aiCard}>
+            <Ionicons name={aiNotice === 'checking' ? 'sparkles-outline' : 'cloud-offline-outline'} size={20} color={colors.textMuted} />
+            <Text style={styles.aiNoticeText} accessibilityLiveRegion="polite">{AI_STATUS_NOTICE_TEXT[aiNotice]}</Text>
+            {aiNotice !== 'checking' && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                style={styles.aiNoticeBtn}
+                onPress={() => void ai.refresh()}
+                accessibilityLabel="Verificar a análise com IA agora"
+              >
+                <Text style={styles.aiCardAction}>Verificar agora</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
 
         {/* Loading state */}
@@ -295,6 +323,8 @@ const styles = StyleSheet.create({
   },
   aiCardText: { flex: 1, color: TEXT, fontSize: 14, fontWeight: '500' },
   aiCardAction: { color: colors.primaryLight, fontSize: 14, fontWeight: '700' },
+  aiNoticeText: { flex: 1, color: MUTED, fontSize: 13, lineHeight: 18 },
+  aiNoticeBtn: { minHeight: 44, justifyContent: 'center', paddingLeft: 8 },
   centered: { alignItems: 'center', paddingVertical: 48 },
   loadingText: { color: MUTED, marginTop: 12, fontSize: 14 },
   card: {

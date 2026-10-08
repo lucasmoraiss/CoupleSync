@@ -22,6 +22,7 @@ import { isCaptureAllowedNow } from '@/modules/privacy/consentStore';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { GroupList } from '@/components/GroupSwitcher';
 import { routeAfterGroupSetup } from '@/modules/ai/aiStatusStore';
+import { isCaptureConsentAhead } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
 import { colors } from '@/theme';
 
 export default function CoupleSetupScreen() {
@@ -130,7 +131,8 @@ export default function CoupleSetupScreen() {
   // Com o grupo pronto: a tela de boas-vindas da análise com IA, se o servidor disser que a pergunta é devida a
   // esta pessoa neste grupo; senão (ou se o status não vier) o Painel.
   const enterApp = async () => {
-    router.replace((await routeAfterGroupSetup()) as any);
+    // Se o consentimento da captura vai abrir sozinho na chegada, ele vem primeiro: Painel, e a pergunta da IA depois.
+    router.replace((await routeAfterGroupSetup(undefined, isCaptureConsentAhead)) as any);
   };
 
   const goToHome = async () => {

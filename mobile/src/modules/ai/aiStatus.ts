@@ -132,3 +132,82 @@ export function usageTotals(days: readonly AiUsageDayResponse[]): { readonly tod
 export function aiUploadConsent(status: AiStatusResponse | null): boolean {
   return status?.available === true && status.enabled;
 }
+
+// ─── O status enquanto o servidor não respondeu (Painel) ─────────────────────────────────────────────────────
+
+/**
+ * O que o Painel mostra sobre a IA quando ainda não há status nenhum (nem o guardado no aparelho): a pessoa nunca
+ * fica com um Painel "sem IA" sem saber por quê.
+ * - `checking`: a consulta está em andamento;
+ * - `retrying`: a consulta falhou e outra tentativa já está marcada;
+ * - `failed`: as tentativas acabaram; só volta a tentar com o botão, ao puxar para atualizar ou num novo foco.
+ */
+export type AiStatusNotice = 'none' | 'checking' | 'retrying' | 'failed';
+
+export function aiStatusNotice(status: AiStatusResponse | null, loadFailed: boolean, retrying: boolean): AiStatusNotice {
+  if (status) return 'none';
+  if (!loadFailed) return 'checking';
+  return retrying ? 'retrying' : 'failed';
+}
+
+export const AI_STATUS_NOTICE_TEXT: Readonly<Record<Exclude<AiStatusNotice, 'none'>, string>> = {
+  checking: 'Verificando a análise com IA…',
+  retrying: 'Não foi possível verificar a análise com IA. Tentando de novo…',
+  failed: 'Não foi possível verificar a análise com IA. Verifique a internet.',
+};
+
+/** Esperas entre as novas tentativas da consulta do status que falhou (cobrem a API acordando: cerca de 2 minutos). */
+export const AI_STATUS_RETRY_DELAYS_MS: readonly number[] = [3_000, 8_000, 20_000, 40_000, 60_000];
+
+// ─── O último status, guardado no aparelho por pessoa ────────────────────────────────────────────────────────
+
+const STORED_STATUS_VERSION = 1;
+
+export function serializeStoredAiStatus(coupleId: string, status: AiStatusResponse): string {
+  return JSON.stringify({ v: STORED_STATUS_VERSION, coupleId, status });
+}
+
+/**
+ * Lê o que foi guardado. Só vale se for deste grupo e tiver a forma que as telas usam; qualquer outra coisa
+ * (outro grupo, versão antiga, texto corrompido) é como não ter nada guardado.
+ */
+export function parseStoredAiStatus(raw: string | null | undefined, coupleId: string): AiStatusResponse | null {
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw) as { v?: unknown; coupleId?: unknown; status?: Partial<AiStatusResponse> | null };
+    const status = data?.status;
+    if (data?.v !== STORED_STATUS_VERSION || data.coupleId !== coupleId || !status || typeof status !== 'object') return null;
+    const wellFormed =
+      typeof status.available === 'boolean' &&
+      typeof status.enabled === 'boolean' &&
+      typeof status.onboardingPending === 'boolean' &&
+      Array.isArray(status.acceptedBy) &&
+      status.acceptedBy.every((a) => a && typeof a.userId === 'string' && typeof a.name === 'string') &&
+      Array.isArray(status.providers) &&
+      typeof status.features === 'object' && status.features !== null &&
+      typeof status.budget === 'object' && status.budget !== null &&
+      (status.myAcceptance === null || (typeof status.myAcceptance === 'object' && status.myAcceptance !== undefined));
+    return wellFormed ? (status as AiStatusResponse) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Configurações > Inteligência artificial ─────────────────────────────────────────────────────────────────
+
+export interface AiSettingsActions {
+  /** "Ativar para o grupo" (leva ao texto e à pergunta). */
+  readonly activate: boolean;
+  /** "Desligar para o grupo": qualquer membro pode, com a análise ativada. */
+  readonly turnOffForGroup: boolean;
+  /** "Retirar meu aceite": só quem aceitou. */
+  readonly withdrawMine: boolean;
+}
+
+export function aiSettingsActions(status: AiStatusResponse): AiSettingsActions {
+  return {
+    activate: status.available && !status.enabled,
+    turnOffForGroup: status.enabled,
+    withdrawMine: status.enabled && status.myAcceptance !== null,
+  };
+}

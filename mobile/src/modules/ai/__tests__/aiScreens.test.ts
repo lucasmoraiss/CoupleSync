@@ -178,7 +178,8 @@ describe('Painel', () => {
   const dashboard = read('app/(main)/index.tsx');
 
   it('consulta o status da IA a cada foco e tem o botão fixo "Assistente" no cabeçalho, só quando há IA no servidor', () => {
-    expect(dashboard).toMatch(/const \{ status: aiStatus \} = useAiStatus\(/);
+    expect(dashboard).toMatch(/const ai = useAiStatus\(\(fresh\) => \{/);
+    expect(dashboard).toMatch(/const aiStatus = ai\.status;/);
     expect(dashboard).toMatch(/\{isAssistantVisible\(aiStatus\) && \(/);
     expect(dashboard).toMatch(/accessibilityLabel="Abrir o Assistente"/);
     expect(dashboard).toMatch(/router\.push\('\/\(main\)\/chat'/);
@@ -191,8 +192,60 @@ describe('Painel', () => {
   });
 
   it('leva à tela de boas-vindas quando a pergunta é devida, uma vez por abertura do app', () => {
-    expect(dashboard).toMatch(/if \(!shouldOpenWelcome\(fresh, wasWelcomeShown\(\)\)\) return;/);
-    expect(dashboard).toMatch(/useAiStatusStore\.getState\(\)\.markWelcomeShown\(\);\s*router\.push\('\/\(main\)\/ai\/welcome'/);
+    // A regra (devida, uma vez, Painel em foco, a captura primeiro) está em openWelcomeIfDue, testada em aiStatusStore.test.ts.
+    expect(dashboard).toMatch(
+      /void openWelcomeIfDue\(fresh, \{\s*isFocused: ai\.isFocused,\s*otherPromptPending: isCaptureConsentAhead,\s*open: \(\) => router\.push\('\/\(main\)\/ai\/welcome' as any\),\s*\}\);/,
+    );
+    const store = read('src/modules/ai/aiStatusStore.ts');
+    expect(store).toMatch(/if \(!shouldOpenWelcome\(fresh, wasWelcomeShown\(\)\)\) return false;/);
+    expect(store).toMatch(/useAiStatusStore\.getState\(\)\.markWelcomeShown\(\);\s*deps\.open\(\);/);
+  });
+
+  it('sem status nenhum, diz o que está acontecendo com a IA e oferece verificar de novo (revisão 1, I3)', () => {
+    expect(dashboard).toMatch(/const aiNotice = aiStatusNotice\(aiStatus, ai\.loadFailed, ai\.retrying\);/);
+    expect(dashboard).toMatch(/\{aiNotice !== 'none' && \(/);
+    expect(dashboard).toMatch(/\{AI_STATUS_NOTICE_TEXT\[aiNotice\]\}/);
+    expect(dashboard).toMatch(/onPress=\{\(\) => void ai\.refresh\(\)\}\s*accessibilityLabel="Verificar a análise com IA agora"/);
+    // Os fluxos Maestro afirmam que "Tentar novamente" (botão das telas de erro) não aparece: o aviso da IA não usa esse texto.
+    expect(dashboard).not.toMatch(/Tentar novamente/);
+  });
+
+  it('puxar para atualizar consulta também o status da IA', () => {
+    expect(dashboard).toMatch(/await Promise\.all\(\[refetch\(\), ai\.refresh\(\)\]\);/);
+  });
+
+  it('fala em grupo, não em casal', () => {
+    expect(dashboard).not.toMatch(/casal/i);
+  });
+});
+
+describe('o status chega às telas a cada resposta do servidor, não só na consulta do foco', () => {
+  const hook = read('src/modules/ai/useAiStatus.ts');
+
+  it('a tela em foco é avisada quando a contagem de respostas do servidor sobe (ex.: nova tentativa que deu certo)', () => {
+    expect(hook).toMatch(/const freshCount = useAiStatusStore\(\(state\) => state\.freshCount\);/);
+    expect(hook).toMatch(/if \(freshCount === 0 \|\| !focused\.current\) return;/);
+    expect(hook).toMatch(/\}, \[freshCount\]\);/);
+    expect(hook).toMatch(/focused\.current = true;\s*void refresh\(\);/);
+  });
+});
+
+describe('teclado no Assistente', () => {
+  it('no Android a tela não desconta o teclado por conta própria (a janela já encolhe): o botão de enviar fica à vista com o teclado aberto', () => {
+    const screen = read('src/modules/chat/screens/ChatScreen.tsx');
+    expect(screen).toMatch(/behavior=\{Platform\.OS === 'ios' \? 'padding' : undefined\}/);
+    expect(screen).not.toMatch(/'height'/);
+    expect(screen).not.toMatch(/keyboardVerticalOffset/);
+  });
+});
+
+describe('a pergunta da IA e o consentimento da captura não disputam a tela', () => {
+  it('a captura marca que está abrindo antes de gravar e de navegar, e desfaz a marca se não abriu', () => {
+    const hook = read('src/modules/integrations/notification-capture/useCaptureConsentSync.ts');
+    expect(hook).toMatch(
+      /noteCapturePromptOpening\(sessionUserId\);\s*void useConsentStore\.getState\(\)\.markCapturePromptShown\(\)\.then\(\(recorded\) => \{\s*if \(recorded\) router\.push\(CAPTURE_CONSENT_ROUTE as any\);\s*else clearCapturePromptOpening\(\);/,
+    );
+    expect(hook).toMatch(/export function isCaptureConsentAhead\(\): Promise<boolean> \{\s*return isCapturePromptAhead\(\{/);
   });
 });
 
@@ -200,7 +253,7 @@ describe('criar ou entrar num grupo', () => {
   const setup = read('app/(auth)/couple-setup.tsx');
 
   it('depois de criar ("Ir para o Painel") e depois de entrar, o destino vem do status da IA', () => {
-    expect(setup).toMatch(/router\.replace\(\(await routeAfterGroupSetup\(\)\) as any\)/);
+    expect(setup).toMatch(/router\.replace\(\(await routeAfterGroupSetup\(undefined, isCaptureConsentAhead\)\) as any\)/);
     expect(setup).toMatch(/announceGroupChange\(\);\s*await enterApp\(\);/);
     expect(setup).toMatch(/const goToHome = async \(\) => \{[\s\S]*?await enterApp\(\);/);
   });
@@ -282,9 +335,55 @@ describe('fluxos Maestro', () => {
   it('os fluxos que já existiam respondem "Agora não" à tela de boas-vindas antes de chegar ao Painel', () => {
     expect(read('tests/e2e/flows/comum/responder-agora-nao-a-ia.yaml')).toContain('"Agora não ativar a análise com IA"');
     expect(shared).toContain('- runFlow: responder-agora-nao-a-ia.yaml');
-    for (const name of ['01-cadastro-e-grupo.yaml', '03-entrar-em-grupo.yaml']) {
-      expect(read(`tests/e2e/flows/${name}`)).toContain('comum/responder-agora-nao-a-ia.yaml');
-    }
+    expect(read('tests/e2e/flows/01-cadastro-e-grupo.yaml')).toContain('comum/responder-agora-nao-a-ia.yaml');
     expect(read('app/(main)/ai/welcome.tsx')).toContain('accessibilityLabel="Agora não ativar a análise com IA"');
+  });
+
+  it('o fluxo 03 (duas contas no mesmo grupo) passa por "X ativou", Entendi, e por Configurações > IA; todo rótulo que ele toca existe numa tela', () => {
+    const flow03 = read('tests/e2e/flows/03-entrar-em-grupo.yaml');
+    const screens = [
+      read('app/(main)/ai/welcome.tsx'),
+      read('app/(main)/index.tsx'),
+      read('app/(main)/settings/index.tsx'),
+      read('app/(main)/settings/ai.tsx'),
+    ].join('\n');
+    for (const label of [
+      'Ativar a análise com IA para o grupo',
+      'Entendi, manter a análise com IA ativada',
+      'Desligar a análise com IA para o grupo',
+      'Abrir o Assistente',
+      'Abrir a inteligência artificial: ativar, desligar e ver o consumo',
+      'Ativar a análise com IA: ver o que é enviado e decidir',
+      'Retirar o meu aceite da análise com IA',
+      'Voltar para as configurações',
+      'Análise com IA desligada. Ativar',
+    ]) {
+      expect(flow03).toContain(`"${label}"`);
+      expect(screens).toContain(`accessibilityLabel="${label}"`);
+    }
+    // O aviso leva o primeiro nome de quem ativou; Configurações mostra o nome inteiro e a data.
+    expect(flow03).toContain('"Caio ativou a análise com IA para o grupo"');
+    expect(read('app/(main)/ai/welcome.tsx')).toContain('`${view.names} ativou a análise com IA para o grupo`');
+    expect(flow03).toContain('"Ativada por Caio Teste em .*"');
+    expect(flow03).toContain('"Ativada por Davi Teste em .*"');
+    // A confirmação de desligar: título e botão do aviso da tela.
+    expect(flow03).toContain('"Desligar para o grupo\\\\?"');
+    expect(read('app/(main)/settings/ai.tsx')).toContain("'Desligar para o grupo?'");
+    expect(read('app/(main)/settings/ai.tsx')).toContain("text: 'Desligar',");
+    expect(flow03.match(/visible: "Desligada"/g)).toHaveLength(2);
+  });
+
+  it('os fluxos 01 e 06 rolam o Painel até o atalho das transações (o cartão da IA pode empurrá-lo para baixo da dobra)', () => {
+    for (const name of ['01-cadastro-e-grupo.yaml', '06-abas.yaml']) {
+      const flow = read(`tests/e2e/flows/${name}`);
+      expect(flow).toMatch(/- scrollUntilVisible:\s*element: "Ver todas as transações"\s*direction: DOWN/);
+      expect(flow).not.toContain('- assertVisible: "Ver todas as transações"');
+    }
+  });
+
+  it('nenhum texto novo do Painel ou das telas de IA casa com o que os fluxos afirmam que não aparece', () => {
+    for (const file of ['app/(main)/index.tsx', 'app/(main)/ai/welcome.tsx']) {
+      expect(read(file)).not.toMatch(/Tentar novamente|Algo deu errado/);
+    }
   });
 });

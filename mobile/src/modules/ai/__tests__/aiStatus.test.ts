@@ -1,7 +1,13 @@
 // Issue #38: o que as telas decidem a partir de GET /ai/status. Tudo aqui é inventado (nomes de exemplo).
 import {
   AI_CONSENT_VERSION,
+  AI_STATUS_NOTICE_TEXT,
+  AI_STATUS_RETRY_DELAYS_MS,
   activationSummary,
+  aiSettingsActions,
+  aiStatusNotice,
+  parseStoredAiStatus,
+  serializeStoredAiStatus,
   aiUploadConsent,
   assistantGate,
   chatErrorChangesStatus,
@@ -233,6 +239,73 @@ describe('consumo', () => {
       period: { calls: 6, tokens: 600, failures: 1 },
     });
     expect(usageTotals([])).toEqual({ today: { calls: 0, tokens: 0, failures: 0 }, period: { calls: 0, tokens: 0, failures: 0 } });
+  });
+});
+
+describe('Painel sem status nenhum: a pessoa sempre sabe o que está acontecendo com a IA (revisão 1, I3)', () => {
+  it('com status (do servidor ou guardado no aparelho) não há aviso', () => {
+    expect(aiStatusNotice(status(), false, false)).toBe('none');
+    expect(aiStatusNotice(status(), true, true)).toBe('none');
+    expect(aiStatusNotice(status({ available: false }), true, false)).toBe('none');
+  });
+
+  it('consulta em andamento, falha com nova tentativa marcada e falha sem mais tentativas têm cada uma o seu aviso', () => {
+    expect(aiStatusNotice(null, false, false)).toBe('checking');
+    expect(aiStatusNotice(null, true, true)).toBe('retrying');
+    expect(aiStatusNotice(null, true, false)).toBe('failed');
+    expect(AI_STATUS_NOTICE_TEXT.checking).toBe('Verificando a análise com IA…');
+    expect(AI_STATUS_NOTICE_TEXT.retrying).toBe('Não foi possível verificar a análise com IA. Tentando de novo…');
+    expect(AI_STATUS_NOTICE_TEXT.failed).toBe('Não foi possível verificar a análise com IA. Verifique a internet.');
+  });
+
+  it('as novas tentativas cobrem a API acordando (mais de dois minutos) e são poucas', () => {
+    expect(AI_STATUS_RETRY_DELAYS_MS.length).toBeGreaterThanOrEqual(3);
+    expect(AI_STATUS_RETRY_DELAYS_MS.length).toBeLessThanOrEqual(6);
+    expect(AI_STATUS_RETRY_DELAYS_MS.reduce((sum, delay) => sum + delay, 0)).toBeGreaterThanOrEqual(120_000);
+    expect([...AI_STATUS_RETRY_DELAYS_MS]).toEqual([...AI_STATUS_RETRY_DELAYS_MS].sort((a, b) => a - b));
+  });
+});
+
+describe('o último status guardado no aparelho', () => {
+  const on = status({ enabled: true, acceptedBy: [byAna], myAcceptance: { acceptedAtUtc: byAna.acceptedAtUtc }, onboardingPending: false });
+
+  it('o que foi guardado volta igual, para o mesmo grupo', () => {
+    expect(parseStoredAiStatus(serializeStoredAiStatus('couple-1', on), 'couple-1')).toEqual(on);
+    expect(parseStoredAiStatus(serializeStoredAiStatus('couple-1', status()), 'couple-1')).toEqual(status());
+  });
+
+  it('de outro grupo, vazio, corrompido, de outra versão ou sem a forma esperada: é como não ter nada guardado', () => {
+    expect(parseStoredAiStatus(serializeStoredAiStatus('couple-1', on), 'couple-2')).toBeNull();
+    expect(parseStoredAiStatus(null, 'couple-1')).toBeNull();
+    expect(parseStoredAiStatus('', 'couple-1')).toBeNull();
+    expect(parseStoredAiStatus('{não é json', 'couple-1')).toBeNull();
+    expect(parseStoredAiStatus('null', 'couple-1')).toBeNull();
+    expect(parseStoredAiStatus(JSON.stringify({ v: 2, coupleId: 'couple-1', status: on }), 'couple-1')).toBeNull();
+    expect(parseStoredAiStatus(JSON.stringify({ v: 1, coupleId: 'couple-1', status: { available: true } }), 'couple-1')).toBeNull();
+    expect(parseStoredAiStatus(JSON.stringify({ v: 1, coupleId: 'couple-1', status: { ...on, acceptedBy: [{ userId: 1 }] } }), 'couple-1')).toBeNull();
+    expect(parseStoredAiStatus(JSON.stringify({ v: 1, coupleId: 'couple-1', status: { ...on, enabled: 'sim' } }), 'couple-1')).toBeNull();
+  });
+});
+
+describe('Configurações > Inteligência artificial: o que cada pessoa pode fazer', () => {
+  it('desligada: só ativar', () => {
+    expect(aiSettingsActions(status())).toEqual({ activate: true, turnOffForGroup: false, withdrawMine: false });
+  });
+
+  it('ativada por outra pessoa: desligar para o grupo, mas não há aceite próprio a retirar', () => {
+    expect(aiSettingsActions(status({ enabled: true, acceptedBy: [byAna] }))).toEqual({ activate: false, turnOffForGroup: true, withdrawMine: false });
+  });
+
+  it('ativada por mim: desligar para o grupo e retirar o meu aceite', () => {
+    expect(aiSettingsActions(status({ enabled: true, acceptedBy: [byAna], myAcceptance: { acceptedAtUtc: byAna.acceptedAtUtc } }))).toEqual({
+      activate: false,
+      turnOffForGroup: true,
+      withdrawMine: true,
+    });
+  });
+
+  it('IA indisponível no servidor: nada a ativar', () => {
+    expect(aiSettingsActions(status({ available: false }))).toEqual({ activate: false, turnOffForGroup: false, withdrawMine: false });
   });
 });
 
