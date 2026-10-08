@@ -16,7 +16,7 @@ namespace CoupleSync.PostgresTests;
 [Collection(PostgresCollection.Name)]
 public sealed class OpenFinanceReconciliationPostgresTests
 {
-    private const string MigrationBefore = "20261008150513_AddOpenFinanceSync";
+    private const string MigrationBefore = "20261008185726_AddAiConsents";
     private const string Base = "/api/v1/openfinance";
     private const string Checking = FakePluggyServer.CheckingAccountId;
     private const string Card = FakePluggyServer.CreditCardAccountId;
