@@ -20,7 +20,8 @@ namespace CoupleSync.PostgresTests;
 [Collection(PostgresCollection.Name)]
 public sealed class AiActivationTests
 {
-    private const string MigrationBefore = "20261008023328_AddAiUsage";
+    // The migration right before AddAiConsents (regenerated after the Open Finance one came in from main).
+    private const string MigrationBefore = "20261008150513_AddOpenFinanceSync";
     private const string Status = "/api/v1/ai/status";
     private const string Consent = "/api/v1/ai/consent";
 
