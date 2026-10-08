@@ -59,7 +59,7 @@ public sealed class OpenFinanceSyncTests
         Assert.Equal("Cantina Exemplo", restaurant["description"]);
         Assert.Equal("COMPRA DEBITO CANTINA EXEMPLO", restaurant["description_raw"]);
         Assert.Equal("Cantina Exemplo Ltda", restaurant["merchant_name"]);
-        Assert.Equal("00000000000191", restaurant["merchant_cnpj"]);
+        Assert.Equal(FakePluggyServer.MerchantCnpj, restaurant["merchant_cnpj"]);
         Assert.Equal("Eating out", restaurant["pluggy_category"]);
         Assert.Equal("11010000", restaurant["pluggy_category_id"]);
         Assert.Equal("ALIMENTACAO", restaurant["suggested_category"]);
@@ -683,7 +683,7 @@ public sealed class OpenFinanceSyncTests
         Assert.NotEmpty(lines);
         Assert.DoesNotContain(lines, l => l.Contains(FakePluggyServer.RawOnlyMarker, StringComparison.Ordinal));
         Assert.DoesNotContain(lines, l => l.Contains("Cantina Exemplo", StringComparison.Ordinal));
-        Assert.DoesNotContain(lines, l => l.Contains("00000000000191", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, l => l.Contains(FakePluggyServer.MerchantCnpj, StringComparison.Ordinal));
         Assert.DoesNotContain(lines, l => l.Contains(FakePluggyServer.ClientSecret, StringComparison.Ordinal));
         Assert.DoesNotContain(lines, l => l.Contains("fake-api-key-", StringComparison.Ordinal));
     }

@@ -356,7 +356,7 @@ public sealed class OpenFinanceReviewTests
         var raw = await (await bruno.Client.GetAsync($"{Base}/review")).Content.ReadAsStringAsync();
         Assert.DoesNotContain(FakePluggyServer.RawOnlyMarker, raw, StringComparison.Ordinal);
         Assert.DoesNotContain("rawJson", raw, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("00000000000191", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain(FakePluggyServer.MerchantCnpj, raw, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -7,13 +7,13 @@ namespace CoupleSync.Application.Transactions.Commands;
 public sealed class DeleteTransactionCommandHandler
 {
     private readonly ITransactionRepository _repository;
-    private readonly IBankSyncRepository? _bankSync;
-    private readonly IDateTimeProvider? _clock;
+    private readonly IBankSyncRepository _bankSync;
+    private readonly IDateTimeProvider _clock;
 
     public DeleteTransactionCommandHandler(
         ITransactionRepository repository,
-        IBankSyncRepository? bankSync = null,
-        IDateTimeProvider? clock = null)
+        IBankSyncRepository bankSync,
+        IDateTimeProvider clock)
     {
         _repository = repository;
         _bankSync = bankSync;
@@ -32,10 +32,10 @@ public sealed class DeleteTransactionCommandHandler
 
         // A transaction that came from the bank (Open Finance): its line of the mirror goes back to the review as
         // discarded, without the link, in the same save. It can be restored and confirmed again.
-        if (transaction.Source == TransactionSource.OpenFinance && _bankSync is not null)
+        if (transaction.Source == TransactionSource.OpenFinance)
         {
             var line = await _bankSync.FindByLinkedTransactionAsync(transaction.Id, transaction.CoupleId, cancellationToken);
-            line?.Discard(_clock?.UtcNow ?? DateTime.UtcNow);
+            line?.Discard(_clock.UtcNow);
         }
 
         await _repository.DeleteAsync(transaction, cancellationToken);

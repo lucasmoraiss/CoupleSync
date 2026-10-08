@@ -496,7 +496,7 @@ public sealed class PluggyHttpClientTests
         Assert.Equal("Cantina Exemplo", restaurant.Description);
         Assert.Equal("COMPRA DEBITO CANTINA EXEMPLO", restaurant.DescriptionRaw);
         Assert.Equal(("Eating out", "11010000"), (restaurant.Category, restaurant.CategoryId));
-        Assert.Equal(("Cantina Exemplo Ltda", "00000000000191"), (restaurant.MerchantName, restaurant.MerchantCnpj));
+        Assert.Equal(("Cantina Exemplo Ltda", FakePluggyServer.MerchantCnpj), (restaurant.MerchantName, restaurant.MerchantCnpj));
         Assert.Equal("POSTED", restaurant.Status);
         Assert.Equal(1175.66m, restaurant.Balance);
         Assert.Equal(DateTimeKind.Utc, restaurant.DateUtc.Kind);

@@ -16,7 +16,7 @@ public sealed class OpenFinanceSyncDomainTests
         string? description = "Cantina Exemplo", string? currency = "BRL")
         => new(
             date ?? new DateTime(2026, 10, 5, 15, 0, 0, DateTimeKind.Utc), amount, type, currency, description, "COMPRA CANTINA EXEMPLO",
-            "Eating out", "11010000", "Cantina Exemplo Ltda", "00000000000191", "Restaurants", "PIX", 2, 6, "bill-1", status, 100m,
+            "Eating out", "11010000", "Cantina Exemplo Ltda", "99999999999999", "Restaurants", "PIX", 2, 6, "bill-1", status, 100m,
             """{"id":"t-1"}""");
 
     private static BankTransaction NewRow(BankTransactionSnapshot? snapshot = null)

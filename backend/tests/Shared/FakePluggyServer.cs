@@ -41,6 +41,9 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     public const string CardPendingTransactionId = "c1b2c3d4-0000-4000-8000-000000000202";
     public const string OtherAccountTransactionId = "c1b2c3d4-0000-4000-8000-000000000301";
 
+    /// <summary>The CNPJ of the merchant of the fixture: all nines, with check digits that do not match (nobody has it).</summary>
+    public const string MerchantCnpj = "99999999999999";
+
     /// <summary>A text that only exists inside the raw JSON of the fixture: must never reach a log nor an API answer.</summary>
     public const string RawOnlyMarker = "PROVIDER-CODE-ONLY-IN-RAW-JSON";
 
@@ -56,7 +59,7 @@ internal sealed class FakePluggyServer : HttpMessageHandler
                 Category = "Eating out",
                 CategoryId = "11010000",
                 MerchantName = "Cantina Exemplo Ltda",
-                MerchantCnpj = "00000000000191",
+                MerchantCnpj = MerchantCnpj,
                 Balance = 1175.66m,
             },
             new FakeTransaction(RideTransactionId, today.AddDays(-3), -23.40m)
