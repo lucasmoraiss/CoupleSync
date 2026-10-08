@@ -419,7 +419,22 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
    sequências de 3+ dígitos, sufixo de cidade/UF/país conhecido e `.com`/`.com.br`; junta espaços. Ex.:
    "NETFLIX.COM 866-579" e "Netflix.com" → `netflix`. Depois passa pela regra de transferência a pessoa (3.8):
    esses viram `transferencia_pessoa` e **não** formam recorrência por nome.
-2. Agrupa por (grupo, chave); ordena por data local; mede intervalos.
+   **Como ficou na fase 3 (issue #39):**
+   - O texto do estabelecimento é `Merchant` ou, **na falta dele, `Description`** (extrato importado grava só a
+     descrição; sem isso quem importa PDF não teria recorrência). A linha de `recurring_streams` guarda a origem
+     em `name_source` (`merchant`/`description`; basta **uma** cobrança do item ter vindo de descrição para ser
+     `description`). Regras para o nome vindo de descrição: vale a regra de transferência a pessoa inteira; se a
+     descrição tem CPF, CNPJ, telefone, e-mail ou chave Pix aleatória, a cobrança **não forma item**; outras
+     sequências de 6+ dígitos saem do nome. Ver 3.8.
+   - A chave tem no máximo 120 caracteres (corte em palavra inteira). Sufixos que a coluna `merchant_key` (160)
+     recebe além da chave: `#NNxAAAAMM` (parcelamento: N parcelas, mês da primeira) e `~N` (segundo item do
+     mesmo estabelecimento, tipo e cadência). Quem lê a tabela para outro fim (fase 4) tira os dois sufixos.
+   - Com `Merchant` preenchido, o marcador `para` seguido de artigo na `Description` ("plano para a família")
+     não conta como transferência; nos outros casos conta como está em 3.8.
+2. Agrupa por (grupo, chave); ordena por data local; mede intervalos. Dois serviços de **mesmo valor** no
+   mesmo estabelecimento (o mesmo plano pago por cada pessoa do casal) são dois itens quando cada pessoa tem a
+   própria série e elas correm lado a lado, ou quando há até 2 séries cada uma sempre no seu dia do mês (± 3
+   dias) que juntas não deixam quase nada de fora; compra a cada 10 ou 14 dias continua fora (só mensal e anual).
 3. **Cadência**: semanal (7 ± 2 dias, **≥ 4 ocorrências**), mensal (28–31 dias, aceitando ±3 dias de
    deslocamento por fim de mês e fim de semana, ≥ 3 ocorrências), anual (335–395 dias; 2 ocorrências →
    confiança "média").
@@ -431,8 +446,12 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
      luz, água, gás, internet e telefonia; lista estática trancada por teste), cadência mensal, valor dentro de
      **±40%** da mediana. Rótulo na tela: "conta fixa variável". Previsão pela mediana das 3 últimas.
 6. **Reajuste** (trilha de assinatura): um único degrau acima da banda seguido de valor estável = mesmo item,
-   com `previous_amount` e marca `PriceIncrease`.
-7. **Primeira cobrança**: primeira ocorrência nos últimos 35 dias → marca `New`.
+   com `previous_amount` e marca `PriceIncrease`. Na fase 3: vale também dentro da banda (mudou mais de 5% e
+   ficou estável por 2 cobranças); a marca fica enquanto o preço novo tem até 3 cobranças, `previous_amount` fica.
+7. **Primeira cobrança**: marca `New` enquanto a **primeira cobrança conhecida do item** tem até **90 dias**
+   (dias de Brasília; `Recurrence:NewWithinDays`). O texto original dizia 35 dias, e o dono pediu 60; com
+   qualquer um dos dois a marca quase nunca aparecia em assinatura mensal, porque a série só existe na 3ª
+   cobrança, cerca de 60 dias depois da primeira. Com 90, aparece da 3ª até perto da 4ª cobrança.
 8. **Ciclo de vida** (medido contra a data de hoje, só a partir da última cobrança): passou 1,5 × o intervalo
    mediano → `SuspectedDormant`; 2 × → `Stopped`. Com a regra 4, uma cobrança que volta depois de
    `SuspectedDormant` reativa a série.
@@ -453,6 +472,21 @@ Materializado em `recurring_streams` (seção 9) por upsert pela chave (grupo, m
 roda quando o último cálculo tem mais de 6 horas ou entrou transação depois dele. A correção do usuário
 (`NotRecurring`, `Cancelled`, `Subscription`, `FixedBill`) sobrevive ao recálculo. "Cancelei" some da lista
 ativa e, se cobrar de novo, volta com a marca `ChargedAfterCancel`.
+
+Como ficou na fase 3 (issue #39):
+- "Entrou transação" inclui excluir e **editar** (valor, data, estabelecimento, descrição, categoria): o próximo
+  pedido da lista recalcula. A exclusão é vista pela contagem e a edição por um contador, os dois na memória do
+  processo; depois de um reinício valem as 6 horas.
+- **Anual**: a janela lida é de 13 meses, então cerca de 30 dias depois da renovação a primeira cobrança sai
+  dela. O item anual que o cálculo não acha mais **fica na lista como está** enquanto a última cobrança dele
+  ainda existir e não tiverem passado 395 dias dela; depois disso sai (ou fica como parado, se a pessoa disse
+  algo sobre ele).
+- `ChargedAfterCancel` traz o item de volta para a lista ativa e para o total mesmo quando a cobrança voltou
+  depois de mais de dois meses (a série continua `Stopped`); a cobrança de **outro** item do mesmo
+  estabelecimento não conta. "Cancelei" de novo oculta outra vez.
+- Fora da lista ativa (`hidden`): `NotRecurring`, `Cancelled` sem cobrança nova e o que parou (`Stopped`).
+- Tipo de série de valor fixo que não é assinatura nem `MORADIA`/`SAUDE`: `FixedBill`, e entra no total.
+- Pequeno gasto frequente (3.2) é gravado com `cadence = Irregular`.
 
 ### 3.4 Parcelamentos
 
@@ -507,7 +541,7 @@ categorização, pergunta e histórico do Assistente):
 | Membros do grupo (`UserId`, nome, e-mail) | Não | `A`, `B`, `C`… por ordem de `CoupleMember.JoinedAtUtc`; o texto usa `{{A}}`/`{{B}}` e a API troca pelo primeiro nome **na hora de responder ao app** |
 | `Transaction.Merchant` | Sim, filtrado | `merchant_key` + nome curto sanitizado (60 caracteres), depois das regras abaixo |
 | Transferência a pessoa (Pix, TED, DOC, transferência) | Só o tipo | A transação vira o rótulo fixo `transferencia_pessoa` (entra nos totais, nunca com o texto) quando: (a) há marcador (`pix`, `ted`, `doc`, `transferencia`, `transf`, `enviado`, `recebido`, `para `) em `Merchant` **ou** em `Description` — a descrição é lida só no servidor e nunca sai, mas é nela que notificação e extrato costumam trazer "Pix enviado"/"TED" enquanto o estabelecimento traz só o nome do destinatário; ou (b) o `Merchant` é formado só por palavras da lista de nomes próprios comuns (`CommonPersonNames`, lista estática em código) e iniciais de uma letra ("MARIA S SILVA" conta como nome) |
-| `Transaction.Description`, `Bank`, origem, ids | Não | — |
+| `Transaction.Description`, `Bank`, origem, ids | Não (nunca sai **para provedor**) | Aparece só para o próprio grupo, que já a vê na lista de transações: quando a transação não tem `Merchant`, a descrição é o nome do item em "Assinaturas e recorrências" (3.3, item 1) e a linha fica com `recurring_streams.name_source = description`. **Item com `name_source = description` vai ao provedor só como tipo, valor, cadência e marcas — nunca `display_name` nem `merchant_key`.** |
 | Categoria, valor, data, cadência, marcas | Sim | Como calculados |
 | Meta (`Goal.Title`, `Description`) | Não por conta do app | `g1`, `g2` com alvo, atual, % e mês do prazo; a resposta usa `{{g1}}` e a API troca pelo título, entre aspas, ao responder. Regra completa abaixo ("Títulos de meta") |
 | Renda (`IncomeSource.Name`) | Não | Tipo (3.5), valor, pessoa |
@@ -1097,7 +1131,7 @@ repositórios em `CoupleSync.Infrastructure.Persistence`, gravação pelo `DbSav
 | `ai_usage` / `AiUsage` | 1 | **não** (contabilidade; inclui chamadas sem grupo); leitura sempre com `couple_id` explícito | id, created_at_utc, day_utc, day_brt, provider, model, couple_id (nulo), feature, input_tokens, output_tokens, outcome, latency_ms | (day_utc, provider, model); (couple_id, day_brt) |
 | `ai_consents` / `AiConsent` | 2 | `ICoupleScoped` | id, couple_id, user_id, version, accepted_at_utc, revoked_at_utc (nulo), revoked_by_user_id (nulo) | único (couple_id, user_id, version) |
 | `ai_user_preferences` / `AiUserPreference` | 2 | `ICoupleScoped` | id, couple_id, user_id, weekly_email_enabled (false), onboarding_answered_at_utc (nulo), updated_at_utc | único (couple_id, user_id) |
-| `recurring_streams` / `RecurringStream` | 3 | `ICoupleScoped` | id, couple_id, merchant_key, display_name, kind (`Subscription`/`FixedBill`/`Installment`/`Habit`), variable_amount (bool, "conta fixa variável"), cadence (`Weekly`/`Monthly`/`Yearly`), category, user_id (nulo), median_amount, last_amount, previous_amount (nulo), annual_cost, occurrences, missed_count, first_seen_local, last_seen_local, next_expected_local, status (`Active`/`SuspectedDormant`/`Stopped`), flags, confidence, installment_number, installment_total, remaining_amount, end_month (nulos), user_override (nulo), override_by_user_id, override_at_utc, detected_at_utc, updated_at_utc | único (couple_id, merchant_key, kind, cadence); (couple_id, status) |
+| `recurring_streams` / `RecurringStream` | 3 | `ICoupleScoped` | id, couple_id, merchant_key (160; chave de até 120 + sufixos `#NNxAAAAMM` e `~N`, ver 3.3), display_name (120), name_source (`merchant`/`description`, ver 3.8), kind (`Subscription`/`FixedBill`/`Installment`/`Habit`), variable_amount (bool, "conta fixa variável"), cadence (`Weekly`/`Monthly`/`Yearly`/`Irregular` = pequeno gasto frequente), category, user_id (nulo), median_amount, last_amount, previous_amount (nulo), annual_cost, occurrences, missed_count, first_seen_local, last_seen_local, next_expected_local, status (`Active`/`SuspectedDormant`/`Stopped`), flags, confidence, installment_number, installment_total, remaining_amount, end_month (nulos), user_override (nulo), override_by_user_id, override_at_utc, detected_at_utc, updated_at_utc | único (couple_id, merchant_key, kind, cadence); (couple_id, status) |
 | `recurring_stream_items` / `RecurringStreamItem` | 3 | `ICoupleScoped` | id, couple_id, stream_id (FK), transaction_id (FK) | único (stream_id, transaction_id) |
 | `ai_insights` / `AiInsight` (amplia a da #29) | 5b | `ICoupleScoped` | id, couple_id, cadence (`Daily`/`Weekly`/`Monthly`), period_key, period_start_local, period_end_local, status (`Ready`/`FactsOnly`/`Generating`/`Failed`), generating_since_utc (nulo), summary, items_json (`jsonb`), facts_json (`jsonb`, nulo após 13 meses), provider, model (nulos), input_tokens, output_tokens, created_at_utc, updated_at_utc | único (couple_id, cadence, period_key); (couple_id, cadence, period_start_local desc) |
 | `ai_insight_user_states` / `AiInsightUserState` | 5b | `ICoupleScoped` | id, couple_id, insight_id (FK), user_id, read_at_utc (nulo), emailed_at_utc (nulo) | único (insight_id, user_id) |
@@ -1141,7 +1175,7 @@ campo `aiChat` do registro local fica sem uso (não é apagado, para não mexer 
 
 | Método e rota | Pedido | Resposta | Erros |
 | --- | --- | --- | --- |
-| `GET /api/v1/ai/recurring` | — | `monthlyTotal`, `annualTotal`, `detectedAtUtc`, `subscriptions[]`, `fixedBills[]`, `installments[]`, `habits[]`, `hidden[]`; item: `id, name, kind, variableAmount, cadence, amount, previousAmount?, annualCost, occurrences, firstSeen, lastSeen, nextExpected, status, flags[], category, person? {userId, name}, installment? {number, total, remainingAmount, endMonth}, override?` | — |
+| `GET /api/v1/ai/recurring` | — | `monthlyTotal`, `annualTotal`, `detectedAtUtc`, `subscriptions[]`, `fixedBills[]`, `installments[]`, `habits[]`, `hidden[]`; item: `id, name, kind, variableAmount, cadence, amount, previousAmount?, annualCost, occurrences, firstSeen, lastSeen, nextExpected, status, flags[], category, person? {userId, name}, installment? {number, total, remainingAmount, endMonth}, override?`. Acrescentados na fase 3: no item `lastAmount`, `missedCount`, `confidence` (`High`/`Medium`/`Low` = parcela provável) e o valor `Irregular` em `cadence`; na lista `installmentsByMonth[] {month, amount}` (12 meses a partir do atual; ainda sem leitor no app, fica para a previsão da fase 7). `name_source` não sai na rota | — |
 | `GET /api/v1/ai/recurring/{id}/transactions` | — | cobranças (data, valor, estabelecimento) | `404 RECURRENCE_NOT_FOUND` |
 | `PATCH /api/v1/ai/recurring/{id}` | `{override: "NotRecurring"\|"Cancelled"\|"Subscription"\|"FixedBill"\|null}` | item | `404 RECURRENCE_NOT_FOUND`; `400 INVALID_OVERRIDE` |
 
@@ -1217,8 +1251,8 @@ trabalho assíncrono preso a `getSessionEpoch`.
 | `(main)/chat/index.tsx` (muda) | 2 | Assistente; sem IA ativada → explicação e **Ativar**; frases de 7.5 | vazio (sugestões de pergunta); carregando; erro |
 | `(main)/settings/ai.tsx` | 2 | Estado, quem ativou, ativar/desligar, consumo; apagar histórico (5b); e-mail semanal (6) | indisponível; carregando; erro |
 | `(main)/settings/index.tsx`, `settings/privacy.tsx` (mudam) | 2 | Entrada "Inteligência artificial"; texto de 7.3 | — |
-| `(main)/index.tsx` Painel (muda) | 2, 3, 5b, 7, 9 | Botão Assistente no cabeçalho e cartão "Ativar IA" (2); "Recorrências: R$ X/mês" (3); seção Insights com último semanal (5b) e item do dia (7); "Seu dinheiro guardado" (9) | cada bloco some sozinho em erro |
-| `(main)/recurring/index.tsx` | 3 | "Assinaturas e recorrências": total mensal e anual; Assinaturas (marcas "talvez esquecida — vocês ainda usam?", "ficou mais cara", "nova"), Contas fixas (com "valor variável"), Parcelamentos (n/N, falta R$, termina em), Pequenos gastos frequentes, Ocultas; ações "Não é recorrente", "Cancelei", "É assinatura", "É conta fixa"; toque abre as cobranças | vazio ("Ainda não há histórico suficiente: precisamos de 3 cobranças parecidas"); carregando; erro |
+| `(main)/index.tsx` Painel (muda) | 2, 3, 5b, 7, 9 | Botão Assistente no cabeçalho e cartão "Ativar IA" (2); "Recorrências: R$ X/mês" (3); seção Insights com último semanal (5b) e item do dia (7); "Seu dinheiro guardado" (9) | cada bloco some sozinho em erro — **menos o cartão das recorrências** (decisão do dono na #39): ele nunca some; sem recorrência explica o que vai aparecer, em erro mostra "Tentar de novo" |
+| `(main)/recurring/index.tsx` | 3 | Duas entradas: o cartão do Painel e Configurações > "Assinaturas e contas fixas". "Assinaturas e recorrências": total mensal e anual; Assinaturas (marcas "talvez esquecida — vocês ainda usam?", "ficou mais cara", "nova"), Contas fixas (com "valor variável"), Parcelamentos (n/N, falta R$, termina em), Pequenos gastos frequentes, Ocultas; ações "Não é recorrente", "Cancelei", "É assinatura", "É conta fixa"; toque abre as cobranças | vazio ("Ainda não há histórico suficiente: precisamos de 3 cobranças parecidas"); carregando; erro |
 | `(main)/insights/index.tsx`, `insights/detail.tsx` | 5b | 4.5 | vazio ("O primeiro resumo semanal sai na segunda-feira"); carregando; erro |
 | `(main)/cashflow/index.tsx` (muda) | 7 | Faixa do saldo do fim do mês, "contas que ainda vão cair este mês", método usado | sem `forecast` → tela de hoje |
 | `(main)/invest/index.tsx`, `invest/profile.tsx` | 9 | 5.6 e 5.2 | sem perfil; sem mercado; resumo automático |
