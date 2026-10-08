@@ -117,6 +117,10 @@ describe('voltar das abas ocultas (M-I2)', () => {
     // No wizard, o período só é pedido (e só é enviado) enquanto a conexão nunca sincronizou.
     expect(wizard).toMatch(/setPeriodChoosable\(neverSynced\(mine\)\);/);
     expect(wizard).toMatch(/historyMonths: periodChoosable \? historyMonths : undefined,/);
+    // Ao guardar as credenciais (passo 3), o período vem da mesma regra: reconectar não manda "3" por cima do
+    // que foi escolhido (revisão 3, I1).
+    expect(wizard).toMatch(/historyMonths: historyMonthsWithCredentials\(mine\),/);
+    expect(wizard).not.toMatch(/historyMonths: 3,/);
     expect(wizard).toMatch(/\{periodChoosable \? \(\s*<View accessibilityRole="radiogroup"/);
   });
 

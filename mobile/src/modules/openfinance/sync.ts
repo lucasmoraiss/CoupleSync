@@ -162,6 +162,18 @@ export function neverSynced(connection: Pick<BankConnectionResponse, 'lastSyncAt
 }
 
 /**
+ * Passo 3 do wizard: o período que vai junto com as credenciais. Conexão nova, ou reconexão de uma que nunca
+ * sincronizou: o padrão de 3 meses (a escolha de verdade é no passo 5). Reconexão de uma conexão que já
+ * sincronizou: nada, e o servidor mantém o período escolhido na primeira sincronização, que continua valendo para
+ * os bancos adicionados depois.
+ */
+export function historyMonthsWithCredentials(
+  myConnection: Pick<BankConnectionResponse, 'lastSyncAtUtc'> | null | undefined,
+): number | undefined {
+  return neverSynced(myConnection) ? HISTORY_OPTIONS[0] : undefined;
+}
+
+/**
  * O que a tela Open Finance oferece para sincronizar uma conexão. Antes da primeira sincronização a pessoa escolhe
  * o período (passo "Período" do wizard): 'choosePeriod'. Depois da primeira o período não aparece mais: 'syncNow'.
  */

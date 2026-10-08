@@ -7,6 +7,7 @@ import {
   canSyncNow,
   connectionToAutoSync,
   historyLabel,
+  historyMonthsWithCredentials,
   isRunFinished,
   lastSyncText,
   neverSynced,
@@ -153,6 +154,16 @@ describe('primeira sincronização: o período é escolhido antes (revisão 1, I
     expect(neverSynced(connection({ lastSyncAtUtc: 'ontem' }))).toBe(true);
     expect(neverSynced(null)).toBe(true);
     expect(neverSynced(connection())).toBe(false);
+  });
+
+  it('passo 3: o período só vai junto com as credenciais enquanto a conexão nunca sincronizou (revisão 3, I1)', () => {
+    // Conexão nova, ou reconexão de uma que nunca sincronizou: o padrão de 3 meses (a escolha é no passo 5).
+    expect(historyMonthsWithCredentials(null)).toBe(3);
+    expect(historyMonthsWithCredentials(connection({ status: 'Disconnected', lastSyncAtUtc: null, historyMonths: 12 }))).toBe(3);
+    // "Desconectar e conectar de novo" numa conexão que já sincronizou: nada é enviado, e o servidor mantém os
+    // 6 ou 12 meses escolhidos. Enviar 3 aqui era o que apagava a escolha.
+    expect(historyMonthsWithCredentials(connection({ status: 'Disconnected', historyMonths: 12 }))).toBeUndefined();
+    expect(historyMonthsWithCredentials(connection({ status: 'Disconnected', historyMonths: 6 }))).toBeUndefined();
   });
 });
 

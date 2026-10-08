@@ -39,6 +39,7 @@ import {
   HISTORY_OPTIONS,
   SYNC_STILL_RUNNING_TEXT,
   historyLabel,
+  historyMonthsWithCredentials,
   neverSynced,
   runProgressText,
   runResultText,
@@ -253,7 +254,8 @@ function OpenFinanceWizardScreen() {
         label: label.trim(),
         clientId: clientId.trim(),
         clientSecret: clientSecret.trim(),
-        historyMonths: 3,
+        // Reconectar uma conexão que já sincronizou não manda período: o servidor mantém o que foi escolhido.
+        historyMonths: historyMonthsWithCredentials(mine),
       });
       if (getSessionEpoch() !== epoch) return;
       // As credenciais já estão no servidor: não ficam na memória da tela.
