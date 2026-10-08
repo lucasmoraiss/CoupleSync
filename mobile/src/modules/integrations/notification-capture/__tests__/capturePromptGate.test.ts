@@ -2,7 +2,10 @@
 // (para quem já deu o acesso às notificações no Android) e a pergunta da análise com IA. A ordem é decidida aqui:
 // a da captura vem primeiro, e a da IA espera a vez dela. Tudo inventado (ids de exemplo).
 import { EMPTY_CONSENT, acceptCapture, declineCapture, markCapturePromptShown, type ConsentRecord } from '@/modules/privacy/consent';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
+  captureConsentScreenFocusEffect,
   clearCapturePromptOpening,
   isCapturePromptAhead,
   noteCapturePromptOpening,
@@ -72,6 +75,26 @@ describe('o consentimento da captura vai abrir sozinho?', () => {
 
     // Respondida, deixa de segurar a pergunta da IA.
     await expect(isCapturePromptAhead(probe({ consent: { userId: 'user-1', loaded: true, record: acceptCapture(record, NOW) } }))).resolves.toBe(false);
+  });
+
+  // Revisão 2: quem saía da tela pelo voltar do Android, sem responder, ficava sem a pergunta da IA até reabrir o app.
+  it('a pessoa saiu da tela da captura sem responder (voltar do Android): na volta ao Painel a pergunta da IA já pode abrir', async () => {
+    noteCapturePromptOpening('user-1');
+    const record = markCapturePromptShown(EMPTY_CONSENT, NOW);
+    const consent = { userId: 'user-1', loaded: true, record };
+    await expect(isCapturePromptAhead(probe({ consent }))).resolves.toBe(true);
+
+    // O que a tela entrega ao useFocusEffect: a função devolvida roda quando a tela perde o foco.
+    const onBlur = captureConsentScreenFocusEffect();
+    await expect(isCapturePromptAhead(probe({ consent }))).resolves.toBe(true);
+    onBlur();
+
+    await expect(isCapturePromptAhead(probe({ consent }))).resolves.toBe(false);
+  });
+
+  it('a tela de consentimento da captura desfaz a marca ao perder o foco', () => {
+    const screen = fs.readFileSync(path.join(__dirname, '../../../../../app/(main)/settings/capture-consent.tsx'), 'utf8');
+    expect(screen).toMatch(/useFocusEffect\(captureConsentScreenFocusEffect\);/);
   });
 
   it('a marca de "abrindo agora" é de uma pessoa: não segura a pergunta da IA de outra', async () => {

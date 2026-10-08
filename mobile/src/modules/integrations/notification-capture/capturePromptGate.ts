@@ -22,6 +22,16 @@ export function clearCapturePromptOpening(): void {
   openingForUserId = null;
 }
 
+/**
+ * Para o `useFocusEffect` da tela de consentimento da captura: quando ela perde o foco, a marca é desfeita. Quem
+ * sai pelo voltar do Android sem responder não deixa a marca de pé — a pergunta da IA abre na volta ao Painel,
+ * sem ter de reabrir o app. (Com a tela da captura em foco a marca não faz falta: o Painel, fora de foco, não
+ * abre tela nenhuma; e a tela da captura não abre sozinha uma segunda vez.)
+ */
+export function captureConsentScreenFocusEffect(): () => void {
+  return clearCapturePromptOpening;
+}
+
 export interface CapturePromptProbe {
   readonly sessionUserId: string | null;
   /** O leitor nativo de notificações existe neste aparelho (Android, APK com o módulo). */

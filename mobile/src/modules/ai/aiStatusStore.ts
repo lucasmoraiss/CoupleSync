@@ -9,7 +9,8 @@
 //   pedir de novo (foco do Painel, puxar para atualizar, botão do aviso) consulta na hora.
 // - Sair da conta apaga tudo, da memória e do aparelho (limpador registrado em userData.ts).
 // - Toda consulta, nova tentativa e escrita fica presa à época da sessão: resposta que chega depois de sair, de
-//   outro login ou da troca de grupo é descartada.
+//   outro login ou da troca de grupo é descartada. A resposta de uma consulta que começou antes de uma escrita
+//   (ativar, desligar) e chega depois dela também: vale o que a escrita devolveu.
 // - Ligar, desligar e responder à pergunta ficam no servidor; o aparelho só guarda a cópia do último status.
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
@@ -87,6 +88,11 @@ export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, ge
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   /** A consulta em andamento e a época em que começou: pedidos simultâneos viram uma chamada só. */
   let reading: { epoch: number; promise: Promise<AiStatusResponse | null> } | null = null;
+  /**
+   * Quantas escritas (ativar, desligar, responder) já tiveram a resposta guardada. Uma consulta que começou antes
+   * de uma delas traz o que valia antes: a resposta dela, ou a falha, não passa por cima do resultado da escrita.
+   */
+  let writesDone = 0;
 
   function cancelRetry(): void {
     if (retryTimer !== undefined) clearTimeout(retryTimer);
@@ -138,13 +144,17 @@ export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, ge
   }
 
   async function read(owner: Owner, epoch: number, attempt: number): Promise<AiStatusResponse | null> {
+    const writesBefore = writesDone;
     try {
       const { data } = await aiApiClient.getStatus();
       if (getSessionEpoch() !== epoch) return null;
+      // Uma escrita foi respondida enquanto esta consulta estava no ar: vale o que a escrita devolveu.
+      if (writesDone !== writesBefore) return owns(owner) ? get().status : null;
       accept(owner, data);
       return data;
     } catch {
       if (getSessionEpoch() !== epoch) return null;
+      if (writesDone !== writesBefore) return owns(owner) ? get().status : null;
       const delay = AI_STATUS_RETRY_DELAYS_MS[attempt];
       set({ loadFailed: true, retrying: delay !== undefined });
       if (delay !== undefined) {
@@ -179,6 +189,9 @@ export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, ge
     claim(owner, epoch);
     const { data } = await call();
     if (getSessionEpoch() !== epoch) return null;
+    writesDone += 1;
+    // A consulta que ainda estiver no ar é de antes desta escrita: a próxima não se junta a ela.
+    reading = null;
     accept(owner, data);
     return data;
   }

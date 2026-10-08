@@ -496,6 +496,59 @@ describe('a consulta que falha é tentada de novo sozinha', () => {
     expect(mockGetStatus).toHaveBeenCalledTimes(1);
   });
 
+  // Revisão 2: ativar pelo cartão com a consulta da abertura ainda no ar (API acordando).
+  it('a resposta atrasada de uma consulta não passa por cima do resultado de uma escrita feita depois dela', async () => {
+    await signIn('user-1');
+    const slowRead = pendingStatus();
+    mockGetStatus.mockReturnValueOnce(slowRead.promise);
+    const reading = useAiStatusStore.getState().refresh();
+    mockAccept.mockResolvedValue({ data: ENABLED });
+
+    await useAiStatusStore.getState().activate();
+    // A consulta começou antes de ativar: o que ela traz é de antes.
+    slowRead.release({ data: status({ enabled: false }) });
+    await reading;
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(forSession().status).toEqual(ENABLED);
+    expect(JSON.parse(secureStore[aiStatusStorageKey('user-1')]).status).toEqual(ENABLED);
+    expect(useAiStatusStore.getState().freshCount).toBe(1);
+  });
+
+  it('a falha atrasada de uma consulta, depois de uma escrita que deu certo, não vira aviso nem nova tentativa', async () => {
+    await signIn('user-1');
+    let fail!: (reason: unknown) => void;
+    mockGetStatus.mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
+    const reading = useAiStatusStore.getState().refresh();
+    mockAccept.mockResolvedValue({ data: ENABLED });
+
+    await useAiStatusStore.getState().activate();
+    fail(NETWORK_DOWN);
+    await reading;
+    await jest.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(forSession()).toEqual({ status: ENABLED, loadFailed: false, welcomeShown: false });
+    expect(mockGetStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('a consulta pedida depois de uma escrita é nova: não se junta à que começou antes', async () => {
+    await signIn('user-1');
+    const slowRead = pendingStatus();
+    mockGetStatus.mockReturnValueOnce(slowRead.promise);
+    const before = useAiStatusStore.getState().refresh();
+    mockAccept.mockResolvedValue({ data: ENABLED });
+    await useAiStatusStore.getState().activate();
+    const OFF_AGAIN = status({ enabled: false, onboardingPending: false });
+    mockGetStatus.mockResolvedValueOnce({ data: OFF_AGAIN });
+
+    await expect(useAiStatusStore.getState().refresh()).resolves.toEqual(OFF_AGAIN);
+    slowRead.release({ data: status({ enabled: false }) });
+    await before;
+
+    expect(mockGetStatus).toHaveBeenCalledTimes(2);
+    expect(forSession().status).toEqual(OFF_AGAIN);
+  });
+
   it('uma escrita que dá certo durante a espera encerra as tentativas (o status já é o do servidor)', async () => {
     await signIn('user-1');
     mockGetStatus.mockRejectedValue(NETWORK_DOWN);

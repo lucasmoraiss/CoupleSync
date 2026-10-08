@@ -225,7 +225,7 @@ describe('consumo', () => {
   });
 
   it('orçamento do grupo', () => {
-    expect(groupBudgetText({ callsToday: 3, callLimit: 25 })).toBe('3 de 25 perguntas do grupo hoje');
+    expect(groupBudgetText({ callsToday: 3, callLimit: 25 })).toBe('3 de 25 chamadas à IA do grupo hoje');
   });
 
   it('totais de hoje e do período', () => {

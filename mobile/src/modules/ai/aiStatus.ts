@@ -106,7 +106,8 @@ export function modelQuotaText(provider: AiUsageProviderResponse): string {
 }
 
 export function groupBudgetText(budget: { readonly callsToday: number; readonly callLimit: number }): string {
-  return `${budget.callsToday} de ${budget.callLimit} perguntas do grupo hoje`;
+  // Chamadas, não perguntas: uma pergunta que passa para o segundo modelo conta duas.
+  return `${budget.callsToday} de ${budget.callLimit} chamadas à IA do grupo hoje`;
 }
 
 export interface UsageTotal {
