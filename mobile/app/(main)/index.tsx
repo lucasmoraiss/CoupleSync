@@ -24,6 +24,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
+import { AppUpdateBanner } from '@/components/AppUpdateBanner';
 import { GroupSwitcher } from '@/components/GroupSwitcher';
 import { spokenBRL } from '@/utils/a11y';
 
@@ -160,6 +161,8 @@ export default function DashboardScreen() {
         <GroupSwitcher />
 
         <EmailVerificationBanner />
+
+        <AppUpdateBanner />
 
         {/* Loading state */}
         {isLoading && <LoadingState />}

@@ -13,6 +13,9 @@ import { registerPushToken } from '@/services/pushTokenService';
 import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
 // Carregado com o app (e não só ao abrir o wizard): é o módulo que registra a limpeza do progresso ao sair da conta.
 import '@/modules/openfinance/wizardStore';
+import { blocksApp } from '@/modules/appUpdate/appUpdate';
+import { useAppUpdate } from '@/modules/appUpdate/useAppUpdate';
+import { AppUpdateRequiredScreen } from '@/components/AppUpdateRequiredScreen';
 import { colors } from '@/theme';
 
 
@@ -37,6 +40,7 @@ export default function MainLayout() {
   // Muda a cada troca de grupo: todas as telas são remontadas e buscam os dados do grupo novo.
   const groupEpoch = useGroupEpoch((s) => s.epoch);
   const [hydrated, setHydrated] = useState(false);
+  const update = useAppUpdate();
 
   useEffect(() => {
     // Wait one tick after root layout has hydrated the session store
@@ -70,6 +74,12 @@ export default function MainLayout() {
         <ActivityIndicator />
       </View>
     );
+  }
+
+  // Versão instalada abaixo da mínima aceita: a tela de bloqueio entra no lugar das abas. Nenhuma aba é montada,
+  // então nenhuma consulta de dados do grupo sai enquanto o bloqueio vale.
+  if (blocksApp(update)) {
+    return <AppUpdateRequiredScreen update={update} />;
   }
 
   return (

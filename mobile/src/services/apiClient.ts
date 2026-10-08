@@ -11,6 +11,7 @@ import { getDevicePushToken } from './deviceToken';
 import { getApiErrorCode } from './apiError';
 import { decideCoupleRequired } from './coupleRequired';
 import type {
+  AppVersionResponse,
   AuthResponse,
   AuthUserResponse,
   ForgotPasswordResponse,
@@ -139,6 +140,13 @@ export function isCoupleRequiredError(error: unknown): boolean {
     getApiErrorCode(error) === 'COUPLE_REQUIRED'
   );
 }
+
+// --- App (versão publicada) ---
+export const appApiClient = {
+  /** Última versão publicada do APK, versão mínima aceita e link de download. Anônima; nunca depende de grupo. */
+  getVersion: (): Promise<AxiosResponse<AppVersionResponse>> =>
+    axiosInstance.get<AppVersionResponse>('/api/v1/app/version', { timeout: 10000 }),
+};
 
 // --- Auth API ---
 interface LoginRequest {
