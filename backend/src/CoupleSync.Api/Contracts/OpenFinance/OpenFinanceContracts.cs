@@ -120,9 +120,14 @@ public sealed record ConfirmBankReviewRequest(IReadOnlyList<ConfirmExpenseReques
 
 public sealed record BankReviewCreatedResponse(Guid Id, Guid TransactionId);
 
+/// <summary>
+/// <c>Skipped</c>: lines sent in <c>expenses</c> that have no value (zero) and so cannot become an expense. They do
+/// not fail the request; they stay in the review, where they can be discarded.
+/// </summary>
 public sealed record ConfirmBankReviewResponse(
     IReadOnlyList<BankReviewCreatedResponse> Created,
     IReadOnlyList<Guid> Discarded,
-    int AlreadyConfirmed);
+    int AlreadyConfirmed,
+    IReadOnlyList<Guid> Skipped);
 
 public sealed record RestoreBankReviewResponse(IReadOnlyList<Guid> Restored);

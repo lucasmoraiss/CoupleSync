@@ -2,6 +2,7 @@ using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
+using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.OpenFinance;
 
@@ -30,19 +31,28 @@ public sealed class BankReviewService
     private readonly INotificationCaptureRepository _ingests;
     private readonly IFingerprintGenerator _fingerprints;
     private readonly IDateTimeProvider _clock;
+    private readonly IAlertPolicyService _alertPolicyService;
+    private readonly INotificationEventRepository _notificationEvents;
+    private readonly ILogger<BankReviewService> _logger;
 
     public BankReviewService(
         IBankSyncRepository sync,
         ITransactionRepository transactions,
         INotificationCaptureRepository ingests,
         IFingerprintGenerator fingerprints,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IAlertPolicyService alertPolicyService,
+        INotificationEventRepository notificationEvents,
+        ILogger<BankReviewService> logger)
     {
         _sync = sync;
         _transactions = transactions;
         _ingests = ingests;
         _fingerprints = fingerprints;
         _clock = clock;
+        _alertPolicyService = alertPolicyService;
+        _notificationEvents = notificationEvents;
+        _logger = logger;
     }
 
     /// <summary>
@@ -116,14 +126,18 @@ public sealed class BankReviewService
             throw new ConflictException(NotPendingCode, "Este lançamento já foi revisado. Atualize a revisão e tente de novo.");
         }
 
-        if (expenseIds.Any(id => rows[id].ReviewState == BankTransactionReviewState.Pending && rows[id].AbsoluteAmount <= 0))
-            throw new UnprocessableEntityException(InvalidSelectionCode, "Um lançamento sem valor não pode virar despesa.");
+        // One read for the whole request: which of these bank transactions already have their transaction.
+        var fingerprints = expenseIds
+            .Where(id => rows[id].ReviewState == BankTransactionReviewState.Pending)
+            .ToDictionary(id => id, id => FingerprintOf(_fingerprints, coupleId, rows[id].PluggyTransactionId));
+        var existing = await _sync.FindTransactionIdsByFingerprintsAsync(fingerprints.Values.Distinct(StringComparer.Ordinal).ToList(), coupleId, ct);
 
         var names = await _sync.GetAccountNamesAsync(coupleId, ct);
         var now = _clock.UtcNow;
         var ingests = new List<TransactionEventIngest>();
         var transactions = new List<Transaction>();
         var created = new List<BankReviewCreatedDto>();
+        var skipped = new List<Guid>();
         var alreadyConfirmed = 0;
 
         foreach (var input in expenses)
@@ -135,8 +149,16 @@ public sealed class BankReviewService
                 continue;
             }
 
-            var fingerprint = FingerprintOf(_fingerprints, coupleId, row.PluggyTransactionId);
-            if (await _sync.FindTransactionIdByFingerprintAsync(fingerprint, coupleId, ct) is { } existingId)
+            // A line without a value cannot be an expense. It does not hold the others back ("Selecionar tudo"):
+            // it stays waiting, to be discarded, and the answer says it was skipped.
+            if (row.AbsoluteAmount <= 0)
+            {
+                skipped.Add(row.Id);
+                continue;
+            }
+
+            var fingerprint = fingerprints[row.Id];
+            if (existing.TryGetValue(fingerprint, out var existingId))
             {
                 // The transaction of this bank transaction is already there: the line points to it, nothing is added.
                 row.Confirm(existingId, now);
@@ -197,7 +219,35 @@ public sealed class BankReviewService
             throw new ConflictException(ConflictCode, "A revisão mudou enquanto era confirmada. Atualize e tente de novo.");
         }
 
-        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed);
+        await RaiseAlertsAsync(coupleId, transactions, ct);
+
+        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed, skipped);
+    }
+
+    /// <summary>
+    /// The same evaluation every other way of entering a transaction runs (manual, notification, statement import),
+    /// once for the whole confirmation: many lines are one summary, not one push per line. Never fails the
+    /// confirmation: the transactions are already stored.
+    /// </summary>
+    private async Task RaiseAlertsAsync(Guid coupleId, IReadOnlyList<Transaction> created, CancellationToken ct)
+    {
+        if (created.Count == 0) return;
+
+        try
+        {
+            var nowUtc = _clock.UtcNow;
+            var recentTransactions = await _transactions.GetRecentByCoupleAsync(coupleId, nowUtc.AddDays(-30), ct);
+            var alertEvents = await _alertPolicyService.EvaluatePostImportAsync(coupleId, created, recentTransactions, nowUtc, ct);
+            if (alertEvents.Count > 0)
+            {
+                await _notificationEvents.AddRangeAsync(alertEvents, ct);
+                await _notificationEvents.SaveChangesAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Alert policy evaluation failed for couple {CoupleId} ({ExceptionType}).", coupleId, ex.GetType().Name);
+        }
     }
 
     /// <summary>Discarded lines go back to waiting. Lines in any other state stay as they are.</summary>

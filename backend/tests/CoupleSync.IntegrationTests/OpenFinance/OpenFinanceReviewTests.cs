@@ -792,6 +792,99 @@ public sealed class OpenFinanceReviewTests
     }
 
     [Fact]
+    public async Task ALineWithoutValue_DoesNotHoldTheBatchBack_TheOthersAreConfirmed_AndTheAnswerSaysWhichWasSkipped()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        const string zeroId = "c1b2c3d4-0000-4000-8000-0000000000c0";
+        factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId].Add(
+            new FakeTransaction(zeroId, DateTime.UtcNow.Date.AddDays(-2).AddHours(16), 0m) { Description = "Tarifa Exemplo Zerada" });
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        var zero = await LineIdAsync(factory, zeroId);
+        var restaurant = await LineIdAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        var ride = await LineIdAsync(factory, FakePluggyServer.RideTransactionId);
+
+        // "Selecionar tudo": the line without value goes in the middle of the others.
+        var confirmed = await ConfirmAsync(ana, new { expenses = new[] { new { id = restaurant }, new { id = zero }, new { id = ride } } });
+
+        Assert.True(HttpStatusCode.OK == confirmed.StatusCode, await confirmed.Content.ReadAsStringAsync());
+        var body = await JsonAsync(confirmed);
+        Assert.Equal(new[] { restaurant, ride }, body.GetProperty("created").EnumerateArray().Select(c => c.GetProperty("id").GetGuid()));
+        Assert.Equal(new[] { zero }, body.GetProperty("skipped").EnumerateArray().Select(s => s.GetGuid()));
+        Assert.Equal(0, body.GetProperty("alreadyConfirmed").GetInt32());
+        Assert.Equal(2, (await factory.RowsAsync("SELECT id FROM transactions")).Count);
+        // It stays waiting, without a transaction, and can be discarded.
+        var line = await MirrorRowAsync(factory, zeroId);
+        Assert.Equal("Pending", line["review_state"]);
+        Assert.Null(line["linked_transaction_id"]);
+        Assert.Equal(HttpStatusCode.OK, (await ConfirmAsync(ana, new { discard = new[] { zero } })).StatusCode);
+        Assert.Equal("Discarded", (await MirrorRowAsync(factory, zeroId))["review_state"]);
+
+        // A request with nothing else to confirm is not an error either.
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { zero })).StatusCode);
+        var alone = await ConfirmAsync(ana, new { expenses = new[] { new { id = zero } } });
+        Assert.True(HttpStatusCode.OK == alone.StatusCode, await alone.Content.ReadAsStringAsync());
+        var aloneBody = await JsonAsync(alone);
+        Assert.Equal(0, aloneBody.GetProperty("created").GetArrayLength());
+        Assert.Equal(new[] { zero }, aloneBody.GetProperty("skipped").EnumerateArray().Select(s => s.GetGuid()));
+        Assert.Equal(2, (await factory.RowsAsync("SELECT id FROM transactions")).Count);
+    }
+
+    [Fact]
+    public async Task Confirm_RaisesTheBudgetAndLargeTransactionAlerts_ThatEveryOtherWayOfEnteringATransactionRaises_OnceForTheWholeConfirmation()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var bruno = await factory.RegisterAsync("Bruno", ana.JoinCode);
+        var connectionId = await ConnectWithBankAsync(ana);
+        // Of this month for sure (the budget is by month of Brazil): a few minutes ago.
+        var moment = factory.Clock.UtcNow.AddMinutes(-5);
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId] = [];
+        factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId] =
+        [
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-000000000a01", moment, -58.90m) { Description = "Cantina Exemplo", Category = "Eating out", CategoryId = "11010000" },
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-000000000a02", moment.AddSeconds(1), -700m) { Description = "Oficina Exemplo", Category = "Taxi and ride-hailing", CategoryId = "19010000" },
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-000000000a03", moment.AddSeconds(2), -900m) { Description = "Passagem Exemplo", Category = "Taxi and ride-hailing", CategoryId = "19010000" },
+        ];
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        // A budget of R$ 50 for ALIMENTACAO this month.
+        var plan = await ana.Client.PostAsJsonAsync("/api/v1/budgets", new { month = CurrentMonth(factory), grossIncome = 6000m, currency = "BRL" });
+        Assert.True(HttpStatusCode.OK == plan.StatusCode, await plan.Content.ReadAsStringAsync());
+        var planId = (await JsonAsync(plan)).GetProperty("id").GetGuid();
+        var allocations = await ana.Client.PutAsJsonAsync($"/api/v1/budgets/{planId}/allocations",
+            new { allocations = new[] { new { category = "ALIMENTACAO", allocatedAmount = 50m, currency = "BRL" } } });
+        Assert.True(HttpStatusCode.OK == allocations.StatusCode, await allocations.Content.ReadAsStringAsync());
+        // Synchronising raised no alert: nothing is a transaction of the app yet.
+        const string alertsSql = "SELECT user_id, alert_type, title, body FROM notification_events WHERE alert_type LIKE 'Budget%' OR alert_type LIKE 'LargeTransaction%'";
+        Assert.Empty(await factory.RowsAsync(alertsSql));
+        var ids = new List<Guid>();
+        foreach (var pluggyId in new[] { "c1b2c3d4-0000-4000-8000-000000000a01", "c1b2c3d4-0000-4000-8000-000000000a02", "c1b2c3d4-0000-4000-8000-000000000a03" })
+            ids.Add(await LineIdAsync(factory, pluggyId));
+
+        // The partner confirms the three.
+        var confirmed = await ConfirmAsync(bruno, new { expenses = ids.Select(id => new { id }).ToArray() });
+
+        Assert.True(HttpStatusCode.OK == confirmed.StatusCode, await confirmed.Content.ReadAsStringAsync());
+        var events = await factory.RowsAsync(alertsSql);
+        var members = new[] { ana.UserId, bruno.UserId }.Select(id => id.ToString().ToUpperInvariant()).Order().ToList();
+        // The budget of the category was passed: one alert for each member of the group.
+        var budget = events.Where(e => (string)e["alert_type"]! == $"BudgetExceeded|ALIMENTACAO|{CurrentMonth(factory)}").ToList();
+        Assert.Equal(members, budget.Select(e => (string)e["user_id"]!).Order());
+        Assert.All(budget, e => Assert.Equal("Orçamento de Alimentação estourado", e["title"]));
+        // Two lines above the large-transaction limit: ONE summary for each member, not one per line.
+        var large = events.Where(e => (string)e["alert_type"]! == "LargeTransaction").ToList();
+        Assert.Equal(members, large.Select(e => (string)e["user_id"]!).Order());
+        Assert.All(large, e => Assert.Contains("2 transações de valor alto", (string)e["body"]!, StringComparison.Ordinal));
+
+        Assert.Equal(4, events.Count);
+
+        // A confirmation that creates nothing (the same lines again) raises nothing more.
+        Assert.Equal(HttpStatusCode.OK, (await ConfirmAsync(ana, new { expenses = ids.Select(id => new { id }).ToArray() })).StatusCode);
+        Assert.Equal(4, (await factory.RowsAsync(alertsSql)).Count);
+    }
+
+    [Fact]
     public async Task Confirm_Takes200LinesInOneRequest()
     {
         await using var factory = NewFactory();

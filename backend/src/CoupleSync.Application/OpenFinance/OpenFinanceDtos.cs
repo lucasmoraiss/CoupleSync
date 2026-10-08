@@ -93,7 +93,9 @@ public sealed record ConfirmExpenseInput(Guid Id, string? Category, string? Desc
 
 public sealed record BankReviewCreatedDto(Guid Id, Guid TransactionId);
 
+/// <summary><c>Skipped</c>: lines asked to be confirmed that have no value; they stay waiting (to be discarded).</summary>
 public sealed record BankReviewConfirmResult(
     IReadOnlyList<BankReviewCreatedDto> Created,
     IReadOnlyList<Guid> Discarded,
-    int AlreadyConfirmed);
+    int AlreadyConfirmed,
+    IReadOnlyList<Guid> Skipped);

@@ -191,16 +191,20 @@ public sealed class BankSyncRepository : IBankSyncRepository
             r => new BankAccountNames(r.ConnectorName, string.IsNullOrWhiteSpace(r.Name) ? r.MarketingName ?? string.Empty : r.Name));
     }
 
-    public async Task<Guid?> FindTransactionIdByFingerprintAsync(string fingerprint, Guid coupleId, CancellationToken ct)
+    public async Task<IReadOnlyDictionary<string, Guid>> FindTransactionIdsByFingerprintsAsync(
+        IReadOnlyCollection<string> fingerprints, Guid coupleId, CancellationToken ct)
     {
-        var ids = await _dbContext.Transactions
+        if (fingerprints.Count == 0) return new Dictionary<string, Guid>(StringComparer.Ordinal);
+
+        var rows = await _dbContext.Transactions
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(t => t.CoupleId == coupleId && t.Fingerprint == fingerprint)
-            .Select(t => t.Id)
-            .Take(1)
+            .Where(t => t.CoupleId == coupleId && fingerprints.Contains(t.Fingerprint))
+            .Select(t => new { t.Fingerprint, t.Id })
             .ToListAsync(ct);
-        return ids.Count == 0 ? null : ids[0];
+        var found = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        foreach (var row in rows) found.TryAdd(row.Fingerprint, row.Id);
+        return found;
     }
 
     public Task SaveChangesAsync(CancellationToken ct)

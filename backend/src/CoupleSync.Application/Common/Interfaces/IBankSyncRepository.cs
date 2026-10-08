@@ -84,7 +84,8 @@ public interface IBankSyncRepository
     /// <summary>Account id → (bank name, account name) for the accounts of the group.</summary>
     Task<IReadOnlyDictionary<Guid, BankAccountNames>> GetAccountNamesAsync(Guid coupleId, CancellationToken ct);
 
-    Task<Guid?> FindTransactionIdByFingerprintAsync(string fingerprint, Guid coupleId, CancellationToken ct);
+    /// <summary>Fingerprint → id of the transaction of the group that already has it (only the ones found).</summary>
+    Task<IReadOnlyDictionary<string, Guid>> FindTransactionIdsByFingerprintsAsync(IReadOnlyCollection<string> fingerprints, Guid coupleId, CancellationToken ct);
 
     Task SaveChangesAsync(CancellationToken ct);
 }
