@@ -1,6 +1,8 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Application.OpenFinance;
 using CoupleSync.Domain.Entities;
+using CoupleSync.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace CoupleSync.Infrastructure.Persistence;
@@ -128,6 +130,53 @@ public sealed class BankSyncRepository : IBankSyncRepository
     public Task AddTransactionsAsync(IEnumerable<BankTransaction> transactions, CancellationToken ct)
         => _dbContext.BankTransactions.AddRangeAsync(transactions, ct);
 
+    public async Task<IReadOnlyList<BankTransaction>> GetTransferCandidatesForJobAsync(Guid coupleId, DateOnly fromDay, DateOnly toDay, CancellationToken ct)
+        => (await _dbContext.BankTransactions
+                .IgnoreQueryFilters()
+                .Where(t => t.CoupleId == coupleId
+                            && t.Status == BankTransactionStatus.Posted
+                            && (t.ReviewState == BankTransactionReviewState.Pending
+                                || (t.ReviewState == BankTransactionReviewState.Ignored && t.AutoReason == BankTransactionAutoReasons.BillPayment))
+                            && t.PersonDecidedAtUtc == null
+                            && t.LocalDate >= fromDay
+                            && t.LocalDate <= toDay)
+                .ToListAsync(ct))
+            .OrderBy(t => t.Date)
+            .ThenBy(t => t.PluggyTransactionId, StringComparer.Ordinal)
+            .ToList();
+
+    public async Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(
+        Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, CancellationToken ct)
+    {
+        // The value is compared in memory (the rules do it): SQLite keeps decimals as text.
+        var rows = await _dbContext.Transactions
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(t => t.CoupleId == coupleId
+                        && t.Currency == CurrencyRules.Brl
+                        && t.Source != TransactionSource.OpenFinance
+                        && t.EventTimestampUtc >= fromUtc
+                        && t.EventTimestampUtc < toUtcExclusive
+                        && !_dbContext.BankTransactions.Any(b => b.LinkedTransactionId == t.Id || b.MatchedTransactionId == t.Id))
+            .Select(t => new { t.Id, t.Amount, t.Currency, t.EventTimestampUtc, t.Source, t.Bank })
+            .ToListAsync(ct);
+
+        return rows
+            .Select(t => new ExistingTransactionFacts(
+                t.Id, t.Amount, t.Currency, BankReconciliationRules.LocalDayOf(t.EventTimestampUtc), t.Source, t.Bank))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<BankAccountHolder>> GetAccountHoldersForJobAsync(Guid coupleId, CancellationToken ct)
+        => await (
+                from account in _dbContext.BankAccounts.IgnoreQueryFilters().AsNoTracking()
+                join item in _dbContext.BankItems on account.ItemId equals item.Id
+                join connection in _dbContext.BankConnections on item.ConnectionId equals connection.Id
+                join user in _dbContext.Users on connection.UserId equals user.Id
+                where account.CoupleId == coupleId && connection.CoupleId == coupleId
+                select new BankAccountHolder(account.Id, user.Id, user.Name))
+            .ToListAsync(ct);
+
     public async Task SaveRunProgressAsync(BankConnection connection, CancellationToken ct)
     {
         // Writing a column of the connection back, changed or not, puts its concurrency token (the stored secret)
@@ -194,7 +243,8 @@ public sealed class BankSyncRepository : IBankSyncRepository
                 .AsNoTracking()
                 .Where(t => ids.Contains(t.Id))
                 .Select(t => new StoredReview(
-                    t.Id, t.ReviewState, t.LinkedTransactionId, t.LinkedIncomeSourceId, t.MatchedTransactionId, t.AutoReason, t.ReviewedAtUtc))
+                    t.Id, t.ReviewState, t.LinkedTransactionId, t.LinkedIncomeSourceId, t.MatchedTransactionId, t.AutoReason, t.ReviewedAtUtc,
+                    t.PersonDecidedAtUtc))
                 .ToListAsync(ct);
             foreach (var row in rows) stored[row.Id] = row;
         }
@@ -217,6 +267,7 @@ public sealed class BankSyncRepository : IBankSyncRepository
             Take(entry.Property(t => t.MatchedTransactionId), review.MatchedTransactionId);
             Take(entry.Property(t => t.AutoReason), review.AutoReason);
             Take(entry.Property(t => t.ReviewedAtUtc), review.ReviewedAtUtc);
+            Take(entry.Property(t => t.PersonDecidedAtUtc), review.PersonDecidedAtUtc);
         }
     }
 
@@ -234,7 +285,8 @@ public sealed class BankSyncRepository : IBankSyncRepository
         Guid? LinkedIncomeSourceId,
         Guid? MatchedTransactionId,
         string? AutoReason,
-        DateTime? ReviewedAtUtc);
+        DateTime? ReviewedAtUtc,
+        DateTime? PersonDecidedAtUtc);
 
     public void DiscardChanges() => _dbContext.ChangeTracker.Clear();
 
@@ -249,6 +301,32 @@ public sealed class BankSyncRepository : IBankSyncRepository
                         && t.LocalDate < toExclusive
                         && ReviewStates.Contains(t.ReviewState))
             .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<BankTransaction>> GetIgnoredAsync(Guid coupleId, DateOnly from, DateOnly toExclusive, CancellationToken ct)
+        => await _dbContext.BankTransactions
+            .AsNoTracking()
+            .Where(t => t.CoupleId == coupleId
+                        && t.ReviewState == BankTransactionReviewState.Ignored
+                        && t.LocalDate >= from
+                        && t.LocalDate < toExclusive)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyDictionary<Guid, MatchedTransactionSummary>> GetTransactionSummariesAsync(
+        IReadOnlyCollection<Guid> transactionIds, Guid coupleId, CancellationToken ct)
+    {
+        var found = new Dictionary<Guid, MatchedTransactionSummary>();
+        foreach (var ids in transactionIds.Distinct().Chunk(ReviewLookupChunk))
+        {
+            var rows = await _dbContext.Transactions
+                .AsNoTracking()
+                .Where(t => t.CoupleId == coupleId && ids.Contains(t.Id))
+                .Select(t => new MatchedTransactionSummary(t.Id, t.Source, t.Description, t.Merchant, t.Amount, t.Currency, t.EventTimestampUtc))
+                .ToListAsync(ct);
+            foreach (var row in rows) found[row.Id] = row;
+        }
+
+        return found;
+    }
 
     public async Task<IReadOnlyList<PendingBankExpense>> GetPendingExpensesAsync(Guid coupleId, CancellationToken ct)
         => await _dbContext.BankTransactions
@@ -268,6 +346,12 @@ public sealed class BankSyncRepository : IBankSyncRepository
         => _dbContext.BankTransactions
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(t => t.CoupleId == coupleId && t.LinkedTransactionId == transactionId, ct);
+
+    public async Task<IReadOnlyList<BankTransaction>> FindAllByLinkedTransactionAsync(Guid transactionId, Guid coupleId, CancellationToken ct)
+        => await _dbContext.BankTransactions
+            .IgnoreQueryFilters()
+            .Where(t => t.CoupleId == coupleId && t.LinkedTransactionId == transactionId)
+            .ToListAsync(ct);
 
     public async Task<IReadOnlyDictionary<Guid, BankAccountNames>> GetAccountNamesAsync(Guid coupleId, CancellationToken ct)
     {

@@ -30,13 +30,12 @@ public sealed class DeleteTransactionCommandHandler
         if (transaction.CoupleId != command.CoupleId)
             throw new ForbiddenException("TRANSACTION_ACCESS_DENIED", "Você não tem acesso a esta transação.");
 
-        // A transaction that came from the bank (Open Finance): its line of the mirror goes back to the review as
-        // discarded, without the link, in the same save. It can be restored and confirmed again.
-        if (transaction.Source == TransactionSource.OpenFinance)
-        {
-            var line = await _bankSync.FindByLinkedTransactionAsync(transaction.Id, transaction.CoupleId, cancellationToken);
-            line?.Discard(_clock.UtcNow);
-        }
+        // A transaction a line of the bank points to (Open Finance): created from the line, or one the person said
+        // the line was the same as. The line goes back to the review as discarded, without the link, in the same
+        // save. It can be restored and confirmed again.
+        var now = _clock.UtcNow;
+        foreach (var line in await _bankSync.FindAllByLinkedTransactionAsync(transaction.Id, transaction.CoupleId, cancellationToken))
+            line.Discard(now);
 
         await _repository.DeleteAsync(transaction, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);

@@ -1,3 +1,4 @@
+using CoupleSync.Application.OpenFinance;
 using CoupleSync.Domain.Entities;
 
 namespace CoupleSync.Application.Common.Interfaces;
@@ -60,6 +61,24 @@ public interface IBankSyncRepository
     Task AddTransactionsAsync(IEnumerable<BankTransaction> transactions, CancellationToken ct);
 
     /// <summary>
+    /// For the job, tracked: the lines of the group that can still be the other leg of a transfer, with their day in
+    /// Brazil in [<paramref name="fromDay"/>, <paramref name="toDay"/>]: settled at the bank, never brought back to
+    /// the review by a person, and either waiting for the review or ignored as a bill payment (whose other leg, the
+    /// credit on the card, may arrive later). Oldest first.
+    /// </summary>
+    Task<IReadOnlyList<BankTransaction>> GetTransferCandidatesForJobAsync(Guid coupleId, DateOnly fromDay, DateOnly toDay, CancellationToken ct);
+
+    /// <summary>
+    /// For the job: the transactions of the group, in reais and not come from the bank, whose instant is in
+    /// [<paramref name="fromUtc"/>, <paramref name="toUtcExclusive"/>) and that no line of the mirror points to yet
+    /// (neither as its transaction nor as a suspected duplicate). Their day is the day in Brazil.
+    /// </summary>
+    Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, CancellationToken ct);
+
+    /// <summary>For the job: every account of the group with who connected it (its holder) and that person's name.</summary>
+    Task<IReadOnlyList<BankAccountHolder>> GetAccountHoldersForJobAsync(Guid coupleId, CancellationToken ct);
+
+    /// <summary>
     /// Saves what a run did so far, unless the credentials of <paramref name="connection"/> are no longer the ones the
     /// run read (disconnected, connected again) or the connection is gone (the person left the group): then nothing
     /// at all is written and it fails with <c>ConcurrencyConflictException</c> or <c>ForeignKeyViolationException</c>.
@@ -76,12 +95,21 @@ public interface IBankSyncRepository
     /// <summary>The expenses of the group whose day in Brazil is in [<paramref name="from"/>, <paramref name="toExclusive"/>), waiting or discarded.</summary>
     Task<IReadOnlyList<BankTransaction>> GetReviewExpensesAsync(Guid coupleId, DateOnly from, DateOnly toExclusive, CancellationToken ct);
 
+    /// <summary>The lines of the group ignored automatically (money that left and money that came in) whose day in Brazil is in [<paramref name="from"/>, <paramref name="toExclusive"/>).</summary>
+    Task<IReadOnlyList<BankTransaction>> GetIgnoredAsync(Guid coupleId, DateOnly from, DateOnly toExclusive, CancellationToken ct);
+
+    /// <summary>What the review shows of the transactions of the group with these ids (only the ones found).</summary>
+    Task<IReadOnlyDictionary<Guid, MatchedTransactionSummary>> GetTransactionSummariesAsync(IReadOnlyCollection<Guid> transactionIds, Guid coupleId, CancellationToken ct);
+
     /// <summary>Every expense of the group still waiting for the review: its day in Brazil and what says whether it can be confirmed.</summary>
     Task<IReadOnlyList<PendingBankExpense>> GetPendingExpensesAsync(Guid coupleId, CancellationToken ct);
 
     Task<IReadOnlyList<BankTransaction>> FindByIdsAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct);
 
     Task<BankTransaction?> FindByLinkedTransactionAsync(Guid transactionId, Guid coupleId, CancellationToken ct);
+
+    /// <summary>Tracked: every line of the group that points to the transaction as its own (confirmed from it, or reconciled with it).</summary>
+    Task<IReadOnlyList<BankTransaction>> FindAllByLinkedTransactionAsync(Guid transactionId, Guid coupleId, CancellationToken ct);
 
     /// <summary>Account id → (bank name, account name) for the accounts of the group.</summary>
     Task<IReadOnlyDictionary<Guid, BankAccountNames>> GetAccountNamesAsync(Guid coupleId, CancellationToken ct);
@@ -95,3 +123,13 @@ public interface IBankSyncRepository
 public sealed record BankAccountNames(string BankName, string AccountName);
 
 public sealed record PendingBankExpense(DateOnly Day, BankTransactionStatus Status, decimal Amount, string Currency);
+
+/// <summary>An account of the group and who connected it. Prints no name.</summary>
+public sealed record BankAccountHolder(Guid AccountId, Guid UserId, string? UserName)
+{
+    public override string ToString() => nameof(BankAccountHolder);
+}
+
+/// <summary>What the review shows of the transaction a line looks the same as.</summary>
+public sealed record MatchedTransactionSummary(
+    Guid Id, TransactionSource Source, string? Description, string? Merchant, decimal Amount, string Currency, DateTime EventTimestampUtc);

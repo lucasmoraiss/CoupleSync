@@ -100,8 +100,9 @@ public sealed record PluggyCreditData(
     decimal? MinimumPayment);
 
 /// <summary>
-/// One transaction as Pluggy lists it. <see cref="RawJson"/> is the element exactly as received. Prints nothing of
-/// its content (a record would print the description and the raw JSON).
+/// One transaction as Pluggy lists it. <see cref="RawJson"/> is the element exactly as received;
+/// <see cref="PayerName"/> is who sent the money, when the bank says so (<c>paymentData.payer.name</c>). Prints
+/// nothing of its content (a record would print the description, the name and the raw JSON).
 /// </summary>
 public sealed record PluggyTransaction(
     string Id,
@@ -122,7 +123,8 @@ public sealed record PluggyTransaction(
     string? BillId,
     string? Status,
     decimal? Balance,
-    string RawJson)
+    string RawJson,
+    string? PayerName = null)
 {
     public override string ToString() => nameof(PluggyTransaction);
 }

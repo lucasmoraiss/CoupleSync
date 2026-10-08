@@ -511,6 +511,27 @@ public sealed class PluggyHttpClientTests
     }
 
     [Fact]
+    public async Task GetTransactions_ReadsWhoPaid_WhenTheBankSaysSo_AndNeverPrintsTheName()
+    {
+        var today = DateTime.UtcNow.Date;
+        _pluggy.Transactions[FakePluggyServer.CheckingAccountId] =
+        [
+            new FakeTransaction("t26-with-payer", today.AddDays(-1), 300.00m) { Type = "CREDIT", PayerName = "BRUNO EXEMPLO SILVA", PaymentMethod = "PIX" },
+            new FakeTransaction("t26-method-only", today.AddDays(-1), 310.00m) { Type = "CREDIT", PaymentMethod = "PIX" },
+            new FakeTransaction("t26-no-payment-data", today.AddDays(-1), 320.00m) { Type = "CREDIT" },
+        ];
+
+        var transactions = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+
+        var withPayer = transactions.Single(t => t.Id == "t26-with-payer");
+        Assert.Equal("BRUNO EXEMPLO SILVA", withPayer.PayerName);
+        Assert.Equal("PIX", withPayer.PaymentMethod);
+        Assert.Null(transactions.Single(t => t.Id == "t26-method-only").PayerName);
+        Assert.Null(transactions.Single(t => t.Id == "t26-no-payment-data").PayerName);
+        Assert.DoesNotContain("BRUNO", withPayer.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetTransactions_OfACreditCard_ReadsInstallmentsBillAndPendingStatus()
     {
         var transactions = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CreditCardAccountId, From, To, CancellationToken.None);

@@ -64,6 +64,7 @@ public sealed class SyncConnectionService
     private readonly IPluggyClient _pluggy;
     private readonly ICredentialCipher _cipher;
     private readonly ICategoryClassifier _classifier;
+    private readonly BankPreclassificationService _preclassification;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<SyncConnectionService> _logger;
 
@@ -74,6 +75,7 @@ public sealed class SyncConnectionService
         IPluggyClient pluggy,
         ICredentialCipher cipher,
         ICategoryClassifier classifier,
+        BankPreclassificationService preclassification,
         IDateTimeProvider clock,
         ILogger<SyncConnectionService> logger)
     {
@@ -83,6 +85,7 @@ public sealed class SyncConnectionService
         _pluggy = pluggy;
         _cipher = cipher;
         _classifier = classifier;
+        _preclassification = preclassification;
         _clock = clock;
         _logger = logger;
     }
@@ -269,7 +272,9 @@ public sealed class SyncConnectionService
                 // could not be read (login error at the bank, another bank of the same connection going on alone).
                 var from = window.FromFor(await _sync.GetLastTransactionDayAsync(account.Id, ct));
                 var transactions = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
-                await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
+                var arrived = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
+                // Before anyone sees them: transfers between accounts of the group, bill payments and suspected duplicates.
+                await _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, ct);
                 await RemoveVanishedAsync(account, transactions, from, window.To, ct);
                 await SaveAsync(connection, ct);
             }
@@ -323,7 +328,11 @@ public sealed class SyncConnectionService
         return stored;
     }
 
-    private async Task UpsertTransactionsAsync(
+    /// <summary>
+    /// Returns the lines the automatic rules have not seen as settled yet: the new ones, and the ones the bank had
+    /// not settled the last time and has now.
+    /// </summary>
+    private async Task<IReadOnlyList<ArrivedBankLine>> UpsertTransactionsAsync(
         SyncRun run, BankConnection connection, BankAccount account, IReadOnlyList<PluggyTransaction> transactions, AiBudget ai, CancellationToken ct)
     {
         var incoming = transactions
@@ -333,6 +342,7 @@ public sealed class SyncConnectionService
         var now = _clock.UtcNow;
         var added = 0;
         var updated = 0;
+        var arrived = new List<ArrivedBankLine>();
 
         foreach (var chunk in incoming.Chunk(LookupChunk))
         {
@@ -347,16 +357,21 @@ public sealed class SyncConnectionService
                 {
                     // The id is unique in the whole database: a row of another account is not this account's to change.
                     if (row.BankAccountId != account.Id) continue;
+                    var waitedForTheBank = row.Status == BankTransactionStatus.Pending;
                     row.Refresh(snapshot, run.Id, now);
                     updated++;
+                    if (waitedForTheBank && row.Status == BankTransactionStatus.Posted)
+                        arrived.Add(new ArrivedBankLine(row, transaction.PayerName));
                     continue;
                 }
 
                 var suggested = BankTransaction.TypeOf(transaction.Type, transaction.Amount) == BankTransactionType.Debit
                     ? await SuggestCategoryAsync(transaction, ai, ct)
                     : null;
-                created.Add(BankTransaction.Create(
-                    connection.CoupleId, connection.UserId, account.Id, transaction.Id, snapshot, suggested, run.Id, now));
+                var line = BankTransaction.Create(
+                    connection.CoupleId, connection.UserId, account.Id, transaction.Id, snapshot, suggested, run.Id, now);
+                created.Add(line);
+                arrived.Add(new ArrivedBankLine(line, transaction.PayerName));
                 added++;
             }
 
@@ -364,6 +379,7 @@ public sealed class SyncConnectionService
         }
 
         run.AddCounts(added, updated);
+        return arrived;
     }
 
     /// <summary>

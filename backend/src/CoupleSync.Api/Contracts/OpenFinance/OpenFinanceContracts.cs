@@ -97,7 +97,23 @@ public sealed record BankReviewLineResponse(
     string BankName,
     string AccountName,
     int? InstallmentNumber,
-    int? InstallmentTotal);
+    int? InstallmentTotal,
+    string Type,
+    string? AutoReason,
+    BankReviewMatchResponse? Match);
+
+/// <summary>
+/// The transaction of the app a waiting line looks the same as (suspected duplicate). <c>Source</c> is how it entered
+/// the app (<c>Manual</c>, <c>OcrImport</c> or <c>Notification</c>); <c>Day</c> is its day in Brazil.
+/// </summary>
+public sealed record BankReviewMatchResponse(
+    Guid TransactionId,
+    string Source,
+    string? Description,
+    string? Merchant,
+    decimal Amount,
+    string Currency,
+    DateOnly Day);
 
 public sealed record BankReviewMonthResponse(string Month, int Pending);
 
@@ -112,14 +128,30 @@ public sealed record BankReviewResponse(
     IReadOnlyList<BankReviewLineResponse> Discarded,
     decimal PendingTotalBrl,
     int PendingAllMonths,
-    IReadOnlyList<BankReviewMonthResponse> PendingByMonth);
+    IReadOnlyList<BankReviewMonthResponse> PendingByMonth,
+    IReadOnlyList<BankReviewLineResponse> Ignored,
+    int SuspectedDuplicates);
 
 /// <summary>The value is never editable: only the category and the description.</summary>
 public sealed record ConfirmExpenseRequest(Guid Id, string? Category, string? Description);
 
-public sealed record ConfirmBankReviewRequest(IReadOnlyList<ConfirmExpenseRequest>? Expenses, IReadOnlyList<Guid>? Discard);
+/// <summary>"It is the same": the line that is the transaction the app already had.</summary>
+public sealed record ReconcileBankLineRequest(Guid Id);
+
+/// <summary>
+/// <c>Reconcile</c>: lines that are the same as the transaction they were suspected of repeating (nothing is created).
+/// <c>AsNew</c>: suspected lines that are another expense (confirmed like <c>Expenses</c>, with the suggested category).
+/// Both are optional: a request without them means what it always meant.
+/// </summary>
+public sealed record ConfirmBankReviewRequest(
+    IReadOnlyList<ConfirmExpenseRequest>? Expenses,
+    IReadOnlyList<Guid>? Discard,
+    IReadOnlyList<ReconcileBankLineRequest>? Reconcile = null,
+    IReadOnlyList<Guid>? AsNew = null);
 
 public sealed record BankReviewCreatedResponse(Guid Id, Guid TransactionId);
+
+public sealed record BankReviewReconciledResponse(Guid Id, Guid TransactionId);
 
 /// <summary>
 /// <c>Skipped</c>: lines sent in <c>expenses</c> that cannot become an expense: no value (zero), or a currency that
@@ -131,6 +163,7 @@ public sealed record ConfirmBankReviewResponse(
     IReadOnlyList<Guid> Discarded,
     int AlreadyConfirmed,
     IReadOnlyList<Guid> Skipped,
-    IReadOnlyList<Guid> SkippedOtherCurrency);
+    IReadOnlyList<Guid> SkippedOtherCurrency,
+    IReadOnlyList<BankReviewReconciledResponse> Reconciled);
 
 public sealed record RestoreBankReviewResponse(IReadOnlyList<Guid> Restored);

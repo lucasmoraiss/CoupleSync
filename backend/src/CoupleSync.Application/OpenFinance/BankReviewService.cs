@@ -9,7 +9,8 @@ namespace CoupleSync.Application.OpenFinance;
 /// <summary>
 /// The review of what came from the bank: nothing of the mirror becomes a transaction of the app without someone of
 /// the group confirming it here. Anyone of the group reviews; the transaction created belongs to who connected the
-/// account. Only expenses in this phase.
+/// account. Only expenses in this phase. A line that looks the same as a transaction the app already has is
+/// answered here too: "it is the same" (reconcile: nothing is created) or "it is another one" (confirmed as new).
 /// </summary>
 public sealed class BankReviewService
 {
@@ -19,6 +20,13 @@ public sealed class BankReviewService
     public const string InvalidSelectionCode = "INVALID_SELECTION";
     public const string ConflictCode = "BANK_REVIEW_CONFLICT";
     public const string InvalidMonthCode = "INVALID_MONTH";
+    public const string NotMatchedCode = "BANK_TRANSACTION_NOT_MATCHED";
+    public const string MatchTakenCode = "MATCHED_TRANSACTION_TAKEN";
+
+    private const string NotMatchedMessage =
+        "Este lançamento não tem mais uma transação parecida para conciliar. Atualize a revisão e tente de novo.";
+    private const string MatchTakenMessage =
+        "A transação parecida já está ligada a outro lançamento do banco. Confirme este como outra despesa ou descarte.";
 
     /// <summary>Lines of one request, at most (the app sends batches of 200).</summary>
     public const int MaxLinesPerRequest = 500;
@@ -62,16 +70,23 @@ public sealed class BankReviewService
     public static string FingerprintOf(IFingerprintGenerator generator, Guid coupleId, string pluggyTransactionId)
         => generator.Generate(coupleId, TransactionEventIngest.OpenFinanceBank, 0m, CurrencyRules.Brl, DateTime.UnixEpoch, pluggyTransactionId);
 
-    /// <summary>The expenses of a month of Brazil ("yyyy-MM"; the current one when absent) waiting, and the discarded ones apart.</summary>
+    /// <summary>
+    /// The expenses of a month of Brazil ("yyyy-MM"; the current one when absent) waiting (each with the transaction
+    /// it looks the same as, when there is one), and apart the discarded and the automatically ignored ones.
+    /// </summary>
     public async Task<BankReviewDto> GetReviewAsync(Guid coupleId, string? month, CancellationToken ct)
     {
         var (key, from) = ParseMonth(month);
         var rows = await _sync.GetReviewExpensesAsync(coupleId, from, from.AddMonths(1), ct);
+        var ignored = await _sync.GetIgnoredAsync(coupleId, from, from.AddMonths(1), ct);
         var names = await _sync.GetAccountNamesAsync(coupleId, ct);
         var pending = await _sync.GetPendingExpensesAsync(coupleId, ct);
 
         var expenses = rows.Where(r => r.ReviewState == BankTransactionReviewState.Pending).ToList();
         var discarded = rows.Where(r => r.ReviewState == BankTransactionReviewState.Discarded).ToList();
+        var matches = await _sync.GetTransactionSummariesAsync(
+            expenses.Where(r => r.MatchedTransactionId is not null).Select(r => r.MatchedTransactionId!.Value).ToList(), coupleId, ct);
+        var expenseLines = Order(expenses).Select(r => MapLine(r, names, matches)).ToList();
 
         var byMonth = pending
             .GroupBy(p => $"{p.Day.Year:D4}-{p.Day.Month:D2}", StringComparer.Ordinal)
@@ -81,33 +96,66 @@ public sealed class BankReviewService
 
         return new BankReviewDto(
             key,
-            Order(expenses).Select(r => MapLine(r, names)).ToList(),
+            expenseLines,
             Order(discarded).Select(r => MapLine(r, names)).ToList(),
             // Sums in reais count only reais: a purchase in another currency is listed, never added.
             expenses.Where(r => CurrencyRules.IsBrl(r.Currency)).Sum(r => r.AbsoluteAmount),
             // "N to review" is what can be confirmed. What cannot (pending at the bank, without a value, in another
             // currency) is still listed in its month, and counted there, to be discarded.
             pending.Count(p => BankTransaction.CanBecomeExpense(p.Status, p.Amount, p.Currency)),
-            byMonth);
+            byMonth,
+            Order(ignored).Select(r => MapLine(r, names)).ToList(),
+            expenseLines.Count(l => l.Match is not null));
     }
 
+    /// <summary>
+    /// <paramref name="expenses"/> become transactions; <paramref name="asNew"/> too (the answer "it is another one"
+    /// to a suspected duplicate, with the suggested category); <paramref name="reconcile"/> are the answer "it is the
+    /// same": the line points to the transaction the app already had and nothing is created;
+    /// <paramref name="discard"/> are discarded. All or nothing.
+    /// </summary>
     public async Task<BankReviewConfirmResult> ConfirmAsync(
-        Guid coupleId, IReadOnlyList<ConfirmExpenseInput>? expenses, IReadOnlyList<Guid>? discard, CancellationToken ct)
+        Guid coupleId,
+        IReadOnlyList<ConfirmExpenseInput>? expenses,
+        IReadOnlyList<Guid>? discard,
+        IReadOnlyList<Guid>? reconcile,
+        IReadOnlyList<Guid>? asNew,
+        CancellationToken ct)
     {
         expenses ??= [];
+        asNew ??= [];
+        var reconcileIds = (reconcile ?? []).ToList();
         var discardIds = (discard ?? []).Distinct().ToList();
+        var typedIds = expenses.Select(e => e.Id).ToList();
+
+        if (typedIds.Count == 0 && discardIds.Count == 0 && reconcileIds.Count == 0 && asNew.Count == 0)
+            throw new UnprocessableEntityException(InvalidSelectionCode, "Selecione pelo menos um lançamento.");
+        if (typedIds.Count > MaxLinesPerRequest || discardIds.Count > MaxLinesPerRequest
+            || reconcileIds.Count > MaxLinesPerRequest || asNew.Count > MaxLinesPerRequest)
+        {
+            throw new UnprocessableEntityException(InvalidSelectionCode, $"Envie no máximo {MaxLinesPerRequest} lançamentos por vez.");
+        }
+
+        if (typedIds.Count != typedIds.Distinct().Count()
+            || reconcileIds.Count != reconcileIds.Distinct().Count()
+            || asNew.Count != asNew.Distinct().Count())
+        {
+            throw new UnprocessableEntityException(InvalidSelectionCode, "O mesmo lançamento foi enviado mais de uma vez.");
+        }
+
+        if (typedIds.Intersect(discardIds).Any())
+            throw new UnprocessableEntityException(InvalidSelectionCode, "Um lançamento não pode ser confirmado e descartado ao mesmo tempo.");
+        if (reconcileIds.Intersect(typedIds).Any() || reconcileIds.Intersect(discardIds).Any() || reconcileIds.Intersect(asNew).Any()
+            || asNew.Intersect(typedIds).Any() || asNew.Intersect(discardIds).Any())
+        {
+            throw new UnprocessableEntityException(InvalidSelectionCode, "Um lançamento só pode ter um destino por vez.");
+        }
+
+        // "It is another one" is a confirmation like any other, with what the bank and the table suggest.
+        expenses = expenses.Concat(asNew.Select(id => new ConfirmExpenseInput(id, null, null))).ToList();
         var expenseIds = expenses.Select(e => e.Id).ToList();
 
-        if (expenseIds.Count == 0 && discardIds.Count == 0)
-            throw new UnprocessableEntityException(InvalidSelectionCode, "Selecione pelo menos um lançamento.");
-        if (expenseIds.Count != expenseIds.Distinct().Count())
-            throw new UnprocessableEntityException(InvalidSelectionCode, "O mesmo lançamento foi enviado mais de uma vez.");
-        if (expenseIds.Intersect(discardIds).Any())
-            throw new UnprocessableEntityException(InvalidSelectionCode, "Um lançamento não pode ser confirmado e descartado ao mesmo tempo.");
-        if (expenseIds.Count > MaxLinesPerRequest || discardIds.Count > MaxLinesPerRequest)
-            throw new UnprocessableEntityException(InvalidSelectionCode, $"Envie no máximo {MaxLinesPerRequest} lançamentos por vez.");
-
-        var allIds = expenseIds.Concat(discardIds).ToList();
+        var allIds = expenseIds.Concat(discardIds).Concat(reconcileIds).ToList();
         var rows = (await _sync.FindByIdsAsync(allIds, coupleId, ct)).ToDictionary(r => r.Id);
         // A line of another group does not exist for this one.
         if (allIds.Any(id => !rows.ContainsKey(id)))
@@ -117,13 +165,14 @@ public sealed class BankReviewService
             throw new UnprocessableEntityException(InvalidSelectionCode, "Entradas não são confirmadas como despesa.");
 
         // What the bank has not settled yet may still change or vanish: it cannot become a transaction.
-        if (expenseIds.Any(id => rows[id].Status == BankTransactionStatus.Pending))
+        if (expenseIds.Concat(reconcileIds).Any(id => rows[id].Status == BankTransactionStatus.Pending))
             throw new UnprocessableEntityException(
                 NotPostedCode,
                 "Este lançamento ainda está pendente no banco. Ele poderá ser confirmado quando o banco o efetivar.");
 
         if (expenseIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Confirmed))
-            || discardIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Discarded)))
+            || discardIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Discarded))
+            || reconcileIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Reconciled)))
         {
             throw new ConflictException(NotPendingCode, "Este lançamento já foi revisado. Atualize a revisão e tente de novo.");
         }
@@ -214,6 +263,8 @@ public sealed class BankReviewService
             discarded.Add(id);
         }
 
+        var reconciled = await ReconcileAsync(coupleId, reconcileIds.Select(id => rows[id]).ToList(), now, ct);
+
         try
         {
             if (transactions.Count > 0)
@@ -236,7 +287,47 @@ public sealed class BankReviewService
 
         await RaiseAlertsAsync(coupleId, transactions, ct);
 
-        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed, skipped, skippedOtherCurrency);
+        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed, skipped, skippedOtherCurrency, reconciled);
+    }
+
+    /// <summary>
+    /// "It is the same": each line points to the transaction it was suspected of repeating, and that transaction
+    /// takes from the bank only the merchant and the category it did not have. Nothing is created and nothing is
+    /// saved here (the caller saves everything together). A line reconciled before answers what it answered then.
+    /// </summary>
+    private async Task<List<BankReviewReconciledDto>> ReconcileAsync(
+        Guid coupleId, IReadOnlyList<BankTransaction> lines, DateTime now, CancellationToken ct)
+    {
+        var reconciled = new List<BankReviewReconciledDto>();
+        var taken = new HashSet<Guid>();
+
+        foreach (var row in lines)
+        {
+            if (row.ReviewState == BankTransactionReviewState.Reconciled)
+            {
+                // The same request sent twice. Without the link, the transaction was deleted meanwhile and the line
+                // is about to leave this state (or already left): there is nothing to answer for it.
+                if (row.LinkedTransactionId is { } linked) reconciled.Add(new BankReviewReconciledDto(row.Id, linked));
+                continue;
+            }
+
+            if (row.MatchedTransactionId is not { } matchedId)
+                throw new ConflictException(NotMatchedCode, NotMatchedMessage);
+
+            // Read through the group of the token: a transaction of another group does not exist for this one.
+            var transaction = await _transactions.GetByIdAsync(matchedId, coupleId, ct)
+                ?? throw new ConflictException(NotMatchedCode, NotMatchedMessage);
+
+            // One transaction is one line of the bank: a second line can only be another expense.
+            if (!taken.Add(transaction.Id) || await _sync.FindByLinkedTransactionAsync(transaction.Id, coupleId, ct) is not null)
+                throw new ConflictException(MatchTakenCode, MatchTakenMessage);
+
+            transaction.FillMissing(row.MerchantName ?? row.Description ?? row.DescriptionRaw, row.SuggestedCategory);
+            row.Reconcile(transaction.Id, now);
+            reconciled.Add(new BankReviewReconciledDto(row.Id, transaction.Id));
+        }
+
+        return reconciled;
     }
 
     /// <summary>
@@ -265,7 +356,10 @@ public sealed class BankReviewService
         }
     }
 
-    /// <summary>Discarded lines go back to waiting. Lines in any other state stay as they are.</summary>
+    /// <summary>
+    /// Discarded and automatically ignored lines go back to waiting, and from then on no automatic rule decides about
+    /// them again. Lines in any other state stay as they are.
+    /// </summary>
     public async Task<IReadOnlyList<Guid>> RestoreAsync(Guid coupleId, IReadOnlyList<Guid>? ids, CancellationToken ct)
     {
         var wanted = (ids ?? []).Distinct().ToList();
@@ -321,9 +415,14 @@ public sealed class BankReviewService
     private static IEnumerable<BankTransaction> Order(IEnumerable<BankTransaction> rows)
         => rows.OrderByDescending(r => r.LocalDate).ThenByDescending(r => r.Date).ThenBy(r => r.Id);
 
-    private static BankReviewLineDto MapLine(BankTransaction row, IReadOnlyDictionary<Guid, BankAccountNames> names)
+    private static BankReviewLineDto MapLine(
+        BankTransaction row,
+        IReadOnlyDictionary<Guid, BankAccountNames> names,
+        IReadOnlyDictionary<Guid, MatchedTransactionSummary>? matches = null)
     {
         names.TryGetValue(row.BankAccountId, out var account);
+        MatchedTransactionSummary? match = null;
+        if (row.MatchedTransactionId is { } matchedId) matches?.TryGetValue(matchedId, out match);
         return new BankReviewLineDto(
             row.Id,
             row.LocalDate,
@@ -336,6 +435,18 @@ public sealed class BankReviewService
             account?.BankName ?? string.Empty,
             account?.AccountName ?? string.Empty,
             row.InstallmentNumber,
-            row.InstallmentTotal);
+            row.InstallmentTotal,
+            row.Type.ToString(),
+            row.ReviewState == BankTransactionReviewState.Ignored ? row.AutoReason : null,
+            match is null
+                ? null
+                : new BankReviewMatchDto(
+                    match.Id,
+                    match.Source.ToString(),
+                    match.Description,
+                    match.Merchant,
+                    match.Amount,
+                    match.Currency,
+                    BankReconciliationRules.LocalDayOf(match.EventTimestampUtc)));
     }
 }

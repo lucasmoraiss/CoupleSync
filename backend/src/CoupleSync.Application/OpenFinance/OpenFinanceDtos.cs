@@ -64,7 +64,11 @@ public sealed record SyncRunDto(
     string? ErrorCode,
     string? ErrorMessage);
 
-/// <summary>What the review shows of a bank transaction. Never the raw JSON Pluggy sent.</summary>
+/// <summary>
+/// What the review shows of a bank transaction. Never the raw JSON Pluggy sent. <c>Type</c> is <c>Debit</c> (money
+/// that left) or <c>Credit</c>; <c>AutoReason</c> is why an ignored line was ignored (<c>Transfer</c> or
+/// <c>BillPayment</c>); <c>Match</c> is the transaction of the app a waiting line looks the same as.
+/// </summary>
 public sealed record BankReviewLineDto(
     Guid Id,
     DateOnly Day,
@@ -77,29 +81,54 @@ public sealed record BankReviewLineDto(
     string BankName,
     string AccountName,
     int? InstallmentNumber,
-    int? InstallmentTotal);
+    int? InstallmentTotal,
+    string Type,
+    string? AutoReason,
+    BankReviewMatchDto? Match);
+
+/// <summary>The transaction of the app a bank line looks the same as. <c>Day</c> is its day in Brazil; <c>Source</c> is how it entered the app.</summary>
+public sealed record BankReviewMatchDto(
+    Guid TransactionId,
+    string Source,
+    string? Description,
+    string? Merchant,
+    decimal Amount,
+    string Currency,
+    DateOnly Day);
 
 public sealed record BankReviewMonthDto(string Month, int Pending);
 
+/// <summary>
+/// <c>Ignored</c>: the lines of the month ignored automatically (transfers between accounts of the group, bill
+/// payments), money that left and money that came in. <c>SuspectedDuplicates</c>: how many of <c>Expenses</c> look
+/// the same as a transaction the app already has.
+/// </summary>
 public sealed record BankReviewDto(
     string Month,
     IReadOnlyList<BankReviewLineDto> Expenses,
     IReadOnlyList<BankReviewLineDto> Discarded,
     decimal PendingTotalBrl,
     int PendingAllMonths,
-    IReadOnlyList<BankReviewMonthDto> PendingByMonth);
+    IReadOnlyList<BankReviewMonthDto> PendingByMonth,
+    IReadOnlyList<BankReviewLineDto> Ignored,
+    int SuspectedDuplicates);
 
 public sealed record ConfirmExpenseInput(Guid Id, string? Category, string? Description);
 
 public sealed record BankReviewCreatedDto(Guid Id, Guid TransactionId);
 
+/// <summary>A line the person said is the same as a transaction the app already had, and that transaction.</summary>
+public sealed record BankReviewReconciledDto(Guid Id, Guid TransactionId);
+
 /// <summary>
 /// <c>Skipped</c>: lines asked to be confirmed that cannot become an expense (no value, or another currency); they
 /// stay waiting (to be discarded). <c>SkippedOtherCurrency</c>: the ones of them skipped for the currency.
+/// <c>Reconciled</c>: the lines that now point to the transaction the app already had (nothing was created for them).
 /// </summary>
 public sealed record BankReviewConfirmResult(
     IReadOnlyList<BankReviewCreatedDto> Created,
     IReadOnlyList<Guid> Discarded,
     int AlreadyConfirmed,
     IReadOnlyList<Guid> Skipped,
-    IReadOnlyList<Guid> SkippedOtherCurrency);
+    IReadOnlyList<Guid> SkippedOtherCurrency,
+    IReadOnlyList<BankReviewReconciledDto> Reconciled);
