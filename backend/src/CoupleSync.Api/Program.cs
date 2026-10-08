@@ -102,6 +102,9 @@ builder.Services.AddScoped<IncomeService>();
 builder.Services.AddScoped<ImportJobService>();
 builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<OpenFinanceService>();
+builder.Services.AddScoped<SyncConnectionService>();
+builder.Services.AddScoped<SyncRunService>();
+builder.Services.AddScoped<BankReviewService>();
 builder.Services.AddScoped<ChatContextService>();
 builder.Services.AddScoped<AssistantChatService>();
 

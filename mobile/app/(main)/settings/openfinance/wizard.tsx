@@ -1,6 +1,6 @@
-// Wizard do Open Finance (Meu Pluggy), passos 1 a 4: o que é e aceite de privacidade, conectar os bancos no
-// Meu Pluggy, credenciais do Dashboard (testadas e guardadas cifradas no servidor) e um Item ID por banco.
-// Nesta fase termina no passo 4; a sincronização vem na próxima atualização.
+// Wizard do Open Finance (Meu Pluggy), passos 1 a 5: o que é e aceite de privacidade, conectar os bancos no
+// Meu Pluggy, credenciais do Dashboard (testadas e guardadas cifradas no servidor), um Item ID por banco e o
+// período do histórico, com a primeira sincronização (que roda no servidor; a tela só acompanha).
 //
 // O Client ID, o Client Secret e os Item IDs ficam só na memória desta tela, que é remontada a cada visita
 // (resetOnFocus). O que é guardado no aparelho é só o passo (wizardStore.ts).
@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { openFinanceApiClient } from '@/services/apiClient';
 import { getApiErrorCode, getApiErrorMessage } from '@/services/apiError';
@@ -28,7 +29,21 @@ import { TextSections } from '@/components/TextSections';
 import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { colors } from '@/theme';
 import { isOpenFinanceAccepted } from '@/modules/privacy/consent';
-import { useConsentStore } from '@/modules/privacy/consentStore';
+import { isAiChatAllowedNow, useConsentStore } from '@/modules/privacy/consentStore';
+import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
+import { aiConsentForUpload } from '@/modules/ocr/uploadForm';
+import { BANK_REVIEW_KEY } from '@/modules/openfinance/useBankReview';
+import { useSyncRun } from '@/modules/openfinance/useSyncRun';
+import { reviewDoneLabel } from '@/modules/openfinance/review';
+import {
+  HISTORY_OPTIONS,
+  SYNC_STILL_RUNNING_TEXT,
+  historyLabel,
+  historyMonthsWithCredentials,
+  neverSynced,
+  runProgressText,
+  runResultText,
+} from '@/modules/openfinance/sync';
 import { OPEN_FINANCE_CONSENT_SECTIONS, OPEN_FINANCE_CONSENT_TITLE } from '@/modules/privacy/privacyContent';
 import { OPEN_FINANCE_STATUS_KEY, useOpenFinanceStatus } from '@/modules/openfinance/useOpenFinanceStatus';
 import { useWizardStore } from '@/modules/openfinance/wizardStore';
@@ -40,10 +55,12 @@ import {
   MAX_LABEL_LENGTH,
   MEU_PLUGGY_STEPS,
   MEU_PLUGGY_URL,
+  PERIOD_ALREADY_CHOSEN_TEXT,
+  PERIOD_TEXT,
   UNAVAILABLE_TEXT,
   UNAVAILABLE_TITLE,
-  WIZARD_DONE_MESSAGE,
   WIZARD_STEP_TITLES,
+  WIZARD_TOTAL_STEPS,
   canContinueFromBanks,
   canCreateConnection,
   canFinishWizard,
@@ -107,7 +124,6 @@ function OpenFinanceWizardScreen() {
 
   // Passo em que a tela está. null até dar para decidir (status do servidor, aceite e progresso lidos).
   const [step, setStep] = useState<WizardStep | null>(null);
-  const [done, setDone] = useState(false);
   /** O que está em andamento: uma ação por vez. */
   const [pending, setPending] = useState<'accept' | 'test' | 'create' | null>(null);
   const busy = pending !== null;
@@ -125,6 +141,16 @@ function OpenFinanceWizardScreen() {
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [items, setItems] = useState<ItemField[]>([newItemField(0)]);
   const [verifyingKey, setVerifyingKey] = useState<number | null>(null);
+  // Passo 5
+  const [historyMonths, setHistoryMonths] = useState<number>(3);
+  /**
+   * O período só é escolhido antes da primeira sincronização da conexão. Decidido ao chegar ao passo 5 (e não a
+   * cada desenho): a sincronização pedida aqui mesmo muda a conexão, e a tela não troca no meio.
+   */
+  const [periodChoosable, setPeriodChoosable] = useState(true);
+  const sync = useSyncRun();
+  /** Quantas despesas esperam a revisão depois da sincronização (null: ainda não se sabe). */
+  const [toReview, setToReview] = useState<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -147,7 +173,11 @@ function OpenFinanceWizardScreen() {
     const first = startingStep({ progress, consentAccepted, myConnection: mine });
     setStep(first);
     setBanksConnected(progress.banksConnected || first > 2);
-    if (first === 4 && mine) setConnectionId(mine.id);
+    if (first >= 4 && mine) {
+      setConnectionId(mine.id);
+      setHistoryMonths(mine.historyMonths);
+    }
+    setPeriodChoosable(neverSynced(mine));
   }, [ready, step, consentAccepted, mine]);
 
   /** Muda de passo na tela e guarda o progresso (sem nada sensível). */
@@ -158,8 +188,9 @@ function OpenFinanceWizardScreen() {
   };
 
   const handleBack = () => {
-    // Com a conexão criada não há passo anterior a refazer; no primeiro passo, voltar é sair.
-    if (done || step === null || step === 1 || step === 4) {
+    // Com a conexão criada não há passo anterior a refazer; no primeiro passo, voltar é sair. Depois de pedir a
+    // sincronização, voltar também é sair (ela segue no servidor).
+    if (step === null || step === 1 || step === 4 || (step === 5 && sync.phase !== 'idle')) {
       leave();
       return;
     }
@@ -223,7 +254,8 @@ function OpenFinanceWizardScreen() {
         label: label.trim(),
         clientId: clientId.trim(),
         clientSecret: clientSecret.trim(),
-        historyMonths: 3,
+        // Reconectar uma conexão que já sincronizou não manda período: o servidor mantém o que foi escolhido.
+        historyMonths: historyMonthsWithCredentials(mine),
       });
       if (getSessionEpoch() !== epoch) return;
       // As credenciais já estão no servidor: não ficam na memória da tela.
@@ -278,11 +310,43 @@ function OpenFinanceWizardScreen() {
     }
   };
 
-  const handleFinish = async () => {
+  const handleToPeriod = () => {
     if (!canFinishWizard(items.map((item) => ({ verified: item.found !== null })))) return;
-    setDone(true);
-    await useWizardStore.getState().finish();
+    setPeriodChoosable(neverSynced(mine));
+    goTo(5, { connectionId });
   };
+
+  // ------------------------------------------------------------------ passo 5
+
+  const handleSync = async () => {
+    if (!connectionId || sync.phase === 'working') return;
+    const epoch = getSessionEpoch();
+    setNotice(null);
+    setToReview(null);
+    const run = await sync.start(
+      connectionId,
+      {
+        historyMonths: periodChoosable ? historyMonths : undefined,
+        aiConsent: aiConsentForUpload(AI_FEATURE_ENABLED, isAiChatAllowedNow()),
+      },
+      // Pedido aceito pelo servidor: o wizard terminou ali, não há mais o que retomar. Não espera a sincronização
+      // acabar: quem sair no meio não encontra o wizard preso neste passo.
+      () => void useWizardStore.getState().finish(),
+    );
+    if (getSessionEpoch() !== epoch || !run) return;
+    void queryClient.invalidateQueries({ queryKey: OPEN_FINANCE_STATUS_KEY });
+    void queryClient.invalidateQueries({ queryKey: BANK_REVIEW_KEY });
+    if (run.status !== 'Done') return;
+    try {
+      const { data: review } = await openFinanceApiClient.getReview();
+      if (getSessionEpoch() === epoch) setToReview(review.pendingAllMonths ?? 0);
+    } catch {
+      // Sem a contagem, o botão leva à revisão do mesmo jeito.
+      if (getSessionEpoch() === epoch) setToReview(null);
+    }
+  };
+
+  const openReview = () => router.push('/(main)/openfinance/review' as any);
 
   // ------------------------------------------------------------------ telas de espera, erro e indisponível
 
@@ -315,24 +379,6 @@ function OpenFinanceWizardScreen() {
   }
   if (step === null) return <LoadingState />;
 
-  if (done) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.content}>
-          <Text style={styles.title} accessibilityRole="header">Tudo certo</Text>
-          <Text style={styles.paragraph} accessibilityRole="alert">{WIZARD_DONE_MESSAGE}</Text>
-          {items.filter((item) => item.found).map((item) => (
-            <Text key={item.key} style={styles.found}>{item.found}</Text>
-          ))}
-          <View style={styles.spacer} />
-          <TouchableOpacity style={styles.primaryBtn} onPress={leave} accessibilityRole="button" accessibilityLabel="Ver as conexões do grupo">
-            <Text style={styles.primaryText}>Ver conexões</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   const canTest = canTestCredentials(clientId, clientSecret, busy);
   const canCreate = canCreateConnection(label, clientId, clientSecret, tested, busy);
   const credentialsValid = sameCredentials(tested, clientId, clientSecret);
@@ -343,7 +389,7 @@ function OpenFinanceWizardScreen() {
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'android' ? 'height' : 'padding'}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {backLink}
-          <Text style={styles.stepLabel}>Passo {step} de 4 · {WIZARD_STEP_TITLES[step]}</Text>
+          <Text style={styles.stepLabel}>Passo {step} de {WIZARD_TOTAL_STEPS} · {WIZARD_STEP_TITLES[step]}</Text>
 
           {step === 1 ? (
             <>
@@ -562,14 +608,95 @@ function OpenFinanceWizardScreen() {
 
               <TouchableOpacity
                 style={[styles.primaryBtn, !canFinish && styles.disabled]}
-                onPress={() => void handleFinish()}
+                onPress={handleToPeriod}
                 disabled={!canFinish}
                 accessibilityRole="button"
-                accessibilityLabel="Concluir a conexão"
+                accessibilityLabel="Continuar para o passo 5"
                 accessibilityState={{ disabled: !canFinish }}
               >
-                <Text style={styles.primaryText}>Concluir</Text>
+                <Text style={styles.primaryText}>Continuar</Text>
               </TouchableOpacity>
+            </>
+          ) : null}
+
+          {step === 5 ? (
+            <>
+              <Text style={styles.title} accessibilityRole="header">{periodChoosable ? 'Quanto do passado trazer' : 'Sincronizar'}</Text>
+              <Text style={styles.subtitle}>{periodChoosable ? PERIOD_TEXT : PERIOD_ALREADY_CHOSEN_TEXT}</Text>
+
+              {periodChoosable ? (
+                <View accessibilityRole="radiogroup" accessibilityLabel="Período do histórico" style={styles.options}>
+                  {HISTORY_OPTIONS.map((months) => {
+                    const chosen = historyMonths === months;
+                    const locked = sync.phase !== 'idle' && sync.phase !== 'failed';
+                    return (
+                      <TouchableOpacity
+                        key={months}
+                        style={[styles.option, chosen && styles.optionOn, locked && styles.disabled]}
+                        onPress={() => setHistoryMonths(months)}
+                        disabled={locked}
+                        accessibilityRole="radio"
+                        accessibilityLabel={`Últimos ${historyLabel(months)}`}
+                        accessibilityState={{ checked: chosen, disabled: locked }}
+                      >
+                        <Text style={[styles.optionText, chosen && styles.optionTextOn]}>{historyLabel(months)}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : null}
+
+              {sync.phase === 'idle' || sync.phase === 'failed' ? (
+                <TouchableOpacity
+                  style={[styles.primaryBtn, !connectionId && styles.disabled]}
+                  onPress={() => void handleSync()}
+                  disabled={!connectionId}
+                  accessibilityRole="button"
+                  accessibilityLabel={sync.phase === 'failed' ? 'Tentar sincronizar de novo' : periodChoosable ? 'Conectar e sincronizar' : 'Sincronizar agora'}
+                  accessibilityState={{ disabled: !connectionId }}
+                >
+                  <Text style={styles.primaryText}>
+                    {sync.phase === 'failed' ? 'Tentar de novo' : periodChoosable ? 'Conectar e sincronizar' : 'Sincronizar agora'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+
+              {sync.phase === 'working' ? (
+                <View style={styles.progress} accessibilityRole="progressbar" accessibilityLiveRegion="polite">
+                  <ActivityIndicator color={colors.primaryLight} />
+                  <Text style={styles.paragraph}>{runProgressText(sync.run)}</Text>
+                </View>
+              ) : null}
+
+              {sync.phase === 'failed' ? (
+                <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+                  {sync.run ? runResultText(sync.run) : sync.requestError}
+                </Text>
+              ) : null}
+
+              {sync.phase === 'stillRunning' ? (
+                <Text style={styles.paragraph} accessibilityRole="alert" accessibilityLiveRegion="polite">{SYNC_STILL_RUNNING_TEXT}</Text>
+              ) : null}
+
+              {sync.phase === 'done' && sync.run ? (
+                <>
+                  <Text style={styles.found} accessibilityRole="alert" accessibilityLiveRegion="polite">{runResultText(sync.run)}</Text>
+                  <TouchableOpacity
+                    style={styles.primaryBtn}
+                    onPress={openReview}
+                    accessibilityRole="button"
+                    accessibilityLabel={toReview === null ? 'Ver as transações para revisar' : reviewDoneLabel(toReview)}
+                  >
+                    <Text style={styles.primaryText}>{toReview === null ? 'Ver transações para revisar' : reviewDoneLabel(toReview)}</Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
+
+              {sync.phase !== 'idle' && sync.phase !== 'working' ? (
+                <TouchableOpacity style={styles.secondaryBtn} onPress={leave} accessibilityRole="button" accessibilityLabel="Ver as conexões do grupo">
+                  <Text style={styles.secondaryText}>Ver conexões</Text>
+                </TouchableOpacity>
+              ) : null}
             </>
           ) : null}
 
@@ -625,5 +752,10 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   found: { fontSize: 14, color: colors.success, lineHeight: 20 },
   errorText: { fontSize: 14, color: colors.errorLight, lineHeight: 20 },
-  spacer: { height: 16 },
+  options: { flexDirection: 'row', gap: 10 },
+  option: { flex: 1, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
+  optionOn: { borderColor: colors.primary, backgroundColor: colors.primary },
+  optionText: { color: colors.textSubtle, fontSize: 16, fontWeight: '600' },
+  optionTextOn: { color: colors.text },
+  progress: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48 },
 });

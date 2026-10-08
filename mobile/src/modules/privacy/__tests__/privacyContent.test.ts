@@ -140,6 +140,14 @@ describe('a tela Privacidade com o recurso de IA desligado no app (M-I3)', () =>
     expect(text).not.toMatch(/somente depois que você aceita o aviso do Chat IA/);
   });
 
+  it('com ou sem IA no app, a categorização cita os extratos importados e as despesas vindas do banco (revisão 1, M2)', () => {
+    for (const sections of [WITHOUT_AI, WITH_AI]) {
+      expect(flat(sections)).toContain(
+        'as descrições das linhas dos extratos importados e das despesas vindas do banco pelo Open Finance (categorização)',
+      );
+    }
+  });
+
   it('com IA no app, o texto é o do aceite do aviso do Chat IA', () => {
     const text = flat(WITH_AI);
     expect(text).toMatch(/somente depois que você aceita o aviso do Chat IA/);

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Infrastructure.Persistence;
 using CoupleSync.Infrastructure.Persistence.Seeders;
 using CoupleSync.TestSupport;
@@ -60,6 +61,24 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
     /// </summary>
     public string? LoopbackPluggyAddress { get; init; }
 
+    /// <summary>
+    /// The synchronisation job looks at its queue every 50 ms instead of every 5 s (the tests of the synchronisation
+    /// wait for the real hosted job). Off by default: the tests of the connection never have a run to execute.
+    /// </summary>
+    public bool FastSync { get; init; }
+
+    /// <summary>The daily scheduler ticks every 50 ms. Off by default (it would enqueue runs the tests did not ask for).</summary>
+    public bool SchedulerOn { get; init; }
+
+    /// <summary>Changes the services of the API after everything else here (to put a failing one in the place of a real one).</summary>
+    public Action<IServiceCollection>? ConfigureServices { get; init; }
+
+    /// <summary>The clock of the API: the real one, moved by <see cref="TestClock.Offset"/>.</summary>
+    public TestClock Clock { get; } = new();
+
+    /// <summary>The AI category classifier of the API: records what it is asked and answers <see cref="RecordingClassifier.Answer"/>.</summary>
+    public RecordingClassifier Classifier { get; } = new();
+
     /// <summary>Runs once, right before the next save of the API: what another request did in the meantime.</summary>
     public Func<Task>? BeforeNextSave
     {
@@ -92,7 +111,9 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
                 // Empty (not absent) so that a value in the machine's environment can never leak into a test.
                 ["OPENFINANCE_ENCRYPTION_KEY"] = _encryptionKey ?? string.Empty,
                 ["OpenFinance:PluggyBaseUrl"] = LoopbackPluggyAddress ?? FakePluggyServer.BaseUrl,
+                ["OpenFinance:SchedulerTickSeconds"] = SchedulerOn ? "0.05" : "0",
             };
+            if (FastSync) settings["OpenFinance:SyncPollSeconds"] = "0.05";
             if (!ProductionLogLevels)
             {
                 // Everything is captured, down to Trace (where HttpClient writes request headers).
@@ -120,9 +141,16 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
 
             services.AddDbContext<AppDbContext>(options => options.UseSqlite(_databaseConnectionString).AddInterceptors(_saveHook));
 
+            services.RemoveAll<IDateTimeProvider>();
+            services.AddSingleton<IDateTimeProvider>(Clock);
+            services.RemoveAll<ICategoryClassifier>();
+            services.AddSingleton<ICategoryClassifier>(Classifier);
+
             // Every call of the named client "Pluggy" lands on the in-memory fake: no network.
             if (LoopbackPluggyAddress is null)
                 services.AddHttpClient("Pluggy").ConfigurePrimaryHttpMessageHandler(() => Pluggy);
+
+            ConfigureServices?.Invoke(services);
 
             using var scope = services.BuildServiceProvider().CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -219,6 +247,49 @@ internal sealed class OpenFinanceApiFactory : TestApiFactory
 }
 
 internal sealed record Member(HttpClient Client, Guid UserId, Guid CoupleId, string JoinCode);
+
+/// <summary>The real clock, moved forward or back by <see cref="Offset"/>.</summary>
+internal sealed class TestClock : IDateTimeProvider
+{
+    private long _offsetTicks;
+
+    public TimeSpan Offset
+    {
+        get => TimeSpan.FromTicks(Interlocked.Read(ref _offsetTicks));
+        set => Interlocked.Exchange(ref _offsetTicks, value.Ticks);
+    }
+
+    public DateTime UtcNow => DateTime.UtcNow + Offset;
+
+    public void Advance(TimeSpan by) => Interlocked.Add(ref _offsetTicks, by.Ticks);
+
+    /// <summary>Makes "now" this instant (and lets time go on from there).</summary>
+    public void SetNow(DateTime utc) => Offset = DateTime.SpecifyKind(utc, DateTimeKind.Utc) - DateTime.UtcNow;
+}
+
+/// <summary>An AI classifier that calls nobody: it records every description it was sent.</summary>
+internal sealed class RecordingClassifier : ICategoryClassifier
+{
+    private readonly ConcurrentQueue<string> _asked = new();
+
+    public IReadOnlyCollection<string> Asked => _asked.ToArray();
+
+    /// <summary>What it answers (a label as the real one would: "Lazer"); null: no suggestion.</summary>
+    public string? Answer { get; set; }
+
+    /// <summary>When set, every call fails with this.</summary>
+    public Exception? Failure { get; set; }
+
+    /// <summary>Runs at every call, after it is recorded: what happens while the AI takes its time.</summary>
+    public Action? OnAsked { get; set; }
+
+    public Task<string?> SuggestCategoryAsync(string description, IReadOnlyList<string> availableCategories, CancellationToken ct)
+    {
+        _asked.Enqueue(description);
+        OnAsked?.Invoke();
+        return Failure is null ? Task.FromResult(Answer) : Task.FromException<string?>(Failure);
+    }
+}
 
 /// <summary>Everything the host logged, at every level, for the "no secret in the log" assertions.</summary>
 internal sealed class CapturedLogs : ILoggerProvider

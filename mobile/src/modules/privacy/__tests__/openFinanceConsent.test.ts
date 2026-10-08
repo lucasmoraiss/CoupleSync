@@ -107,8 +107,22 @@ describe('texto do passo "O que é"', () => {
     expect(text).toMatch(/aviso do Chat IA/);
   });
 
-  it('nesta versão nenhuma transação é trazida do banco', () => {
-    expect(text).toMatch(/próxima atualização/);
+  it('diz que as transações do banco são copiadas para o servidor a cada sincronização, e que nada entra sem revisão (issue #25)', () => {
+    expect(text).toContain('o servidor guarda uma cópia das transações desses bancos');
+    expect(text).toMatch(/3, 6 ou 12 meses/);
+    expect(text).toMatch(/pede a sincronização sozinho ao ser aberto/);
+    expect(text).toContain('Nada entra nas suas finanças sem alguém do grupo revisar e confirmar.');
+    expect(text).not.toMatch(/próxima atualização/);
+    expect(text).not.toContain('só confere a conexão');
+  });
+
+  it('diz o que acontece com as transações do banco ao desconectar e ao sair do grupo (issue #25)', () => {
+    expect(text).toContain('as transações já trazidas continuam na revisão');
+    expect(text).toContain('As transações do banco que ainda estavam na revisão são apagadas junto. As despesas que já tinham sido confirmadas ficam no grupo.');
+  });
+
+  it('diz que, com o aceite do Chat IA, a descrição de uma despesa do banco pode ir ao Gemini para sugerir a categoria (issue #25)', () => {
+    expect(text).toContain('a descrição de uma despesa do banco que o app não souber classificar pode ser enviada ao Gemini para sugerir a categoria');
   });
 });
 

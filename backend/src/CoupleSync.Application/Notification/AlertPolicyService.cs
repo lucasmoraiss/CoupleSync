@@ -21,6 +21,10 @@ public sealed class AlertPolicyService : IAlertPolicyService
     private const string BudgetWarningKind = "BudgetWarning";
     private const string LowBalanceKind = "LowBalance";
 
+    // What the summary of several large transactions says happened to them, by where they came from.
+    private const string ImportedFromStatement = "importadas do extrato";
+    private const string ConfirmedInBankReview = "confirmadas na revisão do banco";
+
     private readonly IBudgetRepository _budgetRepository;
     private readonly ITransactionRepository _transactionRepository;
     private readonly INotificationEventRepository _notificationEventRepository;
@@ -47,7 +51,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
         IReadOnlyList<Transaction> recentTransactions,
         DateTime nowUtc,
         CancellationToken ct = default)
-        => EvaluateAsync(coupleId, [newTransaction], recentTransactions, nowUtc, ct);
+        => EvaluateAsync(coupleId, [newTransaction], recentTransactions, nowUtc, ImportedFromStatement, ct);
 
     public Task<IReadOnlyList<NotificationEvent>> EvaluatePostImportAsync(
         Guid coupleId,
@@ -55,18 +59,28 @@ public sealed class AlertPolicyService : IAlertPolicyService
         IReadOnlyList<Transaction> recentTransactions,
         DateTime nowUtc,
         CancellationToken ct = default)
-        => EvaluateAsync(coupleId, importedTransactions, recentTransactions, nowUtc, ct);
+        => EvaluateAsync(coupleId, importedTransactions, recentTransactions, nowUtc, ImportedFromStatement, ct);
+
+    public Task<IReadOnlyList<NotificationEvent>> EvaluatePostBankReviewAsync(
+        Guid coupleId,
+        IReadOnlyList<Transaction> confirmedTransactions,
+        IReadOnlyList<Transaction> recentTransactions,
+        DateTime nowUtc,
+        CancellationToken ct = default)
+        => EvaluateAsync(coupleId, confirmedTransactions, recentTransactions, nowUtc, ConfirmedInBankReview, ct);
 
     /// <summary>
     /// The alerts of one user action: a single transaction, or every transaction created by one statement
-    /// import confirmation. Each rule runs once for the whole batch, so an import of many large lines produces
-    /// one summary instead of one push per line.
+    /// import confirmation or one confirmation of the review of the bank. Each rule runs once for the whole
+    /// batch, so many large lines produce one summary instead of one push per line.
+    /// <paramref name="howSeveralArrived"/> is what the summary says happened to them.
     /// </summary>
     private async Task<IReadOnlyList<NotificationEvent>> EvaluateAsync(
         Guid coupleId,
         IReadOnlyList<Transaction> newTransactions,
         IReadOnlyList<Transaction> recentTransactions,
         DateTime nowUtc,
+        string howSeveralArrived,
         CancellationToken ct)
     {
         var events = new List<NotificationEvent>();
@@ -89,7 +103,7 @@ public sealed class AlertPolicyService : IAlertPolicyService
             var title = large.Count == 1 ? "Transação de valor alto" : "Transações de valor alto";
             var body = large.Count == 1
                 ? $"Uma transação de {BrlFormat.Format(large[0].Amount)} foi registrada."
-                : $"{large.Count} transações de valor alto foram importadas do extrato, somando {BrlFormat.Format(large.Sum(t => t.Amount))}.";
+                : $"{large.Count} transações de valor alto foram {howSeveralArrived}, somando {BrlFormat.Format(large.Sum(t => t.Amount))}.";
             foreach (var recipient in recipients)
             {
                 var settings = await SettingsOfAsync(recipient, coupleId, nowUtc, ct);

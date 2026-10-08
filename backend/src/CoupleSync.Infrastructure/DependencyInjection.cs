@@ -48,6 +48,7 @@ public static class DependencyInjection
         services.AddScoped<IImportJobRepository, ImportJobRepository>();
         services.AddScoped<IReportsRepository, ReportsRepository>();
         services.AddScoped<IBankConnectionRepository, BankConnectionRepository>();
+        services.AddScoped<IBankSyncRepository, BankSyncRepository>();
         services.AddScoped<ICategoryMatchingService, CategoryMatchingService>();
         services.AddScoped<ICoupleContext, HttpContextCoupleContext>();
         services.AddScoped<ICoupleMembership, CoupleMembership>();
@@ -175,6 +176,10 @@ public static class DependencyInjection
                 var baseUrl = config[$"{OpenFinanceOptions.SectionName}:{nameof(OpenFinanceOptions.PluggyBaseUrl)}"];
                 if (!string.IsNullOrWhiteSpace(baseUrl)) options.PluggyBaseUrl = baseUrl.Trim();
                 options.EncryptionKey = config[OpenFinanceOptions.EncryptionKeyVariable] ?? string.Empty;
+                if (TryReadSeconds(config, nameof(OpenFinanceOptions.SyncPollSeconds), out var poll) && poll > 0)
+                    options.SyncPollSeconds = poll;
+                if (TryReadSeconds(config, nameof(OpenFinanceOptions.SchedulerTickSeconds), out var tick))
+                    options.SchedulerTickSeconds = tick;
             });
 
         services.AddSingleton<ICredentialCipher, AesGcmCredentialCipher>();
@@ -185,5 +190,18 @@ public static class DependencyInjection
             // ...nor follow a redirect to another address: a 3xx is an answer Pluggy does not give, and it fails.
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<IPluggyClient, PluggyHttpClient>();
+
+        // The synchronisation queue and the daily scheduler. Both only ever read the queue and the clock: with no
+        // key on the server every run ends as failed with a clear error, and nothing here stops the API from starting.
+        services.AddHostedService<OpenFinanceSyncJob>();
+        services.AddHostedService<OpenFinanceDailyScheduler>();
     }
+
+    /// <summary>A number of seconds of the OpenFinance section, written with a dot whatever the culture of the host.</summary>
+    private static bool TryReadSeconds(IConfiguration config, string name, out double seconds)
+        => double.TryParse(
+            config[$"{OpenFinanceOptions.SectionName}:{name}"],
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out seconds);
 }

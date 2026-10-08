@@ -135,6 +135,27 @@ public sealed class BankConnection : ICoupleScoped
         UpdatedAtUtc = nowUtc;
     }
 
+    /// <summary>How far back an account never read before goes (the last step of the wizard): 3, 6 or 12 months.</summary>
+    public void SetHistoryMonths(int historyMonths, DateTime nowUtc)
+    {
+        if (!AllowedHistoryMonths.Contains(historyMonths))
+            throw new ArgumentException("O período deve ser de 3, 6 ou 12 meses.", nameof(historyMonths));
+        if (HistoryMonths == historyMonths) return;
+        HistoryMonths = historyMonths;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>A synchronisation ended well: the only thing that moves <see cref="LastSyncAtUtc"/>.</summary>
+    public void MarkSynced(DateTime nowUtc)
+    {
+        if (Status == BankConnectionStatus.Disconnected) return;
+        Status = BankConnectionStatus.Active;
+        LastErrorCode = null;
+        LastErrorMessage = null;
+        LastSyncAtUtc = nowUtc;
+        UpdatedAtUtc = nowUtc;
+    }
+
     /// <summary>What may be shown of a client id: its last characters.</summary>
     public static string HintOf(string clientId)
     {

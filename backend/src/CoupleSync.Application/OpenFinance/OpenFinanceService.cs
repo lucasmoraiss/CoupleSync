@@ -12,6 +12,12 @@ namespace CoupleSync.Application.OpenFinance;
 public sealed class OpenFinanceService
 {
     public const string UnavailableCode = "OPENFINANCE_UNAVAILABLE";
+    public const string UnavailableMessage =
+        "O Open Finance não está disponível neste servidor. Ele depende de uma configuração que ainda não foi feita.";
+    public const string CredentialsUnreadableCode = "OPENFINANCE_CREDENTIALS_UNREADABLE";
+    public const string CredentialsUnreadableMessage =
+        "Não foi possível ler as credenciais guardadas. Desconecte e conecte de novo com o Client ID e o Client Secret.";
+    public const string DisconnectedCode = "BANK_CONNECTION_DISCONNECTED";
     public const string ItemEmptyCode = "PLUGGY_ITEM_EMPTY";
 
     /// <summary>
@@ -134,7 +140,11 @@ public sealed class OpenFinanceService
             else
             {
                 connection = existing;
-                connection.Connect(input.Label, encryptedId, encryptedSecret, hint, historyMonths, now);
+                // Connecting again is about the credentials. Once something was read, the period is the one the
+                // person chose for the first synchronisation: it goes on deciding how far back a bank added later
+                // is read, and the app (which always sends the default here) cannot take it back to 3 months.
+                var period = existing.LastSyncAtUtc is null ? historyMonths : existing.HistoryMonths;
+                connection.Connect(input.Label, encryptedId, encryptedSecret, hint, period, now);
                 _pluggy.ForgetConnection(connection.Id);
             }
 
@@ -175,12 +185,10 @@ public sealed class OpenFinanceService
             || !_cipher.TryDecrypt(connection.ClientSecretEncrypted!, out var clientSecret))
         {
             // Stored with another key (the server's key changed): nothing can be read back.
-            throw new UnprocessableEntityException(
-                "OPENFINANCE_CREDENTIALS_UNREADABLE",
-                "Não foi possível ler as credenciais guardadas. Desconecte e conecte de novo com o Client ID e o Client Secret.");
+            throw new UnprocessableEntityException(CredentialsUnreadableCode, CredentialsUnreadableMessage);
         }
 
-        var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret);
+        var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret, connection.ClientSecretEncrypted!);
         PluggyItem pluggyItem;
         IReadOnlyList<PluggyAccount> pluggyAccounts;
         try
@@ -334,10 +342,7 @@ public sealed class OpenFinanceService
     private void EnsureAvailable()
     {
         if (!_cipher.IsAvailable)
-            throw new AppException(
-                UnavailableCode,
-                "O Open Finance não está disponível neste servidor. Ele depende de uma configuração que ainda não foi feita.",
-                503);
+            throw new AppException(UnavailableCode, UnavailableMessage, 503);
     }
 
     /// <summary>The connection, when it is in the group (else 404) and belongs to the caller (else 403).</summary>
@@ -356,7 +361,7 @@ public sealed class OpenFinanceService
 
     private static ConflictException Disconnected()
         => new(
-            "BANK_CONNECTION_DISCONNECTED",
+            DisconnectedCode,
             "Esta conexão foi desconectada. Conecte de novo com o Client ID e o Client Secret para adicionar bancos.");
 
     private static NotFoundException AccountNotFound()
@@ -368,7 +373,7 @@ public sealed class OpenFinanceService
     private static ConflictException ItemAlreadyConnected()
         => new("BANK_ITEM_ALREADY_CONNECTED", "Este Item ID já está conectado em outra conexão bancária.");
 
-    private static BankAccountSnapshot ToSnapshot(PluggyAccount account) => new(
+    internal static BankAccountSnapshot ToSnapshot(PluggyAccount account) => new(
         account.Type,
         account.Subtype,
         account.Name,

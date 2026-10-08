@@ -1,4 +1,5 @@
 using CoupleSync.Application.Common.Exceptions;
+using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Transactions.Commands;
 using CoupleSync.Domain.Entities;
 using CoupleSync.UnitTests.Support;
@@ -8,7 +9,11 @@ namespace CoupleSync.UnitTests.Transactions;
 public sealed class DeleteTransactionCommandHandlerTests
 {
     private static DeleteTransactionCommandHandler BuildHandler(FakeTransactionRepository? repo = null)
-        => new(repo ?? new FakeTransactionRepository());
+        // None of these transactions came from the bank: the mirror of Open Finance is never read.
+        => new(
+            repo ?? new FakeTransactionRepository(),
+            NeverCalled<IBankSyncRepository>.Create(),
+            new FixedDateTimeProvider(new DateTime(2026, 4, 21, 12, 0, 0, DateTimeKind.Utc)));
 
     private static Transaction BuildTransaction(Guid coupleId)
     {

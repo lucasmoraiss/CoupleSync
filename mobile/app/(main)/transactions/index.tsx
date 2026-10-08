@@ -42,6 +42,9 @@ import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
 import { useSessionStore } from '@/state/sessionStore';
 import { useConsentStore } from '@/modules/privacy/consentStore';
+import { usePendingBankReviewCount } from '@/modules/openfinance/useBankReview';
+import { reviewShortcutLabel } from '@/modules/openfinance/review';
+import { useOnRefocus } from '@/navigation/resetOnFocus';
 import { spokenBRL } from '@/utils/a11y';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -90,6 +93,7 @@ const SOURCE_BADGE_CONFIG: Record<string, { label: string; bg: string; text: str
   Manual: { label: 'Manual', bg: '#E0E0E0', text: '#616161' },
   OcrImport: { label: 'OCR', bg: '#BBDEFB', text: '#1565C0' },
   Notification: { label: 'Notificação', bg: '#C8E6C9', text: '#2E7D32' },
+  OpenFinance: { label: 'Banco', bg: '#D1C4E9', text: '#4527A0' },
 };
 
 function getSourceBadge(source: string | undefined) {
@@ -278,6 +282,11 @@ export default function TransactionsScreen() {
   const notifPermission = useNotificationPermission();
   const captureConsent = useConsentStore((state) => state.record.capture);
   const captureBanner = captureBannerText(captureConsent, notifPermission);
+  // Open Finance: quantas despesas do banco esperam a revisão. O atalho só aparece quando há alguma; a contagem
+  // é refeita a cada volta à tela (a aba fica montada).
+  const bankReview = usePendingBankReviewCount();
+  const bankReviewShortcut = reviewShortcutLabel(bankReview.pending);
+  useOnRefocus(() => bankReview.refetch());
 
   const {
     data,
@@ -435,6 +444,21 @@ export default function TransactionsScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Open Finance: atalho para a revisão do banco, só quando há algo esperando */}
+      {bankReviewShortcut !== null && (
+        <TouchableOpacity
+          style={styles.bankReviewShortcut}
+          onPress={() => router.push('/(main)/openfinance/review' as any)}
+          accessibilityRole="button"
+          accessibilityLabel={`${bankReviewShortcut}. Abrir a revisão do banco`}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="business-outline" size={18} color={ACCENT} />
+          <Text style={styles.bannerText}>{bankReviewShortcut}</Text>
+          <Ionicons name="chevron-forward" size={18} color={ACCENT} />
+        </TouchableOpacity>
+      )}
 
       {/* Notification permission banner */}
       {captureBanner !== null && (
@@ -710,6 +734,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    borderRadius: 8,
+    gap: 8,
+  },
+  bankReviewShortcut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(99,102,241,0.14)',
+    borderLeftWidth: 3,
+    borderLeftColor: ACCENT,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    minHeight: 48,
     borderRadius: 8,
     gap: 8,
   },

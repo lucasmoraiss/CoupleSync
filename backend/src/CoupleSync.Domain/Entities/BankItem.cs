@@ -65,13 +65,51 @@ public sealed class BankItem : ICoupleScoped
     }
 }
 
-/// <summary>Texts that come from outside (Pluggy) are cut to the size of their column instead of failing the write.</summary>
+/// <summary>
+/// Texts that come from outside (Pluggy) are cut to the size of their column instead of failing the write, and lose
+/// the null character: PostgreSQL refuses it in a text column and refuses its escape in <c>jsonb</c>.
+/// </summary>
 internal static class TextLimits
 {
+    private const string NullEscape = "u0000";
+
     public static string? Clip(string? value, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        var trimmed = value.Trim();
+        var trimmed = (value.Contains('\0') ? value.Replace("\0", string.Empty) : value).Trim();
+        if (trimmed.Length == 0) return null;
         return trimmed.Length > maxLength ? trimmed[..maxLength] : trimmed;
+    }
+
+    /// <summary>
+    /// A JSON text without the escape of the null character inside its strings. An escaped backslash followed by
+    /// "u0000" is ordinary text and stays: escapes are read in pairs, never by searching the text.
+    /// </summary>
+    public static string JsonWithoutNull(string json)
+    {
+        if (!json.Contains(NullEscape, StringComparison.Ordinal) && !json.Contains('\0')) return json;
+
+        var clean = new System.Text.StringBuilder(json.Length);
+        for (var i = 0; i < json.Length; i++)
+        {
+            var c = json[i];
+            if (c == '\0') continue;
+            if (c != '\\' || i + 1 >= json.Length)
+            {
+                clean.Append(c);
+                continue;
+            }
+
+            if (string.CompareOrdinal(json, i + 1, NullEscape, 0, NullEscape.Length) == 0)
+            {
+                i += NullEscape.Length; // the escape of the null character: dropped
+                continue;
+            }
+
+            clean.Append(c).Append(json[i + 1]); // any other escape, whole (also an escaped backslash)
+            i++;
+        }
+
+        return clean.ToString();
     }
 }

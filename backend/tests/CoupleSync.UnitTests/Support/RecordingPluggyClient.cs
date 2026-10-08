@@ -24,4 +24,10 @@ public sealed class RecordingPluggyClient(List<string> steps) : IPluggyClient
 
     public Task<IReadOnlyList<PluggyAccount>> GetAccountsAsync(PluggyAuth auth, string itemId, CancellationToken ct)
         => throw new InvalidOperationException("Leaving a group never calls Pluggy.");
+
+    public Task<IReadOnlyList<PluggyTransaction>> GetTransactionsAsync(PluggyAuth auth, string accountId, DateOnly from, DateOnly to, CancellationToken ct)
+        => throw new InvalidOperationException("Leaving a group never calls Pluggy.");
+
+    public Task RequestItemUpdateAsync(PluggyAuth auth, string itemId, CancellationToken ct)
+        => throw new InvalidOperationException("Leaving a group never calls Pluggy.");
 }
