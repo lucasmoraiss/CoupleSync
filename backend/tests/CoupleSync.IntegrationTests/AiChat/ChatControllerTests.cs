@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using CoupleSync.Domain.Interfaces;
+using System.Text.Json;
+using CoupleSync.Application.Ai;
+using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Domain.Entities;
 using CoupleSync.Infrastructure.Integrations.Gemini;
 using CoupleSync.Infrastructure.Persistence;
 using CoupleSync.TestSupport;
@@ -82,7 +85,14 @@ public sealed class ChatControllerTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<ChatResponseDto>();
         Assert.NotNull(payload);
-        Assert.Equal(FakeChatGeminiAdapter.FixedReply, payload!.Reply);
+        Assert.Equal(StubLlmProvider.FixedReply, payload!.Reply);
+        // New optional field of the contract: who answered.
+        Assert.Equal("gemini", payload.Provider);
+
+        // The call went through the chain and left its accounting row (metadata only).
+        var usage = Assert.Single(factory.UsageRows());
+        Assert.Equal(("gemini", "gemini-flash-lite-latest", "chat", "Ok"), (usage.Provider, usage.Model, usage.Feature, usage.Outcome));
+        Assert.NotNull(usage.CoupleId);
     }
 
     [Fact]
@@ -154,8 +164,16 @@ public sealed class ChatControllerTests
     [Fact]
     public async Task Chat_Returns429_WhenRateLimited()
     {
-        // Each factory gets its own singleton ChatRateLimiter
-        await using var factory = new ChatWebApplicationFactory(enabled: true);
+        // Each factory gets its own singleton ChatRateLimiter. The daily budget of the group (25) is raised here so
+        // that this test keeps proving the hourly limit on its own, and so is the pace per minute of the model (5),
+        // which thirty calls in a row would also hit.
+        await using var factory = new ChatWebApplicationFactory(enabled: true, config: new()
+        {
+            ["Ai:GroupDailyCalls"] = "1000",
+            ["Ai:Limits:0:Provider"] = "gemini",
+            ["Ai:Limits:0:Model"] = "gemini-flash-lite-latest",
+            ["Ai:Limits:0:Rpm"] = "1000",
+        });
         using var client = factory.CreateClient();
 
         var token = await RegisterWithCoupleAndGetTokenAsync(client, $"rate-limit-chat-{Guid.NewGuid():N}@example.com");
@@ -171,6 +189,259 @@ public sealed class ChatControllerTests
         // 31st request must be rate limited
         var blocked = await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
         Assert.Equal(HttpStatusCode.TooManyRequests, blocked.StatusCode);
+        Assert.Equal("CHAT_RATE_LIMITED", (await ErrorOf(blocked)).Code);
+    }
+
+    // ── The chain (issue #37) ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task Chat_FallsToTheNextModel_WhenTheFirstIsOutOfQuota_AndRecordsBothCalls()
+    {
+        var catalog = new StubCatalog(
+            new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Failed(LlmOutcome.QuotaExhaustedDay)),
+            new StubLlmProvider("gemini", "gemini-2.5-flash"));
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: catalog);
+        using var client = await factory.ClientWithCoupleAsync();
+
+        var first = await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
+        var second = await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        // The exhausted model was called once: the second request (a new gateway) read its state from ai_usage.
+        Assert.Equal(1, catalog.Providers[0].Calls);
+        Assert.Equal(2, catalog.Providers[1].Calls);
+        Assert.Equal(1, factory.UsageRows().Count(u => u.Outcome == "QuotaExhaustedDay"));
+        Assert.Equal(2, factory.UsageRows().Count(u => u.Outcome == "Ok" && u.Model == "gemini-2.5-flash"));
+    }
+
+    [Fact]
+    public async Task Chat_ARequestTheClientAbandons_StillLeavesItsRowInAiUsage()
+    {
+        using var abandon = new CancellationTokenSource();
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest")
+        {
+            AsyncAnswer = async (_, ct) =>
+            {
+                // The request reached the provider; the client closes the connection before the answer.
+                abandon.Cancel();
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                return StubLlmProvider.Answer("tarde demais");
+            },
+        };
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        using var client = await factory.ClientWithCoupleAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest(), abandon.Token));
+
+        // The server finishes on its own time.
+        for (var i = 0; i < 100 && factory.UsageRows().Count == 0; i++) await Task.Delay(50);
+        var row = Assert.Single(factory.UsageRows());
+        Assert.Equal(("Cancelled", "chat"), (row.Outcome, row.Feature));
+        Assert.NotNull(row.CoupleId);
+    }
+
+    [Fact]
+    public async Task Chat_Returns502AiProviderFailed_InTheSingleErrorFormat_WhenEveryLinkFails()
+    {
+        var catalog = new StubCatalog(
+            new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Failed(LlmOutcome.Error)),
+            new StubLlmProvider("gemini", "gemini-2.5-flash", _ => StubLlmProvider.Failed(LlmOutcome.Timeout)));
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: catalog);
+        using var client = await factory.ClientWithCoupleAsync();
+
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("AI_PROVIDER_FAILED", body.GetProperty("code").GetString());
+        Assert.Equal("A IA não respondeu agora. Tente de novo em alguns minutos.", body.GetProperty("message").GetString());
+        Assert.True(body.TryGetProperty("traceId", out _));
+        Assert.False(body.TryGetProperty("errors", out var errors) && errors.ValueKind != JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task Chat_AnswersTheFixedSentenceWith200_WhenTheAnswerIsRejectedTwice()
+    {
+        var catalog = new StubCatalog(
+            new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Answer("Clique em https://exemplo.test")),
+            new StubLlmProvider("gemini", "gemini-2.5-flash", _ => StubLlmProvider.Answer("Ligue para (11) 99999-9999")));
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: catalog);
+        using var client = await factory.ClientWithCoupleAsync();
+
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<ChatResponseDto>();
+        Assert.Equal("Não consegui responder com segurança com os dados que tenho. Tente perguntar de outro jeito.", payload!.Reply);
+        Assert.Null(payload.Provider);
+    }
+
+    [Fact]
+    public async Task Chat_TheGroupBudget_IsCountedInAiUsage_SurvivesARestart_AndAnswersChatRateLimited()
+    {
+        var database = $"couplesync-chat-budget-{Guid.NewGuid():N}";
+        var catalog = new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-lite-latest"));
+        // One instant for the rows and for both hosts: the test does not depend on the wall clock staying in the
+        // same Brasília day between the seeding and the request.
+        var now = DateTime.UtcNow;
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: catalog, databaseName: database, frozenNow: now);
+        using var client = await factory.ClientWithCoupleAsync();
+        using var otherGroup = await factory.ClientWithCoupleAsync();
+
+        // The rows are written straight into ai_usage: 24 answered calls and one that came back invalid.
+        var coupleId = factory.CoupleIds().First();
+        factory.SeedUsage(24, coupleId, "Ok", now);
+        factory.SeedUsage(1, coupleId, "InvalidOutput", now);
+
+        // "The API restarted": another host, with nothing in memory, on the same database.
+        await using var restarted = new ChatWebApplicationFactory(enabled: true, catalog: catalog, databaseName: database, frozenNow: now);
+        using var sameUser = restarted.CreateClient();
+        sameUser.DefaultRequestHeaders.Authorization = client.DefaultRequestHeaders.Authorization;
+
+        var blocked = await sameUser.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, blocked.StatusCode);
+        var error = await ErrorOf(blocked);
+        Assert.Equal("CHAT_RATE_LIMITED", error.Code);
+        Assert.Equal("A cota de IA do grupo para hoje acabou. Volta à meia-noite.", error.Message);
+        Assert.Equal(0, catalog.Providers[0].Calls);
+
+        // Isolation: the other group, in the same host, is answered.
+        using var other = restarted.CreateClient();
+        other.DefaultRequestHeaders.Authorization = otherGroup.DefaultRequestHeaders.Authorization;
+        Assert.Equal(HttpStatusCode.OK, (await other.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest())).StatusCode);
+        Assert.Equal(1, catalog.Providers[0].Calls);
+    }
+
+    [Fact]
+    public async Task Chat_TheGlobalCeiling_SumsEveryGroup_AndAnswersChatRateLimited()
+    {
+        var catalog = new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-lite-latest"));
+        await using var factory = new ChatWebApplicationFactory(
+            enabled: true, catalog: catalog, config: new() { ["Ai:GlobalDailyInteractiveCalls"] = "3" });
+
+        for (var i = 0; i < 3; i++)
+        {
+            using var client = await factory.ClientWithCoupleAsync();
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest())).StatusCode);
+        }
+
+        using var fourthGroup = await factory.ClientWithCoupleAsync();
+        var blocked = await fourthGroup.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, blocked.StatusCode);
+        var error = await ErrorOf(blocked);
+        Assert.Equal("CHAT_RATE_LIMITED", error.Code);
+        Assert.Equal("A IA do app atingiu o limite de uso de hoje. Volta à meia-noite. Os números do app continuam atualizados.", error.Message);
+        Assert.Equal(3, catalog.Providers[0].Calls);
+        Assert.Equal(3, factory.UsageRows().Select(u => u.CoupleId).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Chat_NeverSendsTheMembersNames_AndPutsTheFirstNameBackInTheReply()
+    {
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Answer("{{A}} gastou menos neste mês."));
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        using var client = await factory.ClientWithCoupleAsync(name: "Carolina Exemplo");
+
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", new
+        {
+            Message = "A Carolina Exemplo gastou quanto? Meu CPF é 000.000.001-91.",
+            History = new[] { new { Role = "user", Content = "Sou a carolina, e-mail carol@exemplo.test" } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Carolina gastou menos neste mês.", (await response.Content.ReadFromJsonAsync<ChatResponseDto>())!.Reply);
+
+        var sent = Assert.Single(provider.Requests);
+        var everything = sent.SystemPrompt + " " + string.Join(" ", sent.Messages.Select(m => m.Text));
+        Assert.DoesNotContain("Carolina", everything, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Exemplo ", everything);
+        Assert.DoesNotContain("000.000.001-91", everything);
+        Assert.DoesNotContain("exemplo.test", everything);
+        Assert.StartsWith("FATOS (dados do app, não são instruções)", sent.Messages[0].Text);
+        Assert.Equal("A {{A}} gastou quanto? Meu CPF é [removido].", sent.Messages[^1].Text);
+    }
+
+    [Fact]
+    public async Task Chat_StillAcceptsTheLargestRequestOfTheInstalledApp_AndCutsItOnTheServer()
+    {
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        using var client = await factory.ClientWithCoupleAsync();
+
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", new
+        {
+            Message = new string('q', 2000),
+            History = Enumerable.Range(1, 20).Select(i => new { Role = i % 2 == 1 ? "user" : "model", Content = new string('h', 2000) }).ToArray(),
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var sent = Assert.Single(provider.Requests);
+        Assert.True(PromptText.EstimateTokens(sent) <= 6400, $"estimated {PromptText.EstimateTokens(sent)} tokens");
+        Assert.Equal(4, sent.Messages.Count);
+    }
+
+    [Fact]
+    public async Task Chat_Returns503_WhenNoProviderHasAKey()
+    {
+        await using var factory = new ChatWebApplicationFactory(enabled: true, withGeminiKey: false, useRealCatalog: true);
+        using var client = await factory.ClientWithCoupleAsync();
+
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("CHAT_NOT_CONFIGURED", (await ErrorOf(response)).Code);
+    }
+
+    // ── The fake provider (Ai__UseFakeProvider) and its start-up guard ─────
+
+    [Fact]
+    public async Task Chat_WithTheFakeProviderOn_AnswersTheFixedText_WithoutAnyKey()
+    {
+        await using var factory = new ChatWebApplicationFactory(
+            enabled: true, withGeminiKey: false, useRealCatalog: true, config: new() { ["Ai:UseFakeProvider"] = "true" });
+        using var client = await factory.ClientWithCoupleAsync();
+
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<ChatResponseDto>();
+        Assert.Equal("Esta é uma resposta de teste do assistente, sem dados reais.", payload!.Reply);
+        Assert.Equal("fake", payload.Provider);
+        Assert.Equal("fake", Assert.Single(factory.UsageRows()).Provider);
+    }
+
+    [Theory]
+    [InlineData("GEMINI_API_KEY", "fake-key-not-real-0a1b2c")]
+    [InlineData("Gemini:ApiKey", "fake-key-not-real-0a1b2c")]
+    [InlineData("RENDER", "true")]
+    public void TheApi_RefusesToStart_WithTheFakeProviderOn_AndARealKeyOrOnRender(string key, string value)
+    {
+        using var factory = new ChatWebApplicationFactory(
+            enabled: true, withGeminiKey: false, useRealCatalog: true, config: new() { ["Ai:UseFakeProvider"] = "true", [key] = value });
+
+        var ex = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
+
+        Assert.Contains("Ai__UseFakeProvider", ex.Message);
+        Assert.DoesNotContain("fake-key", ex.Message);
+    }
+
+    [Fact]
+    public void TheApi_RefusesToStart_WithTheFakeProviderOn_AndTheKeyOfAConfiguredCompatibleProvider()
+    {
+        using var factory = new ChatWebApplicationFactory(enabled: true, withGeminiKey: false, useRealCatalog: true, config: new()
+        {
+            ["Ai:UseFakeProvider"] = "true",
+            ["Ai:OpenAiCompatible:0:Name"] = "groq",
+            ["Ai:OpenAiCompatible:0:BaseUrl"] = "https://compat.test/openai/v1",
+            ["Ai:OpenAiCompatible:0:ApiKeyVariable"] = "GROQ_API_KEY",
+            ["GROQ_API_KEY"] = "fake-key-not-real-0a1b2c",
+        });
+
+        Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────
@@ -220,25 +491,68 @@ public sealed class ChatControllerTests
 
     private sealed record ChatRequest(string Message, IReadOnlyList<object>? History);
 
-    private sealed record ChatResponseDto(string Reply);
+    private sealed record ChatResponseDto(string Reply, string? Provider);
+
+    private sealed record ErrorDto(string Code, string Message);
+
+    private static async Task<ErrorDto> ErrorOf(HttpResponseMessage response)
+        => (await response.Content.ReadFromJsonAsync<ErrorDto>())!;
 
     private sealed record AuthResponseDto(AuthUserDto User, string AccessToken, string RefreshToken);
 
     private sealed record AuthUserDto(Guid Id, string Email, string Name);
 }
 
-// ── Fake Gemini adapter ────────────────────────────────────────────────────
+// ── Stub providers (no test talks to a real provider) ─────────────────────
 
-internal sealed class FakeChatGeminiAdapter : IGeminiAdapter
+internal sealed class StubLlmProvider : ILlmProvider
 {
     public const string FixedReply = "Seus gastos estão sob controle!";
 
-    public Task<string> SendAsync(
-        string systemPrompt,
-        IReadOnlyList<ChatMessage> history,
-        string userMessage,
-        CancellationToken ct)
-        => Task.FromResult(FixedReply);
+    private readonly Func<LlmRequest, LlmResult> _answer;
+
+    public StubLlmProvider(string provider, string model, Func<LlmRequest, LlmResult>? answer = null)
+    {
+        Provider = provider;
+        Model = model;
+        _answer = answer ?? (_ => Answer(FixedReply));
+    }
+
+    public string Provider { get; }
+
+    public string Model { get; }
+
+    public LlmCapabilities Capabilities { get; } = new(JsonSchema: true, Images: false, Pdf: false);
+
+    public List<LlmRequest> Requests { get; } = new();
+
+    public int Calls => Requests.Count;
+
+    /// <summary>When set, answers instead of the fixed function (it sees the token of the call).</summary>
+    public Func<LlmRequest, CancellationToken, Task<LlmResult>>? AsyncAnswer { get; init; }
+
+    public Task<LlmResult> GenerateAsync(LlmRequest request, CancellationToken ct)
+    {
+        Requests.Add(request);
+        return AsyncAnswer is not null ? AsyncAnswer(request, ct) : Task.FromResult(_answer(request));
+    }
+
+    public static LlmResult Answer(string text)
+        => new(LlmOutcome.Ok, JsonSerializer.Serialize(new { answer = text, refs = Array.Empty<string>() }), 120, 30, null, 5);
+
+    public static LlmResult Failed(LlmOutcome outcome) => new(outcome, null, 0, 0, outcome.ToString(), 5);
+}
+
+internal sealed class StubCatalog : ILlmProviderCatalog
+{
+    public StubCatalog(params StubLlmProvider[] providers) => Providers = providers;
+
+    public IReadOnlyList<StubLlmProvider> Providers { get; }
+
+    public bool AnyAvailable => Providers.Count > 0;
+
+    public ILlmProvider? Find(string provider, string model)
+        => Providers.FirstOrDefault(p => p.Provider == provider && p.Model == model);
 }
 
 // ── WebApplicationFactory ──────────────────────────────────────────────────
@@ -250,15 +564,34 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
     public const string JwtAudience = "CoupleSync.Mobile.IntegrationTests";
 
     private readonly bool _enabled;
-
-    private readonly string _databaseConnectionString =
-        $"Data Source=couplesync-chat-tests-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+    private readonly bool _withGeminiKey;
+    private readonly DateTime? _frozenNow;
+    private readonly ILlmProviderCatalog? _catalog;
+    private readonly Dictionary<string, string?> _config;
+    private readonly string _databaseConnectionString;
 
     private SqliteConnection? _keepAliveConnection;
 
-    public ChatWebApplicationFactory(bool enabled)
+    /// <param name="catalog">The providers of the chain; by default one stub in place of each Gemini model of the Assistant.</param>
+    /// <param name="useRealCatalog">Keeps the real catalog (real adapters): only for hosts that never reach a provider or use the fake one.</param>
+    /// <param name="databaseName">Two hosts with the same name share the database (the first one keeps it alive).</param>
+    public ChatWebApplicationFactory(
+        bool enabled,
+        ILlmProviderCatalog? catalog = null,
+        Dictionary<string, string?>? config = null,
+        bool withGeminiKey = true,
+        bool useRealCatalog = false,
+        string? databaseName = null,
+        DateTime? frozenNow = null)
     {
         _enabled = enabled;
+        _frozenNow = frozenNow;
+        _withGeminiKey = withGeminiKey;
+        _catalog = useRealCatalog
+            ? null
+            : catalog ?? new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-lite-latest"), new StubLlmProvider("gemini", "gemini-2.5-flash"));
+        _config = config ?? new();
+        _databaseConnectionString = $"Data Source={databaseName ?? $"couplesync-chat-tests-{Guid.NewGuid():N}"};Mode=Memory;Cache=Shared";
         Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
         Environment.SetEnvironmentVariable("JWT__ISSUER", JwtIssuer);
         Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
@@ -281,8 +614,9 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
                 ["Jwt:Issuer"] = JwtIssuer,
                 ["Jwt:Audience"] = JwtAudience,
                 ["Gemini:Enabled"] = _enabled ? "true" : "false",
-                ["Gemini:ApiKey"] = "test-key"
             };
+            if (_withGeminiKey) config["Gemini:ApiKey"] = "test-key";
+            foreach (var (key, value) in _config) config[key] = value;
             configBuilder.AddInMemoryCollection(config);
         });
 
@@ -300,21 +634,84 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
                 options.UseSqlite(_databaseConnectionString);
             });
 
-            // Replace real Gemini adapter with fake (no external API calls)
-            services.RemoveAll<IGeminiAdapter>();
-            services.AddScoped<IGeminiAdapter, FakeChatGeminiAdapter>();
+            // Replace the real providers with stubs (no external API calls)
+            if (_catalog is not null)
+            {
+                services.RemoveAll<ILlmProviderCatalog>();
+                services.AddSingleton(_catalog);
+            }
+
+            if (_frozenNow is { } frozen)
+            {
+                services.RemoveAll<IDateTimeProvider>();
+                services.AddSingleton<IDateTimeProvider>(new FrozenClock(frozen));
+            }
 
             // Override GeminiOptions.Enabled to match the test scenario
             services.PostConfigure<GeminiOptions>(opts =>
             {
                 opts.Enabled = _enabled;
-                opts.ApiKey = "test-key";
+                opts.ApiKey = _withGeminiKey ? "test-key" : string.Empty;
             });
 
             using var scope = services.BuildServiceProvider().CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Database.EnsureCreated();
         });
+    }
+
+    /// <summary>A client of a new user (already in a group of their own), carrying the token.</summary>
+    public async Task<HttpClient> ClientWithCoupleAsync(string name = "Test User")
+    {
+        const string password = "SecurePass123!";
+        var email = $"chat-{Guid.NewGuid():N}@example.com";
+        var client = CreateClient();
+
+        var register = await client.PostAsJsonAsync("/api/v1/auth/register", new { Email = email, Name = name, Password = password });
+        register.EnsureSuccessStatusCode();
+        var registered = await register.Content.ReadFromJsonAsync<JsonElement>();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", registered.GetProperty("accessToken").GetString());
+
+        var couple = await client.PostAsJsonAsync("/api/v1/couples", new { });
+        couple.EnsureSuccessStatusCode();
+
+        client.DefaultRequestHeaders.Authorization = null;
+        var login = await client.PostAsJsonAsync("/api/v1/auth/login", new { Email = email, Password = password });
+        login.EnsureSuccessStatusCode();
+        var loggedIn = await login.Content.ReadFromJsonAsync<JsonElement>();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loggedIn.GetProperty("accessToken").GetString());
+        return client;
+    }
+
+    private AppDbContext NewContext()
+        => new(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_databaseConnectionString).Options);
+
+    public List<AiUsage> UsageRows()
+    {
+        using var db = NewContext();
+        return db.AiUsages.AsNoTracking().ToList().OrderBy(u => u.CreatedAtUtc).ToList();
+    }
+
+    /// <summary>The groups of the database, oldest first.</summary>
+    public List<Guid> CoupleIds()
+    {
+        using var db = NewContext();
+        return db.Couples.AsNoTracking().ToList().OrderBy(c => c.CreatedAtUtc).Select(c => c.Id).ToList();
+    }
+
+    public void SeedUsage(int count, Guid coupleId, string outcome, DateTime atUtc)
+    {
+        using var db = NewContext();
+        for (var i = 0; i < count; i++)
+            db.AiUsages.Add(AiUsage.Record(atUtc, "gemini", "gemini-flash-lite-latest", coupleId, LlmFeatures.Chat, 100, 20, outcome, 5));
+        db.SaveChanges();
+    }
+
+    private sealed class FrozenClock : IDateTimeProvider
+    {
+        public FrozenClock(DateTime utcNow) => UtcNow = utcNow;
+
+        public DateTime UtcNow { get; }
     }
 
     protected override void Dispose(bool disposing)

@@ -17,10 +17,10 @@ namespace CoupleSync.Api.Controllers;
 [Route("api/v1/ai")]
 public sealed class ChatController : ControllerBase
 {
-    private readonly GeminiChatService _chatService;
+    private readonly AssistantChatService _chatService;
     private readonly GeminiOptions _geminiOptions;
 
-    public ChatController(GeminiChatService chatService, IOptions<GeminiOptions> geminiOptions)
+    public ChatController(AssistantChatService chatService, IOptions<GeminiOptions> geminiOptions)
     {
         _chatService = chatService;
         _geminiOptions = geminiOptions.Value;
@@ -34,6 +34,8 @@ public sealed class ChatController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ChatResponse>> Chat(
         [FromBody] ChatRequest request,
         CancellationToken ct)
@@ -48,7 +50,7 @@ public sealed class ChatController : ControllerBase
             .ToList() ?? new List<ChatMessage>();
 
         var reply = await _chatService.ChatAsync(coupleId, request.Message, history, ct);
-        return Ok(new ChatResponse(reply));
+        return Ok(new ChatResponse(reply.Reply, reply.Provider));
     }
 
     private bool IsAiChatEnabled() => _geminiOptions.Enabled;
