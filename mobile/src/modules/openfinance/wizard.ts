@@ -14,7 +14,6 @@ export const UNAVAILABLE_TITLE = 'Indisponível neste servidor';
 export const UNAVAILABLE_TEXT =
   'A conexão com bancos pelo Open Finance depende de uma configuração do servidor do CoupleSync que ainda não foi feita. Quando ela estiver pronta, esta tela passa a mostrar o passo a passo para conectar.';
 
-export const WIZARD_DONE_MESSAGE = 'Conexão pronta. A sincronização chega na próxima atualização do app.';
 
 export const DEFAULT_CONNECTION_LABEL = 'Meus bancos';
 export const MAX_LABEL_LENGTH = 60;
@@ -44,14 +43,21 @@ export const ITEM_STEPS: readonly string[] = [
   'Cole o Item ID abaixo. Cada banco tem o seu Item ID.',
 ];
 
-export type WizardStep = 1 | 2 | 3 | 4;
+export type WizardStep = 1 | 2 | 3 | 4 | 5;
+
+export const WIZARD_TOTAL_STEPS = 5;
 
 export const WIZARD_STEP_TITLES: Readonly<Record<WizardStep, string>> = {
   1: 'O que é',
   2: 'Meu Pluggy',
   3: 'Dashboard',
   4: 'Item ID',
+  5: 'Período',
 };
+
+/** Passo 5: o que a escolha do período muda. */
+export const PERIOD_TEXT =
+  'Escolha quanto do passado trazer na primeira sincronização. Nada entra direto: cada transação passa pela sua revisão antes de virar despesa.';
 
 // ---------------------------------------------------------------- progresso guardado
 
@@ -84,7 +90,7 @@ export function progressStorageKey(userId: string): string {
 }
 
 function isStep(value: unknown): value is WizardStep {
-  return value === 1 || value === 2 || value === 3 || value === 4;
+  return value === 1 || value === 2 || value === 3 || value === 4 || value === 5;
 }
 
 /** Só os campos conhecidos vão para o armazenamento: nada do que a tela tiver a mais (credenciais) é gravado. */
@@ -248,8 +254,9 @@ export function connectionErrorHelp(connection: Pick<BankConnectionResponse, 'st
 }
 
 /**
- * Em que passo o wizard abre. Quem já tem conexão (ativa ou com erro) só adiciona bancos: passo 4. Quem
- * desconectou precisa informar as credenciais de novo. Sem conexão e sem o aceite do aviso de privacidade, o passo 1.
+ * Em que passo o wizard abre. Quem já tem conexão (ativa ou com erro) só adiciona bancos: passo 4; ou retoma o
+ * passo 5 (período), se parou nele com esta mesma conexão. Quem desconectou precisa informar as credenciais de
+ * novo. Sem conexão e sem o aceite do aviso de privacidade, o passo 1.
  */
 export function startingStep(input: {
   readonly progress: WizardProgress;
@@ -257,10 +264,12 @@ export function startingStep(input: {
   readonly myConnection: BankConnectionResponse | null;
 }): WizardStep {
   const { progress, consentAccepted, myConnection } = input;
-  if (myConnection && myConnection.status !== 'Disconnected') return 4;
+  if (myConnection && myConnection.status !== 'Disconnected') {
+    return progress.step === 5 && progress.connectionId === myConnection.id ? 5 : 4;
+  }
   if (!consentAccepted) return 1;
   const resumed: WizardStep = progress.step === 1 ? 2 : progress.step;
-  return resumed === 4 ? 3 : resumed;
+  return resumed >= 4 ? 3 : resumed;
 }
 
 // ---------------------------------------------------------------- contas encontradas

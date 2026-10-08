@@ -1,5 +1,5 @@
 // Open Finance: o que o grupo conectou pelo Meu Pluggy. Todos do grupo veem bancos, contas e saldos; só quem
-// conectou liga/desliga a sincronização de cada conta, adiciona banco e desconecta.
+// conectou liga/desliga a sincronização de cada conta, sincroniza, adiciona banco e desconecta.
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -21,9 +21,14 @@ import { getSessionEpoch } from '@/state/sessionStore';
 import { ErrorState } from '@/components/ErrorState';
 import { LoadingState } from '@/components/LoadingState';
 import { goToParent, useOnRefocus } from '@/navigation/resetOnFocus';
-import { formatBrazilDate } from '@/utils/brazilDateTime';
 import { colors } from '@/theme';
 import { OPEN_FINANCE_STATUS_KEY, useOpenFinanceStatus } from '@/modules/openfinance/useOpenFinanceStatus';
+import { BANK_REVIEW_KEY } from '@/modules/openfinance/useBankReview';
+import { useSyncRun } from '@/modules/openfinance/useSyncRun';
+import { SYNC_STILL_RUNNING_TEXT, canSyncNow, lastSyncText, runProgressText, runResultText } from '@/modules/openfinance/sync';
+import { isAiChatAllowedNow } from '@/modules/privacy/consentStore';
+import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
+import { aiConsentForUpload } from '@/modules/ocr/uploadForm';
 import { useWizardStore } from '@/modules/openfinance/wizardStore';
 import {
   UNAVAILABLE_TEXT,
@@ -58,6 +63,20 @@ export default function OpenFinanceScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [busyAccountId, setBusyAccountId] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const sync = useSyncRun();
+
+  // "Sincronizar agora": pede ao Pluggy para ler os bancos de novo e acompanha a sincronização do servidor.
+  const syncNow = async (connection: BankConnectionResponse) => {
+    if (sync.phase === 'working') return;
+    const epoch = getSessionEpoch();
+    const run = await sync.start(connection.id, {
+      force: true,
+      aiConsent: aiConsentForUpload(AI_FEATURE_ENABLED, isAiChatAllowedNow()),
+    });
+    if (getSessionEpoch() !== epoch || !run) return;
+    void queryClient.invalidateQueries({ queryKey: BANK_REVIEW_KEY });
+    await refetch({ cancelRefetch: false });
+  };
 
   // A tela é uma aba oculta e continua montada: o que o parceiro conectou, o status e os saldos mudam sem ela
   // saber. Busca de novo a cada volta à tela e ao puxar para atualizar.
@@ -177,7 +196,7 @@ export default function OpenFinanceScreen() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Você ainda não conectou</Text>
             <Text style={styles.cardText}>
-              São 4 passos, com os links e as instruções de cada um. Você vai precisar de uma conta gratuita no Meu Pluggy.
+              São 5 passos, com os links e as instruções de cada um. Você vai precisar de uma conta gratuita no Meu Pluggy.
             </Text>
             <TouchableOpacity style={styles.primaryBtn} onPress={openWizard} accessibilityRole="button" accessibilityLabel="Conectar meus bancos pelo Meu Pluggy">
               <Text style={styles.primaryText}>Conectar meus bancos</Text>
@@ -195,11 +214,7 @@ export default function OpenFinanceScreen() {
                 {connection.isMine ? 'Conectada por você' : `Conectada por ${connection.userName}`} · {connectionStatusLabel(connection.status)}
               </Text>
               {connection.clientIdHint ? <Text style={styles.muted}>Client ID ····{connection.clientIdHint}</Text> : null}
-              <Text style={styles.muted}>
-                {connection.lastSyncAtUtc
-                  ? `Última sincronização: ${formatBrazilDate(connection.lastSyncAtUtc)}`
-                  : 'Ainda sem sincronização: ela chega na próxima atualização do app.'}
-              </Text>
+              <Text style={styles.muted}>{lastSyncText(connection)}</Text>
               {connection.lastErrorMessage ? (
                 <Text style={styles.errorText} accessibilityRole="alert">{connection.lastErrorMessage}</Text>
               ) : null}
@@ -245,6 +260,35 @@ export default function OpenFinanceScreen() {
                   </View>
                 );
               })}
+
+              {canSyncNow(connection, available, false) ? (
+                <View style={styles.syncBox}>
+                  <TouchableOpacity
+                    style={[styles.primaryBtn, (sync.phase === 'working' || disconnecting) && styles.disabledBtn]}
+                    onPress={() => void syncNow(connection)}
+                    disabled={sync.phase === 'working' || disconnecting}
+                    accessibilityRole="button"
+                    accessibilityLabel="Sincronizar agora com os bancos"
+                    accessibilityState={{ disabled: sync.phase === 'working' || disconnecting, busy: sync.phase === 'working' }}
+                  >
+                    {sync.phase === 'working' ? <ActivityIndicator color={colors.text} /> : <Text style={styles.primaryText}>Sincronizar agora</Text>}
+                  </TouchableOpacity>
+                  {sync.phase === 'working' ? (
+                    <Text style={styles.muted} accessibilityLiveRegion="polite">{runProgressText(sync.run)}</Text>
+                  ) : null}
+                  {sync.phase === 'done' && sync.run ? (
+                    <Text style={styles.cardText} accessibilityRole="alert" accessibilityLiveRegion="polite">{runResultText(sync.run)}</Text>
+                  ) : null}
+                  {sync.phase === 'failed' ? (
+                    <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+                      {sync.run ? runResultText(sync.run) : sync.requestError}
+                    </Text>
+                  ) : null}
+                  {sync.phase === 'stillRunning' ? (
+                    <Text style={styles.cardText} accessibilityRole="alert" accessibilityLiveRegion="polite">{SYNC_STILL_RUNNING_TEXT}</Text>
+                  ) : null}
+                </View>
+              ) : null}
 
               {controls.addBank || controls.reconnect ? (
                 <View style={styles.actions}>
@@ -299,8 +343,10 @@ const styles = StyleSheet.create({
   switchBox: { alignItems: 'center' },
   switchLabel: { fontSize: 11, color: colors.textMuted, marginBottom: 2 },
   actions: { marginTop: 12, gap: 10 },
+  syncBox: { marginTop: 12, gap: 8 },
   primaryBtn: { minHeight: 48, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   primaryText: { color: colors.text, fontSize: 16, fontWeight: '700' },
+  disabledBtn: { opacity: 0.5 },
   secondaryBtn: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { color: colors.textSubtle, fontSize: 16, fontWeight: '600' },
   dangerBtn: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.error, alignItems: 'center', justifyContent: 'center' },

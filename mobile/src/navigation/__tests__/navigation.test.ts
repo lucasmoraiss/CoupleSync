@@ -97,6 +97,33 @@ describe('voltar das abas ocultas (M-I2)', () => {
     expect(screen.match(/\.isMine\b/g)).toHaveLength(1);
   });
 
+  it('Open Finance: "Sincronizar agora" só aparece pela regra testada (canSyncNow), força a leitura no banco e mostra a última sincronização', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/\{canSyncNow\(connection, available, false\) \? \(\s*<View style=\{styles\.syncBox\}>[\s\S]{0,400}syncNow\(connection\)/);
+    expect(screen.match(/syncNow\(connection\)/g)).toHaveLength(1);
+    expect(screen).toMatch(/sync\.start\(connection\.id, \{\s*force: true,/);
+    expect(screen).toMatch(/\{lastSyncText\(connection\)\}/);
+    expect(screen).not.toContain('próxima atualização do app');
+  });
+
+  it('Open Finance: o pedido silencioso ao abrir o app é ligado no layout principal, só com sessão e grupo', () => {
+    expect(layout).toMatch(/useAutoSyncOnOpen\(gate === 'app'\);/);
+    const hook = read('../src/modules/openfinance/useAutoSync.ts');
+    expect(hook).toMatch(/registerUserDataCleaner\(/);
+    expect(hook).toMatch(/getEpoch: getSessionEpoch/);
+    // Só APIs do próprio React Native: nenhum módulo nativo novo.
+    expect(hook).toMatch(/import \{ AppState \} from 'react-native'/);
+  });
+
+  it('Open Finance: o passo 5 do wizard manda o período escolhido e termina no botão da revisão', () => {
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    expect(wizard).toMatch(/sync\.start\(connectionId, \{\s*historyMonths,/);
+    expect(wizard).toMatch(/HISTORY_OPTIONS\.map\(/);
+    expect(wizard).toContain('Conectar e sincronizar');
+    expect(wizard).toMatch(/reviewDoneLabel\(toReview\)/);
+    expect(wizard).toMatch(/router\.push\('\/\(main\)\/openfinance\/review'/);
+  });
+
   it('Open Finance: na tela de gestão, o texto de saldo e limite (com a data da leitura) vem da regra testada (accountBalanceText)', () => {
     const screen = read('(main)/settings/openfinance/index.tsx');
     expect(screen).toMatch(/\{accountBalanceText\(account, formatMoney\)\}/);

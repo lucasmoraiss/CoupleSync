@@ -110,7 +110,8 @@ export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
     title: 'O que o CoupleSync passa a ver',
     paragraphs: [
       'Com as suas credenciais, o servidor do CoupleSync consulta no Pluggy os dados dos bancos que você conectou: extrato da conta, cartão de crédito e faturas, saldos e investimentos.',
-      'Nesta versão o app só confere a conexão e mostra as contas encontradas, com saldo e limite. As transações do banco começam a chegar na próxima atualização do app, e nada entra nas suas finanças sem você revisar.',
+      'Quando você sincroniza, o servidor guarda uma cópia das transações desses bancos (data, valor, descrição, estabelecimento e categoria), do período que você escolher: 3, 6 ou 12 meses. Depois da primeira vez, o app pede a sincronização sozinho ao ser aberto e o servidor repete uma vez por dia.',
+      'Nada entra nas suas finanças sem alguém do grupo revisar e confirmar. O que for descartado não vira despesa.',
     ],
   },
   {
@@ -124,14 +125,15 @@ export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
     title: 'Como as credenciais são guardadas',
     paragraphs: [
       'O Client ID e o Client Secret são guardados cifrados no servidor do CoupleSync e nunca são mostrados de novo por inteiro: só os 4 últimos caracteres do Client ID aparecem, para o grupo reconhecer a conexão. No seu celular eles não ficam guardados.',
-      'Ao desconectar, as credenciais são apagadas na hora. As contas já encontradas continuam visíveis para o grupo.',
+      'Ao desconectar, as credenciais são apagadas na hora. As contas já encontradas continuam visíveis para o grupo, e as transações já trazidas continuam na revisão.',
       'Se você sair do grupo, ou for removido dele, a sua conexão, os seus bancos e as suas contas são apagados daquele grupo.',
+      'As transações do banco que ainda estavam na revisão são apagadas junto. As despesas que já tinham sido confirmadas ficam no grupo.',
     ],
   },
   {
     title: 'Inteligência artificial',
     paragraphs: [
-      'Conectar um banco não muda o que vai para a IA: o Chat IA continua seguindo a resposta que você deu no aviso do Chat IA. Sem aquele aceite, nada do que vier do banco é enviado ao Google Gemini.',
+      'Conectar um banco não muda o que vai para a IA: o Chat IA continua seguindo a resposta que você deu no aviso do Chat IA. Sem aquele aceite, nada do que vier do banco é enviado ao Google Gemini. Com ele, a descrição de uma despesa do banco que o app não souber classificar pode ser enviada ao Gemini para sugerir a categoria.',
     ],
   },
 ];
@@ -139,7 +141,7 @@ export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
 export const PRIVACY_TITLE = 'Privacidade';
 
 const GEMINI_SHARING_WHEN_AVAILABLE =
-  'Com o Google Gemini, somente depois que você aceita o aviso do Chat IA e somente quando o servidor está com a IA ligada: a sua pergunta e os dados financeiros do grupo (chat) e as descrições das linhas dos extratos importados (categorização).';
+  'Com o Google Gemini, somente depois que você aceita o aviso do Chat IA e somente quando o servidor está com a IA ligada: a sua pergunta e os dados financeiros do grupo (chat) e as descrições das linhas dos extratos importados e das despesas vindas do banco pelo Open Finance (categorização).';
 
 const GEMINI_SHARING_WHEN_UNAVAILABLE =
   'Com o Google Gemini, apenas quando o recurso de IA estiver disponível no app. Nesta versão ele está desligado e nada é enviado ao Gemini. Quando estiver disponível, o app vai pedir o seu aceite antes; só então poderão ser enviados a sua pergunta e os dados financeiros do grupo (chat) e as descrições das linhas dos extratos importados (categorização).';
@@ -158,7 +160,7 @@ export function privacySections(aiAvailable: boolean): readonly TextSection[] {
         'Importação de extratos: o PDF que você envia é lido no servidor para extrair as transações e é apagado depois de processado.',
         'Captura de notificações (só se você aceitar): banco, valor, estabelecimento e data e hora das compras. O texto das notificações não é enviado.',
         'Alertas: o código do seu aparelho para enviar notificações do app (push).',
-        'Open Finance (só se você conectar): o Client ID e o Client Secret da sua aplicação no Pluggy, guardados cifrados, e as contas e cartões dos bancos que você conectou, com saldo, limite e os últimos dígitos do número.',
+        'Open Finance (só se você conectar): o Client ID e o Client Secret da sua aplicação no Pluggy, guardados cifrados, e as contas e cartões dos bancos que você conectou, com saldo, limite e os últimos dígitos do número, e as transações dessas contas e cartões.',
       ],
     },
     {
