@@ -114,11 +114,16 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
     public void AReadThatNeedsMoreMemoryThanTheLimit_KillsOnlyTheChild_AndFailsWithTheWorkerCode()
     {
         // 6 MB of heap is far below what reading 50 text pages takes: the runtime of the child dies, the test process lives.
+        var heavy = SyntheticPdf.Pages(50, linesPerPage: 400);
         var extractor = new ChildProcessPdfTextExtractor(new PdfWorkerOptions { HeapHardLimitBytes = 6 * 1024 * 1024, TempDirectory = _tempDirectory });
 
-        var ex = Assert.Throws<OcrException>(() => extractor.ExtractText(new MemoryStream(SyntheticPdf.Pages(50, linesPerPage: 400))));
+        var ex = Assert.Throws<OcrException>(() => extractor.ExtractText(new MemoryStream(heavy)));
 
         Assert.Equal("PDF_WORKER_FAILED", ex.Code);
+
+        // Control: the same document under the default limit is read normally, so the failure above is the limit.
+        var text = new ChildProcessPdfTextExtractor(Options()).ExtractText(new MemoryStream(heavy));
+        Assert.Contains("Pagina 50 do extrato", text);
     }
 
     [Fact]
@@ -182,6 +187,39 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
         Assert.DoesNotContain(child.Values, v => v is "segredo" or "chave-de-email" or "chave-de-ia" || v.Contains("Password"));
         Assert.Equal("/usr/bin", child["PATH"]);
         Assert.Equal("false", child["DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"]);
+    }
+
+    [Fact]
+    public void TheEnvironmentOfTheChild_IsAnAllowList_SoSecretsAddedLaterStayOut()
+    {
+        // Secrets that exist today and names nobody has invented yet: none of them may reach the child, because the
+        // child gets only what is on the list (runtime and globalization), never "everything except what is known".
+        var parent = new Hashtable
+        {
+            ["PATH"] = "/usr/bin",
+            ["OPENFINANCE_ENCRYPTION_KEY"] = "chave-de-cifragem",
+            ["OpenFinance__EncryptionKey"] = "chave-de-cifragem-2",
+            ["PLUGGY_CLIENT_ID"] = "id-pluggy",
+            ["PLUGGY_CLIENT_SECRET"] = "segredo-pluggy",
+            ["OpenFinance__PluggyClientSecret"] = "segredo-pluggy-2",
+            ["INTERNAL_JOBS_SECRET"] = "segredo-de-jobs",
+            ["AI__ApiKey"] = "chave-de-ia-2",
+            ["ANTHROPIC_API_KEY"] = "chave-de-ia-3",
+            ["SEGREDO_QUE_AINDA_NAO_EXISTE"] = "valor-novo",
+        };
+        var extractor = new ChildProcessPdfTextExtractor(Options());
+
+        var startInfo = extractor.BuildStartInfo(parent);
+
+        var names = startInfo.Environment.Keys.ToList();
+        foreach (var forbidden in new[]
+        {
+            "OPENFINANCE_ENCRYPTION_KEY", "OpenFinance__EncryptionKey", "PLUGGY_CLIENT_ID", "PLUGGY_CLIENT_SECRET",
+            "OpenFinance__PluggyClientSecret", "INTERNAL_JOBS_SECRET", "AI__ApiKey", "ANTHROPIC_API_KEY", "SEGREDO_QUE_AINDA_NAO_EXISTE",
+        })
+            Assert.DoesNotContain(forbidden, names);
+        Assert.DoesNotContain(startInfo.Environment.Values, v => v is not null && (v.StartsWith("chave-") || v.StartsWith("segredo") || v.StartsWith("id-") || v == "valor-novo"));
+        Assert.Equal("/usr/bin", startInfo.Environment["PATH"]);
     }
 
     [Fact]

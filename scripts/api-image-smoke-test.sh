@@ -242,6 +242,10 @@ expect "upload PDF with a password" 200 "$response" '"uploadId"'
 wait_import "$(echo "$response" | json_field uploadId)" Failed
 case "$IMPORT_STATUS_BODY" in *PDF_ENCRYPTED*) ;; *) fail "the PDF with a password did not fail with PDF_ENCRYPTED" ;; esac
 
+# The read really went through the child process (an image that still read in-process would pass the steps above).
+api_log="$(docker logs "$API" 2>&1)"
+case "$api_log" in *'PDF worker finished (exit code 0'*'ok=True'*) ;; *) fail "the API log has no 'PDF worker finished' line: the PDF was not read by the worker process" ;; esac
+
 workers="$(docker exec "$API" sh -c 'ps' | grep -c -e '--pdf-worker' || true)"
 echo "PDF worker processes still running in the container: $workers"
 [ "$workers" = "0" ] || fail "a PDF worker process was left running"

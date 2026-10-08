@@ -145,7 +145,8 @@ public sealed class ChildProcessPdfTextExtractor : IPdfTextExtractor
         }
     }
 
-    private ProcessStartInfo BuildStartInfo()
+    /// <summary>What is started for one file, with the environment already reduced to the allow-list.</summary>
+    public ProcessStartInfo BuildStartInfo(IDictionary? parentEnvironment = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -173,7 +174,7 @@ public sealed class ChildProcessPdfTextExtractor : IPdfTextExtractor
         }
 
         startInfo.Environment.Clear();
-        foreach (var (name, value) in BuildChildEnvironment(Environment.GetEnvironmentVariables(), _options))
+        foreach (var (name, value) in BuildChildEnvironment(parentEnvironment ?? Environment.GetEnvironmentVariables(), _options))
             startInfo.Environment[name] = value;
         return startInfo;
     }
