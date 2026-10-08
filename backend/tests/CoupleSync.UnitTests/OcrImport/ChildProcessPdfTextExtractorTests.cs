@@ -545,9 +545,13 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
     private PdfWorkerOptions Options(Action<int>? onStarted = null) => new() { TempDirectory = _tempDirectory, OnProcessStarted = onStarted };
 
     /// <summary>A "worker" that reads nothing and never answers: an idle shell command (the same on Windows and Linux).</summary>
-    private PdfWorkerOptions Idle(TimeSpan timeout, Action<int>? onStarted) => OperatingSystem.IsWindows()
-        ? new PdfWorkerOptions { FileName = "cmd.exe", Arguments = ["/c", "ping -n 60 127.0.0.1 > nul"], Timeout = timeout, TempDirectory = _tempDirectory, OnProcessStarted = onStarted }
-        : new PdfWorkerOptions { FileName = "sh", Arguments = ["-c", "sleep 60"], Timeout = timeout, TempDirectory = _tempDirectory, OnProcessStarted = onStarted };
+    private PdfWorkerOptions Idle(TimeSpan timeout, Action<int>? onStarted) =>
+        IdleWorkerOptions() with { Timeout = timeout, TempDirectory = _tempDirectory, OnProcessStarted = onStarted };
+
+    /// <summary>The program of an idle "worker", shared by the tests that need a read that never finishes.</summary>
+    internal static PdfWorkerOptions IdleWorkerOptions() => OperatingSystem.IsWindows()
+        ? new PdfWorkerOptions { FileName = "cmd.exe", Arguments = ["/c", "ping -n 60 127.0.0.1 > nul"] }
+        : new PdfWorkerOptions { FileName = "sh", Arguments = ["-c", "sleep 60"] };
 
     /// <summary>An idle child whose own child has a name nothing else on the machine uses (Windows), so the test can look for it.</summary>
     private PdfWorkerOptions IdleWithADescendant(TimeSpan timeout, Action<int>? onStarted) => OperatingSystem.IsWindows()

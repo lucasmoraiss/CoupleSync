@@ -42,9 +42,7 @@ public sealed class PdfExtractionLimitsTests
     public void AReadThatNeverFinishes_FailsWithPdfTimeout_InsteadOfHangingTheCaller()
     {
         // A worker that never answers: an idle shell command (same on Windows and Linux).
-        var options = OperatingSystem.IsWindows()
-            ? new PdfWorkerOptions { FileName = "cmd.exe", Arguments = ["/c", "ping -n 60 127.0.0.1 > nul"], Timeout = TimeSpan.FromMilliseconds(500) }
-            : new PdfWorkerOptions { FileName = "sh", Arguments = ["-c", "sleep 60"], Timeout = TimeSpan.FromMilliseconds(500) };
+        var options = ChildProcessPdfTextExtractorTests.IdleWorkerOptions() with { Timeout = TimeSpan.FromMilliseconds(500) };
         var clock = System.Diagnostics.Stopwatch.StartNew();
 
         var ex = Assert.Throws<OcrException>(() => new ChildProcessPdfTextExtractor(options).ExtractText(new MemoryStream([1, 2, 3])));

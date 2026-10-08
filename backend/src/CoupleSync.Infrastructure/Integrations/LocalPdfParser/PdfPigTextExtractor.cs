@@ -10,7 +10,11 @@ public class PdfPigTextExtractor : IPdfTextExtractor
     /// <summary>A statement longer than this is not read (bank statements are a handful of pages).</summary>
     public const int DefaultMaxPages = 50;
 
-    /// <summary>Reading one PDF may take at most this long; PdfPig is synchronous and cannot be cancelled mid-page.</summary>
+    /// <summary>
+    /// Time limit of this in-process reader when none is given; PdfPig is synchronous and cannot be cancelled mid-page.
+    /// The API does not read PDFs here: it uses ChildProcessPdfTextExtractor (limit in PdfWorkerOptions), and the worker
+    /// process builds this reader with no limit, because the parent kills it.
+    /// </summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
     private readonly int _maxPages;

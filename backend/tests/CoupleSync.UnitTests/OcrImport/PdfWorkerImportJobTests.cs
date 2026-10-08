@@ -64,9 +64,8 @@ public sealed class PdfWorkerImportJobTests
         Assert.Equal("PDF_TIMEOUT", job.ErrorCode);
     }
 
-    private static PdfWorkerOptions IdleWorker(Action<int>? onStarted, TimeSpan? timeout = null) => OperatingSystem.IsWindows()
-        ? new PdfWorkerOptions { FileName = "cmd.exe", Arguments = ["/c", "ping -n 60 127.0.0.1 > nul"], Timeout = timeout ?? TimeSpan.FromSeconds(30), OnProcessStarted = onStarted }
-        : new PdfWorkerOptions { FileName = "sh", Arguments = ["-c", "sleep 60"], Timeout = timeout ?? TimeSpan.FromSeconds(30), OnProcessStarted = onStarted };
+    private static PdfWorkerOptions IdleWorker(Action<int>? onStarted, TimeSpan? timeout = null) =>
+        ChildProcessPdfTextExtractorTests.IdleWorkerOptions() with { Timeout = timeout ?? TimeSpan.FromSeconds(30), OnProcessStarted = onStarted };
 
     private static (OcrBackgroundJob Job, FakeImportJobRepository Jobs) Build(IPdfTextExtractor extractor)
     {
