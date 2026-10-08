@@ -148,6 +148,23 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
     }
 
     [Fact]
+    public void TheRealWorker_KilledAtTheTimeLimit_LeavesNothingInItsTempDirectory()
+    {
+        // The real worker, with its runtime fully started and in the middle of a document that takes several seconds,
+        // is killed outright. On Linux a .NET runtime creates a diagnostics socket and debugger pipes in the temp
+        // directory at start, and a killed process cannot remove them: the child runs with diagnostics off.
+        var childId = 0;
+        var slow = SyntheticPdf.Pages(50, linesPerPage: 2000);
+        var options = Options(id => childId = id) with { Timeout = TimeSpan.FromSeconds(1.5) };
+
+        var ex = Assert.Throws<OcrException>(() => new ChildProcessPdfTextExtractor(options).ExtractText(new MemoryStream(slow)));
+
+        Assert.Equal("PDF_TIMEOUT", ex.Code);
+        Assert.True(IsGone(childId));
+        Assert.Empty(Directory.GetFileSystemEntries(_tempDirectory));
+    }
+
+    [Fact]
     public void AReadThatNeedsMoreMemoryThanTheLimit_KillsOnlyTheChild_AndFailsWithTheWorkerCode()
     {
         // 6 MB of heap is far below what reading 50 text pages takes: the runtime of the child dies, the test process lives.
