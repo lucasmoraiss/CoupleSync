@@ -29,9 +29,9 @@ import { TextSections } from '@/components/TextSections';
 import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { colors } from '@/theme';
 import { isOpenFinanceAccepted } from '@/modules/privacy/consent';
-import { isAiChatAllowedNow, useConsentStore } from '@/modules/privacy/consentStore';
-import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
-import { aiConsentForUpload } from '@/modules/ocr/uploadForm';
+import { useConsentStore } from '@/modules/privacy/consentStore';
+import { aiUploadConsent } from '@/modules/ai/aiStatus';
+import { currentAiStatus } from '@/modules/ai/aiStatusStore';
 import { BANK_REVIEW_KEY } from '@/modules/openfinance/useBankReview';
 import { useSyncRun } from '@/modules/openfinance/useSyncRun';
 import { reviewDoneLabel } from '@/modules/openfinance/review';
@@ -327,7 +327,7 @@ function OpenFinanceWizardScreen() {
       connectionId,
       {
         historyMonths: periodChoosable ? historyMonths : undefined,
-        aiConsent: aiConsentForUpload(AI_FEATURE_ENABLED, isAiChatAllowedNow()),
+        aiConsent: aiUploadConsent(currentAiStatus()),
       },
       // Pedido aceito pelo servidor: o wizard terminou ali, não há mais o que retomar. Não espera a sincronização
       // acabar: quem sair no meio não encontra o wizard preso neste passo.

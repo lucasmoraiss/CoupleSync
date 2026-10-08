@@ -5,8 +5,9 @@ namespace CoupleSync.Application.Ai;
 
 /// <summary>
 /// The Assistant's history as it is sent (design 3.9): from the most recent message to the oldest, whole messages,
-/// up to 1,500 estimated tokens. The request validator still accepts 20 messages of 2,000 characters — the installed
-/// app does not change — and the server cuts.
+/// up to 1,500 estimated tokens. The request validator accepts 20 messages, each longer than a question — the
+/// installed app sends earlier answers back whole — and the server cuts: each message to the length of a question
+/// (after the privacy filter), then the history here.
 /// </summary>
 public static class ChatHistoryTrimmer
 {
@@ -137,12 +138,6 @@ public sealed record LlmLinkState(bool ExhaustedToday, DateTime? PausedUntilUtc,
 
         return new LlmLinkState(exhausted, pausedUntil, unexplainedInARow);
     }
-}
-
-/// <summary>Phase 1: there is no consent table yet; the chat is still behind the acceptance kept on the device.</summary>
-public sealed class DeviceAiConsentGate : IAiConsentGate
-{
-    public Task<bool> IsEnabledAsync(Guid? coupleId, CancellationToken ct) => Task.FromResult(true);
 }
 
 public sealed class SystemLlmWaiter : ILlmWaiter

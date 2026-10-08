@@ -3,7 +3,7 @@ using CoupleSync.Application.Common.Interfaces;
 namespace CoupleSync.Infrastructure.Integrations.Gemini;
 
 /// <summary>
-/// No-op implementation used when AI_CHAT_ENABLED is false.
+/// No-op implementation: the one registered while statement categorization by AI is off (see DependencyInjection).
 /// Always returns <c>null</c>; transactions will receive the default category.
 /// </summary>
 public sealed class NullCategoryClassifier : ICategoryClassifier

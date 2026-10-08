@@ -102,9 +102,10 @@ describe('texto do passo "O que é"', () => {
     );
   });
 
-  it('a IA segue o consentimento que já existe: nada de novo é enviado ao Gemini por causa do Open Finance', () => {
-    expect(text).toMatch(/Chat IA/);
-    expect(text).toMatch(/aviso do Chat IA/);
+  it('conectar um banco não liga a IA: o aceite dela é outro, em Configurações > Inteligência artificial', () => {
+    expect(text).toContain('Conectar um banco não liga a IA nem muda o aceite dela.');
+    expect(text).toContain('A análise com IA tem aceite próprio; veja Configurações > Inteligência artificial.');
+    expect(text).not.toMatch(/Chat IA/);
   });
 
   it('diz que as transações do banco são copiadas para o servidor a cada sincronização, e que nada entra sem revisão (issue #25)', () => {
@@ -121,14 +122,22 @@ describe('texto do passo "O que é"', () => {
     expect(text).toContain('As transações do banco que ainda estavam na revisão são apagadas junto. As despesas que já tinham sido confirmadas ficam no grupo.');
   });
 
-  it('diz que, com o aceite do Chat IA, a descrição de uma despesa do banco pode ir ao Gemini para sugerir a categoria (issue #25)', () => {
-    expect(text).toContain('a descrição de uma despesa do banco que o app não souber classificar pode ser enviada ao Gemini para sugerir a categoria');
+  it('diz o que das despesas do banco vai à IA: nada sem a análise ativada para o grupo; com ela, só as confirmadas, nos totais por categoria (issues #25 e #38)', () => {
+    expect(text).toContain('Sem a análise com IA ativada para o grupo, nada do que vier do banco é enviado à IA.');
+    expect(text).toContain(
+      'Com ela ativada, as despesas do banco que alguém do grupo confirmou na revisão entram, como qualquer outra despesa, nos resumos calculados das finanças do grupo (totais por categoria).',
+    );
+  });
+
+  it('não promete o envio da descrição de uma despesa do banco para categorizar: a categorização por IA está desligada no servidor (issue #38)', () => {
+    expect(text).not.toMatch(/sugerir a categoria/);
+    expect(text).not.toMatch(/Gemini/);
   });
 });
 
 describe('tela Privacidade', () => {
-  it.each([true, false])('cita o Pluggy na coleta e no compartilhamento (IA no app: %p)', (aiAvailable) => {
-    const sections = privacySections(aiAvailable);
+  it('cita o Pluggy na coleta e no compartilhamento', () => {
+    const sections = privacySections();
     const collected = sections.find((s) => s.title === 'Dados que o CoupleSync coleta')!.paragraphs.join('\n');
     const shared = sections.find((s) => s.title === 'Com quem são compartilhados')!.paragraphs.join('\n');
 
@@ -141,8 +150,8 @@ describe('tela Privacidade', () => {
   it('o aceite do Open Finance aparece em "Suas respostas" só para quem aceitou', () => {
     const date = (iso: string) => `[${iso.slice(0, 10)}]`;
 
-    expect(consentStatusLines(EMPTY_CONSENT, false, date)).toEqual(['Captura de notificações: não aceita.']);
-    expect(consentStatusLines(acceptOpenFinance(EMPTY_CONSENT, NOW), false, date)).toEqual([
+    expect(consentStatusLines(EMPTY_CONSENT, date)).toEqual(['Captura de notificações: não aceita.']);
+    expect(consentStatusLines(acceptOpenFinance(EMPTY_CONSENT, NOW), date)).toEqual([
       'Captura de notificações: não aceita.',
       'Open Finance (Meu Pluggy): aceito em [2026-10-07].',
     ]);

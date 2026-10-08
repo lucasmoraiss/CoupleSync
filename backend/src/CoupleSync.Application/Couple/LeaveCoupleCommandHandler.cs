@@ -102,6 +102,9 @@ public sealed class LeaveCoupleCommandHandler
 
         var bankConnectionIds = await _coupleRepository.RemoveOpenFinanceOfMemberAsync(user.Id, coupleId, cancellationToken);
 
+        // Their acceptance of the AI analysis stops counting for the group, and their AI preferences there go.
+        await _coupleRepository.RemoveAiOfMemberAsync(user.Id, coupleId, now, cancellationToken);
+
         var (accessToken, refreshToken) = await SessionTokens.ReplaceAsync(
             user, _jwtTokenService, _authRepository, _tokenHasher, now, _jwtOptions.RefreshTokenTtlDays, cancellationToken);
 

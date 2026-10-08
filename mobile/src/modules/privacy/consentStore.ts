@@ -16,7 +16,6 @@ import {
   acceptOpenFinance,
   declineAiChat,
   declineCapture,
-  isAiChatAllowed,
   isCaptureAllowed,
   markCapturePromptShown,
   parseConsent,
@@ -131,13 +130,6 @@ export function isCaptureAllowedNow(): boolean {
   const { userId, loaded, record } = useConsentStore.getState();
   const sessionUserId = useSessionStore.getState().userId;
   return loaded && userId !== null && userId === sessionUserId && isCaptureAllowed(record);
-}
-
-/** O chat com IA pode enviar dados ao Gemini agora? Mesma exigência de dono e carga. */
-export function isAiChatAllowedNow(): boolean {
-  const { userId, loaded, record } = useConsentStore.getState();
-  const sessionUserId = useSessionStore.getState().userId;
-  return loaded && userId !== null && userId === sessionUserId && isAiChatAllowed(record);
 }
 
 registerUserDataCleaner(() => useConsentStore.getState().reset());

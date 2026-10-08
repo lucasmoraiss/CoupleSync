@@ -110,4 +110,14 @@ public interface IAiUsageRepository
 
     /// <summary>The latest Ok / 429 rows of one model since an instant, newest first.</summary>
     Task<IReadOnlyList<AiLinkEvent>> GetRecentLinkEventsAsync(string provider, string model, DateTime sinceUtc, int take, CancellationToken ct);
+
+    /// <summary>Every call of one group between two Brasília days (both included), summed by day, feature and outcome.</summary>
+    Task<IReadOnlyList<AiUsageSummaryRow>> GetGroupSummaryAsync(Guid coupleId, DateOnly fromDayBrt, DateOnly toDayBrt, CancellationToken ct);
+
+    /// <summary>What one group sent to each model in one day of the provider (UTC).</summary>
+    Task<IReadOnlyList<AiUsageModelRow>> GetGroupModelDayAsync(Guid coupleId, DateOnly dayUtc, CancellationToken ct);
 }
+
+public sealed record AiUsageSummaryRow(DateOnly DayBrt, string Feature, string Outcome, int Calls, long InputTokens, long OutputTokens);
+
+public sealed record AiUsageModelRow(string Provider, string Model, int Calls);

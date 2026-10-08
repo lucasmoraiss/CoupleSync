@@ -20,6 +20,7 @@ import {
 } from './NotificationListenerBridge';
 import { clearPendingEvents } from './eventUploader';
 import { applyCaptureDecision, decideCaptureSync } from './captureSync';
+import { clearCapturePromptOpening, isCapturePromptAhead, noteCapturePromptOpening } from './capturePromptGate';
 
 export const CAPTURE_CONSENT_ROUTE = '/(main)/settings/capture-consent';
 
@@ -83,8 +84,25 @@ export function useCaptureConsentSync(): void {
 
   useEffect(() => {
     if (!decision.prompt) return;
+    // Marcado já, antes de gravar e de navegar: a pergunta da análise com IA não abre por cima desta tela.
+    noteCapturePromptOpening(sessionUserId);
     void useConsentStore.getState().markCapturePromptShown().then((recorded) => {
       if (recorded) router.push(CAPTURE_CONSENT_ROUTE as any);
+      else clearCapturePromptOpening();
     });
-  }, [decision.prompt]);
+  }, [decision.prompt, sessionUserId]);
+}
+
+/**
+ * A tela de consentimento da captura vai abrir sozinha (ou está abrindo) para a pessoa logada? Quem pergunta é a
+ * tela de boas-vindas da análise com IA, que espera a vez dela (capturePromptGate.ts).
+ */
+export function isCaptureConsentAhead(): Promise<boolean> {
+  return isCapturePromptAhead({
+    sessionUserId: useSessionStore.getState().userId,
+    bridgeAvailable: Platform.OS === 'android' && isNotificationBridgeAvailable(),
+    readConsent: () => useConsentStore.getState(),
+    loadConsent: (userId) => useConsentStore.getState().load(userId),
+    checkPermission: () => checkNotificationListenerPermission(),
+  });
 }

@@ -510,6 +510,63 @@ export interface CreateBankConnectionRequest {
   readonly historyMonths?: number;
 }
 
+// --- Análise com IA: ativação do grupo e consumo (GET /api/v1/ai/status, /ai/usage) ---
+export interface AiAcceptedByResponse {
+  readonly userId: string;
+  readonly name: string;
+  readonly acceptedAtUtc: string;
+}
+
+export interface AiStatusResponse {
+  /** A IA existe no servidor agora (não está desligada e há provedor configurado). */
+  readonly available: boolean;
+  /** O grupo ativou: há ao menos um aceite em vigor de quem ainda é membro. */
+  readonly enabled: boolean;
+  readonly consentVersion: number;
+  readonly acceptedBy: readonly AiAcceptedByResponse[];
+  readonly myAcceptance: { readonly acceptedAtUtc: string } | null;
+  /** A tela de boas-vindas da IA ainda é devida a esta pessoa neste grupo. */
+  readonly onboardingPending: boolean;
+  readonly weeklyEmailEnabled: boolean;
+  readonly emailVerified: boolean;
+  readonly emailConfigured: boolean;
+  readonly providers: readonly { readonly name: string; readonly country: string; readonly trainsOnData: boolean }[];
+  readonly features: { readonly assistant: boolean; readonly insights: boolean; readonly education: boolean; readonly weeklyEmail: boolean };
+  readonly budget: { readonly callsToday: number; readonly callLimit: number; readonly resetsAtLocal: string };
+}
+
+export interface AiUsageDayResponse {
+  /** Dia de Brasília, yyyy-MM-dd. */
+  readonly day: string;
+  readonly calls: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly failures: number;
+}
+
+export interface AiUsageProviderResponse {
+  readonly name: string;
+  readonly model: string;
+  readonly calls: number;
+  /** Cota diária do modelo; null enquanto ela não é conhecida. */
+  readonly limit: number | null;
+  readonly percentUsed: number | null;
+  readonly exhaustedToday: boolean;
+}
+
+export interface AiUsageResponse {
+  readonly days: readonly AiUsageDayResponse[];
+  readonly byFeature: readonly { readonly feature: string; readonly calls: number; readonly inputTokens: number; readonly outputTokens: number }[];
+  readonly providersToday: readonly AiUsageProviderResponse[];
+  readonly groupBudget: {
+    readonly callsToday: number;
+    readonly callLimit: number;
+    readonly tokensToday: number;
+    readonly tokenLimit: number;
+    readonly resetsAtLocal: string;
+  };
+}
+
 // --- Open Finance: sincronização e revisão do banco ---
 
 export interface SyncRunResponse {

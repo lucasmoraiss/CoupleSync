@@ -10,7 +10,6 @@ import { mainAreaGate } from '@/modules/couple/groups';
 import { TABS_BACK_BEHAVIOR } from '@/navigation/routes';
 import { useCaptureConsentSync } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
 import { registerPushToken } from '@/services/pushTokenService';
-import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
 // Carregado com o app (e não só ao abrir o wizard): é o módulo que registra a limpeza do progresso ao sair da conta.
 import '@/modules/openfinance/wizardStore';
 import { useAutoSyncOnOpen } from '@/modules/openfinance/useAutoSync';
@@ -93,7 +92,7 @@ export default function MainLayout() {
         },
         tabBarActiveTintColor: colors.primaryLight,
         tabBarInactiveTintColor: colors.textDisabled,
-        // Sete abas: sem margem lateral e com letra menor, o rótulo mais longo ("Transações") cabe inteiro.
+        // Abas lado a lado: sem margem lateral e com letra menor, o rótulo mais longo ("Transações") cabe inteiro.
         tabBarItemStyle: { paddingHorizontal: 0 },
         tabBarLabelStyle: { fontSize: 9.5, fontWeight: '600', letterSpacing: -0.2 },
         tabBarAllowFontScaling: false,
@@ -105,8 +104,11 @@ export default function MainLayout() {
       <Tabs.Screen name="cashflow/index" options={{ title: 'Fluxo', tabBarLabel: 'Fluxo', tabBarAccessibilityLabel: 'Fluxo de caixa', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="trending-up-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="budget/index" options={{ title: 'Rendas', tabBarLabel: 'Rendas', tabBarAccessibilityLabel: 'Rendas e orçamento', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="wallet-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="reports/index" options={{ title: 'Relatórios', tabBarLabel: 'Relatórios', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="pie-chart-outline" color={color} size={size} focused={focused} /> }} />
-      <Tabs.Screen name="chat/index" options={{ title: 'Chat IA', tabBarLabel: 'Chat IA', href: AI_FEATURE_ENABLED ? undefined : null, tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="chatbubble-ellipses-outline" color={color} size={size} focused={focused} /> }} />
       <Tabs.Screen name="settings/index" options={{ title: 'Config', tabBarLabel: 'Config', tabBarAccessibilityLabel: 'Configurações', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="settings-outline" color={color} size={size} focused={focused} /> }} />
+      {/* O Assistente não é aba: abre pelo botão do Painel. Se aparece ou não vem do servidor (GET /ai/status). */}
+      <Tabs.Screen name="chat/index" options={{ title: 'Assistente', href: null }} />
+      <Tabs.Screen name="ai/welcome" options={{ href: null }} />
+      <Tabs.Screen name="settings/ai" options={{ href: null }} />
       <Tabs.Screen name="settings/alerts" options={{ href: null }} />
       <Tabs.Screen name="settings/group" options={{ href: null }} />
       <Tabs.Screen name="settings/change-password" options={{ href: null }} />

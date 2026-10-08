@@ -1,7 +1,9 @@
 // MOB-03: consentimento da captura de notificações bancárias. A captura só é ligada depois do aceite aqui.
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { colors } from '@/theme';
+import { captureConsentScreenFocusEffect } from '@/modules/integrations/notification-capture/capturePromptGate';
 import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { useMyGroups } from '@/modules/couple/useMyGroups';
 import { captureDestinationText } from '@/modules/couple/groups';
@@ -24,6 +26,8 @@ function CaptureConsentScreen() {
   const { data: myGroups } = useMyGroups();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Saiu da tela (inclusive pelo voltar do Android, sem responder): a pergunta da IA deixa de esperar por ela.
+  useFocusEffect(captureConsentScreenFocusEffect);
 
   const handleAccept = async () => {
     if (busy) return;

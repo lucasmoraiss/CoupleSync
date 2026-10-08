@@ -37,6 +37,13 @@ public interface ICoupleRepository
     /// </summary>
     Task<IReadOnlyList<Guid>> RemoveOpenFinanceOfMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Takes the user's AI choices out of the group: their acceptance of the AI analysis there is revoked (it stops
+    /// counting for the group) and their AI preferences in that group are deleted. Other groups and other members
+    /// are not touched. Applied on the next <see cref="SaveChangesAsync"/>.
+    /// </summary>
+    Task RemoveAiOfMemberAsync(Guid userId, Guid coupleId, DateTime nowUtc, CancellationToken cancellationToken);
+
     /// <summary>Deletes the user's refresh token so the session cannot be renewed. Applied on the next <see cref="SaveChangesAsync"/>.</summary>
     Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken);
 

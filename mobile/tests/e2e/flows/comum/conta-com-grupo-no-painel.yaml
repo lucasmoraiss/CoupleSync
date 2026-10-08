@@ -10,6 +10,8 @@ appId: com.couplesync.app
       EMAIL: ${EMAIL}
 - runFlow: criar-grupo.yaml
 - tapOn: "Ir para o Painel"
+# No primeiro uso do grupo o app pergunta pela análise com IA antes do Painel.
+- runFlow: responder-agora-nao-a-ia.yaml
 - extendedWaitUntil:
     visible: "Total de gastos"
     timeout: 60000

@@ -67,6 +67,7 @@ public sealed class ChatControllerTests
         var response = await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("AI_CHAT_DISABLED", (await ErrorOf(response)).Code);
     }
 
     // ── Happy path ─────────────────────────────────────────────────────────
@@ -279,7 +280,7 @@ public sealed class ChatControllerTests
     }
 
     [Fact]
-    public async Task Chat_TheGroupBudget_IsCountedInAiUsage_SurvivesARestart_AndAnswersChatRateLimited()
+    public async Task Chat_TheGroupBudget_IsCountedInAiUsage_SurvivesARestart_AndAnswersAiDailyBudgetExhausted()
     {
         var database = $"couplesync-chat-budget-{Guid.NewGuid():N}";
         var catalog = new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-lite-latest"));
@@ -304,7 +305,7 @@ public sealed class ChatControllerTests
 
         Assert.Equal(HttpStatusCode.TooManyRequests, blocked.StatusCode);
         var error = await ErrorOf(blocked);
-        Assert.Equal("CHAT_RATE_LIMITED", error.Code);
+        Assert.Equal("AI_DAILY_BUDGET_EXHAUSTED", error.Code);
         Assert.Equal("A cota de IA do grupo para hoje acabou. Volta à meia-noite.", error.Message);
         Assert.Equal(0, catalog.Providers[0].Calls);
 
@@ -316,7 +317,7 @@ public sealed class ChatControllerTests
     }
 
     [Fact]
-    public async Task Chat_TheGlobalCeiling_SumsEveryGroup_AndAnswersChatRateLimited()
+    public async Task Chat_TheGlobalCeiling_SumsEveryGroup_AndAnswersAiGlobalBudgetExhausted()
     {
         var catalog = new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-lite-latest"));
         await using var factory = new ChatWebApplicationFactory(
@@ -333,7 +334,7 @@ public sealed class ChatControllerTests
 
         Assert.Equal(HttpStatusCode.TooManyRequests, blocked.StatusCode);
         var error = await ErrorOf(blocked);
-        Assert.Equal("CHAT_RATE_LIMITED", error.Code);
+        Assert.Equal("AI_GLOBAL_BUDGET_EXHAUSTED", error.Code);
         Assert.Equal("A IA do app atingiu o limite de uso de hoje. Volta à meia-noite. Os números do app continuam atualizados.", error.Message);
         Assert.Equal(3, catalog.Providers[0].Calls);
         Assert.Equal(3, factory.UsageRows().Select(u => u.CoupleId).Distinct().Count());
@@ -384,16 +385,90 @@ public sealed class ChatControllerTests
         Assert.Equal(4, sent.Messages.Count);
     }
 
+    /// <summary>
+    /// Issue #38, review 2 (I2): the app sends every earlier answer back whole as history, and an answer may be
+    /// longer than a question. With the item refused, every following question of the conversation was a 400.
+    /// </summary>
+    [Theory]
+    [InlineData(2001)]
+    [InlineData(4000)]
+    [InlineData(16000)]
+    public async Task Chat_AnEarlierAnswerLongerThanAQuestion_ComingBackAsHistory_DoesNotBlockTheConversation(int length)
+    {
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        using var client = await factory.ClientWithCoupleAsync();
+        var longAnswer = string.Concat(Enumerable.Repeat("Os gastos subiram. ", length / 19 + 1))[..length];
+        var history = new List<object>
+        {
+            new { Role = "user", Content = "Faça uma análise completa dos nossos gastos." },
+            new { Role = "model", Content = longAnswer },
+        };
+
+        var next = await client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "E onde dá para economizar?", History = history });
+
+        Assert.Equal(HttpStatusCode.OK, next.StatusCode);
+        var sent = Assert.Single(provider.Requests);
+        Assert.True(PromptText.EstimateTokens(sent) <= 6400, $"estimated {PromptText.EstimateTokens(sent)} tokens");
+        Assert.Equal("E onde dá para economizar?", sent.Messages[^1].Text);
+        // The long answer goes cut to the size of a question, never whole.
+        Assert.Equal(2000, sent.Messages[^2].Text.Length);
+        Assert.StartsWith("Os gastos subiram. Os gastos", sent.Messages[^2].Text);
+
+        // And the question after that one, with the long answer still among the last 20 messages.
+        history.Add(new { Role = "user", Content = "E onde dá para economizar?" });
+        history.Add(new { Role = "model", Content = "Em lazer." });
+        var later = await client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto?", History = history });
+
+        Assert.Equal(HttpStatusCode.OK, later.StatusCode);
+    }
+
     [Fact]
-    public async Task Chat_Returns503_WhenNoProviderHasAKey()
+    public async Task Chat_TheLargestRequestTheValidatorAccepts_IsAnsweredQuickly_AndCutOnTheServer()
+    {
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        using var client = await factory.ClientWithCoupleAsync();
+        // No space and no "@": the worst text for the patterns of the privacy filter.
+        var history = Enumerable.Range(1, 20).Select(i => new { Role = i % 2 == 1 ? "user" : "model", Content = new string('h', 16000) }).ToArray();
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = new string('q', 2000), History = history });
+        watch.Stop();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var sent = Assert.Single(provider.Requests);
+        Assert.True(PromptText.EstimateTokens(sent) <= 6400, $"estimated {PromptText.EstimateTokens(sent)} tokens");
+        Assert.All(sent.Messages.Skip(1), m => Assert.True(m.Text.Length <= 2000));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+    }
+
+    [Fact]
+    public async Task Chat_Returns400_WhenAHistoryItemIsLongerThanAnyAnswerCouldBe()
+    {
+        await using var factory = new ChatWebApplicationFactory(enabled: true);
+        using var client = await factory.ClientWithCoupleAsync();
+
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", new
+        {
+            Message = "E agora?",
+            History = new[] { new { Role = "model", Content = new string('h', 16001) } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Chat_Returns404AiChatDisabled_WhenNoProviderHasAKey()
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true, withGeminiKey: false, useRealCatalog: true);
         using var client = await factory.ClientWithCoupleAsync();
 
         var response = await client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest());
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.Equal("CHAT_NOT_CONFIGURED", (await ErrorOf(response)).Code);
+        // No provider with a key: the AI is not available, which the chat answers as "disabled" (design 10.2).
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("AI_CHAT_DISABLED", (await ErrorOf(response)).Code);
     }
 
     // ── The fake provider (Ai__UseFakeProvider) and its start-up guard ─────
@@ -484,7 +559,12 @@ public sealed class ChatControllerTests
         });
         loginResponse.EnsureSuccessStatusCode();
         var loginAuth = await loginResponse.Content.ReadFromJsonAsync<AuthResponseDto>();
-        return loginAuth!.AccessToken;
+
+        // The group switches the AI on (ignored where the AI is not available: those tests expect exactly that).
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginAuth!.AccessToken);
+        await client.PostAsJsonAsync("/api/v1/ai/consent", new { Version = 1 });
+        client.DefaultRequestHeaders.Authorization = null;
+        return loginAuth.AccessToken;
     }
 
     // ── Local DTOs ─────────────────────────────────────────────────────────
@@ -564,6 +644,7 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
     public const string JwtAudience = "CoupleSync.Mobile.IntegrationTests";
 
     private readonly bool _enabled;
+    private readonly Action<IServiceCollection>? _configureServices;
     private readonly bool _withGeminiKey;
     private readonly DateTime? _frozenNow;
     private readonly ILlmProviderCatalog? _catalog;
@@ -574,6 +655,8 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
 
     /// <param name="catalog">The providers of the chain; by default one stub in place of each Gemini model of the Assistant.</param>
     /// <param name="useRealCatalog">Keeps the real catalog (real adapters): only for hosts that never reach a provider or use the fake one.</param>
+    /// <param name="enabled">False sets the emergency switch (Ai:Disabled=true).</param>
+    /// <param name="configureServices">Last word on the services of the host (for instance a fake e-mail sender).</param>
     /// <param name="databaseName">Two hosts with the same name share the database (the first one keeps it alive).</param>
     public ChatWebApplicationFactory(
         bool enabled,
@@ -582,9 +665,11 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
         bool withGeminiKey = true,
         bool useRealCatalog = false,
         string? databaseName = null,
-        DateTime? frozenNow = null)
+        DateTime? frozenNow = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         _enabled = enabled;
+        _configureServices = configureServices;
         _frozenNow = frozenNow;
         _withGeminiKey = withGeminiKey;
         _catalog = useRealCatalog
@@ -613,7 +698,7 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
                 ["Jwt:Secret"] = JwtSecret,
                 ["Jwt:Issuer"] = JwtIssuer,
                 ["Jwt:Audience"] = JwtAudience,
-                ["Gemini:Enabled"] = _enabled ? "true" : "false",
+                ["Ai:Disabled"] = _enabled ? "false" : "true",
             };
             if (_withGeminiKey) config["Gemini:ApiKey"] = "test-key";
             foreach (var (key, value) in _config) config[key] = value;
@@ -647,12 +732,10 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
                 services.AddSingleton<IDateTimeProvider>(new FrozenClock(frozen));
             }
 
-            // Override GeminiOptions.Enabled to match the test scenario
-            services.PostConfigure<GeminiOptions>(opts =>
-            {
-                opts.Enabled = _enabled;
-                opts.ApiKey = _withGeminiKey ? "test-key" : string.Empty;
-            });
+            // The Gemini key of the test scenario (never a real one)
+            services.PostConfigure<GeminiOptions>(opts => opts.ApiKey = _withGeminiKey ? "test-key" : string.Empty);
+
+            _configureServices?.Invoke(services);
 
             using var scope = services.BuildServiceProvider().CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -661,7 +744,8 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
     }
 
     /// <summary>A client of a new user (already in a group of their own), carrying the token.</summary>
-    public async Task<HttpClient> ClientWithCoupleAsync(string name = "Test User")
+    /// <param name="acceptAi">The person switches the AI on for the group (ignored where the AI is not available).</param>
+    public async Task<HttpClient> ClientWithCoupleAsync(string name = "Test User", bool acceptAi = true)
     {
         const string password = "SecurePass123!";
         var email = $"chat-{Guid.NewGuid():N}@example.com";
@@ -680,11 +764,32 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
         login.EnsureSuccessStatusCode();
         var loggedIn = await login.Content.ReadFromJsonAsync<JsonElement>();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loggedIn.GetProperty("accessToken").GetString());
+        if (acceptAi) await client.PostAsJsonAsync("/api/v1/ai/consent", new { Version = 1 });
         return client;
     }
 
     private AppDbContext NewContext()
         => new(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_databaseConnectionString).Options);
+
+    /// <summary>One value read straight from the database (raw SQL: the tests look at the rows, not at the model).</summary>
+    public T Scalar<T>(string sql)
+    {
+        using var connection = new SqliteConnection(_databaseConnectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var value = command.ExecuteScalar();
+        return value is null or DBNull ? default! : (T)Convert.ChangeType(value, Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    public void Execute(string sql)
+    {
+        using var connection = new SqliteConnection(_databaseConnectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
 
     public List<AiUsage> UsageRows()
     {
@@ -699,11 +804,11 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
         return db.Couples.AsNoTracking().ToList().OrderBy(c => c.CreatedAtUtc).Select(c => c.Id).ToList();
     }
 
-    public void SeedUsage(int count, Guid coupleId, string outcome, DateTime atUtc)
+    public void SeedUsage(int count, Guid coupleId, string outcome, DateTime atUtc, string model = "gemini-flash-lite-latest")
     {
         using var db = NewContext();
         for (var i = 0; i < count; i++)
-            db.AiUsages.Add(AiUsage.Record(atUtc, "gemini", "gemini-flash-lite-latest", coupleId, LlmFeatures.Chat, 100, 20, outcome, 5));
+            db.AiUsages.Add(AiUsage.Record(atUtc, "gemini", model, coupleId, LlmFeatures.Chat, 100, 20, outcome, 5));
         db.SaveChanges();
     }
 

@@ -83,6 +83,15 @@ public sealed class FakeCoupleRepository : ICoupleRepository
         return Task.CompletedTask;
     }
 
+    /// <summary>Whose AI acceptance and preferences were taken out of which group.</summary>
+    public List<(Guid UserId, Guid CoupleId)> RemovedAi { get; } = new();
+
+    public Task RemoveAiOfMemberAsync(Guid userId, Guid coupleId, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        RemovedAi.Add((userId, coupleId));
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyList<Guid>> RemoveOpenFinanceOfMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken)
     {
         Steps.Add($"openfinance:{userId}:{coupleId}");

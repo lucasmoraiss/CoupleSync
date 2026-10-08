@@ -3,10 +3,8 @@ using CoupleSync.Api.Filters;
 using CoupleSync.Application.AiChat;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Domain.Interfaces;
-using CoupleSync.Infrastructure.Integrations.Gemini;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using System.Security.Claims;
 
 namespace CoupleSync.Api.Controllers;
@@ -18,15 +16,16 @@ namespace CoupleSync.Api.Controllers;
 public sealed class ChatController : ControllerBase
 {
     private readonly AssistantChatService _chatService;
-    private readonly GeminiOptions _geminiOptions;
 
-    public ChatController(AssistantChatService chatService, IOptions<GeminiOptions> geminiOptions)
+    public ChatController(AssistantChatService chatService)
     {
         _chatService = chatService;
-        _geminiOptions = geminiOptions.Value;
     }
 
-    /// <summary>Send a message to the AI financial assistant.</summary>
+    /// <summary>
+    /// Send a message to the AI financial assistant. 404 AI_CHAT_DISABLED while the AI is not available on the server,
+    /// 403 AI_CONSENT_REQUIRED while the group has not switched it on, 429 when a budget of the day is used up.
+    /// </summary>
     [HttpPost("chat")]
     [ProducesResponseType(typeof(ChatResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -40,9 +39,6 @@ public sealed class ChatController : ControllerBase
         [FromBody] ChatRequest request,
         CancellationToken ct)
     {
-        if (!IsAiChatEnabled())
-            throw new NotFoundException("AI_CHAT_DISABLED", "O assistente de IA não está disponível.");
-
         var coupleId = GetAuthenticatedCoupleId();
 
         var history = request.History?
@@ -52,8 +48,6 @@ public sealed class ChatController : ControllerBase
         var reply = await _chatService.ChatAsync(coupleId, request.Message, history, ct);
         return Ok(new ChatResponse(reply.Reply, reply.Provider));
     }
-
-    private bool IsAiChatEnabled() => _geminiOptions.Enabled;
 
     private Guid GetAuthenticatedCoupleId()
     {

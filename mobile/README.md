@@ -77,7 +77,6 @@ Variáveis `EXPO_PUBLIC_*` são embutidas no pacote JavaScript no momento do bui
 | Variável | Obrigatória | Padrão | Observação |
 |---|---|---|---|
 | `EXPO_PUBLIC_API_BASE_URL` | Não | `http://10.0.2.2:5000` | Raiz da API, sem `/api/v1`. Nos builds do EAS vem do bloco `env` do perfil em `eas.json`. |
-| `EXPO_PUBLIC_AI_CHAT_ENABLED` | Não | desligado | `true` exibe a aba "Chat IA". A API também precisa estar com a IA habilitada. |
 
 ## Estrutura
 
@@ -100,7 +99,7 @@ mobile/
 │       ├── cashflow/index.tsx        # Fluxo de caixa
 │       ├── budget/index.tsx          # Fontes de renda (aba "Rendas")
 │       ├── reports/index.tsx         # Relatórios
-│       ├── chat/index.tsx            # Chat IA (aba oculta por padrão)
+│       ├── chat/index.tsx            # Assistente (tela oculta; abre pelo Painel)
 │       └── settings/                 # Configurações e alertas
 ├── src/
 │   ├── components/                   # Estados de tela, ErrorBoundary, Toast

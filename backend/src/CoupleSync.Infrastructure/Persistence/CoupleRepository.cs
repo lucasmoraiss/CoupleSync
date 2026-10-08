@@ -180,6 +180,25 @@ public sealed class CoupleRepository : ICoupleRepository
         return connectionIds;
     }
 
+    public async Task RemoveAiOfMemberAsync(Guid userId, Guid coupleId, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        // As above: the caller's couple claim may not be this couple's, so user and couple are stated explicitly.
+        var consents = await _dbContext.AiConsents
+            .IgnoreQueryFilters()
+            .Where(c => c.UserId == userId && c.CoupleId == coupleId && c.RevokedAtUtc == null)
+            .ToListAsync(cancellationToken);
+        foreach (var consent in consents)
+        {
+            consent.Revoke(nowUtc, userId);
+        }
+
+        var preferences = await _dbContext.AiUserPreferences
+            .IgnoreQueryFilters()
+            .Where(p => p.UserId == userId && p.CoupleId == coupleId)
+            .ToListAsync(cancellationToken);
+        _dbContext.AiUserPreferences.RemoveRange(preferences);
+    }
+
     public async Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken)
     {
         var refreshTokens = await _dbContext.RefreshTokens
