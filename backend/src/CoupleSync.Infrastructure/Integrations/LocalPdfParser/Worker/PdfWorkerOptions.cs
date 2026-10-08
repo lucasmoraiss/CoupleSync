@@ -6,6 +6,8 @@ public sealed record PdfWorkerOptions
     /// <summary>Limit of the managed heap of the child (DOTNET_GCHeapHardLimit): past it the child dies, not the API.</summary>
     public const long DefaultHeapHardLimitBytes = 128L * 1024 * 1024;
 
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
+
     /// <summary>Executable to start; null means the API executable itself, run as the PDF worker.</summary>
     public string? FileName { get; init; }
 
@@ -15,7 +17,7 @@ public sealed record PdfWorkerOptions
     public int MaxPages { get; init; } = PdfPigTextExtractor.DefaultMaxPages;
 
     /// <summary>Counts from just before the process is started, so the start-up time is inside it.</summary>
-    public TimeSpan Timeout { get; init; } = PdfPigTextExtractor.DefaultTimeout;
+    public TimeSpan Timeout { get; init; } = DefaultTimeout;
 
     public long HeapHardLimitBytes { get; init; } = DefaultHeapHardLimitBytes;
 
@@ -24,4 +26,7 @@ public sealed record PdfWorkerOptions
 
     /// <summary>Called with the id of the child right after it started (used by the tests to check it is gone).</summary>
     public Action<int>? OnProcessStarted { get; init; }
+
+    /// <summary>Replaces the kill of the process and its tree (used by the tests to make the kill itself fail).</summary>
+    public Action<System.Diagnostics.Process>? KillProcess { get; init; }
 }

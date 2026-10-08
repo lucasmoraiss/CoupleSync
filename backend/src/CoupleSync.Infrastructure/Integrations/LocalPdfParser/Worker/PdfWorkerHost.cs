@@ -16,6 +16,12 @@ public static class PdfWorkerHost
 
     public const string MaxPagesArgument = "--max-pages";
 
+    /// <summary>Size of the PDF that is coming, so that it is held once, in a buffer of that size.</summary>
+    public const string InputBytesArgument = "--input-bytes";
+
+    /// <summary>A size hint above this is ignored (the upload limit is far below it).</summary>
+    private const int MaxInputBytesHint = 64 * 1024 * 1024;
+
     /// <summary>The file could not be opened as a PDF (corrupt or not a PDF at all).</summary>
     public const string UnreadableCode = "PDF_UNREADABLE";
 
@@ -26,29 +32,34 @@ public static class PdfWorkerHost
 
     public static int Run(string[] args, Stream input, Stream output)
     {
-        var maxPages = ParseMaxPages(args);
+        var maxPages = ParsePositive(args, MaxPagesArgument) ?? PdfPigTextExtractor.DefaultMaxPages;
+        var inputBytes = ParsePositive(args, InputBytesArgument);
         WorkerAnswer answer;
         try
         {
-            using var pdf = new MemoryStream();
+            // The standard input cannot be read backwards and PdfPig needs that, so the PDF is held in memory: once,
+            // in a buffer of its own size when the parent told it (a buffer that grows by doubling holds up to twice that).
+            using var pdf = inputBytes is > 0 and <= MaxInputBytesHint ? new MemoryStream(inputBytes.Value) : new MemoryStream();
             input.CopyTo(pdf);
             pdf.Position = 0;
 
             // The parent owns the time limit and kills this process when it is over; no second timer here.
             var result = new PdfPigTextExtractor(maxPages, System.Threading.Timeout.InfiniteTimeSpan).ExtractTextWithPageCount(pdf);
-            answer = new WorkerAnswer(true, result.Pages, result.Text, null, null);
+            answer = new WorkerAnswer(true, result.Pages, result.Text, null, null, null);
         }
         catch (OcrException ex)
         {
-            answer = new WorkerAnswer(false, null, null, ex.Code, ex.Message);
+            answer = new WorkerAnswer(false, null, null, ex.Code, ex.Message, null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Out of memory is not a verdict on the file: it ends the process (the parent reports a failed worker).
-            // The exception text may quote the document, so only a fixed message leaves this process.
+            // The exception text may quote the document, so only a fixed message leaves this process, with the name of
+            // the exception type (never its message): it is what tells a broken file from a defect of the library.
             answer = new WorkerAnswer(
                 false, null, null, UnreadableCode,
-                "Não foi possível ler o PDF. O arquivo parece corrompido; exporte o extrato novamente.");
+                "Não foi possível ler o PDF. O arquivo parece corrompido; exporte o extrato novamente.",
+                ex.GetType().Name);
         }
 
         JsonSerializer.Serialize(output, answer, Json);
@@ -56,14 +67,14 @@ public static class PdfWorkerHost
         return 0;
     }
 
-    private static int ParseMaxPages(string[] args)
+    private static int? ParsePositive(string[] args, string name)
     {
-        var index = Array.IndexOf(args, MaxPagesArgument);
+        var index = Array.IndexOf(args, name);
         return index >= 0 && index + 1 < args.Length
                && int.TryParse(args[index + 1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var value)
                && value > 0
             ? value
-            : PdfPigTextExtractor.DefaultMaxPages;
+            : null;
     }
 }
 
@@ -72,4 +83,5 @@ internal sealed record WorkerAnswer(
     [property: JsonPropertyName("pages")] int? Pages,
     [property: JsonPropertyName("text")] string? Text,
     [property: JsonPropertyName("code")] string? Code,
-    [property: JsonPropertyName("message")] string? Message);
+    [property: JsonPropertyName("message")] string? Message,
+    [property: JsonPropertyName("errorType")] string? ErrorType);
