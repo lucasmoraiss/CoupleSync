@@ -96,6 +96,12 @@ describe('texto do passo "O que é"', () => {
     expect(text).not.toContain('nem para você, nem para o seu grupo');
   });
 
+  it('avisa que sair do grupo, ou ser removido dele, apaga a conexão, os bancos e as contas da pessoa naquele grupo (issue #31)', () => {
+    expect(text).toContain(
+      'Se você sair do grupo, ou for removido dele, a sua conexão, os seus bancos e as suas contas são apagados daquele grupo.',
+    );
+  });
+
   it('a IA segue o consentimento que já existe: nada de novo é enviado ao Gemini por causa do Open Finance', () => {
     expect(text).toMatch(/Chat IA/);
     expect(text).toMatch(/aviso do Chat IA/);

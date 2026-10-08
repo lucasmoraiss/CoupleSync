@@ -23,7 +23,14 @@ import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { GroupList } from '@/components/GroupSwitcher';
 import { applyGroupSession } from '@/modules/couple/groupSession';
 import { useMyGroups } from '@/modules/couple/useMyGroups';
-import { activeGroupOf, destinationAfterLeave, groupChangeNotice, leaveFollowUpText } from '@/modules/couple/groups';
+import {
+  activeGroupOf,
+  destinationAfterLeave,
+  groupChangeNotice,
+  leaveConfirmationText,
+  leaveFollowUpText,
+  removeMemberConfirmationText,
+} from '@/modules/couple/groups';
 import { isCaptureAllowedNow } from '@/modules/privacy/consentStore';
 import { describeJoinCodeValidity, isGroupOwner } from '@/modules/couple/group';
 import { ErrorState } from '@/components/ErrorState';
@@ -137,7 +144,7 @@ export default function GroupScreen() {
   const confirmRemove = (member: CoupleMemberResponse) => {
     Alert.alert(
       'Remover membro',
-      `${member.name} perde o acesso ao grupo agora. As transações que essa pessoa lançou continuam no grupo.`,
+      removeMemberConfirmationText(member.name),
       [
         { text: 'Cancelar', style: 'cancel' },
         { text: 'Remover', style: 'destructive', onPress: () => removeMember.mutate(member.userId) },
@@ -147,11 +154,7 @@ export default function GroupScreen() {
 
   const confirmLeave = () => {
     const onlyMember = (data?.members.length ?? 0) <= 1;
-    const message = onlyMember
-      ? 'Você é o último membro. Ao sair, ninguém mais consegue acessar este grupo e o código de convite deixa de valer. Os dados não são apagados.'
-      : owner
-        ? 'Você deixa de ver os dados do grupo. A administração passa ao membro mais antigo. As transações que você lançou continuam no grupo.'
-        : 'Você deixa de ver os dados do grupo. As transações que você lançou continuam no grupo.';
+    const message = leaveConfirmationText({ onlyMember, owner });
     const followUp = data ? leaveFollowUpText(myGroups, data.coupleId) : '';
     Alert.alert('Sair do grupo', message + followUp, [
       { text: 'Cancelar', style: 'cancel' },
