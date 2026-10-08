@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { chatErrorChangesStatus, chatErrorMessage } from '@/modules/ai/aiStatus';
 import { useAiStatusStore } from '@/modules/ai/aiStatusStore';
 import { chatApi } from '../api/chatApi';
+import { buildChatHistory } from '../chatHistory';
 import type { ChatHistoryItem } from '../api/chatApi';
 
 export interface Message {
@@ -60,12 +61,9 @@ export function useChat(): UseChatReturn {
         content: trimmed,
       };
 
-      // Snapshot history before the new user message (what backend needs as context)
-      // Trim to last 20 messages to cap request size
-      const history: ChatHistoryItem[] = messages.slice(-20).map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      // Snapshot history before the new user message (what backend needs as context): the last 20 messages,
+      // each within what the server accepts — a long answer sent back whole would make every next question fail.
+      const history: ChatHistoryItem[] = buildChatHistory(messages);
 
       setMessages((prev) => [...prev, userMessage]);
       mutation.mutate({ message: trimmed, history });
