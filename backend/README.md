@@ -87,8 +87,9 @@ Estas são as chaves que o código lê. Nomes com `__` seguem a convenção do .
 | `Storage__BasePath` | Não | `./uploads` no diretório de trabalho | Pasta onde o arquivo enviado fica até ser processado. |
 | `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`, `AZURE_DOCUMENT_INTELLIGENCE_KEY` | Só com `USE_LOCAL_PDF_PARSER=false` | — | Credenciais do provedor de OCR alternativo. |
 | `Fcm__ProjectId`, `Fcm__CredentialJson` | Não | vazio | Projeto Firebase e JSON da conta de serviço. Sem eles, o envio de push é pulado. |
-| `AI_CHAT_ENABLED` | Não | desligado | `true` habilita o assistente e a categorização automática de candidatos do extrato. |
-| `GEMINI_API_KEY` | Só com IA ligada | vazio | Chave da API do Gemini. |
+| `Ai__Disabled` | Não | `false` | Interruptor de emergência: `true` desliga toda a IA na hora (o status passa a dizer que ela não está disponível). |
+| `GEMINI_API_KEY` | Não | vazio | Chave da API do Gemini. Com ela a IA fica disponível; cada grupo ainda precisa ativar a análise no app (o aceite fica no servidor). Sem chave de nenhum provedor, a IA não aparece. |
+| `Ai__UseFakeProvider` | Não | `false` | Só para testes e para o "App E2E": provedor falso de IA, sem chave. A API recusa iniciar com ele onde há chave real ou no Render. |
 | `GEMINI_MODEL` | Não | `gemini-2.0-flash` | Modelo usado. |
 | `ASPNETCORE_URLS` | Não | — | Endereço de escuta. O `Dockerfile` fixa `http://+:8080`. |
 

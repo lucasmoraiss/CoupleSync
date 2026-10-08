@@ -1,0 +1,8 @@
+# Parte comum: a tela de boas-vindas da análise com IA, que abre no primeiro uso de um grupo (depois de criar ou
+# entrar). Responde "Agora não" e segue. Quem testa a ativação é o fluxo 08.
+appId: com.couplesync.app
+---
+- extendedWaitUntil:
+    visible: "Quer que a IA analise as finanças do grupo\\?"
+    timeout: 60000
+- tapOn: "Agora não ativar a análise com IA"

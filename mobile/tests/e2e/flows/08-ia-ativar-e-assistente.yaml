@@ -1,0 +1,52 @@
+# Ativar a análise com IA no primeiro uso e abrir o Assistente pelo Painel.
+# A API de teste roda com o provedor falso de IA (Ai__UseFakeProvider=true em scripts/app-e2e-api.sh): nenhuma
+# chave, nenhuma chamada a provedor de verdade, e a resposta do Assistente é sempre a mesma frase.
+appId: com.couplesync.app
+name: 08 - IA - ativar e Assistente
+---
+- evalScript: ${output.email = 'e2e-08-' + Date.now() + '@example.com'}
+- launchApp:
+    clearState: true
+- runFlow:
+    file: comum/criar-conta.yaml
+    env:
+      NOME: Iara Teste
+      EMAIL: ${output.email}
+- runFlow: comum/criar-grupo.yaml
+- tapOn: "Ir para o Painel"
+
+# Primeiro uso do grupo: a tela de boas-vindas da análise com IA, com as duas respostas.
+- extendedWaitUntil:
+    visible: "Quer que a IA analise as finanças do grupo\\?"
+    timeout: 60000
+- assertVisible: "Agora não ativar a análise com IA"
+- tapOn: "Ativar a análise com IA para o grupo"
+
+# Painel: sem o cartão "Análise com IA desligada" e com o botão do Assistente no cabeçalho.
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: "Abrir o Assistente"
+    timeout: 30000
+- assertNotVisible: "Análise com IA desligada.*"
+- tapOn: "Abrir o Assistente"
+
+# O Assistente abre e responde (pelo provedor falso).
+- extendedWaitUntil:
+    visible: "Pergunta para o Assistente"
+    timeout: 30000
+- tapOn: "Pergunta para o Assistente"
+- inputText: "Quanto gastamos este mes"
+- tapOn: "Enviar mensagem"
+- extendedWaitUntil:
+    visible: ".*Esta é uma resposta de teste do assistente, sem dados reais..*"
+    timeout: 60000
+- assertNotVisible: "Tentar novamente"
+- assertNotVisible: "Algo deu errado"
+
+# De volta ao Painel pelo botão da tela.
+- tapOn: "Voltar para o Painel"
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 30000

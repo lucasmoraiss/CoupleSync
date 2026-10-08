@@ -22,6 +22,47 @@ namespace CoupleSync.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("CoupleSync.Domain.Entities.AiConsent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("accepted_at_utc");
+
+                    b.Property<Guid>("CoupleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("couple_id");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at_utc");
+
+                    b.Property<Guid?>("RevokedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revoked_by_user_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CoupleId", "UserId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("ai_consents", (string)null);
+                });
+
             modelBuilder.Entity("CoupleSync.Domain.Entities.AiUsage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -92,6 +133,45 @@ namespace CoupleSync.Infrastructure.Migrations
                     b.HasIndex("DayUtc", "Provider", "Model");
 
                     b.ToTable("ai_usage", (string)null);
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.AiUserPreference", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CoupleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("couple_id");
+
+                    b.Property<DateTime?>("OnboardingAnsweredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("onboarding_answered_at_utc");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<bool>("WeeklyEmailEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("weekly_email_enabled");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CoupleId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("ai_user_preferences", (string)null);
                 });
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.BankAccount", b =>
@@ -1505,6 +1585,36 @@ namespace CoupleSync.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("users", (string)null);
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.AiConsent", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.AiUserPreference", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.BankAccount", b =>

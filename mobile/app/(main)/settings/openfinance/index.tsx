@@ -35,9 +35,8 @@ import {
   shouldClearSyncOnRefocus,
   syncActionOf,
 } from '@/modules/openfinance/sync';
-import { isAiChatAllowedNow } from '@/modules/privacy/consentStore';
-import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
-import { aiConsentForUpload } from '@/modules/ocr/uploadForm';
+import { aiUploadConsent } from '@/modules/ai/aiStatus';
+import { currentAiStatus } from '@/modules/ai/aiStatusStore';
 import { useWizardStore } from '@/modules/openfinance/wizardStore';
 import {
   UNAVAILABLE_TEXT,
@@ -80,7 +79,7 @@ export default function OpenFinanceScreen() {
     const epoch = getSessionEpoch();
     const run = await sync.start(connection.id, {
       force: true,
-      aiConsent: aiConsentForUpload(AI_FEATURE_ENABLED, isAiChatAllowedNow()),
+      aiConsent: aiUploadConsent(currentAiStatus()),
     });
     if (getSessionEpoch() !== epoch || !run) return;
     void queryClient.invalidateQueries({ queryKey: BANK_REVIEW_KEY });

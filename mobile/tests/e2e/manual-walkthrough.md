@@ -22,6 +22,7 @@ its own account (a unique e-mail per run) and does not depend on the others.
 | `05-metas-e-rendas.yaml` | Create a goal and an income source and see them on their screens |
 | `06-abas.yaml` | Open every tab; none shows an error state |
 | `07-captura-de-notificacao.yaml` + `partes/07-conferir-transacao-capturada.yaml` | With Android's notification access granted, accept the capture consent, receive one made-up bank notification and see it as a transaction |
+| `08-ia-ativar-e-assistente.yaml` | On the first use of a group, switch the AI analysis on at the welcome screen, see the Painel without the "desligada" card, open the Assistente from the Painel and get the answer of the fake AI provider of the test API |
 
 Flow 07 is driven by `scripts/app-e2e-run-flows.sh` (Maestro cannot run `adb`). The notification comes from a
 test double installed only on the emulator (`mobile/tests/e2e/notification-stub/`), whose application id is one

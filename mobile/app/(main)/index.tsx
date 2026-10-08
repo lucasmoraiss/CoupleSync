@@ -26,6 +26,10 @@ import { ErrorState } from '@/components/ErrorState';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { GroupSwitcher } from '@/components/GroupSwitcher';
 import { spokenBRL } from '@/utils/a11y';
+import { AI_STATUS_NOTICE_TEXT, aiStatusNotice, isAssistantVisible, shouldShowActivationCard } from '@/modules/ai/aiStatus';
+import { openWelcomeIfDue } from '@/modules/ai/aiStatusStore';
+import { useAiStatus } from '@/modules/ai/useAiStatus';
+import { isCaptureConsentAhead } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -123,10 +127,27 @@ export default function DashboardScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Análise com IA: o status é consultado a cada vez que o Painel recebe foco. Quem ainda não respondeu à pergunta
+  // (ou não viu que o outro membro ativou) é levado à tela de boas-vindas, uma vez por abertura do app.
+  // Vale cada resposta do servidor (a do foco, a de uma nova tentativa depois de uma falha). Se o consentimento da
+  // captura vai abrir sozinho, ele vem primeiro e a pergunta da IA fica para a próxima volta ao Painel.
+  const ai = useAiStatus((fresh) => {
+    void openWelcomeIfDue(fresh, {
+      isFocused: ai.isFocused,
+      otherPromptPending: isCaptureConsentAhead,
+      open: () => router.push('/(main)/ai/welcome' as any),
+    });
+  });
+  const aiStatus = ai.status;
+  // Sem status nenhum (nem o guardado no aparelho): o Painel diz o que está acontecendo com a IA, em vez de
+  // simplesmente não mostrar nada dela.
+  const aiNotice = aiStatusNotice(aiStatus, ai.loadFailed, ai.retrying);
+
   const [refreshing, setRefreshing] = React.useState(false);
   const handleRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    // Puxar para atualizar também consulta o status da IA (não só os números do Painel).
+    await Promise.all([refetch(), ai.refresh()]);
     setRefreshing(false);
   };
 
@@ -145,21 +166,67 @@ export default function DashboardScreen() {
             {data ? (
               <Text style={styles.subtitle}>{monthLabelFromIso(data.periodStart)}</Text>
             ) : (
-              <Text style={styles.subtitle}>Resumo financeiro do casal</Text>
+              <Text style={styles.subtitle}>Resumo financeiro do grupo</Text>
             )}
           </View>
-          <TouchableOpacity accessibilityRole="button"
-            style={styles.transactionsBtn}
-            onPress={() => router.push('/transactions' as any)}
-            accessibilityLabel="Ver transações"
-          >
-            <Ionicons name="receipt-outline" size={22} color={colors.primaryLight} />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            {/* Só existe quando o servidor diz que há IA (GET /ai/status: available). */}
+            {isAssistantVisible(aiStatus) && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                style={styles.assistantBtn}
+                onPress={() => router.push('/(main)/chat' as any)}
+                accessibilityLabel="Abrir o Assistente"
+              >
+                <Ionicons name="sparkles" size={18} color={colors.primaryLight} />
+                <Text style={styles.assistantBtnText}>Assistente</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity accessibilityRole="button"
+              style={styles.transactionsBtn}
+              onPress={() => router.push('/transactions' as any)}
+              accessibilityLabel="Ver transações"
+            >
+              <Ionicons name="receipt-outline" size={22} color={colors.primaryLight} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <GroupSwitcher />
 
         <EmailVerificationBanner />
+
+        {/* Enquanto o grupo não ativou a análise com IA (os números do Painel continuam iguais). */}
+        {shouldShowActivationCard(aiStatus) && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.aiCard}
+            onPress={() => router.push('/(main)/ai/welcome' as any)}
+            accessibilityLabel="Análise com IA desligada. Ativar"
+          >
+            <Ionicons name="sparkles-outline" size={20} color={colors.primaryLight} />
+            <Text style={styles.aiCardText}>Análise com IA desligada</Text>
+            <Text style={styles.aiCardAction}>Ativar</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* O status da IA ainda não chegou e não há valor guardado: verificando, tentando de novo ou falhou. */}
+        {aiNotice !== 'none' && (
+          <View style={styles.aiCard}>
+            <Ionicons name={aiNotice === 'checking' ? 'sparkles-outline' : 'cloud-offline-outline'} size={20} color={colors.textMuted} />
+            <Text style={styles.aiNoticeText} accessibilityLiveRegion="polite">{AI_STATUS_NOTICE_TEXT[aiNotice]}</Text>
+            {aiNotice !== 'checking' && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                style={styles.aiNoticeBtn}
+                onPress={() => void ai.refresh()}
+                accessibilityLabel="Verificar a análise com IA agora"
+              >
+                <Text style={styles.aiCardAction}>Verificar agora</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Loading state */}
         {isLoading && <LoadingState />}
@@ -228,6 +295,36 @@ const styles = StyleSheet.create({
   greeting: { fontSize: 22, fontWeight: '700', color: TEXT },
   subtitle: { fontSize: 14, color: MUTED, marginTop: 2 },
   transactionsBtn: { minHeight: 44, minWidth: 44, backgroundColor: CARD, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: BORDER },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  assistantBtn: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: CARD,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: PRIMARY,
+  },
+  assistantBtnText: { color: colors.primaryLight, fontSize: 14, fontWeight: '600' },
+  aiCard: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: CARD,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  aiCardText: { flex: 1, color: TEXT, fontSize: 14, fontWeight: '500' },
+  aiCardAction: { color: colors.primaryLight, fontSize: 14, fontWeight: '700' },
+  aiNoticeText: { flex: 1, color: MUTED, fontSize: 13, lineHeight: 18 },
+  aiNoticeBtn: { minHeight: 44, justifyContent: 'center', paddingLeft: 8 },
   centered: { alignItems: 'center', paddingVertical: 48 },
   loadingText: { color: MUTED, marginTop: 12, fontSize: 14 },
   card: {

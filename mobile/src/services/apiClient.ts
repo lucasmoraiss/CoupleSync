@@ -52,6 +52,8 @@ import type {
   CategoriesResponse,
   MonthlyTrendsResponse,
   OpenFinanceStatusResponse,
+  AiStatusResponse,
+  AiUsageResponse,
   BankConnectionResponse,
   BankItemResponse,
   BankAccountResponse,
@@ -499,4 +501,25 @@ export const openFinanceApiClient = {
   /** Descartadas voltam a esperar a revisão. */
   restoreReview: (ids: readonly string[]): Promise<AxiosResponse<RestoreBankReviewResponse>> =>
     axiosInstance.post<RestoreBankReviewResponse>('/api/v1/openfinance/review/restore', ids),
+};
+
+// --- Análise com IA: ativação do grupo, preferências e consumo ---
+// Um aceite vale para o grupo inteiro e fica no servidor; todas as escritas devolvem o status já atualizado.
+export const aiApiClient = {
+  getStatus: (): Promise<AxiosResponse<AiStatusResponse>> =>
+    axiosInstance.get<AiStatusResponse>('/api/v1/ai/status'),
+
+  /** Ativa para o grupo. 409 AI_CONSENT_VERSION_OUTDATED se o texto mudou; 503 AI_UNAVAILABLE sem IA no servidor. */
+  accept: (version: number): Promise<AxiosResponse<AiStatusResponse>> =>
+    axiosInstance.post<AiStatusResponse>('/api/v1/ai/consent', { version }),
+
+  /** `mine` retira só o próprio aceite; `group` desliga para o grupo inteiro. */
+  revoke: (scope: 'mine' | 'group'): Promise<AxiosResponse<AiStatusResponse>> =>
+    axiosInstance.delete<AiStatusResponse>(`/api/v1/ai/consent?scope=${scope}`),
+
+  updatePreferences: (data: { onboardingAnswered?: boolean; weeklyEmail?: boolean }): Promise<AxiosResponse<AiStatusResponse>> =>
+    axiosInstance.patch<AiStatusResponse>('/api/v1/ai/preferences', data),
+
+  getUsage: (days = 30): Promise<AxiosResponse<AiUsageResponse>> =>
+    axiosInstance.get<AiUsageResponse>(`/api/v1/ai/usage?days=${days}`),
 };

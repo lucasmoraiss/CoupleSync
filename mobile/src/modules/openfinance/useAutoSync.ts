@@ -9,9 +9,8 @@ import { AppState } from 'react-native';
 import { openFinanceApiClient } from '@/services/apiClient';
 import { getSessionEpoch, useSessionStore } from '@/state/sessionStore';
 import { registerUserDataCleaner } from '@/state/userData';
-import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
-import { aiConsentForUpload } from '@/modules/ocr/uploadForm';
-import { isAiChatAllowedNow } from '@/modules/privacy/consentStore';
+import { aiUploadConsent } from '@/modules/ai/aiStatus';
+import { currentAiStatus } from '@/modules/ai/aiStatusStore';
 import { autoSyncOnOpen } from './sync';
 
 /** Entre duas tentativas do mesmo usuário no mesmo grupo (o servidor também só aceita uma a cada 10 minutos). */
@@ -33,7 +32,7 @@ function attempt(userId: string, coupleId: string): void {
     now: Date.now,
     loadStatus: async () => (await openFinanceApiClient.getStatus()).data,
     requestSync: (connectionId, query) => openFinanceApiClient.requestSync(connectionId, query),
-    aiConsent: () => aiConsentForUpload(AI_FEATURE_ENABLED, isAiChatAllowedNow()),
+    aiConsent: () => aiUploadConsent(currentAiStatus()),
   });
 }
 

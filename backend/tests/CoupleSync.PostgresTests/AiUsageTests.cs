@@ -309,6 +309,12 @@ public sealed class AiUsageTests
     // ---------------------------------------------------------------- the chain on this database
 
     /// <summary>Two Gemini links (stubs) and a gateway that is built again, on a new context, for every call.</summary>
+    /// <summary>These tests are about the counters: the group is taken as switched on.</summary>
+    private sealed class GroupSwitchedOn : IAiConsentGate
+    {
+        public Task<bool> IsEnabledAsync(Guid? coupleId, CancellationToken ct) => Task.FromResult(true);
+    }
+
     private sealed class Chain
     {
         private readonly TestDatabase _database;
@@ -342,7 +348,7 @@ public sealed class AiUsageTests
             var gateway = new LlmGateway(
                 new Catalog(First, Second),
                 new AiUsageRepository(db),
-                new DeviceAiConsentGate(),
+                new GroupSwitchedOn(),
                 Microsoft.Extensions.Options.Options.Create(Options),
                 new LlmMinuteWindow(),
                 Clock,

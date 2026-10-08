@@ -71,9 +71,35 @@ public sealed class OcrBackgroundJobTests
         Assert.Equal(1, provider.Calls);
     }
 
+    // ── Issue #38: descriptions only go to the classifier while the group has the AI switched on ──
+
+    [Theory]
+    [InlineData(true, true, 1)]
+    [InlineData(true, false, 0)]
+    [InlineData(false, true, 0)]
+    public async Task TheClassifier_OnlySeesTheStatement_WhenTheUploaderAskedAndTheGroupHasTheAiOnAtTheServer(
+        bool uploaderAsked, bool groupEnabled, int expectedDescriptions)
+    {
+        var classifier = new SpyClassifier();
+        var gate = new FixedConsentGate(groupEnabled);
+        var provider = new FixedOcrProvider(
+            """{"provider":"local-pdf","transactions":[{"date":"2026-01-10","description":"Padaria Sol","amount":12.5,"type":"Debit"}]}""");
+        var (backgroundJob, jobs, _) = Build(provider, classifier, gate);
+        var job = ImportJob.Create(CoupleId, UserId, "couples/x/statement.pdf", "application/pdf", FixedNow, null, aiCategorizationConsent: uploaderAsked);
+        jobs.Jobs.Add(job);
+
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(ImportJobStatus.Ready, job.Status);
+        Assert.Equal(expectedDescriptions, classifier.Seen.Count);
+        // The group is the one of the job, named explicitly: there is no token in background work.
+        if (uploaderAsked) Assert.Equal([CoupleId], gate.Asked);
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
 
-    private static (OcrBackgroundJob Job, FakeImportJobRepository Jobs, CountingStorageAdapter Storage) Build(IOcrProvider provider)
+    private static (OcrBackgroundJob Job, FakeImportJobRepository Jobs, CountingStorageAdapter Storage) Build(
+        IOcrProvider provider, ICategoryClassifier? classifier = null, IAiConsentGate? gate = null)
     {
         var jobs = new FakeImportJobRepository();
         var storage = new CountingStorageAdapter();
@@ -84,7 +110,8 @@ public sealed class OcrBackgroundJobTests
         services.AddSingleton<IStorageAdapter>(storage);
         services.AddSingleton<IDateTimeProvider>(new FakeDateTimeProvider(FixedNow));
         services.AddSingleton(new OcrProcessingService(
-            new UniqueIndexTransactionRepository(), new NullCategoryClassifier(), new FakeBudgetRepository()));
+            new UniqueIndexTransactionRepository(), classifier ?? new NullCategoryClassifier(), new FakeBudgetRepository()));
+        if (gate is not null) services.AddSingleton(gate);
 
         var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
         return (new OcrBackgroundJob(scopeFactory, NullLogger<OcrBackgroundJob>.Instance), jobs, storage);
@@ -95,6 +122,33 @@ public sealed class OcrBackgroundJobTests
         var job = ImportJob.Create(CoupleId, UserId, "couples/x/statement.pdf", "application/pdf", FixedNow);
         jobs.Jobs.Add(job);
         return job;
+    }
+
+    private sealed class FixedOcrProvider(string json) : IOcrProvider
+    {
+        public Task<string> AnalyzeAsync(string storagePath, string mimeType, CancellationToken ct) => Task.FromResult(json);
+    }
+
+    private sealed class SpyClassifier : ICategoryClassifier
+    {
+        public List<string> Seen { get; } = new();
+
+        public Task<string?> SuggestCategoryAsync(string description, IReadOnlyList<string> availableCategories, CancellationToken ct)
+        {
+            Seen.Add(description);
+            return Task.FromResult<string?>("Alimentação");
+        }
+    }
+
+    private sealed class FixedConsentGate(bool enabled) : IAiConsentGate
+    {
+        public List<Guid?> Asked { get; } = new();
+
+        public Task<bool> IsEnabledAsync(Guid? coupleId, CancellationToken ct)
+        {
+            Asked.Add(coupleId);
+            return Task.FromResult(enabled);
+        }
     }
 
     private sealed class ThrowingOcrProvider : IOcrProvider

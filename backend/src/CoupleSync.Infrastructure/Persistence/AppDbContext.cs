@@ -63,6 +63,10 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<AiUsage> AiUsages => Set<AiUsage>();
 
+    public DbSet<AiConsent> AiConsents => Set<AiConsent>();
+
+    public DbSet<AiUserPreference> AiUserPreferences => Set<AiUserPreference>();
+
     // BudgetAllocation is NOT exposed as a top-level DbSet.
     // All allocation access must go through BudgetPlan.Allocations navigation
     // to ensure couple-level data isolation via ICoupleScoped query filter on BudgetPlan.
@@ -788,6 +792,61 @@ public sealed class AppDbContext : DbContext
 
             entity.HasIndex(x => new { x.DayUtc, x.Provider, x.Model });
             entity.HasIndex(x => new { x.CoupleId, x.DayBrt });
+        });
+
+        modelBuilder.Entity<AiConsent>(entity =>
+        {
+            // Who switched the AI on for the group, per version of the text. One row per (group, person, version):
+            // accepting again after a revocation updates it.
+            entity.ToTable("ai_consents");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(x => x.Version).HasColumnName("version").IsRequired();
+            entity.Property(x => x.AcceptedAtUtc).HasColumnName("accepted_at_utc").IsRequired();
+            entity.Property(x => x.RevokedAtUtc).HasColumnName("revoked_at_utc");
+            entity.Property(x => x.RevokedByUserId).HasColumnName("revoked_by_user_id");
+            entity.Ignore(x => x.IsActive);
+
+            entity.HasIndex(x => new { x.CoupleId, x.UserId, x.Version }).IsUnique();
+            entity.HasIndex(x => x.UserId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AiUserPreference>(entity =>
+        {
+            // What one person chose about the AI inside one group. Deleted when the person leaves the group.
+            entity.ToTable("ai_user_preferences");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(x => x.WeeklyEmailEnabled).HasColumnName("weekly_email_enabled").IsRequired().HasDefaultValue(false);
+            entity.Property(x => x.OnboardingAnsweredAtUtc).HasColumnName("onboarding_answered_at_utc");
+            entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+
+            entity.HasIndex(x => new { x.CoupleId, x.UserId }).IsUnique();
+            entity.HasIndex(x => x.UserId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         ApplyCoupleQueryFilters(modelBuilder);

@@ -311,6 +311,18 @@ public sealed class AiTextRulesTests
         Assert.Equal("ok", PromptText.Sanitize("  ok  "));
     }
 
+    [Fact]
+    public void PromptText_Sanitize_DoesNotCutASurrogatePairInHalf()
+    {
+        // An emoji is two UTF-16 units: with the first one in the last position kept, the cut left half a character.
+        var split = PromptText.Sanitize(new string('a', 1999) + "\U0001F600 e mais texto", 2000);
+        var whole = PromptText.Sanitize(new string('a', 1998) + "\U0001F600 e mais texto", 2000);
+
+        Assert.Equal(new string('a', 1999), split);
+        Assert.Equal(new string('a', 1998) + "\U0001F600", whole);
+        Assert.DoesNotContain(split, char.IsSurrogate);
+    }
+
     [Theory]
     [InlineData("", 0)]
     [InlineData("abc", 1)]

@@ -36,7 +36,7 @@ jobs:
   app-e2e:
     name: App E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 70
 
     env:
       # Pinned on purpose (never "latest"): a new Maestro can change how the flows behave.
@@ -151,11 +151,12 @@ jobs:
 
       # The action boots the emulator, runs the script and shuts the emulator down. `script` is ONE command:
       # the action runs each line in its own shell.
-      # Time: the script has its own budget (22 min: it stops by itself and reports what did not run); the
-      # `timeout` around it is the hard ceiling (25 min). Measured on the hosted runner, cold caches: about
-      # 13 min of steps before this one, 1 to 2 min to boot the emulator, 13 min 22 s for the script. Worst
-      # case: 20 min before (a slow cold build) + 2 + 25 = 47 min, which leaves the evidence steps 13 min
-      # before the 60 min of the job.
+      # Time: the script has its own budget (30 min: it stops by itself and reports what did not run); the
+      # `timeout` around it is the hard ceiling (33 min). Measured on the hosted runner, cold caches: about
+      # 13 min of steps before this one, 1 to 2 min to boot the emulator, 13 min 22 s for the script with seven flows (the eighth, of the AI, adds about 1.5 min). Worst
+      # case: 20 min before (a slow cold build) + 2 + 33 = 55 min, which leaves the evidence steps 15 min
+      # before the 70 min of the job. The budget grew from 22 to 30 min with the eighth flow: a run with a slow
+      # emulator (flow 05 alone took 8 min) spent the 22 min on seven flows and never reached the eighth.
       # Third-party action, pinned to the commit of v2.38.0.
       - name: Run the screen tests on the emulator
         if: steps.changes.outputs.run == 'true'
@@ -170,7 +171,7 @@ jobs:
           disk-size: 6000M
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: timeout --signal=TERM --kill-after=30 1500 bash scripts/app-e2e-run-flows.sh
+          script: timeout --signal=TERM --kill-after=30 1980 bash scripts/app-e2e-run-flows.sh
 
       # ── Evidence ──────────────────────────────────────────────────────────────────────────────────────────
       # always(): also when the emulator step failed and when the run was cancelled.
