@@ -10,7 +10,7 @@ namespace CoupleSync.UnitTests.OcrImport;
 public sealed class PdfExtractionLimitsTests
 {
     [Fact]
-    public void TheDefaultLimits_Are50PagesAnd30Seconds()
+    public void TheInProcessReader_KeepsItsLimitsOf50PagesAnd30Seconds_TheChildHasItsOwnInPdfWorkerOptions()
     {
         Assert.Equal(50, PdfPigTextExtractor.DefaultMaxPages);
         Assert.Equal(TimeSpan.FromSeconds(30), PdfPigTextExtractor.DefaultTimeout);

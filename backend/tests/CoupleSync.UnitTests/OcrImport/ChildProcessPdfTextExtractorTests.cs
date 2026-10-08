@@ -157,10 +157,14 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
         var ex = Assert.Throws<OcrException>(() => extractor.ExtractText(new MemoryStream(heavy)));
 
         Assert.Equal("PDF_WORKER_FAILED", ex.Code);
+        // This is the real worker dying without a chance to tidy up: whatever its runtime creates in the temp
+        // directory at start would stay there.
+        Assert.Empty(Directory.GetFileSystemEntries(_tempDirectory));
 
         // Control: the same document under the default limit is read normally, so the failure above is the limit.
         var text = new ChildProcessPdfTextExtractor(Options()).ExtractText(new MemoryStream(heavy));
         Assert.Contains("Pagina 50 do extrato", text);
+        Assert.Empty(Directory.GetFileSystemEntries(_tempDirectory));
     }
 
     /// <summary>
@@ -422,6 +426,21 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
     }
 
     [Fact]
+    public void ACodeSentWithAGoodAnswer_IsNotLogged()
+    {
+        // With ok=true nothing checks the code against the known list, so it must not be written anywhere.
+        var logger = new ListLogger();
+        var extractor = new ChildProcessPdfTextExtractor(
+            Answering("""{"ok":true,"pages":1,"text":"texto lido","code":"saldo 123 do documento"}"""), logger);
+
+        var text = extractor.ExtractText(new MemoryStream([1, 2, 3]));
+
+        Assert.Equal("texto lido", text);
+        Assert.Contains(logger.Lines, line => line.Contains("ok=True") && line.Contains("code=-"));
+        Assert.DoesNotContain(logger.Lines, line => line.Contains("saldo") || line.Contains("documento"));
+    }
+
+    [Fact]
     public void AnExceptionTypeThatIsNotAPlainName_IsNotLogged()
     {
         var logger = new ListLogger();
@@ -498,6 +517,63 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
             Assert.DoesNotContain(forbidden, names);
         Assert.DoesNotContain(startInfo.Environment.Values, v => v is not null && (v.StartsWith("chave-") || v.StartsWith("segredo") || v.StartsWith("id-") || v == "valor-novo" || v == "GROQ_API_KEY" || v == "groq" || v.Contains("provedor.invalid")));
         Assert.Equal("/usr/bin", startInfo.Environment["PATH"]);
+
+        // A ProcessStartInfo is born with the whole environment of the current process: what is started must carry
+        // exactly the allow-list built from the parent, and nothing that was there before.
+        var expected = ChildProcessPdfTextExtractor.BuildChildEnvironment(parent, Options());
+        Assert.Equal(expected.Keys.OrderBy(n => n, StringComparer.Ordinal), names.OrderBy(n => n, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void TheStartInfoOfProduction_CarriesNothingOfTheEnvironmentOfThisProcess_BeyondTheAllowList()
+    {
+        // The production path: no parent environment is passed, the one of the running process is used.
+        var sentinel = "COUPLESYNC_TEST_SEGREDO_" + Guid.NewGuid().ToString("N");
+        Environment.SetEnvironmentVariable(sentinel, "valor-que-nao-pode-passar");
+        try
+        {
+            var startInfo = new ChildProcessPdfTextExtractor(Options()).BuildStartInfo();
+
+            Assert.DoesNotContain(sentinel, startInfo.Environment.Keys);
+            Assert.DoesNotContain("valor-que-nao-pode-passar", startInfo.Environment.Values);
+            var expected = ChildProcessPdfTextExtractor.BuildChildEnvironment(Environment.GetEnvironmentVariables(), Options());
+            Assert.Equal(
+                expected.Keys.OrderBy(n => n, StringComparer.Ordinal),
+                startInfo.Environment.Keys.OrderBy(n => n, StringComparer.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(sentinel, null);
+        }
+    }
+
+    [Fact]
+    public void AProcessStartedByTheExtractor_DoesNotSeeAVariableOfThisProcess()
+    {
+        // End to end: a process really started by the extractor answers whether it can see a variable that exists in
+        // the process that started it. (A shell stands in for the worker: the worker has no way of telling its
+        // environment, and none was added for this.)
+        var sentinel = "COUPLESYNC_TEST_SEGREDO_" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(_answersDirectory);
+        var seen = Path.Combine(_answersDirectory, "seen.json");
+        var clean = Path.Combine(_answersDirectory, "clean.json");
+        File.WriteAllText(seen, """{"ok":true,"pages":1,"text":"VIU"}""", new UTF8Encoding(false));
+        File.WriteAllText(clean, """{"ok":true,"pages":1,"text":"NAO VIU"}""", new UTF8Encoding(false));
+        var options = OperatingSystem.IsWindows()
+            ? new PdfWorkerOptions { FileName = "cmd.exe", Arguments = ["/c", $"if defined {sentinel} (type {seen}) else (type {clean})"], TempDirectory = _tempDirectory }
+            : new PdfWorkerOptions { FileName = "sh", Arguments = ["-c", $"if [ -n \"${{{sentinel}:-}}\" ]; then cat '{seen}'; else cat '{clean}'; fi"], TempDirectory = _tempDirectory };
+
+        Environment.SetEnvironmentVariable(sentinel, "valor-que-nao-pode-passar");
+        try
+        {
+            var text = new ChildProcessPdfTextExtractor(options).ExtractText(new MemoryStream([1, 2, 3]));
+
+            Assert.Equal("NAO VIU", text);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(sentinel, null);
+        }
     }
 
     [Fact]
@@ -519,6 +595,9 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
 
         Assert.Equal("0", child["DOTNET_gcServer"]);
         Assert.Equal("0", child["DOTNET_gcConcurrent"]);
+        // Without this the runtime of the child creates a diagnostics socket and debugger pipes in the temp directory,
+        // and a child that is killed leaves them there.
+        Assert.Equal("0", child["DOTNET_EnableDiagnostics"]);
         Assert.DoesNotContain("COMPlus_gcServer", child.Keys);
         Assert.DoesNotContain("DOTNET_GCHeapCount", child.Keys);
     }

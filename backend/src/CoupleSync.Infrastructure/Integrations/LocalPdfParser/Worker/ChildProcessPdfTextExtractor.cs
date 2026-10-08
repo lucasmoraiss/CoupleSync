@@ -107,13 +107,16 @@ public sealed class ChildProcessPdfTextExtractor : IPdfTextExtractor
         using (process)
         {
             var killed = false;
+            // Once these readers are taken, closing them is up to whoever took them (Process.Dispose leaves them alone).
+            var output = process.StandardOutput;
+            var errors = process.StandardError;
             try
             {
                 _options.OnProcessStarted?.Invoke(process.Id);
 
                 var writing = Task.Run(() => WriteInput(process, input));
-                var reading = process.StandardOutput.ReadToEndAsync();
-                var drainingErrors = process.StandardError.ReadToEndAsync(); // never looked at: it could quote the PDF
+                var reading = output.ReadToEndAsync();
+                var drainingErrors = errors.ReadToEndAsync(); // never looked at: it could quote the PDF
 
                 var remaining = _options.Timeout - clock.Elapsed;
                 if (remaining < TimeSpan.Zero || !process.WaitForExit(remaining))
@@ -149,7 +152,8 @@ public sealed class ChildProcessPdfTextExtractor : IPdfTextExtractor
 
                 _logger.LogInformation(
                     "PDF worker finished (exit code {ExitCode}, {ElapsedMs}ms, {Pages} page(s), ok={Ok}, code={Code}, error type={ErrorType}, oom score adj={OomScoreAdj}).",
-                    exitCode, clock.ElapsedMilliseconds, answer.Pages, answer.Ok, answer.Code ?? "-", PlainTypeName(answer.ErrorType) ?? "-",
+                    // A code is only written when it was checked against the known list, which a good answer skips.
+                    exitCode, clock.ElapsedMilliseconds, answer.Pages, answer.Ok, answer.Ok ? "-" : answer.Code, PlainTypeName(answer.ErrorType) ?? "-",
                     answer.OomScoreAdj?.ToString(CultureInfo.InvariantCulture) ?? "-");
 
                 if (!answer.Ok)
@@ -162,6 +166,8 @@ public sealed class ChildProcessPdfTextExtractor : IPdfTextExtractor
                 // Every way out (answer, error, timeout, exception) leaves nothing running.
                 if (!killed)
                     Kill(process);
+                output.Dispose();
+                errors.Dispose();
             }
         }
     }
