@@ -115,3 +115,23 @@ export function mainAreaGate(state: {
   if (!state.coupleId) return 'group-setup';
   return 'app';
 }
+
+/**
+ * Texto da confirmação de sair do grupo. Sair apaga a conexão bancária (Open Finance) da pessoa naquele grupo,
+ * com os bancos e as contas; as transações ficam. (A frase sobre o grupo que passa a ser o ativo vem de
+ * leaveFollowUpText.)
+ */
+export function leaveConfirmationText({ onlyMember, owner }: { onlyMember: boolean; owner: boolean }): string {
+  const openFinance = 'A sua conexão bancária (Open Finance) neste grupo, se houver, é apagada com os bancos e as contas dela.';
+  if (onlyMember) {
+    return `Você é o último membro. Ao sair, ninguém mais consegue acessar este grupo e o código de convite deixa de valer. As transações do grupo não são apagadas. ${openFinance}`;
+  }
+  return owner
+    ? `Você deixa de ver os dados do grupo. A administração passa ao membro mais antigo. As transações que você lançou continuam no grupo. ${openFinance}`
+    : `Você deixa de ver os dados do grupo. As transações que você lançou continuam no grupo. ${openFinance}`;
+}
+
+/** Texto da confirmação de remover um membro: a conexão bancária (Open Finance) dele naquele grupo também é apagada. */
+export function removeMemberConfirmationText(memberName: string): string {
+  return `${memberName} perde o acesso ao grupo agora. As transações que essa pessoa lançou continuam no grupo. A conexão bancária (Open Finance) dessa pessoa neste grupo, se houver, é apagada com os bancos e as contas dela.`;
+}
