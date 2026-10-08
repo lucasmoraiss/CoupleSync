@@ -6,7 +6,8 @@
 //
 // Conciliação: a linha que parece uma transação que o app já tinha (possível duplicada) não entra em "Selecionar
 // tudo" nem tem caixa; a pessoa responde "É a mesma" (nada é criado) ou "É outra" (vira despesa nova). O que o
-// servidor ignorou sozinho (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas.
+// servidor ignorou sozinho (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas,
+// saídas e entradas, cada uma com "restaurar".
 import { getApiErrorMessage } from '@/services/apiError';
 import { monthLabelFromIso } from '@/utils/format';
 import type {
@@ -255,11 +256,20 @@ export function ignoredLineText(line: Pick<BankReviewLineResponse, 'day' | 'amou
 }
 
 /**
- * Só a saída ignorada tem "restaurar" nesta tela: ela volta para as despesas. A entrada restaurada não teria onde
- * aparecer aqui (a revisão de entradas ainda não existe).
+ * Toda linha ignorada pode ser restaurada, a entrada também: o servidor ignora entradas sozinho (dinheiro que veio
+ * de alguém do grupo, a perna de entrada de uma transferência) e pode errar. A saída restaurada volta para as
+ * despesas desta tela, à vista. A entrada restaurada deixa de ser ignorada mas some daqui, porque esta tela só
+ * lista despesas: é esse o aviso. null: nada a avisar.
  */
-export function canRestoreIgnored(line: Pick<BankReviewLineResponse, 'type'>): boolean {
-  return line.type !== 'Credit';
+export function restoredNoticeText(line: Pick<BankReviewLineResponse, 'type'>): string | null {
+  return line.type === 'Credit'
+    ? 'Entrada restaurada: ela deixou de ser ignorada. Esta lista é só de despesas, por isso ela não aparece aqui.'
+    : null;
+}
+
+/** O que o botão "restaurar" de uma linha diz em voz alta. */
+export function restoreLabel(line: Pick<BankReviewLineResponse, 'type' | 'merchant' | 'description'>): string {
+  return line.type === 'Credit' ? `Restaurar entrada ${lineTitle(line)}` : `Restaurar ${lineTitle(line)}`;
 }
 
 // ---------------------------------------------------------------- linhas por dia

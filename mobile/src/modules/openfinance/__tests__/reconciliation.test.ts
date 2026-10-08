@@ -1,5 +1,10 @@
 // Open Finance (issue #26): regras puras da conciliação na tela "Revisão do banco": possíveis duplicadas
 // ("É a mesma" / "É outra") e a seção Ignoradas. Tudo aqui é inventado; nenhum dado bancário real.
+// O Jest daqui não renderiza React Native: o que é da tela (quem tem o botão "restaurar") é conferido lendo o
+// código dela, como nos testes de navegação.
+import * as fs from 'fs';
+import * as path from 'path';
+import * as review from '../review';
 import {
   allSelected,
   answerDuplicateRequest,
@@ -7,13 +12,14 @@ import {
   autoReasonText,
   buildConfirmBatches,
   canAnswerDuplicate,
-  canRestoreIgnored,
   duplicateNoticeText,
   hasSuspectedDuplicate,
   ignoredLineText,
   isSelectable,
   matchText,
   pruneSelection,
+  restoreLabel,
+  restoredNoticeText,
   selectAllIds,
   selectedTotalBrl,
   suspectedDuplicateCount,
@@ -212,10 +218,53 @@ describe('Ignoradas', () => {
     expect(ignoredLineText(line({ amount: 10, currency: 'USD', type: 'Debit', autoReason: 'Transfer' }))).not.toContain('R$');
   });
 
-  it('só a despesa ignorada pode ser restaurada nesta tela: a entrada não tem para onde voltar aqui', () => {
-    expect(canRestoreIgnored(line({ type: 'Debit' }))).toBe(true);
-    expect(canRestoreIgnored(line({ type: 'Credit' }))).toBe(false);
-    // Sem o campo (servidor antigo só lista despesas): é despesa.
-    expect(canRestoreIgnored(line({}))).toBe(true);
+  it('a entrada restaurada some desta tela (que só lista despesas): o aviso diz isso; a saída volta para a lista, sem aviso', () => {
+    expect(restoredNoticeText(line({ type: 'Credit', autoReason: 'Transfer' }))).toBe(
+      'Entrada restaurada: ela deixou de ser ignorada. Esta lista é só de despesas, por isso ela não aparece aqui.',
+    );
+    expect(restoredNoticeText(line({ type: 'Debit', autoReason: 'Transfer' }))).toBeNull();
+    expect(restoredNoticeText(line({ type: 'Debit', autoReason: 'BillPayment' }))).toBeNull();
+    // Sem o campo (servidor antigo só lista despesas; as descartadas são sempre despesas): é despesa.
+    expect(restoredNoticeText(line({}))).toBeNull();
+  });
+
+  it('o botão diz em voz alta o que restaura: "entrada" quando é dinheiro que entrou', () => {
+    expect(restoreLabel(line({ type: 'Credit', merchant: null, description: 'PIX RECEBIDO' }))).toBe('Restaurar entrada PIX RECEBIDO');
+    expect(restoreLabel(line({ type: 'Debit', merchant: null, description: 'PIX ENVIADO' }))).toBe('Restaurar PIX ENVIADO');
+    expect(restoreLabel(line({}))).toBe('Restaurar Padaria Exemplo Ltda');
+  });
+});
+
+describe('a tela: toda linha ignorada tem "restaurar", a entrada também', () => {
+  const screen = fs.readFileSync(path.resolve(__dirname, '../../../../app/(main)/openfinance/review.tsx'), 'utf8');
+  const start = screen.indexOf('ignored.map((line) => (');
+  const end = screen.indexOf('{discarded.length > 0 ?');
+  const ignoredRows = screen.slice(start, end);
+
+  it('o trecho das ignoradas foi encontrado no código da tela', () => {
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+  });
+
+  it('o botão "restaurar" está em toda linha ignorada, sem condição pelo tipo da linha', () => {
+    expect(ignoredRows).toContain('onPress={() => void handleRestore(line)}');
+    expect(ignoredRows).toContain('<Text style={styles.smallBtnText}>restaurar</Text>');
+    expect(ignoredRows).toContain('accessibilityLabel={restoreLabel(line)}');
+    // Nada ali decide se o botão aparece: nem o tipo da linha, nem uma regra "pode restaurar".
+    expect(ignoredRows).not.toMatch(/line\.type/);
+    expect(ignoredRows).not.toMatch(/canRestore/);
+    expect(ignoredRows).not.toMatch(/\? \(\s*<TouchableOpacity/);
+  });
+
+  it('a regra antiga "só a saída pode ser restaurada" não existe mais', () => {
+    expect(Object.keys(review)).not.toContain('canRestoreIgnored');
+    expect(screen).not.toContain('canRestoreIgnored');
+  });
+
+  it('depois de restaurar, a tela mostra o aviso da linha (o da entrada) e só quando a restauração deu certo', () => {
+    const handler = screen.slice(screen.indexOf('const handleRestore = async'), screen.indexOf('const backLink'));
+    expect(handler).toMatch(
+      /await openFinanceApiClient\.restoreReview\(\[line\.id\]\);\s+if \(getSessionEpoch\(\) !== epoch\) return;\s+const restoredText = restoredNoticeText\(line\);\s+if \(restoredText\) setNotice\(\{ text: restoredText, error: false \}\);\s+\} catch/,
+    );
   });
 });

@@ -4,7 +4,8 @@
 //
 // Conciliação: a linha que parece uma transação que o app já tinha não tem caixa nem entra em "Selecionar tudo";
 // ela mostra "Parece a mesma de: ..." e os botões "É a mesma" e "É outra". O que o servidor ignorou sozinho
-// (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas, recolhida, com "restaurar".
+// (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas, recolhida, com "restaurar"
+// em toda linha: nas saídas e nas entradas.
 //
 // Aba oculta cujo pai é Transações. A tela é remontada a cada visita (resetOnFocus): seleção, categorias
 // trocadas e avisos de uma visita não ficam para a seguinte, e a lista é a que o servidor tem agora.
@@ -42,7 +43,6 @@ import {
   answerDuplicateResultMessage,
   buildConfirmBatches,
   canAnswerDuplicate,
-  canRestoreIgnored,
   confirmInBatches,
   dayLabel,
   duplicateNoticeText,
@@ -57,6 +57,8 @@ import {
   matchText,
   monthTitle,
   pruneSelection,
+  restoreLabel,
+  restoredNoticeText,
   selectAllIds,
   selectedTotalBrl,
   shiftMonth,
@@ -214,6 +216,9 @@ function BankReviewScreen() {
     setNotice(null);
     try {
       await openFinanceApiClient.restoreReview([line.id]);
+      if (getSessionEpoch() !== epoch) return;
+      const restoredText = restoredNoticeText(line);
+      if (restoredText) setNotice({ text: restoredText, error: false });
     } catch (err) {
       if (getSessionEpoch() !== epoch) return;
       setNotice({ text: getApiErrorMessage(err, 'Não foi possível restaurar. Tente novamente.'), error: true });
@@ -376,17 +381,15 @@ function BankReviewScreen() {
                       {[line.bankName, line.accountName].filter((part) => !!part).join(' · ')}
                     </Text>
                   </View>
-                  {canRestoreIgnored(line) ? (
-                    <TouchableOpacity
-                      style={styles.smallBtn}
-                      onPress={() => void handleRestore(line)}
-                      disabled={busy !== null}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Restaurar ${lineTitle(line)}`}
-                    >
-                      <Text style={styles.smallBtnText}>restaurar</Text>
-                    </TouchableOpacity>
-                  ) : null}
+                  <TouchableOpacity
+                    style={styles.smallBtn}
+                    onPress={() => void handleRestore(line)}
+                    disabled={busy !== null}
+                    accessibilityRole="button"
+                    accessibilityLabel={restoreLabel(line)}
+                  >
+                    <Text style={styles.smallBtnText}>restaurar</Text>
+                  </TouchableOpacity>
                 </View>
               ))
             : null}
