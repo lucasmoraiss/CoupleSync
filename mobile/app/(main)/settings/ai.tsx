@@ -15,7 +15,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { goToParent, useOnRefocus } from '@/navigation/resetOnFocus';
 import { formatConsentDate } from '@/modules/privacy/consent';
-import { activationSummary, groupBudgetText, modelQuotaText, usageTotals } from '@/modules/ai/aiStatus';
+import { activationSummary, aiSettingsActions, groupBudgetText, modelQuotaText, usageTotals } from '@/modules/ai/aiStatus';
 import { useAiStatusStore } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
 import type { AiUsageResponse } from '@/types/api';
@@ -101,6 +101,9 @@ export default function AiSettingsScreen() {
     );
   };
 
+  // O que esta pessoa pode fazer agora (regra em aiStatus.ts, testada).
+  const actions = status ? aiSettingsActions(status) : { activate: false, turnOffForGroup: false, withdrawMine: false };
+
   const withdrawMine = () => {
     void change(() => useAiStatusStore.getState().revoke('mine'), 'O seu aceite foi retirado.');
   };
@@ -135,7 +138,7 @@ export default function AiSettingsScreen() {
                 <Text style={styles.muted}>A análise com IA não está disponível no momento. O restante do app funciona normalmente.</Text>
               )}
 
-              {status.available && !status.enabled && (
+              {actions.activate && (
                 <>
                   <Text style={styles.muted}>Uma pessoa ativa e vale para o grupo inteiro. Antes de ativar você vê o que é enviado e para onde.</Text>
                   <TouchableOpacity
@@ -149,7 +152,7 @@ export default function AiSettingsScreen() {
                 </>
               )}
 
-              {status.enabled && (
+              {actions.turnOffForGroup && (
                 <>
                   <TouchableOpacity
                     style={[styles.dangerBtn, busy && styles.btnDisabled]}
@@ -160,7 +163,7 @@ export default function AiSettingsScreen() {
                   >
                     <Text style={styles.dangerText}>Desligar para o grupo</Text>
                   </TouchableOpacity>
-                  {status.myAcceptance !== null && (
+                  {actions.withdrawMine && (
                     <>
                       <TouchableOpacity
                         style={[styles.secondaryBtn, busy && styles.btnDisabled]}

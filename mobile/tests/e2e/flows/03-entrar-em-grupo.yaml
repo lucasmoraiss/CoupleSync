@@ -1,4 +1,7 @@
 # Segunda conta entra no grupo da primeira pelo código de convite (lido da tela, nunca fixo).
+# Como são duas contas no mesmo grupo, é também aqui que se vê a análise com IA entre duas pessoas: a primeira
+# ativa para o grupo; a segunda, ao entrar, é avisada de quem ativou, e em Configurações > Inteligência artificial
+# desliga para o grupo, ativa de novo e retira o próprio aceite.
 appId: com.couplesync.app
 name: 03 - Entrar em grupo
 ---
@@ -19,6 +22,19 @@ name: 03 - Entrar em grupo
 - evalScript: ${output.codigo = maestro.copiedText}
 - assertTrue: ${output.codigo.length == 8}
 
+# A primeira conta ativa a análise com IA para o grupo, na pergunta do primeiro uso.
+- tapOn: "Ir para o Painel"
+- extendedWaitUntil:
+    visible: "Quer que a IA analise as finanças do grupo\\?"
+    timeout: 60000
+- tapOn: "Ativar a análise com IA para o grupo"
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: "Abrir o Assistente"
+    timeout: 30000
+
 # Segunda conta, como num outro aparelho: o app é aberto do zero.
 - launchApp:
     clearState: true
@@ -35,16 +51,83 @@ name: 03 - Entrar em grupo
 - inputText: ${output.codigo}
 - hideKeyboard
 - tapOn: "Confirmar entrada no grupo"
-# Quem entra num grupo também é perguntado pela análise com IA antes do Painel.
-- runFlow: comum/responder-agora-nao-a-ia.yaml
+
+# Quem entra num grupo em que outra pessoa já ativou não é perguntado: é avisado de quem ativou, e pode desligar.
+- extendedWaitUntil:
+    visible: "Caio ativou a análise com IA para o grupo"
+    timeout: 60000
+- assertVisible: "Desligar a análise com IA para o grupo"
+- assertNotVisible: "Agora não ativar a análise com IA"
+- tapOn: "Entendi, manter a análise com IA ativada"
 - extendedWaitUntil:
     visible: "Total de gastos"
     timeout: 60000
+# Ativada para o grupo: o Assistente está no Painel e não há o cartão de ativar.
+- extendedWaitUntil:
+    visible: "Abrir o Assistente"
+    timeout: 30000
+- assertNotVisible: "Análise com IA desligada.*"
 
-# O grupo em que entrou é o da primeira conta: mesmo código, os dois membros.
+# Configurações > Inteligência artificial: quem ativou e quando; quem não aceitou não tem aceite a retirar.
 - tapOn: "Configurações"
 - extendedWaitUntil:
     visible: "Abrir o grupo: membros e código de convite"
+    timeout: 30000
+- scrollUntilVisible:
+    element: "Abrir a inteligência artificial: ativar, desligar e ver o consumo"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Abrir a inteligência artificial: ativar, desligar e ver o consumo"
+- extendedWaitUntil:
+    visible: "Ativada por Caio Teste em .*"
+    timeout: 30000
+- assertNotVisible: "Retirar o meu aceite da análise com IA"
+
+# Qualquer membro desliga para o grupo (com confirmação).
+- tapOn: "Desligar a análise com IA para o grupo"
+- extendedWaitUntil:
+    visible: "Desligar para o grupo\\?"
+    timeout: 15000
+- tapOn: "Desligar"
+- extendedWaitUntil:
+    visible: "Desligada"
+    timeout: 30000
+- assertNotVisible: "Desligar a análise com IA para o grupo"
+
+# Ativar de novo passa pelo texto e pela pergunta; agora o aceite é da segunda conta.
+- tapOn: "Ativar a análise com IA: ver o que é enviado e decidir"
+- extendedWaitUntil:
+    visible: "Quer que a IA analise as finanças do grupo\\?"
+    timeout: 30000
+- tapOn: "Ativar a análise com IA para o grupo"
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 60000
+- tapOn: "Configurações"
+- extendedWaitUntil:
+    visible: "Abrir o grupo: membros e código de convite"
+    timeout: 30000
+- scrollUntilVisible:
+    element: "Abrir a inteligência artificial: ativar, desligar e ver o consumo"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Abrir a inteligência artificial: ativar, desligar e ver o consumo"
+- extendedWaitUntil:
+    visible: "Ativada por Davi Teste em .*"
+    timeout: 30000
+
+# Retirar o próprio aceite: era o único, então a análise desliga para o grupo.
+- tapOn: "Retirar o meu aceite da análise com IA"
+- extendedWaitUntil:
+    visible: "Desligada"
+    timeout: 30000
+- assertNotVisible: "Tentar novamente"
+- tapOn: "Voltar para as configurações"
+
+# O grupo em que entrou é o da primeira conta: mesmo código, os dois membros.
+- scrollUntilVisible:
+    element: "Abrir o grupo: membros e código de convite"
+    direction: UP
     timeout: 30000
 - tapOn: "Abrir o grupo: membros e código de convite"
 - extendedWaitUntil:
@@ -54,3 +137,13 @@ name: 03 - Entrar em grupo
 - assertVisible: "Caio Teste"
 - assertVisible: "Davi Teste \\(você\\)"
 - assertNotVisible: "Tentar novamente"
+
+# De volta ao Painel: com a análise desligada, o cartão de ativar está lá, e o Assistente continua à mão.
+- tapOn: "Painel"
+- extendedWaitUntil:
+    visible: "Total de gastos"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Análise com IA desligada. Ativar"
+    timeout: 30000
+- assertVisible: "Abrir o Assistente"
