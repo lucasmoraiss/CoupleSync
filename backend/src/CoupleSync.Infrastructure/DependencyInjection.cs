@@ -10,6 +10,7 @@ using CoupleSync.Infrastructure.Integrations.Fcm;
 using CoupleSync.Infrastructure.Integrations.Gemini;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser.Parsers;
+using CoupleSync.Infrastructure.Integrations.GitHub;
 using CoupleSync.Infrastructure.Integrations.Pluggy;
 using CoupleSync.Infrastructure.Integrations.Storage;
 using CoupleSync.Infrastructure.Persistence;
@@ -122,8 +123,34 @@ public static class DependencyInjection
             services.AddScoped<ICategoryClassifier, NullCategoryClassifier>();
 
         AddOpenFinance(services);
+        AddAppUpdate(services);
 
         return services;
+    }
+
+    /// <summary>
+    /// "Is there a newer APK?" — the latest release is read from GitHub, the minimum version from its own variable.
+    /// Registered always: without the variable there is no minimum version, and a failing lookup is "unknown".
+    /// </summary>
+    private static void AddAppUpdate(IServiceCollection services)
+    {
+        // Read from the final configuration when first used (environment variables and test overrides included).
+        services.AddOptions<AppUpdateOptions>()
+            .Configure<IConfiguration>((options, config) =>
+            {
+                // Present but empty means "no lookup"; absent keeps the default address.
+                var latestReleaseUrl = config[$"{AppUpdateOptions.SectionName}:{nameof(AppUpdateOptions.LatestReleaseUrl)}"];
+                if (latestReleaseUrl is not null) options.LatestReleaseUrl = latestReleaseUrl.Trim();
+                options.MinimumVersion = config[AppUpdateOptions.MinimumVersionVariable] ?? string.Empty;
+            });
+
+        services.AddMemoryCache();
+        services.AddHttpClient(GitHubLatestReleaseClient.HttpClientName, c =>
+        {
+            c.Timeout = GitHubLatestReleaseClient.RequestTimeout;
+            c.MaxResponseContentBufferSize = GitHubLatestReleaseClient.MaxResponseBytes;
+        });
+        services.AddSingleton<ILatestAppReleaseSource, GitHubLatestReleaseClient>();
     }
 
     /// <summary>

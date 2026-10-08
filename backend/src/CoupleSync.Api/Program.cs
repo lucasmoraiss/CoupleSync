@@ -27,6 +27,7 @@ using CoupleSync.Application.CashFlow.Queries;
 using CoupleSync.Application.Notification;
 using CoupleSync.Application.OcrImport;
 using CoupleSync.Application.OpenFinance;
+using CoupleSync.Application.AppUpdate;
 using CoupleSync.Application.Reports;
 using CoupleSync.Infrastructure;
 using CoupleSync.Infrastructure.Persistence;
@@ -95,6 +96,7 @@ builder.Services.AddScoped<IncomeService>();
 builder.Services.AddScoped<ImportJobService>();
 builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<OpenFinanceService>();
+builder.Services.AddScoped<AppVersionService>();
 builder.Services.AddScoped<ChatContextService>();
 builder.Services.AddScoped<GeminiChatService>();
 

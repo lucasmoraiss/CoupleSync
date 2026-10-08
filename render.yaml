@@ -53,6 +53,11 @@ services:
       - key: GEMINI_API_KEY
         sync: false
 
+      # Versão mínima do app ainda aceita (ex.: 1.1.0). Quem tiver um APK mais antigo vê a tela "baixe a nova"
+      # no lugar das abas. Sem valor (ou com valor que não seja X.Y.Z) não há versão mínima e ninguém é bloqueado.
+      - key: APP_MINIMUM_VERSION
+        sync: false
+
       # Envio de e-mail (recuperação de senha e confirmação de e-mail) pela API HTTP da Brevo,
       # porque o Render gratuito bloqueia as portas SMTP. Sem Email__Provider=brevo, a chave e o
       # remetente, o envio fica desligado: as rotas de e-mail respondem 503 EMAIL_NOT_CONFIGURED.
