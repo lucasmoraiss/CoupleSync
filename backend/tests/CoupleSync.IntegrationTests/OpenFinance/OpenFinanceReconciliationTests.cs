@@ -655,6 +655,86 @@ public sealed class OpenFinanceReconciliationTests
     }
 
     [Fact]
+    public async Task RestoringAnIgnoredEntry_BringsItBackToWaiting_AndADebitOfTheSameValueThatArrivesLater_DoesNotPairWithIt()
+    {
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory);
+        var (bruno, brunoConnection) = await WithOtherBankAsync(factory, "Bruno Silva", ana.JoinCode);
+        Bank(factory, Checking,
+            Debit("t26-sent", Noon(), 500.00m, "PIX ENVIADO"),
+            // a credit ignored by the rule of the partner: Bruno holds another account of the group
+            Credit("t26-from-bruno", Noon(), 300.00m) with { PayerName = "BRUNO EXEMPLO SILVA" });
+        Bank(factory, OtherChecking, Credit("t26-received", Noon().AddHours(1), 500.00m, "PIX RECEBIDO"));
+        await DoneAsync(factory, ana, anaConnection);
+        await DoneAsync(factory, bruno, brunoConnection);
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-received"));
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-from-bruno"));
+        var received = await LineIdAsync(factory, "t26-received");
+        var fromBruno = await LineIdAsync(factory, "t26-from-bruno");
+        var review = await ReviewAsync(ana, Noon());
+        Assert.NotNull(Find(review.GetProperty("ignored"), received));
+        Assert.NotNull(Find(review.GetProperty("ignored"), fromBruno));
+
+        // Only the entries are restored (the debit leg stays ignored).
+        var restored = await OkAsync(bruno.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { received, fromBruno }));
+
+        Assert.Equal(new[] { received, fromBruno }.Order(), restored.GetProperty("restored").EnumerateArray().Select(e => e.GetGuid()).Order());
+        foreach (var id in new[] { "t26-received", "t26-from-bruno" })
+        {
+            var row = await MirrorRowAsync(factory, id);
+            Assert.Equal(("Pending", null), ((string)row["review_state"]!, (string?)row["auto_reason"]));
+            Assert.Null(row["reviewed_at_utc"]);
+            Assert.NotNull(row["person_decided_at_utc"]);
+        }
+
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-sent"));
+        review = await ReviewAsync(ana, Noon());
+        Assert.Null(Find(review.GetProperty("ignored"), received));
+        Assert.Null(Find(review.GetProperty("ignored"), fromBruno));
+        Assert.NotNull(Find(review.GetProperty("ignored"), await LineIdAsync(factory, "t26-sent")));
+
+        // Debits of the same values arrive later, in the other account of the group: the restored entries are not legs to pair with.
+        Bank(factory, Checking,
+            Debit("t26-sent", Noon(), 500.00m, "PIX ENVIADO"),
+            Credit("t26-from-bruno", Noon(), 300.00m) with { PayerName = "BRUNO EXEMPLO SILVA" },
+            Debit("t26-sent-2", Noon().AddHours(2), 500.00m, "PIX ENVIADO"));
+        Bank(factory, OtherChecking,
+            Credit("t26-received", Noon().AddHours(1), 500.00m, "PIX RECEBIDO"),
+            Debit("t26-sent-3", Noon().AddHours(2), 300.00m, "PIX ENVIADO"));
+        await DoneAsync(factory, ana, anaConnection);
+        await DoneAsync(factory, bruno, brunoConnection);
+        await DoneAsync(factory, ana, anaConnection);
+
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-received"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-from-bruno"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-sent-2"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-sent-3"));
+        Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-sent"));
+    }
+
+    [Fact]
+    public async Task TheIgnoredOfAMonth_AreOnlyThoseOfThatMonth()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        // 45 days apart: never in the same month.
+        var older = Noon(-35);
+        Bank(factory, Checking,
+            new FakeTransaction("t26-bill-now", Noon(), -900.00m) { Description = "Pagamento de fatura", DescriptionRaw = "PAGAMENTO DE FATURA" },
+            new FakeTransaction("t26-bill-older", older, -800.00m) { Description = "Pagamento de fatura", DescriptionRaw = "PAGAMENTO DE FATURA" });
+        await DoneAsync(factory, ana, connection);
+        var now = await LineIdAsync(factory, "t26-bill-now");
+        var before = await LineIdAsync(factory, "t26-bill-older");
+        Assert.NotEqual(BrazilTime.MonthOf(Noon()), BrazilTime.MonthOf(older));
+
+        var thisMonth = (await ReviewAsync(ana, Noon())).GetProperty("ignored").EnumerateArray().Select(l => l.GetProperty("id").GetGuid()).ToList();
+        var olderMonth = (await ReviewAsync(ana, older)).GetProperty("ignored").EnumerateArray().Select(l => l.GetProperty("id").GetGuid()).ToList();
+
+        Assert.Equal(new[] { now }, thisMonth);
+        Assert.Equal(new[] { before }, olderMonth);
+    }
+
+    [Fact]
     public async Task ALineThePersonDiscardedAndRestored_IsNeverIgnoredNorSuspectedByALaterSynchronisation()
     {
         await using var factory = NewFactory();
@@ -1035,6 +1115,28 @@ public sealed class OpenFinanceReconciliationTests
         foreach (var (body, message) in bodies)
             await AssertErrorAsync(await ConfirmAsync(ana, body), HttpStatusCode.UnprocessableEntity, "INVALID_SELECTION", message);
 
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-padaria"));
+        Assert.Single(await factory.RowsAsync("SELECT id FROM transactions"));
+    }
+
+    [Theory]
+    [InlineData("""{"reconcile":[null]}""")]
+    [InlineData("""{"reconcile":[{"id":null}]}""")]
+    [InlineData("""{"asNew":[null]}""")]
+    [InlineData("""{"asNew":["isto-nao-e-um-id"]}""")]
+    public async Task Confirm_WithAnInvalidItemInReconcileOrAsNew_Answers4xxInTheStandardFormat_NeverA500(string json)
+    {
+        await using var factory = NewFactory();
+        var (ana, _, existing, _) = await WithDuplicateAsync(factory);
+
+        var response = await ana.Client.PostAsync($"{Base}/review/confirm", new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
+
+        var raw = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity, $"{(int)response.StatusCode}: {raw}");
+        var body = JsonSerializer.Deserialize<JsonElement>(raw);
+        Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("code").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("message").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("traceId").GetString()));
         Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-padaria"));
         Assert.Single(await factory.RowsAsync("SELECT id FROM transactions"));
     }

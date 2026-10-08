@@ -331,6 +331,39 @@ public sealed class OpenFinanceReconciliationPostgresTests
     }
 
     [PostgresFact]
+    public async Task TheIgnoredOfAMonth_AreOnlyThoseOfThatMonth_ByTheDayInBrazil()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyPluggy();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana Exemplo Souza");
+        var connection = await ConnectWithBankAsync(ana);
+        // 45 days apart: never in the same month.
+        var older = Noon(-35);
+        pluggy.Transactions[Checking] =
+        [
+            new FakeTransaction("t26-bill-now", Noon(), -900.00m) { DescriptionRaw = "PAGAMENTO DE FATURA" },
+            new FakeTransaction("t26-bill-older", older, -800.00m) { DescriptionRaw = "PAGAMENTO DE FATURA" },
+        ];
+        Assert.Equal("Done", (await SyncAsync(ana, connection)).GetProperty("status").GetString());
+        Assert.Equal(("Ignored", "BillPayment", null), await StateAsync(database, "t26-bill-now"));
+        Assert.Equal(("Ignored", "BillPayment", null), await StateAsync(database, "t26-bill-older"));
+        var now = await LineAsync(database, "t26-bill-now");
+        var before = await LineAsync(database, "t26-bill-older");
+        var nowMonth = CoupleSync.Domain.ValueObjects.BrazilTime.MonthOf(Noon());
+        var olderMonth = CoupleSync.Domain.ValueObjects.BrazilTime.MonthOf(older);
+        Assert.NotEqual(nowMonth, olderMonth);
+
+        async Task<List<Guid>> IgnoredOfAsync(string month)
+            => (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review?month={month}"))
+                .GetProperty("ignored").EnumerateArray().Select(l => l.GetProperty("id").GetGuid()).ToList();
+
+        Assert.Equal(new[] { now }, await IgnoredOfAsync(nowMonth));
+        Assert.Equal(new[] { before }, await IgnoredOfAsync(olderMonth));
+    }
+
+    [PostgresFact]
     public async Task ALegSomeoneDiscardsWhileTheRunIsPairingIt_StaysDiscarded_TheRunEndsWell_AndNothingIsWrittenOverTheReview()
     {
         await using var database = await _server.CreateDatabaseAsync();

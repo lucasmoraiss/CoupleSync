@@ -240,6 +240,28 @@ export function answerDuplicateResultMessage(answer: DuplicateAnswer, result: Co
   );
 }
 
+export const SAME_KEPT_CATEGORY_TEXT =
+  'A categoria escolhida não foi usada: a transação que já estava no app manteve a dela.';
+
+/**
+ * O aviso depois da resposta. Igual ao de `answerDuplicateResultMessage`; em "É a mesma" com outra categoria
+ * escolhida no chip, acrescenta que ela não foi usada (nada é criado, a transação que já existia fica como está),
+ * para a escolha não sumir em silêncio.
+ */
+export function answerDuplicateNotice(
+  answer: DuplicateAnswer,
+  line: BankReviewLineResponse,
+  categories: Readonly<Record<string, string>>,
+  result: ConfirmBankReviewResponse,
+): string {
+  const message = answerDuplicateResultMessage(answer, result);
+  const chosen = categories[line.id];
+  const reconciled = (result.reconciled?.length ?? 0) > 0;
+  return answer === 'same' && reconciled && chosen && chosen !== line.suggestedCategory
+    ? `${message} ${SAME_KEPT_CATEGORY_TEXT}`
+    : message;
+}
+
 // ---------------------------------------------------------------- ignoradas
 
 /** Por que o servidor ignorou a linha sozinho. */

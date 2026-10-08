@@ -196,6 +196,9 @@ public sealed class OpenFinanceController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<ConfirmBankReviewResponse>> ConfirmReview([FromBody] ConfirmBankReviewRequest request, CancellationToken ct)
     {
+        if (request.Reconcile is not null && request.Reconcile.Any(r => r is null))
+            throw new UnprocessableEntityException(BankReviewService.InvalidSelectionCode, "Há um lançamento inválido na lista.");
+
         var result = await _review.ConfirmAsync(
             GetAuthenticatedCoupleId(),
             request.Expenses?.Select(e => new ConfirmExpenseInput(e.Id, e.Category, e.Description)).ToList(),

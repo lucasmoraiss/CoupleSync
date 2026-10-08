@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as review from '../review';
 import {
   allSelected,
+  answerDuplicateNotice,
   answerDuplicateRequest,
   answerDuplicateResultMessage,
   autoReasonText,
@@ -189,6 +190,24 @@ describe('"É a mesma" e "É outra"', () => {
     expect(answerDuplicateResultMessage('same', response())).toBe('Nada foi alterado.');
   });
 
+  it('"É a mesma" com outra categoria escolhida no chip não descarta a escolha em silêncio: avisa que a categoria da transação já registrada foi mantida', () => {
+    const done = response({ reconciled: [{ id: 'd', transactionId: 't-1' }] });
+    expect(answerDuplicateNotice('same', duplicate, { d: 'LAZER' }, done)).toBe(
+      'Marcada como a mesma: nenhuma despesa nova foi criada. A categoria escolhida não foi usada: a transação que já estava no app manteve a dela.',
+    );
+    // Sem escolha, ou com a escolha igual à sugerida, ou para outra linha: nada a avisar além do de sempre.
+    const plainNotice = 'Marcada como a mesma: nenhuma despesa nova foi criada.';
+    expect(answerDuplicateNotice('same', duplicate, {}, done)).toBe(plainNotice);
+    expect(answerDuplicateNotice('same', duplicate, { d: 'ALIMENTACAO' }, done)).toBe(plainNotice);
+    expect(answerDuplicateNotice('same', duplicate, { a: 'LAZER' }, done)).toBe(plainNotice);
+    // Se nada foi conciliado, a categoria não foi "mantida" de nada.
+    expect(answerDuplicateNotice('same', duplicate, { d: 'LAZER' }, response())).toBe('Nada foi alterado.');
+    // "É outra" usa a categoria escolhida: não há o que avisar.
+    expect(answerDuplicateNotice('other', duplicate, { d: 'LAZER' }, response({ created: [{ id: 'd', transactionId: 't-2' }] }))).toBe(
+      '1 despesa registrada.',
+    );
+  });
+
   it('o aviso de "É outra" é o de uma despesa confirmada, também quando o servidor a pulou', () => {
     expect(answerDuplicateResultMessage('other', response({ created: [{ id: 'd', transactionId: 't-2' }] }))).toBe('1 despesa registrada.');
     expect(answerDuplicateResultMessage('other', response({ alreadyConfirmed: 1 }))).toBe('1 já estava registrada.');
@@ -266,5 +285,58 @@ describe('a tela: toda linha ignorada tem "restaurar", a entrada também', () =>
     expect(handler).toMatch(
       /await openFinanceApiClient\.restoreReview\(\[line\.id\]\);\s+if \(getSessionEpoch\(\) !== epoch\) return;\s+const restoredText = restoredNoticeText\(line\);\s+if \(restoredText\) setNotice\(\{ text: restoredText, error: false \}\);\s+\} catch/,
     );
+  });
+});
+
+describe('a tela: os botões de possível duplicada', () => {
+  const screen = fs.readFileSync(path.resolve(__dirname, '../../../../app/(main)/openfinance/review.tsx'), 'utf8');
+  const answers = screen.slice(screen.indexOf('{line.match ? ('), screen.indexOf('<View style={styles.lineActions}>'));
+
+  it('o trecho dos botões foi encontrado no código da tela', () => {
+    expect(screen.indexOf('{line.match ? (')).toBeGreaterThan(0);
+    expect(answers.length).toBeGreaterThan(100);
+  });
+
+  it('"É a mesma" chama a resposta que concilia e "É outra" a que confirma como nova, cada rótulo no seu botão', () => {
+    const same = /handleAnswer\('same', line\)[\s\S]*?<Text style=\{styles\.answerText\}>([^<]+)<\/Text>/.exec(answers);
+    const other = /handleAnswer\('other', line\)[\s\S]*?<Text style=\{styles\.answerText\}>([^<]+)<\/Text>/.exec(answers);
+    expect(same?.[1]).toBe('É a mesma');
+    expect(other?.[1]).toBe('É outra');
+    // Cada botão tem uma só chamada, e a descrição falada de cada um diz o que ele faz.
+    expect(answers.match(/handleAnswer\(/g)).toHaveLength(2);
+    expect(answers).toMatch(/handleAnswer\('same', line\)[\s\S]*?accessibilityLabel=\{`É a mesma: [^`]*não registrar de novo`\}/);
+    expect(answers).toMatch(/handleAnswer\('other', line\)[\s\S]*?accessibilityLabel=\{`É outra: registrar [^`]*como uma despesa nova`\}/);
+  });
+
+  it('a resposta vira o corpo certo: "same" concilia (reconcile), "other" confirma como nova (asNew)', () => {
+    const handler = screen.slice(screen.indexOf('const handleAnswer = async'), screen.indexOf('const handleRestore = async'));
+    expect(handler).toContain('answerDuplicateRequest(answer, line, chosen)');
+    expect(handler).toContain("answer === 'same' ? ANSWER_SAME_FAILED_TEXT : ANSWER_OTHER_FAILED_TEXT");
+    expect(answerDuplicateRequest('same', duplicate, {})).toHaveProperty('reconcile');
+    expect(answerDuplicateRequest('other', duplicate, {})).toHaveProperty('asNew');
+  });
+
+  it('o aviso depois da resposta vem de answerDuplicateNotice (com a categoria não usada)', () => {
+    const handler = screen.slice(screen.indexOf('const handleAnswer = async'), screen.indexOf('const handleRestore = async'));
+    expect(handler).toContain('answerDuplicateNotice(answer, line, chosen, result)');
+    expect(handler).not.toContain('answerDuplicateResultMessage(');
+  });
+
+  it('a linha com possível duplicada fica sem caixa de seleção, e as sem marca têm', () => {
+    const rows = screen.slice(screen.indexOf('renderItem={({ item: line }) => {'));
+    expect(rows).toContain('const selectable = isSelectable(line);');
+    expect(rows).toMatch(/\{selectable \? \(\s*<TouchableOpacity\s+style=\{styles\.checkTouch\}[\s\S]*?accessibilityRole="checkbox"/);
+    // Sem caixa: só o espaço, para as linhas alinharem.
+    expect(rows).toMatch(/\) : \(\s*(?:\/\/[^\r\n]*[\r\n]+\s*)*<View style=\{styles\.checkTouch\} \/>\s*\)\}/);
+    // Quem decide é a função pura, e ela recusa a linha com possível duplicada.
+    expect(isSelectable(duplicate)).toBe(false);
+    expect(isSelectable(plain)).toBe(true);
+  });
+
+  it('o aviso do topo vem de duplicateNoticeText, com a contagem das possíveis duplicadas das despesas', () => {
+    expect(screen).toContain('const duplicatesNotice = duplicateNoticeText(suspectedDuplicateCount(expenses));');
+    expect(screen).toMatch(/\{duplicatesNotice \? \(\s*<View style=\{styles\.duplicatesNotice\}[\s\S]*?\{duplicatesNotice\}/);
+    expect(duplicateNoticeText(suspectedDuplicateCount([plain, duplicate, otherPlain]))).toBe('1 possível duplicada precisa de você');
+    expect(duplicateNoticeText(suspectedDuplicateCount([plain, otherPlain]))).toBeNull();
   });
 });

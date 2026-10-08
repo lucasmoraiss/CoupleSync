@@ -39,8 +39,8 @@ import {
   ANSWER_OTHER_FAILED_TEXT,
   ANSWER_SAME_FAILED_TEXT,
   allSelected,
+  answerDuplicateNotice,
   answerDuplicateRequest,
-  answerDuplicateResultMessage,
   buildConfirmBatches,
   canAnswerDuplicate,
   confirmInBatches,
@@ -193,7 +193,7 @@ function BankReviewScreen() {
     try {
       const result = (await openFinanceApiClient.confirmReview(answerDuplicateRequest(answer, line, chosen))).data;
       if (getSessionEpoch() !== epoch) return;
-      setNotice({ text: answerDuplicateResultMessage(answer, result), error: false });
+      setNotice({ text: answerDuplicateNotice(answer, line, chosen, result), error: false });
     } catch (err) {
       if (getSessionEpoch() !== epoch) return;
       setNotice({
