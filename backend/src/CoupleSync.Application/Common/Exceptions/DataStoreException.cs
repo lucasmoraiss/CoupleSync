@@ -23,6 +23,18 @@ public sealed class UniqueViolationException : DataStoreException
 }
 
 /// <summary>
+/// The write referred to a row that is not there (another request deleted it first), or deleted a row that others
+/// still refer to. Nothing of the failed write was stored.
+/// </summary>
+public sealed class ForeignKeyViolationException : DataStoreException
+{
+    public ForeignKeyViolationException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
 /// The write touched a row that another request changed or deleted in the meantime (optimistic concurrency).
 /// Nothing of the failed write was stored.
 /// </summary>

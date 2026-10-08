@@ -29,6 +29,14 @@ public interface ICoupleRepository
     /// </summary>
     Task StopDeliveriesToMemberAsync(Guid userId, Guid coupleId, Guid? remainingCoupleId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Takes the user's Open Finance out of the group: their bank connection there (with the stored credentials),
+    /// its items and their accounts are deleted. Their connections in other groups and the connections of the
+    /// other members are not touched. Nothing is decrypted, so it works on a server without the encryption key.
+    /// Applied on the next <see cref="SaveChangesAsync"/>. Returns the ids of the connections being deleted.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> RemoveOpenFinanceOfMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken);
+
     /// <summary>Deletes the user's refresh token so the session cannot be renewed. Applied on the next <see cref="SaveChangesAsync"/>.</summary>
     Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken);
 
@@ -37,7 +45,8 @@ public interface ICoupleRepository
     /// <summary>
     /// Starts one change of group membership for the user (create, join, leave, removal, switch, code renewal):
     /// opens a transaction and, on PostgreSQL, locks the user's row, so the changes of one user's memberships
-    /// run one at a time. Read the state to decide on only AFTER this (and after
+    /// run one at a time. Storing a bank connection of the user takes it too, so it never lands in a group they are
+    /// leaving at that moment. Read the state to decide on only AFTER this (and after
     /// <see cref="IMembershipChange.LockCoupleAsync"/> when a group is involved). Commit, then dispose.
     /// </summary>
     Task<IMembershipChange> BeginMembershipChangeAsync(Guid userId, CancellationToken cancellationToken);

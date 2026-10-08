@@ -13,7 +13,12 @@ public sealed class FakeCoupleRepository : ICoupleRepository
 
     public List<Guid> RevokedRefreshTokenUserIds { get; } = new();
 
-    /// <summary>What the handlers did, in order: "begin:{user}", "lock:{couple}", "save", "commit".</summary>
+    /// <summary>The bank connections stored, by who connected and in which group.</summary>
+    public List<(Guid UserId, Guid CoupleId, Guid ConnectionId)> BankConnections { get; } = new();
+
+    /// <summary>
+    /// What the handlers did, in order: "begin:{user}", "lock:{couple}", "openfinance:{user}:{couple}", "save", "commit".
+    /// </summary>
     public List<string> Steps { get; } = new();
 
     public int SaveChangesCalls { get; private set; }
@@ -76,6 +81,17 @@ public sealed class FakeCoupleRepository : ICoupleRepository
     {
         StoppedDeliveries.Add((userId, coupleId, remainingCoupleId));
         return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<Guid>> RemoveOpenFinanceOfMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken)
+    {
+        Steps.Add($"openfinance:{userId}:{coupleId}");
+        IReadOnlyList<Guid> removed = BankConnections
+            .Where(c => c.UserId == userId && c.CoupleId == coupleId)
+            .Select(c => c.ConnectionId)
+            .ToList();
+        BankConnections.RemoveAll(c => c.UserId == userId && c.CoupleId == coupleId);
+        return Task.FromResult(removed);
     }
 
     public Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken)
