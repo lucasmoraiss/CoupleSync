@@ -3,10 +3,22 @@ namespace CoupleSync.Infrastructure.Integrations.LocalPdfParser.Worker;
 /// <summary>How the child process that reads one PDF is started and limited.</summary>
 public sealed record PdfWorkerOptions
 {
-    /// <summary>Limit of the managed heap of the child (DOTNET_GCHeapHardLimit): past it the child dies, not the API.</summary>
-    public const long DefaultHeapHardLimitBytes = 128L * 1024 * 1024;
+    /// <summary>
+    /// Limit of the managed heap of the child (DOTNET_GCHeapHardLimit): past it the child dies, not the API.
+    /// Measured in the image (issue #14, review round 1): the largest statement the reader inside the API could read
+    /// on the production instance (50 pages, 35 thousand lines of text) needs 96 MB of heap; statements whose size
+    /// comes from pictures (10 MB) need less than 64 MB. 192 MB is twice the need, and the whole child then stays
+    /// near 200 MB, which fits beside the API (about 130 MB) in the 512 MB of the instance.
+    /// </summary>
+    public const long DefaultHeapHardLimitBytes = 192L * 1024 * 1024;
 
-    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
+    /// <summary>
+    /// Time limit of one read, start of the process included. The reader inside the API had 30 s for a read that was
+    /// already started and compiled; the child starts and compiles for every file, which on the 0.1 CPU of the
+    /// production instance takes about 10 s by itself. Measured there, the largest statement the old reader read took
+    /// 49 s through the child; 90 s leaves room for a busy instance and still ends a read that is stuck.
+    /// </summary>
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(90);
 
     /// <summary>Executable to start; null means the API executable itself, run as the PDF worker.</summary>
     public string? FileName { get; init; }

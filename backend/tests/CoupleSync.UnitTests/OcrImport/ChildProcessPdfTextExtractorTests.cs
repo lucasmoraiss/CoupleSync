@@ -166,12 +166,12 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
     /// <summary>
     /// The largest statements the reader in the API process could read on the small production instance, measured in
     /// the image (issue #14, round 1): about 10 MB in 50 pages when the size comes from pictures, and 50 pages of
-    /// 400 lines each (20 thousand lines, 1.2 MB of pure text) when it comes from text. The real worker reads both
+    /// 700 lines each (35 thousand lines of pure text) when it comes from text. The real worker reads both
     /// under the default limits. Nothing here asks for speed: only that it ends well, with the default memory limit.
     /// </summary>
     [Theory]
     [InlineData(50, 45, 190_000, 9_000_000)]
-    [InlineData(50, 400, 0, 1_000_000)]
+    [InlineData(50, 700, 0, 1_500_000)]
     public void TheLargestStatementsReadBefore_AreStillReadUnderTheDefaultLimits(int pages, int linesPerPage, int imageBytesPerPage, int atLeastBytes)
     {
         var pdf = SyntheticPdf.Pages(pages, linesPerPage: linesPerPage, imageBytesPerPage: imageBytesPerPage);
@@ -187,7 +187,7 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
         Assert.Equal(defaults.HeapHardLimitBytes, options.HeapHardLimitBytes);
         Assert.Equal(defaults.Timeout, options.Timeout);
         Assert.Equal(defaults.MaxPages, options.MaxPages);
-        Assert.Equal(128L * 1024 * 1024, PdfWorkerOptions.DefaultHeapHardLimitBytes);
+        Assert.Equal(192L * 1024 * 1024, PdfWorkerOptions.DefaultHeapHardLimitBytes);
     }
 
     [Fact]
@@ -439,7 +439,7 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
     {
         var child = ChildProcessPdfTextExtractor.BuildChildEnvironment(new Hashtable(), new PdfWorkerOptions());
 
-        Assert.Equal("8000000", child["DOTNET_GCHeapHardLimit"]);
+        Assert.Equal("c000000", child["DOTNET_GCHeapHardLimit"]);
     }
 
     [Fact]
@@ -458,12 +458,19 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
     }
 
     [Fact]
-    public void TheLimitsAreStillThoseOfTheOldReader()
+    public void ThePageLimitIsThatOfTheOldReader_AndTheTimeLimitCoversTheStartOfTheProcess()
     {
         var options = new PdfWorkerOptions();
 
         Assert.Equal(50, options.MaxPages);
-        Assert.Equal(TimeSpan.FromSeconds(30), options.Timeout);
+        // 30 s was the limit of a read inside the API, already started and compiled. The child starts and compiles
+        // for every file, and on the 0.1 CPU of the production instance that alone takes about 10 s: with 30 s it
+        // refused statements the old reader read. 90 s is what the measurement in the image supports (round 1 of the
+        // review of issue #14): the largest statement the old reader read there took 49 s through the child.
+        Assert.Equal(TimeSpan.FromSeconds(90), options.Timeout);
+        Assert.Equal(TimeSpan.FromSeconds(90), PdfWorkerOptions.DefaultTimeout);
+        // Still far below the 10 minutes after which a job stuck in "processing" is given up on.
+        Assert.True(options.Timeout < CoupleSync.Application.OcrImport.ImportJobRecovery.ProcessingTimeout / 4);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
