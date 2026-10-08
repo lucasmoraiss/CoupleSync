@@ -1095,7 +1095,7 @@ Rotas de usuário: `[RequireCouple]` (grupo do token, `RequireCoupleAttribute.cs
 
 | Método e rota | Mudança | Erros |
 | --- | --- | --- |
-| `POST /api/v1/ai/chat` (existente, `ChatController.cs`) | Passa pela cadeia com esquema `{ "answer": string, "refs": [ids] }`, filtro de privacidade, corte de histórico (3.9) e só o `OutputSafetyValidator` (o `NumberGroundingValidator` entra no chat na fase 4, quando existe o pacote de fatos contra o qual comparar); resposta igual, mais `provider` opcional. Ainda atrás de `AI_CHAT_ENABLED` e do aceite do aparelho, como hoje (o app não muda nesta fase) | mantidos: `404 AI_CHAT_DISABLED`, `429 CHAT_RATE_LIMITED`, `503`; `502 AI_PROVIDER_FAILED` quando todos os elos falham; resposta reprovada duas vezes → 200 com a frase de 7.5 |
+| `POST /api/v1/ai/chat` (existente, `ChatController.cs`) | Passa pela cadeia com esquema `{ "answer": string, "refs": [ids] }`, filtro de privacidade, corte de histórico (3.9) e só o `OutputSafetyValidator` (o `NumberGroundingValidator` entra no chat na fase 4, quando existe o pacote de fatos contra o qual comparar); resposta igual, mais `provider` opcional. Ainda atrás de `AI_CHAT_ENABLED` e do aceite do aparelho, como hoje (o app não muda nesta fase) | mantidos: `404 AI_CHAT_DISABLED`, `429 CHAT_RATE_LIMITED`, `503`; orçamento do grupo ou teto global estourado nesta fase → o mesmo `429 CHAT_RATE_LIMITED` que o app já conhece (os códigos próprios `AI_BUDGET_EXHAUSTED` e `AI_GLOBAL_BUDGET_EXHAUSTED` só nascem na fase 2, com o app que os trata); `502 AI_PROVIDER_FAILED` quando todos os elos falham; resposta reprovada duas vezes → 200 com a frase de 7.5 |
 
 ### 10.2 Fase 2 — ativação e Assistente visível
 
