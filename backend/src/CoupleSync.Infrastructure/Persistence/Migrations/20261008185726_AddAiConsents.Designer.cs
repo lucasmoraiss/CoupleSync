@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CoupleSync.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261008141718_AddAiConsents")]
+    [Migration("20261008185726_AddAiConsents")]
     partial class AddAiConsents
     {
         /// <inheritdoc />
@@ -434,6 +434,192 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("bank_items", (string)null);
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.BankTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<string>("AutoReason")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("auto_reason");
+
+                    b.Property<decimal?>("BalanceAfter")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("balance_after");
+
+                    b.Property<Guid>("BankAccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("bank_account_id");
+
+                    b.Property<string>("BillId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("bill_id");
+
+                    b.Property<Guid>("CoupleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("couple_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("date");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("DescriptionRaw")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("description_raw");
+
+                    b.Property<int?>("InstallmentNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("installment_number");
+
+                    b.Property<int?>("InstallmentTotal")
+                        .HasColumnType("integer")
+                        .HasColumnName("installment_total");
+
+                    b.Property<Guid?>("LinkedIncomeSourceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("linked_income_source_id");
+
+                    b.Property<Guid?>("LinkedTransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("linked_transaction_id");
+
+                    b.Property<DateOnly>("LocalDate")
+                        .HasColumnType("date")
+                        .HasColumnName("local_date");
+
+                    b.Property<Guid?>("MatchedTransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("matched_transaction_id");
+
+                    b.Property<string>("MerchantCategory")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("merchant_category");
+
+                    b.Property<string>("MerchantCnpj")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("merchant_cnpj");
+
+                    b.Property<string>("MerchantName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("merchant_name");
+
+                    b.Property<string>("PaymentMethod")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("payment_method");
+
+                    b.Property<string>("PluggyCategory")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("pluggy_category");
+
+                    b.Property<string>("PluggyCategoryId")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("pluggy_category_id");
+
+                    b.Property<string>("PluggyTransactionId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("pluggy_transaction_id");
+
+                    b.Property<string>("RawJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("raw_json");
+
+                    b.Property<string>("ReviewState")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("review_state");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reviewed_at_utc");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("SuggestedCategory")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("suggested_category");
+
+                    b.Property<Guid?>("SyncRunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("sync_run_id");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("type");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankAccountId");
+
+                    b.HasIndex("LinkedIncomeSourceId");
+
+                    b.HasIndex("LinkedTransactionId");
+
+                    b.HasIndex("PluggyTransactionId")
+                        .IsUnique();
+
+                    b.HasIndex("SyncRunId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CoupleId", "LocalDate");
+
+                    b.HasIndex("CoupleId", "ReviewState");
+
+                    b.ToTable("bank_transactions", (string)null);
                 });
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.BudgetAllocation", b =>
@@ -1091,6 +1277,87 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                     b.ToTable("refresh_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("CoupleSync.Domain.Entities.SyncRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("AiCategorizationConsent")
+                        .HasColumnType("boolean")
+                        .HasColumnName("ai_categorization_consent");
+
+                    b.Property<Guid>("ConnectionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("connection_id");
+
+                    b.Property<Guid>("CoupleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("couple_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("error_message");
+
+                    b.Property<DateTime?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at_utc");
+
+                    b.Property<bool>("ForceItemUpdate")
+                        .HasColumnType("boolean")
+                        .HasColumnName("force_item_update");
+
+                    b.Property<DateTime?>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at_utc");
+
+                    b.Property<string>("Status")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<int>("TransactionsNew")
+                        .HasColumnType("integer")
+                        .HasColumnName("transactions_new");
+
+                    b.Property<int>("TransactionsUpdated")
+                        .HasColumnType("integer")
+                        .HasColumnName("transactions_updated");
+
+                    b.Property<string>("TriggeredBy")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("triggered_by");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CoupleId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("ConnectionId", "CreatedAtUtc");
+
+                    b.HasIndex(new[] { "ConnectionId" }, "IX_sync_runs_one_open_per_connection")
+                        .IsUnique()
+                        .HasFilter("status IN ('Pending', 'Running')");
+
+                    b.ToTable("sync_runs", (string)null);
+                });
+
             modelBuilder.Entity("CoupleSync.Domain.Entities.Transaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1398,6 +1665,42 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("CoupleSync.Domain.Entities.BankTransaction", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.BankAccount", null)
+                        .WithMany()
+                        .HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.IncomeSource", null)
+                        .WithMany()
+                        .HasForeignKey("LinkedIncomeSourceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CoupleSync.Domain.Entities.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("LinkedTransactionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CoupleSync.Domain.Entities.SyncRun", null)
+                        .WithMany()
+                        .HasForeignKey("SyncRunId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CoupleSync.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("CoupleSync.Domain.Entities.BudgetAllocation", b =>
                 {
                     b.HasOne("CoupleSync.Domain.Entities.BudgetPlan", "BudgetPlan")
@@ -1549,6 +1852,21 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.SyncRun", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.BankConnection", null)
+                        .WithMany()
+                        .HasForeignKey("ConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("CoupleSync.Domain.Entities.Transaction", b =>
