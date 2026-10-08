@@ -1,7 +1,7 @@
 using System.Text;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser;
-using UglyToad.PdfPig;
+using CoupleSync.Infrastructure.Integrations.LocalPdfParser.Worker;
 
 namespace CoupleSync.UnitTests.OcrImport;
 
@@ -10,7 +10,7 @@ namespace CoupleSync.UnitTests.OcrImport;
 public sealed class PdfExtractionLimitsTests
 {
     [Fact]
-    public void TheDefaultLimits_Are50PagesAnd30Seconds()
+    public void TheInProcessReader_KeepsItsLimitsOf50PagesAnd30Seconds_TheChildHasItsOwnInPdfWorkerOptions()
     {
         Assert.Equal(50, PdfPigTextExtractor.DefaultMaxPages);
         Assert.Equal(TimeSpan.FromSeconds(30), PdfPigTextExtractor.DefaultTimeout);
@@ -21,7 +21,7 @@ public sealed class PdfExtractionLimitsTests
     {
         using var stream = BuildPdf(pageCount: 51);
 
-        var ex = Assert.Throws<OcrException>(() => new PdfPigTextExtractor().ExtractText(stream));
+        var ex = Assert.Throws<OcrException>(() => new ChildProcessPdfTextExtractor(new PdfWorkerOptions()).ExtractText(stream));
 
         Assert.Equal("PDF_TOO_MANY_PAGES", ex.Code);
         Assert.Contains("50", ex.Message);
@@ -32,7 +32,7 @@ public sealed class PdfExtractionLimitsTests
     {
         using var stream = BuildPdf(pageCount: 50);
 
-        var text = new PdfPigTextExtractor().ExtractText(stream);
+        var text = new ChildProcessPdfTextExtractor(new PdfWorkerOptions()).ExtractText(stream);
 
         Assert.Contains("Pagina 1 do extrato", text);
         Assert.Contains("Pagina 50 do extrato", text);
@@ -41,47 +41,25 @@ public sealed class PdfExtractionLimitsTests
     [Fact]
     public void AReadThatNeverFinishes_FailsWithPdfTimeout_InsteadOfHangingTheCaller()
     {
-        var release = new ManualResetEventSlim();
-        var extractor = new HangingExtractor(release, TimeSpan.FromMilliseconds(200));
+        // A worker that never answers: an idle shell command (same on Windows and Linux).
+        var options = ChildProcessPdfTextExtractorTests.IdleWorkerOptions() with { Timeout = TimeSpan.FromMilliseconds(500) };
         var clock = System.Diagnostics.Stopwatch.StartNew();
 
-        try
-        {
-            var ex = Assert.Throws<OcrException>(() => extractor.ExtractText(new MemoryStream([1, 2, 3])));
+        var ex = Assert.Throws<OcrException>(() => new ChildProcessPdfTextExtractor(options).ExtractText(new MemoryStream([1, 2, 3])));
 
-            Assert.Equal("PDF_TIMEOUT", ex.Code);
-            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), "the caller must not wait for the stuck read");
-        }
-        finally
-        {
-            release.Set();
-        }
+        Assert.Equal("PDF_TIMEOUT", ex.Code);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), "the caller must not wait for the stuck read");
     }
 
     [Fact]
-    public void ADocumentOverTheLimit_IsRejectedWithTheLimitOfTheSubclass()
+    public void ADocumentOverTheLimit_IsRejectedWithTheLimitOfTheOptions()
     {
         using var stream = BuildPdf(pageCount: 3);
 
-        var ex = Assert.Throws<OcrException>(() => new SmallLimitExtractor().ExtractText(stream));
+        var ex = Assert.Throws<OcrException>(() => new ChildProcessPdfTextExtractor(new PdfWorkerOptions { MaxPages = 2 }).ExtractText(stream));
 
         Assert.Equal("PDF_TOO_MANY_PAGES", ex.Code);
-    }
-
-    private sealed class HangingExtractor(ManualResetEventSlim release, TimeSpan timeout) : PdfPigTextExtractor
-    {
-        protected override TimeSpan Timeout => timeout;
-
-        protected override PdfDocument OpenDocument(Stream stream)
-        {
-            release.Wait(TimeSpan.FromSeconds(30));
-            throw new InvalidOperationException("abandoned read ends here");
-        }
-    }
-
-    private sealed class SmallLimitExtractor : PdfPigTextExtractor
-    {
-        protected override int MaxPages => 2;
+        Assert.Contains("o limite é 2", ex.Message);
     }
 
     /// <summary>Minimal valid PDF with one text line per page (Latin-1 so string length equals byte count).</summary>

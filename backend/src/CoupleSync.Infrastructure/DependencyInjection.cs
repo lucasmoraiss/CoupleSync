@@ -68,7 +68,7 @@ public static class DependencyInjection
 
         services.AddScoped<IStorageAdapter, LocalFileStorageAdapter>();
 
-        services.AddScoped<IPdfTextExtractor, PdfPigTextExtractor>();
+        services.AddScoped<IPdfTextExtractor, Integrations.LocalPdfParser.Worker.ChildProcessPdfTextExtractor>();
         services.AddScoped<BankDetector>();
 
         // Bank statement parsers — registered as IEnumerable<IBankStatementParser> via multiple scoped registrations
