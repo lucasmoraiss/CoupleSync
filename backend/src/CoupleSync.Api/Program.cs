@@ -29,6 +29,8 @@ using CoupleSync.Application.OcrImport;
 using CoupleSync.Application.OpenFinance;
 using CoupleSync.Application.Reports;
 using CoupleSync.Infrastructure;
+using CoupleSync.Infrastructure.Integrations.Gemini;
+using CoupleSync.Infrastructure.Integrations.Llm;
 using CoupleSync.Infrastructure.Persistence;
 using CoupleSync.Infrastructure.Persistence.Seeders;
 using CoupleSync.Infrastructure.Security;
@@ -101,7 +103,7 @@ builder.Services.AddScoped<ImportJobService>();
 builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<OpenFinanceService>();
 builder.Services.AddScoped<ChatContextService>();
-builder.Services.AddScoped<GeminiChatService>();
+builder.Services.AddScoped<AssistantChatService>();
 
 ValidationLocalization.Configure();
 builder.Services.AddControllers(ValidationLocalization.ConfigureModelBinding)
@@ -137,6 +139,11 @@ builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database");
 
 var app = builder.Build();
+
+// The fake AI provider (tests and "App E2E" only) never starts where a real provider key exists, nor on Render.
+FakeLlmProviderGuard.EnsureSafe(
+    app.Configuration,
+    app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<GeminiOptions>>().Value.ApiKey);
 
 using (var scope = app.Services.CreateScope())
 {

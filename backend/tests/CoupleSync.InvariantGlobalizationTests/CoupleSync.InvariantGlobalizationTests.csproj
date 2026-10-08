@@ -30,6 +30,8 @@
     <Compile Include="..\Shared\TestHostEnvironmentTests.cs" Link="TestHostEnvironmentTests.cs" />
     <!-- The same category cases the unit tests run with ICU, run again without it. -->
     <Compile Include="..\CoupleSync.UnitTests\Domain\TransactionCategoriesTests.cs" Link="TransactionCategoriesTests.cs" />
+    <!-- The text rules of the AI layer compare without accents: the same cases, without ICU. -->
+    <Compile Include="..\CoupleSync.UnitTests\Ai\AiTextRulesTests.cs" Link="AiTextRulesTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
