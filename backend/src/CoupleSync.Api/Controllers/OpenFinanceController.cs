@@ -11,9 +11,11 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace CoupleSync.Api.Controllers;
 
 /// <summary>
-/// Open Finance through Meu Pluggy, phase 1: credentials, items and the accounts found. The whole group reads;
-/// only who connected writes. Without OPENFINANCE_ENCRYPTION_KEY on the server every write answers
-/// 503 OPENFINANCE_UNAVAILABLE and the status says <c>available: false</c>.
+/// Open Finance through Meu Pluggy: credentials, items and the accounts found (phase 1); synchronisation of the
+/// transactions into a mirror and the review that turns expenses into transactions (phase 2). The whole group reads
+/// and reviews; only who connected changes the connection and asks for a synchronisation. Without
+/// OPENFINANCE_ENCRYPTION_KEY on the server every write of the connection answers 503 OPENFINANCE_UNAVAILABLE and
+/// the status says <c>available: false</c>.
 /// </summary>
 [ApiController]
 [Authorize]
@@ -22,10 +24,14 @@ namespace CoupleSync.Api.Controllers;
 public sealed class OpenFinanceController : ControllerBase
 {
     private readonly OpenFinanceService _service;
+    private readonly SyncRunService _syncRuns;
+    private readonly BankReviewService _review;
 
-    public OpenFinanceController(OpenFinanceService service)
+    public OpenFinanceController(OpenFinanceService service, SyncRunService syncRuns, BankReviewService review)
     {
         _service = service;
+        _syncRuns = syncRuns;
+        _review = review;
     }
 
     [HttpGet("status")]
@@ -74,6 +80,7 @@ public sealed class OpenFinanceController : ControllerBase
 
     /// <summary>Checks the item at Pluggy with the connection's credentials, stores it and returns the accounts found.</summary>
     [HttpPost("connections/{id:guid}/items")]
+    [EnableRateLimiting(RateLimitPolicies.OpenFinanceItems)]
     [ProducesResponseType(typeof(BankItemResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -111,6 +118,100 @@ public sealed class OpenFinanceController : ControllerBase
         await _service.DisconnectAsync(GetAuthenticatedCoupleId(), GetAuthenticatedUserId(), id, ct);
         return NoContent();
     }
+
+    /// <summary>
+    /// Enqueues a synchronisation of the caller's own connection and answers at once; the run is followed by
+    /// <c>GET sync-runs/{id}</c>. <c>force=true</c> asks Pluggy to read the banks again first (the manual button).
+    /// <c>appOpen=true</c> marks the silent request the app makes when it is opened (it never forces).
+    /// <c>aiCategorizationConsent=true</c> says who connected accepted the AI disclosure: only then may a description
+    /// the category table does not know go to the AI classifier. <c>historyMonths</c> (3, 6 or 12), when given,
+    /// becomes the period of the connection: how far back an account never read before goes. One run per
+    /// connection every 10 minutes (409 SYNC_TOO_SOON, with <c>errors.nextSyncAtUtc</c>).
+    /// </summary>
+    [HttpPost("connections/{id:guid}/sync")]
+    [EnableRateLimiting(RateLimitPolicies.OpenFinanceSync)]
+    [ProducesResponseType(typeof(SyncRunResponse), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<SyncRunResponse>> RequestSync(
+        Guid id,
+        [FromQuery] bool force = false,
+        [FromQuery] bool appOpen = false,
+        [FromQuery] bool aiCategorizationConsent = false,
+        [FromQuery] int? historyMonths = null,
+        CancellationToken ct = default)
+    {
+        var run = await _syncRuns.RequestAsync(
+            GetAuthenticatedCoupleId(), GetAuthenticatedUserId(), id, force, appOpen, aiCategorizationConsent, historyMonths, ct);
+        return StatusCode(StatusCodes.Status202Accepted, Map(run));
+    }
+
+    [HttpGet("sync-runs/{id:guid}")]
+    [ProducesResponseType(typeof(SyncRunResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SyncRunResponse>> GetSyncRun(Guid id, CancellationToken ct)
+        => Ok(Map(await _syncRuns.GetAsync(GetAuthenticatedCoupleId(), id, ct)));
+
+    /// <summary>The expenses of a month of Brazil (<c>month=AAAA-MM</c>; the current one when absent) waiting for the review, and the discarded ones apart.</summary>
+    [HttpGet("review")]
+    [ProducesResponseType(typeof(BankReviewResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<BankReviewResponse>> GetReview([FromQuery] string? month, CancellationToken ct)
+    {
+        var review = await _review.GetReviewAsync(GetAuthenticatedCoupleId(), month, ct);
+        return Ok(new BankReviewResponse(
+            review.Month,
+            review.Expenses.Select(Map).ToList(),
+            review.Discarded.Select(Map).ToList(),
+            review.PendingTotalBrl,
+            review.PendingAllMonths,
+            review.PendingByMonth.Select(m => new BankReviewMonthResponse(m.Month, m.Pending)).ToList()));
+    }
+
+    /// <summary>
+    /// Turns the chosen expenses into transactions (of who connected the account) and discards the others. All or
+    /// nothing. A line not settled at the bank yet answers 422 TRANSACTION_NOT_POSTED; a line of another group, 404.
+    /// </summary>
+    [HttpPost("review/confirm")]
+    [ProducesResponseType(typeof(ConfirmBankReviewResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ConfirmBankReviewResponse>> ConfirmReview([FromBody] ConfirmBankReviewRequest request, CancellationToken ct)
+    {
+        var result = await _review.ConfirmAsync(
+            GetAuthenticatedCoupleId(),
+            request.Expenses?.Select(e => new ConfirmExpenseInput(e.Id, e.Category, e.Description)).ToList(),
+            request.Discard,
+            ct);
+        return Ok(new ConfirmBankReviewResponse(
+            result.Created.Select(c => new BankReviewCreatedResponse(c.Id, c.TransactionId)).ToList(),
+            result.Discarded,
+            result.AlreadyConfirmed));
+    }
+
+    /// <summary>Discarded lines go back to waiting for the review.</summary>
+    [HttpPost("review/restore")]
+    [ProducesResponseType(typeof(RestoreBankReviewResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RestoreBankReviewResponse>> RestoreReview([FromBody] IReadOnlyList<Guid> ids, CancellationToken ct)
+        => Ok(new RestoreBankReviewResponse(await _review.RestoreAsync(GetAuthenticatedCoupleId(), ids, ct)));
+
+    private static SyncRunResponse Map(SyncRunDto r) => new(
+        r.Id, r.ConnectionId, r.Status, r.TriggeredBy, r.CreatedAtUtc, r.StartedAtUtc, r.FinishedAtUtc,
+        r.TransactionsNew, r.TransactionsUpdated, r.ErrorCode, r.ErrorMessage);
+
+    private static BankReviewLineResponse Map(BankReviewLineDto l) => new(
+        l.Id, l.Day, l.Merchant, l.Description, l.Amount, l.Currency, l.SuggestedCategory, l.BankStatus,
+        l.BankName, l.AccountName, l.InstallmentNumber, l.InstallmentTotal);
 
     private static BankConnectionResponse Map(BankConnectionDto c) => new(
         c.Id, c.Label, c.UserId, c.UserName, c.IsMine, c.Status, c.ClientIdHint, c.HistoryMonths,
