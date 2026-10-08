@@ -18,20 +18,31 @@ public sealed class FactPackGoalMarkerTests
         ["g5"] = "Ação",
     };
 
+    // Review 2: only the title exactly as an answer shows it (between quotes, trimmed) becomes the marker again.
     [Theory]
-    [InlineData("Falta pouco para \"Casa na praia\".", "Falta pouco para {{g2}}.")]
-    [InlineData("casa na\n praia e CASA", "{{g2}} e {{g1}}")]
-    [InlineData("O casamento e as casas não são a meta.", "O casamento e as casas não são a meta.")]
-    [InlineData("Quanto falta para o carro (2027)?", "Quanto falta para o {{g3}}?")]
-    // Decomposed text: the combining accents fold to nothing and go away with their letters.
-    [InlineData("E a ação?", "E a {{g5}}?")]
+    [InlineData("Falta pouco para \"Casa   na praia\" e para \"Casa\".", "Falta pouco para {{g2}} e para {{g1}}.")]
+    [InlineData("Falta pouco para \"Carro (2027)\", \"Ação\" e \"Sítio\".", "Falta pouco para {{g3}}, {{g5}} e uma meta.")]
+    // Not what the system wrote: no quotes, another case, a piece of the title, something else between quotes.
+    [InlineData("A casa na praia, \"casa\", \"Casa na\" e \"Alimentação\".", "A casa na praia, \"casa\", \"Casa na\" e \"Alimentação\".")]
     [InlineData("", "")]
-    public void EveryKnownTitle_BecomesItsMarker(string text, string expected)
-        => Assert.Equal(expected, FactPackPrivacyFilter.ReplaceGoalTitles(text, Titles));
+    public void InAnAnswerThatComesBack_OnlyTheShownTitle_BecomesItsMarker(string text, string expected)
+        => Assert.Equal(expected, FactPackPrivacyFilter.MaskShownGoalTitles(text, Titles, ["Sítio", "Casa", " "]));
+
+    [Theory]
+    [InlineData("casa na\n praia e CASA", "casa na\n praia={{g2}}|CASA={{g1}}")]
+    [InlineData("O casamento e as casas não são a meta.", "")]
+    [InlineData("Quanto falta para o carro (2027)?", "carro (2027)={{g3}}")]
+    // Decomposed text: the combining accents fold to nothing and go with their letters.
+    [InlineData("E a ação? E a casa, e a casa?", "ação={{g5}}|casa={{g1}}")]
+    [InlineData("", "")]
+    public void TheTitlesCitedInAQuestion_AreFoundAsTyped_OncePerTitle_InTheOrderTheyAppear(string text, string expected)
+        => Assert.Equal(
+            expected,
+            string.Join("|", FactPackPrivacyFilter.FindGoalMentions(text, Titles).Select(m => $"{m.Text}={string.Join("+", m.Markers)}")));
 
     [Fact]
-    public void WithNoGoals_TheTextIsUntouched()
-        => Assert.Equal("Quanto gastamos?", FactPackPrivacyFilter.ReplaceGoalTitles("Quanto gastamos?", new Dictionary<string, string>()));
+    public void WithNoGoals_NothingIsFound()
+        => Assert.Empty(FactPackPrivacyFilter.FindGoalMentions("Quanto gastamos?", new Dictionary<string, string>()));
 
     [Theory]
     [InlineData("Faltam R$ 10,00 para {{g1}} e {{B}}.", false)]

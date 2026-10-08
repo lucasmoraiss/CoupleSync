@@ -385,6 +385,79 @@ public sealed class ChatControllerTests
         Assert.Equal(4, sent.Messages.Count);
     }
 
+    /// <summary>
+    /// Issue #38, review 2 (I2): the app sends every earlier answer back whole as history, and an answer may be
+    /// longer than a question. With the item refused, every following question of the conversation was a 400.
+    /// </summary>
+    [Theory]
+    [InlineData(2001)]
+    [InlineData(4000)]
+    [InlineData(16000)]
+    public async Task Chat_AnEarlierAnswerLongerThanAQuestion_ComingBackAsHistory_DoesNotBlockTheConversation(int length)
+    {
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        using var client = await factory.ClientWithCoupleAsync();
+        var longAnswer = string.Concat(Enumerable.Repeat("Os gastos subiram. ", length / 19 + 1))[..length];
+        var history = new List<object>
+        {
+            new { Role = "user", Content = "Faça uma análise completa dos nossos gastos." },
+            new { Role = "model", Content = longAnswer },
+        };
+
+        var next = await client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "E onde dá para economizar?", History = history });
+
+        Assert.Equal(HttpStatusCode.OK, next.StatusCode);
+        var sent = Assert.Single(provider.Requests);
+        Assert.True(PromptText.EstimateTokens(sent) <= 6400, $"estimated {PromptText.EstimateTokens(sent)} tokens");
+        Assert.Equal("E onde dá para economizar?", sent.Messages[^1].Text);
+        // The long answer goes cut to the size of a question, never whole.
+        Assert.Equal(2000, sent.Messages[^2].Text.Length);
+        Assert.StartsWith("Os gastos subiram. Os gastos", sent.Messages[^2].Text);
+
+        // And the question after that one, with the long answer still among the last 20 messages.
+        history.Add(new { Role = "user", Content = "E onde dá para economizar?" });
+        history.Add(new { Role = "model", Content = "Em lazer." });
+        var later = await client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto?", History = history });
+
+        Assert.Equal(HttpStatusCode.OK, later.StatusCode);
+    }
+
+    [Fact]
+    public async Task Chat_TheLargestRequestTheValidatorAccepts_IsAnsweredQuickly_AndCutOnTheServer()
+    {
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        using var client = await factory.ClientWithCoupleAsync();
+        // No space and no "@": the worst text for the patterns of the privacy filter.
+        var history = Enumerable.Range(1, 20).Select(i => new { Role = i % 2 == 1 ? "user" : "model", Content = new string('h', 16000) }).ToArray();
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = new string('q', 2000), History = history });
+        watch.Stop();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var sent = Assert.Single(provider.Requests);
+        Assert.True(PromptText.EstimateTokens(sent) <= 6400, $"estimated {PromptText.EstimateTokens(sent)} tokens");
+        Assert.All(sent.Messages.Skip(1), m => Assert.True(m.Text.Length <= 2000));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+    }
+
+    [Fact]
+    public async Task Chat_Returns400_WhenAHistoryItemIsLongerThanAnyAnswerCouldBe()
+    {
+        await using var factory = new ChatWebApplicationFactory(enabled: true);
+        using var client = await factory.ClientWithCoupleAsync();
+
+        var response = await client.PostAsJsonAsync("/api/v1/ai/chat", new
+        {
+            Message = "E agora?",
+            History = new[] { new { Role = "model", Content = new string('h', 16001) } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact]
     public async Task Chat_Returns404AiChatDisabled_WhenNoProviderHasAKey()
     {

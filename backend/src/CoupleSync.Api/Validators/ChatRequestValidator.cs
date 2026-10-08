@@ -1,4 +1,5 @@
 using CoupleSync.Api.Contracts.Chat;
+using CoupleSync.Application.Ai;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -24,9 +25,10 @@ public sealed class ChatRequestValidator : AbstractValidator<ChatRequest>
                     .Must(r => ValidRoles.Contains(r, StringComparer.OrdinalIgnoreCase))
                     .WithMessage("O autor de cada mensagem do histórico deve ser 'user' ou 'model'.");
 
+                // Longer than a question: an earlier answer comes back whole and is cut on the server (PromptText).
                 item.RuleFor(h => h.Content)
                     .NotEmpty()
-                    .MaximumLength(2000);
+                    .MaximumLength(PromptText.HistoryItemMaxLength);
             })
             .When(x => x.History is not null);
     }

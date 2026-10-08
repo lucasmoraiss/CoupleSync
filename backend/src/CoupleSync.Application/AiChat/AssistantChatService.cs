@@ -27,6 +27,15 @@ public sealed class AssistantChatService
     /// <summary>Room for the data message (design 3.9), in estimated tokens.</summary>
     public const int MaxFactsTokens = 2500;
 
+    /// <summary>
+    /// The question with the lines the app adds to it (<see cref="GoalNotes"/>), in characters: the 600 estimated
+    /// tokens of the question (design 3.9).
+    /// </summary>
+    public const int QuestionWithNotesMaxLength = 2100;
+
+    /// <summary>How a line the app adds after the question starts; the rules tell the model what it is.</summary>
+    private const string GoalNotePrefix = "Nota do app";
+
     private static readonly LlmJsonSchema AnswerSchema = LlmJsonSchema.Object(
         "assistant_answer",
         ("answer", LlmJsonSchema.String()),
@@ -44,7 +53,9 @@ public sealed class AssistantChatService
         "3. Nunca escreva links, endereços de sites, e-mails, telefones, perfis de redes sociais, chaves Pix ou qualquer outro contato.\n" +
         "4. Nunca peça nem sugira nada fora do aplicativo: clicar, acessar um site, ligar, enviar mensagem, informar senha ou código, " +
         "transferir ou depositar dinheiro.\n" +
-        "5. " + PeopleRulePlaceholder + " As metas aparecem como {{g1}}, {{g2}}: refira-se a elas exatamente assim.\n" +
+        "5. " + PeopleRulePlaceholder + " As metas aparecem como {{g1}}, {{g2}}: refira-se a elas exatamente assim. " +
+        "Uma linha \"" + GoalNotePrefix + "\" depois da pergunta avisa que uma palavra da pergunta também é o nome de uma meta: " +
+        "decida pelo contexto se a pergunta fala da meta ou de outra coisa (um gasto, uma categoria).\n" +
         "6. Para questões sobre investimentos, decisões legais ou fiscais, recomende a consulta a um profissional qualificado.\n" +
         "Responda em JSON: \"answer\" com o texto da resposta e \"refs\" com uma lista vazia.";
 
@@ -97,7 +108,7 @@ public sealed class AssistantChatService
         switch (result.Outcome)
         {
             case LlmGatewayOutcome.Ok:
-                // Names and goal titles never left the API: they are put back only now, in what the person reads.
+                // Names were never sent and the goals were cited only by marker: both are put back only now, in what the person reads.
                 var answer = FactPackPrivacyFilter.RestoreNames(result.Value!.Answer.Trim(), people);
                 return new AssistantReply(FactPackPrivacyFilter.RestoreGoalTitles(answer, facts.GoalTitles), result.Provider);
             case LlmGatewayOutcome.OutputRejected:
@@ -154,21 +165,25 @@ public sealed class AssistantChatService
     private static LlmRequest BuildRequest(IReadOnlyList<AiPerson> people, ChatFacts facts, string message, IReadOnlyList<ChatMessage> history)
     {
         // The history is what the app showed: an answer of the model comes back with the titles of the goals put
-        // back in it. Titles never leave, so in the history and in the question they become markers again; and in
-        // an answer that comes back, what is still between quotes (a goal renamed or deleted since) goes away too.
+        // back in it. The app does not send titles by itself, so what the system put there (the title between
+        // quotes) becomes the marker again. What the person typed goes as typed: a word that is also the title of
+        // a goal is not rewritten — the question would become another one.
         var filteredHistory = history
             .Select(h =>
             {
                 var fromModel = string.Equals(h.Role, "model", StringComparison.OrdinalIgnoreCase);
-                var text = WithoutGoalTitles(h.Content, facts);
-                return new LlmMessage(fromModel ? "model" : "user", Clean(fromModel ? FactPackPrivacyFilter.ReplaceQuoted(text) : text, people));
+                var text = fromModel
+                    ? FactPackPrivacyFilter.MaskShownGoalTitles(h.Content, facts.GoalTitles, facts.OtherGoalTitles)
+                    : h.Content;
+                return new LlmMessage(fromModel ? "model" : "user", Clean(text, people));
             })
             .Where(m => m.Text.Length > 0)
             .ToList();
 
         var messages = new List<LlmMessage> { new("user", FactsMessage(facts.Text, people)) };
         messages.AddRange(ChatHistoryTrimmer.Trim(filteredHistory));
-        messages.Add(new LlmMessage("user", Clean(WithoutGoalTitles(message, facts), people)));
+        var question = Clean(message, people);
+        messages.Add(new LlmMessage("user", question + GoalNotes(question, facts, people)));
 
         return new LlmRequest(
             LlmFeatures.Chat,
@@ -179,11 +194,39 @@ public sealed class AssistantChatService
             MaxOutputTokens);
     }
 
-    /// <summary>Every title of a goal of the group, in the data or not, out of a text that came from the app.</summary>
-    private static string WithoutGoalTitles(string text, ChatFacts facts)
-        => FactPackPrivacyFilter.ReplaceGoalTitles(text, facts.GoalTitles, facts.OtherGoalTitles);
+    /// <summary>
+    /// One line for each piece of the question that is also the title of a goal in the data: with the goals cited
+    /// only as {{g1}}, {{g2}}, the model would not know which one "a meta do carro" is. The line repeats words of
+    /// the question as it is sent — nothing else of the title leaves — and stops when the question and its lines
+    /// reach <see cref="QuestionWithNotesMaxLength"/>.
+    /// </summary>
+    private static string GoalNotes(string question, ChatFacts facts, IReadOnlyList<AiPerson> people)
+    {
+        if (facts.GoalTitles.Count == 0) return string.Empty;
 
-    /// <summary>What a person typed: privacy filter first, then the prompt hygiene, at the length the validator accepts.</summary>
+        // Compared as the question is: a member's name in a title is a marker there too.
+        var titles = facts.GoalTitles.ToDictionary(
+            pair => pair.Key, pair => FactPackPrivacyFilter.FilterFreeText(pair.Value, people), StringComparer.Ordinal);
+
+        var notes = string.Empty;
+        foreach (var mention in FactPackPrivacyFilter.FindGoalMentions(question, titles))
+        {
+            var markers = mention.Markers.Count == 1
+                ? "da meta " + mention.Markers[0]
+                : "das metas " + string.Join(", ", mention.Markers.Take(mention.Markers.Count - 1)) + " e " + mention.Markers[^1];
+            var note = $"\n{GoalNotePrefix}: na pergunta, {mention.Text} também é o nome {markers}.";
+            if (question.Length + notes.Length + note.Length > QuestionWithNotesMaxLength) break;
+            notes += note;
+        }
+
+        return notes;
+    }
+
+    /// <summary>
+    /// What came from the app as text: privacy filter first, then the prompt hygiene, cut at the length of a question.
+    /// A history item may arrive longer than that (an earlier answer, sent back whole): the cut is here, after the
+    /// filter, so a document or a contact is never cut in half before being recognized.
+    /// </summary>
     private static string Clean(string text, IReadOnlyList<AiPerson> people)
         => PromptText.Sanitize(FactPackPrivacyFilter.FilterFreeText(text, people), PromptText.QuestionMaxLength);
 

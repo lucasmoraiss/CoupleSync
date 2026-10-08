@@ -9,6 +9,9 @@ namespace CoupleSync.Application.Ai;
 /// and surnames of the group's members become {{A}}/{{B}}, and documents and contacts become "[removido]". It is
 /// applied to the Assistant's question, to its history and to the context sent with them. The field-by-field part
 /// (merchants, transfers, goals, incomes) comes with the fact pack.
+/// Goals: the app never sends a title by itself — the data cites a goal as {{g1}}, and a title the system put in an
+/// earlier answer becomes its marker again when that answer comes back as history. What a person types in a
+/// question is theirs and goes as typed, a word that happens to be the title of a goal included.
 /// </summary>
 public static partial class FactPackPrivacyFilter
 {
@@ -16,9 +19,6 @@ public static partial class FactPackPrivacyFilter
 
     /// <summary>What stands for a goal that has no marker in the data sent.</summary>
     public const string UnnamedGoal = "uma meta";
-
-    [GeneratedRegex(@"""[^""]*""", RegexOptions.CultureInvariant)]
-    private static partial Regex Quoted();
 
     private static readonly HashSet<string> NameParticles = new(StringComparer.Ordinal) { "de", "da", "do", "das", "dos", "e", "di", "du" };
 
@@ -41,6 +41,13 @@ public static partial class FactPackPrivacyFilter
 
     [GeneratedRegex(@"\{{1,2}\s*[gG]\s*([0-9]+)\s*\}{1,2}", RegexOptions.CultureInvariant)]
     private static partial Regex GoalMarker();
+
+    // The same marker (group 1), or what a model may write in its place without the braces: [g1] (group 2) or a
+    // bare g1 (group 3) — lower case as it was sent, a word of its own, not the start of a number like "g1,5".
+    [GeneratedRegex(
+        @"\{{1,2}\s*[gG]\s*([0-9]+)\s*\}{1,2}|\[\s*g([0-9]+)\s*\]|(?<![\p{L}\p{N}_{])g([0-9]+)(?![\p{L}\p{N}_}])(?![.,][0-9])",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex AnyGoalMarker();
 
     /// <summary>The text without the members' names, documents, phones, e-mails, random Pix keys and long numbers.</summary>
     public static string FilterFreeText(string? text, IReadOnlyList<AiPerson> people)
@@ -80,14 +87,20 @@ public static partial class FactPackPrivacyFilter
         });
 
     /// <summary>
-    /// Puts the titles of the goals back in a text of the model, when answering the app (the titles never leave the
-    /// API: a goal goes as {{g1}}, {{g2}}...). A marker of no goal becomes "uma meta".
+    /// Puts the titles of the goals back in a text of the model, when answering the app (the app never sends the
+    /// titles by itself: a goal goes as {{g1}}, {{g2}}...). A marker of no goal becomes "uma meta". A marker the model
+    /// wrote without the braces (g1, [g1]) is read too, but only when it is exactly the marker of a goal that was
+    /// sent: "G20", "5g1" or the "g7" of a group with one goal are ordinary text and stay.
     /// </summary>
     public static string RestoreGoalTitles(string text, IReadOnlyDictionary<string, string> titlesByMarker)
-        => GoalMarker().Replace(text, match =>
-            titlesByMarker.TryGetValue(GoalKey(match), out var title) && ShownTitle(title).Length > 0
-                ? $"\"{ShownTitle(title)}\""
-                : UnnamedGoal);
+        => AnyGoalMarker().Replace(text, match =>
+        {
+            var braced = match.Groups[1].Success;
+            var number = braced ? match.Groups[1].Value : match.Groups[2].Success ? match.Groups[2].Value : match.Groups[3].Value;
+            var known = titlesByMarker.TryGetValue("g" + number.TrimStart('0'), out var title) && ShownTitle(title).Length > 0;
+            if (known) return $"\"{ShownTitle(title)}\"";
+            return braced ? UnnamedGoal : match.Value;
+        });
 
     /// <summary>True when the text names a person marker ({{B}}...) that belongs to nobody in the group.</summary>
     public static bool MentionsUnknownPerson(string text, IReadOnlyList<AiPerson> people)
@@ -104,63 +117,69 @@ public static partial class FactPackPrivacyFilter
     }
 
     /// <summary>
-    /// The opposite of <see cref="RestoreGoalTitles"/>, for what comes from the app: the answer the person read has
-    /// the title of the goal and returns as history, and a question may name a goal. Every known title becomes its
-    /// marker again before anything is sent — compared without accents or case, with any white space between its
-    /// words, whole words only, the longest title first, with or without the quotes of the answer.
+    /// The opposite of <see cref="RestoreGoalTitles"/>, for an answer of the model that the app sends back as
+    /// history: only what the system itself put there is taken out again — the title exactly as an answer shows it,
+    /// between quotes. The same word written by the model without quotes ("gastos com carro") is ordinary text, and
+    /// so is anything else between quotes.
     /// </summary>
-    /// <param name="titlesByMarker">The goals that are in the data sent: each title becomes its marker.</param>
+    /// <param name="titlesByMarker">The goals that are in the data sent: each shown title becomes its marker again.</param>
     /// <param name="otherTitles">
-    /// Titles of goals of the group that are not in the data (archived, completed): they do not leave either, and
-    /// with no marker to stand for them they become "uma meta".
+    /// Titles of goals of the group that are not in the data (archived, completed): with no marker to stand for
+    /// them they become "uma meta".
     /// </param>
-    public static string ReplaceGoalTitles(
+    public static string MaskShownGoalTitles(
         string? text,
         IReadOnlyDictionary<string, string> titlesByMarker,
         IEnumerable<string>? otherTitles = null)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
+        if (!text.Contains('"')) return text;
 
-        var titles = titlesByMarker
-            .Select(pair => (Order: pair.Key, Replacement: Marker(pair.Key), Title: pair.Value))
-            .Concat((otherTitles ?? []).Select(title => (Order: "~", Replacement: UnnamedGoal, Title: title)))
-            .Select(title => (title.Order, title.Replacement, Words: TitleWords(title.Title)))
-            .Where(title => title.Words.Length > 0)
-            .OrderByDescending(title => title.Words.Sum(word => word.Length) + title.Words.Length)
-            .ThenBy(title => title.Order, StringComparer.Ordinal)
-            .ToList();
+        var shown = new List<(string Shown, string Replacement)>();
+        foreach (var (marker, title) in InMarkerOrder(titlesByMarker)) Add(title, Marker(marker));
+        foreach (var title in otherTitles ?? []) Add(title, UnnamedGoal);
 
         var result = text;
-        foreach (var (_, replacement, words) in titles)
-        {
-            // Quotes around the title (the answer shows it so) or around one of its words go with it.
-            var pattern = @"(?<![\p{L}\p{N}])""?" + string.Join(@"""?\s+""?", words.Select(Regex.Escape)) + @"""?(?![\p{L}\p{N}])";
-            result = ReplaceFolded(result, new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), replacement);
-        }
-
+        // The longest first: "Casa na praia" is never read as a piece of another title.
+        foreach (var (quoted, replacement) in shown.OrderByDescending(s => s.Shown.Length))
+            result = result.Replace(quoted, replacement, StringComparison.Ordinal);
         return result;
+
+        void Add(string? title, string replacement)
+        {
+            var quoted = $"\"{ShownTitle(title)}\"";
+            // Two goals with the same title: the first one (an active goal before an archived one) stands for both.
+            if (quoted.Length > 2 && shown.All(s => s.Shown != quoted)) shown.Add((quoted, replacement));
+        }
     }
 
-    /// <summary>
-    /// For an answer of the model that comes back as history: a title is shown between quotes, so whatever is still
-    /// between quotes after <see cref="ReplaceGoalTitles"/> may be the title of a goal that was renamed or deleted
-    /// since (nobody knows the old title any more). It does not leave: it becomes "uma meta".
-    /// </summary>
-    public static string ReplaceQuoted(string text) => Quoted().Replace(text, UnnamedGoal);
-
-    /// <summary>The words of a title as they are compared: folded, without the double quotes an answer never shows.</summary>
-    private static string[] TitleWords(string? title)
-        => PromptText.Fold(ShownTitle(title)).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-
-    /// <summary>The title as an answer shows it: trimmed and without double quotes (the answer puts its own around it).</summary>
-    private static string ShownTitle(string? title) => (title ?? string.Empty).Replace("\"", string.Empty, StringComparison.Ordinal).Trim();
+    /// <summary>A piece of a question that is also the title of goals in the data: the text as sent, and their markers.</summary>
+    public sealed record GoalMention(string Text, IReadOnlyList<string> Markers);
 
     /// <summary>
-    /// Replaces what <paramref name="pattern"/> finds in the folded text (lower case, no accents), in the text as it
-    /// was written. Folding is done character by character, so each folded position knows where it came from.
+    /// Where a question cites the title of a goal that is in the data — compared without accents or case, with any
+    /// white space between the words of the title, whole words only, the longest title first. The question is not
+    /// changed: who calls tells the model, in a line of its own, that those words are also the name of a goal.
+    /// One mention per title, in the order they appear.
     /// </summary>
-    private static string ReplaceFolded(string text, Regex pattern, string replacement)
+    /// <param name="text">The question as it is sent (after the privacy filter and the hygiene).</param>
+    /// <param name="titlesByMarker">Marker to title, each title as it would be sent (after the same privacy filter).</param>
+    public static IReadOnlyList<GoalMention> FindGoalMentions(string? text, IReadOnlyDictionary<string, string> titlesByMarker)
     {
+        if (string.IsNullOrEmpty(text) || titlesByMarker.Count == 0) return [];
+
+        var titles = InMarkerOrder(titlesByMarker)
+            // A title with a document or a contact in it would be compared with "[removido]": any removed piece would match.
+            .Where(pair => !pair.Value.Contains(Removed, StringComparison.Ordinal))
+            .Select(pair => (Marker: pair.Key, Words: TitleWords(pair.Value)))
+            .Where(title => title.Words.Length > 0)
+            .GroupBy(title => string.Join(' ', title.Words), StringComparer.Ordinal)
+            .Select(group => (Words: group.First().Words, Markers: group.Select(title => Marker(title.Marker)).ToList()))
+            .OrderByDescending(title => title.Words.Sum(word => word.Length) + title.Words.Length)
+            .ToList();
+        if (titles.Count == 0) return [];
+
+        // Folded once, character by character, so each folded position knows where it came from.
         var folded = new StringBuilder(text.Length);
         var origin = new List<int>(text.Length + 1);
         for (var i = 0; i < text.Length; i++)
@@ -173,22 +192,40 @@ public static partial class FactPackPrivacyFilter
         }
 
         origin.Add(text.Length);
+        var foldedText = folded.ToString();
 
-        var result = new StringBuilder(text.Length);
-        var copied = 0;
-        foreach (Match match in pattern.Matches(folded.ToString()))
+        var taken = new List<(int Start, int End)>();
+        var mentions = new List<(int Start, GoalMention Mention)>();
+        foreach (var (words, markers) in titles)
         {
-            if (match.Length == 0) continue;
-            var start = origin[match.Index];
-            // Up to where the next folded character came from: a combining accent (folded to nothing) goes with its letter.
-            var end = origin[match.Index + match.Length];
-            if (start < copied) continue;
-            result.Append(text, copied, start - copied).Append(replacement);
-            copied = end;
+            var pattern = @"(?<![\p{L}\p{N}])" + string.Join(@"\s+", words.Select(Regex.Escape)) + @"(?![\p{L}\p{N}])";
+            var first = true;
+            foreach (Match match in Regex.Matches(foldedText, pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+            {
+                if (match.Length == 0) continue;
+                // Up to where the next folded character came from: a combining accent (folded to nothing) goes with its letter.
+                var (start, end) = (origin[match.Index], origin[match.Index + match.Length]);
+                // Inside a longer title already found ("casa" in "casa na praia"): it is that other goal.
+                if (taken.Any(span => start < span.End && span.Start < end)) continue;
+                taken.Add((start, end));
+                if (first) mentions.Add((start, new GoalMention(text[start..end], markers)));
+                first = false;
+            }
         }
 
-        return result.Append(text, copied, text.Length - copied).ToString();
+        return mentions.OrderBy(mention => mention.Start).Select(mention => mention.Mention).ToList();
     }
+
+    /// <summary>g1, g2... g10: by number, not by text.</summary>
+    private static IEnumerable<KeyValuePair<string, string>> InMarkerOrder(IReadOnlyDictionary<string, string> titlesByMarker)
+        => titlesByMarker.OrderBy(pair => pair.Key.Length).ThenBy(pair => pair.Key, StringComparer.Ordinal);
+
+    /// <summary>The words of a title as they are compared: folded, without the double quotes an answer never shows.</summary>
+    private static string[] TitleWords(string? title)
+        => PromptText.Fold(ShownTitle(title)).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>The title as an answer shows it: trimmed and without double quotes (the answer puts its own around it).</summary>
+    private static string ShownTitle(string? title) => (title ?? string.Empty).Replace("\"", string.Empty, StringComparison.Ordinal).Trim();
 
     /// <summary>A, B, C... for members in the order given (oldest membership first).</summary>
     public static IReadOnlyList<AiPerson> AsPeople(IEnumerable<string> namesByJoinOrder)
@@ -197,9 +234,6 @@ public static partial class FactPackPrivacyFilter
     private static string Marker(string letter) => "{{" + letter + "}}";
 
     private static string MarkerLetter(Match match) => match.Groups[1].Value.ToUpperInvariant();
-
-    /// <summary>"g1" for {{g1}}, {{G1}}, {{ g 01 }}: the key of the titles in <see cref="RestoreGoalTitles"/>.</summary>
-    private static string GoalKey(Match match) => "g" + match.Groups[1].Value.TrimStart('0');
 
     /// <summary>Every word of every member's name (folded), except particles, with the marker of its first owner.</summary>
     private static Dictionary<string, string> NameTokens(IReadOnlyList<AiPerson> people)

@@ -353,58 +353,178 @@ public sealed class AssistantChatServiceTests : IDisposable
         => _goals.Goals.Add(Goal.Create(_couple, Guid.NewGuid(), title, null, 5000m, "BRL", _kit.Clock.UtcNow.AddMonths(4), _kit.Clock.UtcNow.AddDays(-10)));
 
     /// <summary>
-    /// I1: the answer shown to the person has the title of the goal, and the app sends that answer back as history.
-    /// "Titles of goals never go" has to hold on that path too, and for a title the person types in a question.
+    /// Review 2, I1 — what the person types is sent as typed (minus names, documents and contacts): a common word
+    /// that is also the title of a goal is not rewritten, or the model would answer about the goal when the
+    /// question was about a spending. A line of the app says which goal has that name, and nothing else leaves.
     /// </summary>
     [Fact]
-    public async Task TheTitleOfAGoal_ComingBackInTheHistoryOrTypedInTheQuestion_GoesAsItsMarker_NeverAsText()
+    public async Task AQuestionWithAWordThatIsAlsoTheTitleOfAGoal_IsSentAsTyped_WithALineSayingWhichGoalHasThatName()
     {
-        AddGoal("Viagem para Recife");
-        AddGoal("Viagem");
-        AddGoal("Férias da Mariana");
-        var history = new List<ChatMessage>
-        {
-            new("user", "Quanto falta para a meta?"),
-            new("model", "Faltam R$ 5.000,00 para \"Viagem para Recife\" e R$ 100,00 para \"Férias da Mariana\"."),
-        };
+        AddGoal("Carro");
 
-        await AskAsync("E a VIAGEM  PARA RECIFE? E a viágem, e as ferias da mariana? Viagens são outra coisa.", history);
+        await AskAsync("Quanto gastamos com carro este mês?");
 
         var request = Assert.Single(_first.Requests);
+        Assert.Equal(
+            "Quanto gastamos com carro este mês?\nNota do app: na pergunta, carro também é o nome da meta {{g1}}.",
+            request.Messages[^1].Text);
+        Assert.Contains("Nota do app", request.SystemPrompt);
+    }
+
+    [Fact]
+    public async Task AQuestionWithTheTitleOfAnArchivedGoal_IsSentAsTyped_WithNoLine()
+    {
+        AddGoal("Viagem");
+        _goals.Goals[0].Archive(_kit.Clock.UtcNow);
+
+        await AskAsync("Quanto gastamos com viagem?");
+
+        Assert.Equal("Quanto gastamos com viagem?", Assert.Single(_first.Requests).Messages[^1].Text);
+    }
+
+    [Fact]
+    public async Task WithSeveralGoals_TheLineNamesOnlyTheGoalsCited_ComparedWithoutCaseOrAccents_ByWholeWords()
+    {
+        AddGoal("Carro");
+        AddGoal("Casa na praia");
+        AddGoal("Férias");
+        AddGoal("Casa");
+
+        await AskAsync("Como está a meta do CARRO? E as ferias, e a casa  na praia? Carros e casamentos são outra coisa.");
+
+        Assert.Equal(
+            "Como está a meta do CARRO? E as ferias, e a casa na praia? Carros e casamentos são outra coisa."
+            + "\nNota do app: na pergunta, CARRO também é o nome da meta {{g1}}."
+            + "\nNota do app: na pergunta, ferias também é o nome da meta {{g3}}."
+            // The longest title first: "casa na praia" is {{g2}}, not {{g4}} followed by "na praia".
+            + "\nNota do app: na pergunta, casa na praia também é o nome da meta {{g2}}.",
+            Assert.Single(_first.Requests).Messages[^1].Text);
+    }
+
+    [Fact]
+    public async Task TwoGoalsWithTheSameTitle_AreBothNamedInTheLine()
+    {
+        AddGoal("Reserva");
+        AddGoal("reserva");
+
+        await AskAsync("E a reserva?");
+
+        Assert.Equal(
+            "E a reserva?\nNota do app: na pergunta, reserva também é o nome das metas {{g1}} e {{g2}}.",
+            Assert.Single(_first.Requests).Messages[^1].Text);
+    }
+
+    /// <summary>The line repeats only what is being sent: a name of a member in the title is a marker there too.</summary>
+    [Fact]
+    public async Task TheLine_NeverCarriesMoreThanTheQuestionThatIsSent()
+    {
+        AddGoal("Férias da Mariana");
+        AddGoal("Conta 12345678");
+
+        await AskAsync("E as ferias da mariana? E a conta 12345678?");
+
+        var request = Assert.Single(_first.Requests);
+        Assert.Equal(
+            "E as ferias da {{A}}? E a conta [removido]?\nNota do app: na pergunta, ferias da {{A}} também é o nome da meta {{g1}}.",
+            request.Messages[^1].Text);
         var sent = request.SystemPrompt + "\n" + string.Join("\n", request.Messages.Select(m => m.Text));
-        foreach (var forbidden in new[] { "Viagem", "VIAGEM", "viágem", "Recife", "RECIFE", "Férias", "ferias", "Mariana", "mariana" }) Assert.DoesNotContain(forbidden, sent);
-        Assert.Equal("Faltam R$ 5.000,00 para {{g1}} e R$ 100,00 para {{g3}}.", request.Messages[2].Text);
-        // The longest title first ("Viagem para Recife" is not "{{g2}} para Recife"); only whole words ("Viagens" stays).
-        Assert.Equal("E a {{g1}}? E a {{g2}}, e as {{g3}}? Viagens são outra coisa.", request.Messages[3].Text);
+        foreach (var forbidden in new[] { "Mariana", "mariana", "Férias", "12345678" }) Assert.DoesNotContain(forbidden, sent);
+    }
+
+    [Fact]
+    public async Task TheQuestionAndItsLines_StayWithinTheSixHundredTokensOfTheQuestion()
+    {
+        static string Title(int i) => $"meta{(char)('a' + i % 26)}{(char)('a' + i / 26)} " + new string('x', 100);
+        for (var i = 0; i < 30; i++) AddGoal(Title(i));
+        var question = (string.Join(" ", Enumerable.Range(0, 30).Select(Title)) + " " + new string('q', 2000))[..1800];
+
+        await AskAsync(question);
+
+        var text = Assert.Single(_first.Requests).Messages[^1].Text;
+        Assert.StartsWith(question, text);
+        Assert.Contains("\nNota do app: na pergunta, metaaa ", text);
+        Assert.True(PromptText.EstimateTokens(text) <= 600, $"estimated {PromptText.EstimateTokens(text)} tokens");
+        Assert.True(PromptText.EstimateTokens(_first.Requests[0]) <= 6400);
     }
 
     /// <summary>
-    /// I1, the paths that are left: the goal cited in an earlier answer was archived since, or renamed or deleted
-    /// (its old title is nowhere any more). An answer shows a title between quotes, so what is still between quotes
-    /// in an answer that comes back is not sent either.
+    /// Review 2, I1 — in the history, only what the system itself put in an answer is taken out again: the title
+    /// exactly as the answer shows it, between quotes. Anything else between quotes, the same word written by the
+    /// model without quotes, and what the person typed stay as they are.
     /// </summary>
     [Fact]
-    public async Task TheTitleOfAGoalThatIsNoLongerActiveOrNoLongerExists_DoesNotLeaveInTheHistoryEither()
+    public async Task InTheHistory_OnlyTheTitlesTheSystemPutBackInAnAnswer_BecomeMarkersAgain()
     {
-        AddGoal("Reserva");
-        AddGoal("Carro do João");
+        AddGoal("Carro");
+        AddGoal("Viagem");
+        AddGoal("Férias da Mariana");
         _goals.Goals[1].Archive(_kit.Clock.UtcNow);
         var history = new List<ChatMessage>
         {
-            new("user", "E o carro do joão?"),
-            new("model", "Faltam R$ 900,00 para \"Carro do João\", R$ 50,00 para \"Sítio em Atibaia\" e R$ 10,00 para \"Reserva\"."),
+            new("user", "E o \"Carro\"? E a viagem?"),
+            new("model", "O maior gasto foi em \"Alimentação\". Faltam R$ 900,00 para \"Carro\", R$ 50,00 para \"Viagem\" e R$ 10,00 para \"Férias da Mariana\"; os gastos com carro e com viagem subiram."),
         };
+
+        await AskAsync("e quanto foi?", history);
+
+        var request = Assert.Single(_first.Requests);
+        // What the person typed: as typed (the hygiene takes the quotes of any text).
+        Assert.Equal("E o Carro? E a viagem?", request.Messages[1].Text);
+        Assert.Equal(
+            "O maior gasto foi em Alimentação. Faltam R$ 900,00 para {{g1}}, R$ 50,00 para uma meta e R$ 10,00 para {{g2}}; os gastos com carro e com viagem subiram.",
+            request.Messages[2].Text);
+        Assert.Equal("e quanto foi?", request.Messages[3].Text);
+        Assert.DoesNotContain("Mariana", string.Join("\n", request.Messages.Select(m => m.Text)));
+    }
+
+    /// <summary>Review 2, I1 (6): a marker the model wrote without braces is still the goal, when that goal exists.</summary>
+    [Theory]
+    [InlineData("Faltam R$ 5.000,00 para g1.", "Faltam R$ 5.000,00 para \"Viagem para Recife\".")]
+    [InlineData("Faltam R$ 5.000,00 para [g1].", "Faltam R$ 5.000,00 para \"Viagem para Recife\".")]
+    [InlineData("Faltam R$ 5.000,00 para a meta (g1).", "Faltam R$ 5.000,00 para a meta (\"Viagem para Recife\").")]
+    [InlineData("Meta g1: faltam R$ 5.000,00; {{g1}} vence em 2027.", "Meta \"Viagem para Recife\": faltam R$ 5.000,00; \"Viagem para Recife\" vence em 2027.")]
+    // Ordinary text is not a marker: another case, part of a word or of a number, a goal that does not exist.
+    [InlineData("O G1 e o G20 falaram de 5g1, de g1x, de g1,5 e de g7.", "O G1 e o G20 falaram de 5g1, de g1x, de g1,5 e de g7.")]
+    public async Task AGoalMarkerWrittenWithoutBraces_IsReplacedByTheTitle_AndOrdinaryTextIsLeftAlone(string answer, string shown)
+    {
+        AddGoal("Viagem para Recife");
+        _first.Then(Answer(answer));
+
+        var reply = await AskAsync();
+
+        Assert.Equal(shown, reply.Reply);
+    }
+
+    [Fact]
+    public async Task ATitleThatContainsAMarker_IsNotReplacedTwice()
+    {
+        AddGoal("Plano g2");
+        AddGoal("Reserva");
+        _first.Then(Answer("Faltam R$ 5.000,00 para {{g1}} e R$ 10,00 para g2."));
+
+        var reply = await AskAsync();
+
+        Assert.Equal("Faltam R$ 5.000,00 para \"Plano g2\" e R$ 10,00 para \"Reserva\".", reply.Reply);
+    }
+
+    /// <summary>
+    /// Review 2, I2 — the installed app sends every earlier answer back whole, and an answer may be longer than the
+    /// 2,000 characters of a question. Such an item is cut here, after the privacy filter, and the request stays
+    /// within its token budget.
+    /// </summary>
+    [Fact]
+    public async Task AHistoryItemLongerThanAQuestion_IsCutAfterTheFilter_AndTheRequestStaysWithinTheBudget()
+    {
+        var longAnswer = "Mariana gastou mais. " + string.Concat(Enumerable.Repeat("Os gastos subiram neste mês. ", 600));
+        var history = new List<ChatMessage> { new("user", "Faça uma análise completa."), new("model", longAnswer[..16000]) };
 
         await AskAsync("E agora?", history);
 
         var request = Assert.Single(_first.Requests);
-        var sent = request.SystemPrompt + "\n" + string.Join("\n", request.Messages.Select(m => m.Text));
-        foreach (var forbidden in new[] { "Carro", "carro", "Sítio", "Atibaia", "Reserva" }) Assert.DoesNotContain(forbidden, sent);
-        Assert.Equal("E o uma meta?", request.Messages[1].Text);
-        Assert.Equal("Faltam R$ 900,00 para uma meta, R$ 50,00 para uma meta e R$ 10,00 para {{g1}}.", request.Messages[2].Text);
-        // Only the active goal is in the data.
-        Assert.Contains("{{g1}}", request.Messages[0].Text);
-        Assert.DoesNotContain("{{g2}}", request.Messages[0].Text);
+        Assert.Equal(4, request.Messages.Count);
+        Assert.StartsWith("{{A}} gastou mais. Os gastos subiram", request.Messages[2].Text);
+        Assert.Equal(2000, request.Messages[2].Text.Length);
+        Assert.True(PromptText.EstimateTokens(request) <= 6400, $"estimated {PromptText.EstimateTokens(request)} tokens");
     }
 
     [Fact]
