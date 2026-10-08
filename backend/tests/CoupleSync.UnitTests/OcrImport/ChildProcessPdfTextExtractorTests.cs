@@ -531,10 +531,11 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
         Assert.Equal(50, options.MaxPages);
         // 30 s was the limit of a read inside the API, already started and compiled. The child starts and compiles
         // for every file, and on the 0.1 CPU of the production instance that alone takes about 10 s: with 30 s it
-        // refused statements the old reader read. 90 s is what the measurement in the image supports (round 1 of the
-        // review of issue #14): the largest statement the old reader read there took 49 s through the child.
-        Assert.Equal(TimeSpan.FromSeconds(90), options.Timeout);
-        Assert.Equal(TimeSpan.FromSeconds(90), PdfWorkerOptions.DefaultTimeout);
+        // refused statements the old reader read. 120 s is what the measurement in the image supports (rounds 1 and 2
+        // of the review of issue #14): the largest statement the old reader read there took 49 s through the child
+        // alone, and up to 73 s inside the API while it answers one request per second.
+        Assert.Equal(TimeSpan.FromSeconds(120), options.Timeout);
+        Assert.Equal(TimeSpan.FromSeconds(120), PdfWorkerOptions.DefaultTimeout);
         // Still far below the 10 minutes after which a job stuck in "processing" is given up on.
         Assert.True(options.Timeout < CoupleSync.Application.OcrImport.ImportJobRecovery.ProcessingTimeout / 4);
     }

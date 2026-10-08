@@ -17,9 +17,10 @@ public sealed record PdfWorkerOptions
     /// Time limit of one read, start of the process included. The reader inside the API had 30 s for a read that was
     /// already started and compiled; the child starts and compiles for every file, which on the 0.1 CPU of the
     /// production instance takes about 10 s by itself. Measured there, the largest statement the old reader read took
-    /// 49 s through the child; 90 s leaves room for a busy instance and still ends a read that is stuck.
+    /// 49 s through the child alone and up to 73 s inside the API while it answers one request per second; 120 s is
+    /// about 1.6 times that, and still ends a read that is stuck long before the job is given up on (10 minutes).
     /// </summary>
-    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(90);
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(120);
 
     /// <summary>Executable to start; null means the API executable itself, run as the PDF worker.</summary>
     public string? FileName { get; init; }
