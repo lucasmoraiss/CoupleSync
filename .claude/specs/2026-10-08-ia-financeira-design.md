@@ -1,6 +1,6 @@
 # IA financeira no CoupleSync — desenho
 
-Data: 2026-10-08 (rodadas 1 e 2 de revisão aplicadas; ver seção 15). Decidido com o dono (decisões em
+Data: 2026-10-08 (rodadas 1 e 2 de revisão e emenda da chave real aplicadas; ver seção 15). Decidido com o dono (decisões em
 `decisoes-do-dono.md`, 08/10/2026). Este documento é a referência das issues de IA; cada fase da seção 12 vira
 uma issue com o rótulo `backlog` e passa pela esteira `/entregar`. Ele se apoia no desenho de Open Finance
 (`.claude/specs/2026-10-07-open-finance-design.md`) e absorve a fase 6 dele ("Base para IA", issue #29) e a
@@ -34,8 +34,9 @@ conteúdo educativo de investimento com os números oficiais do dia; e, em segun
    IA)"**. Nada de tela vazia por causa do provedor.
 3. **R$ 0 e sem cartão.** Só tiers gratuitos; nenhum serviço pago; nenhum modelo local no Render (512 MB,
    seção 13). Agendamento por GitHub Actions em repositório público (seção 8).
-4. **Fallback obrigatório.** Toda chamada passa por uma cadeia de provedores (seção 2.4); nunca há um único
-   provedor sem alternativa.
+4. **Fallback obrigatório.** Toda chamada passa por uma cadeia de elos (provedor + modelo, seção 2.4); nunca
+   há um único elo sem alternativa. Hoje os elos são modelos Gemini Flash com cotas separadas; um segundo
+   provedor entra por configuração quando houver chave (2.2).
 5. **Cota com orçamento.** Contadores diários por provedor/modelo gravados no banco (a API dorme e contador
    em memória zera); orçamento diário por grupo; o dono vê o consumo no app.
 6. **Saída estruturada sempre.** Toda chamada pede JSON com esquema; texto livre só dentro de campos do
@@ -73,6 +74,7 @@ esteira abre a issue "Pacote de fatos: incluir …" com o conteúdo abaixo.
 | 3 (conciliação, #26) | Devolver ao espelho ao resolver duplicada; estender a colisão às quatro portas (6.1) | 11 |
 | 4 (entradas e contas) | Entradas e salário por cadência (3.5); faturas a vencer no pacote (`bills`); saldo real como ponto de partida da previsão (3.6) | 4 e 7 |
 | 5 (investimentos) | Posições × CDI no guia (5.3); reserva sugerida pelos saldos (5.2) | 9 |
+| 2 em diante (sincronização diária) | Tarefa `OpenFinanceSync` no agendamento (8.3), para a sincronização diária não depender de a API estar acordada às 06:00 | 5a |
 
 Ao abrir as issues deste plano: fechar a #29 com o comentário "absorvida pelas fases 3, 4 e 5b do plano de IA"
 e links; e, no desenho do Open Finance, trocar o texto das linhas 6 e 7 da tabela de fases para "ver
@@ -93,8 +95,8 @@ e links; e, no desenho do Open Finance, trocar o texto das linhas 6 e 7 da tabel
 
 | Provedor | Qualidade dos modelos gratuitos | Cota gratuita | JSON schema | PDF / imagem | Treina com os dados no gratuito | Cartão |
 | --- | --- | --- | --- | --- | --- | --- |
-| Google Gemini (AI Studio) | A mais forte entre os gratuitos: 2.5 Pro, 2.5 Flash, 2.5 Flash-Lite, 3.5/3.6/3.7/3.8 Flash [externo, oficial] | Sem tabela pública; terceiros citam 5–15 RPM, ~250k TPM, 100–1.500 RPD **por modelo** [externo, terceiro] — a confirmar no AI Studio | Sim (`responseSchema`, subconjunto) [oficial] | PDF nativo até 50 MB / 1.000 páginas, 258 tokens por página; imagem sim [oficial] | **Sim**; revisores humanos podem ler; termos pedem não enviar dado pessoal; Brasil fora da exceção [oficial] | Não |
-| Groq | Boa: `openai/gpt-oss-120b`, `gpt-oss-20b`, `qwen/qwen3.8-27b` (visão) [oficial] | **30 RPM, 1.000 RPD, 8k TPM, 200k TPD por modelo**, por organização [oficial] | Sim, `json_schema` strict (sem streaming/tools junto) [oficial] | Imagem até 3 por chamada, 20 MB; **PDF não** [oficial] | **Não** [oficial] | Não [terceiro] |
+| Google Gemini (AI Studio) | A página de preços lista 2.5 Pro, 2.5 Flash, 2.5 Flash-Lite e 3.5/3.6/3.7/3.8 Flash como gratuitos [externo, oficial]; **com a chave real do dono só modelos Flash e Flash-Lite respondem** (medição abaixo) | Sem tabela pública; terceiros citam 5–15 RPM, ~250k TPM, 100–1.500 RPD **por modelo** [externo, terceiro] — não medido (2.5) | Sim (`responseSchema`, subconjunto) [oficial] | PDF nativo até 50 MB / 1.000 páginas, 258 tokens por página; imagem sim [oficial] | **Sim**; revisores humanos podem ler; termos pedem não enviar dado pessoal; Brasil fora da exceção [oficial] | Não |
+| Groq (**sem chave hoje**) | Boa: `openai/gpt-oss-120b`, `gpt-oss-20b`, `qwen/qwen3.8-27b` (visão) [oficial] | **30 RPM, 1.000 RPD, 8k TPM, 200k TPD por modelo**, por organização [oficial] | Sim, `json_schema` strict (sem streaming/tools junto) [oficial] | Imagem até 3 por chamada, 20 MB; **PDF não** [oficial] | **Não** [oficial] | Não [terceiro] |
 | Mistral (Experiment) | Boa: Large 4, Medium 3.5, Small 4 [oficial] | 1 req/s, 500k tokens/min, 1 bilhão tokens/mês por modelo [terceiro; página oficial deu 404] | Sim [terceiro] | Visão sim; OCR é pago [terceiro] | Sim por padrão, com opt-out [terceiro] | Não; pede telefone [terceiro] |
 | OpenRouter `:free` | Varia; lista muda sem aviso | 20 RPM; **50 req/dia** sem compra [oficial] | Depende do modelo | Depende | Depende do provedor | Não |
 | Cerebras | Boa (gpt-oss-120b) | 5 RPM, 1M tokens/dia [oficial] | Sim | Não | Não | **Exige cartão** [oficial] |
@@ -102,37 +104,79 @@ e links; e, no desenho do Open Finance, trocar o texto das linhas 6 e 7 da tabel
 | Cloudflare Workers AI | Boa (Llama 3.3 70B, gpt-oss-120b) | 10.000 neurons/dia ≈ 50k tokens de saída/dia num 70B [oficial] | Em alguns modelos | Imagem em modelos de visão | Não [oficial] | Não |
 | Hugging Face, GitHub Models, Anthropic, OpenAI | — | Sem gratuito utilizável (HF exige crédito; GitHub Models encerrado em 30/07/2026; Anthropic sem tier grátis; OpenAI exige pagamento e compartilhamento) [oficial] | — | — | — | — |
 
-### 2.2 Soma das cotas e escolha por tarefa
+**Medido com a chave gratuita real do dono (08/10/2026)** — uma chamada mínima de `generateContent` por modelo
+em `https://generativelanguage.googleapis.com/v1beta` (`fatos-chave-real.md`):
 
-Somando por modelo, como os dois provedores contam:
+| Modelo | Resultado |
+| --- | --- |
+| `gemini-2.5-flash`, `gemini-flash-latest`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite` | HTTP 200 |
+| `gemini-flash-lite-latest` | Consta na listagem de modelos da chave (45 modelos de texto); não foi chamado |
+| `gemini-pro-latest`, `gemini-3.1-pro-preview` | HTTP 429 `RESOURCE_EXHAUSTED` na primeira chamada (cota zero no plano gratuito) |
+| `gemini-2.5-pro`, `gemini-2.5-flash-lite` | HTTP 404 `NOT_FOUND` ("no longer available to new users") |
 
-| Lado | Modelos usados | Pedidos/dia | Tokens/dia | Confiança |
-| --- | --- | --- | --- | --- |
-| Groq | `gpt-oss-120b` + `gpt-oss-20b` + `qwen3.8-27b` | **3.000** (3 × 1.000) | **600k** (3 × 200k) | oficial |
-| Gemini | `2.5-pro` + `2.5-flash` + `2.5-flash-lite` | 300 a 4.500 (3 × 100–1.500) | não publicado | terceiro |
+Duas consequências. **Nenhum modelo "Pro" do Gemini é utilizável de graça com esta chave**: a cadeia do Gemini só
+tem modelos Flash e Flash-Lite. **Não há chave do Groq**: o dono não conseguiu criar conta nem entrar em
+console.groq.com em 08/10/2026 (erro genérico no cadastro e no login). O desenho funciona sem ela (2.2).
 
-Leitura da decisão 1 ("maior qualidade **e** maior quantidade de requisições gratuitas"): a qualidade mais
-forte é a do Gemini (2.5 Pro); a quantidade comprovada é a do Groq. Entre os candidatos sem cartão e com cota
-útil, o Groq tem os únicos números oficiais. Por isso **não há um primário único: a escolha é por tarefa** —
-o Gemini lidera onde há poucas chamadas e a qualidade pesa; o Groq lidera onde há volume.
+### 2.2 Cadeia só com Gemini Flash e escolha por tarefa
+
+O que existe hoje é **um provedor (Google Gemini) com vários modelos Flash, cada um com cota própria** — o
+Gemini conta a cota por modelo [externo, terceiro]. As cotas por dia desses modelos **não são publicadas e não
+foram medidas** (2.5); por isso não há soma de pedidos por dia a apresentar.
+
+Leitura da decisão 1 ("maior qualidade **e** maior quantidade de requisições gratuitas; ao menos um fallback"):
+a maior qualidade que a chave gratuita entrega é a do Flash mais novo; a quantidade vem de espalhar as tarefas
+por modelos com cotas separadas. Por isso **a ordem é por tarefa**: qualidade primeiro onde há poucas chamadas e
+o texto pesa; rapidez e cota primeiro onde há volume.
 
 | Tarefa | Principal | Reserva 1 | Reserva 2 | Motivo |
 | --- | --- | --- | --- | --- |
-| Insight semanal e mensal, guia educativo | `gemini:gemini-2.5-pro` | `gemini:gemini-2.5-flash` | `groq:openai/gpt-oss-120b` | Poucas chamadas por semana; o texto mais bem escrito vale a cota baixa do Pro. |
-| Assistente (chat) | `groq:openai/gpt-oss-120b` | `gemini:gemini-2.5-flash` | `gemini:gemini-2.5-flash-lite` | Volume; cota oficial e resposta rápida. Ordem a rever quando a cota real do AI Studio for conferida (decisão em aberto 2). |
-| Categorização em lote | `groq:openai/gpt-oss-20b` | `groq:openai/gpt-oss-120b` | `gemini:gemini-2.5-flash-lite` | Escolher entre 7 categorias não pede o modelo mais forte; vai primeiro a quem não treina com as linhas do extrato (fatos-externos 4.2, item 4). |
-| Insight diário | `groq:openai/gpt-oss-20b` | `gemini:gemini-2.5-flash-lite` | `gemini:gemini-2.5-flash` | Texto curto, uma chamada por grupo por dia. |
+| Insight semanal e mensal, guia educativo | `gemini:gemini-3-flash-preview` | `gemini:gemini-flash-latest` | `gemini:gemini-flash-lite-latest` | Qualidade primeiro: poucas chamadas, e o Flash mais capaz disponível (a confirmar por teste na fase 1) escreve o texto. Modelo "preview" costuma ter limite menor [externo, 1.1], daí as duas reservas. |
+| Assistente (chat) | `gemini:gemini-flash-latest` | `gemini:gemini-flash-lite-latest` | — | Rapidez e cota primeiro: é o maior volume. Não usa o principal dos resumos (`gemini-3-flash-preview`), para um dia cheio de conversa não esgotar o modelo do semanal, do mensal e do guia. Ordem a rever quando a cota for conhecida (decisão em aberto 2). |
+| Categorização em lote | `gemini:gemini-flash-latest` | `gemini:gemini-flash-lite-latest` | — | Escolher entre 7 categorias não pede o modelo mais forte. Todos falhando: `OUTROS` (6.3). |
+| Insight diário | `gemini:gemini-flash-latest` | `gemini:gemini-flash-lite-latest` | — | Texto curto, uma chamada por grupo por dia. Todos falhando: resumo automático. |
 
-- **Terceiro provedor (opcional, desligado): Mistral Experiment.** Maior cota citada (1 bilhão de
-  tokens/mês por modelo), mas números de terceiros e treino ligado por padrão. O adaptador da seção 2.3 já o
-  atende (decisão em aberto 3).
-- Descartados: OpenRouter (50 req/dia), SambaNova (20 req/dia), Cerebras (exige cartão), Cloudflare (cota em
-  neurons pequena), demais sem gratuito.
+- **Aliases `-latest` como padrão.** `gemini-flash-latest` e `gemini-flash-lite-latest` acompanham as trocas
+  de versão sem mudança de código — a medição mostrou o risco do id fixo: `gemini-2.5-pro` e
+  `gemini-2.5-flash-lite` já não existem para chave nova. O padrão do código (`GeminiOptions`) passa a ser
+  `gemini-flash-latest`. Os ids fixos que responderam (`gemini-2.5-flash`, `gemini-3-flash-preview`,
+  `gemini-3.1-flash-lite`) entram por configuração (2.4). A confirmar no início da fase 1: (a) para qual versão
+  cada alias aponta — se um alias apontar para o mesmo modelo de outro elo da cadeia, os dois dividem a mesma
+  cota, e o elo repetido é trocado por um id fixo diferente (por exemplo `gemini-2.5-flash`); (b) uma chamada ao
+  `gemini-flash-lite-latest`, que foi listado mas não chamado (alternativa já medida: `gemini-3.1-flash-lite`);
+  (c) qual é o Flash mais capaz que responde com a chave — a página de preços lista Flash 3.5 a 3.8 [externo], e
+  o alias `gemini-flash-latest` pode apontar para um modelo mais novo que o `gemini-3-flash-preview`. A cadeia
+  de qualidade começa pelo que esse teste mostrar; o `gemini-3-flash-preview` é o padrão até lá.
+- **A decisão "ao menos um fallback" está atendida hoje só entre modelos do Gemini** (mesmo provedor, cotas
+  separadas). Isso cobre cota esgotada e modelo retirado; **não cobre** queda do Google nem bloqueio da chave —
+  nesses casos vale o princípio 2 (resumo automático). **Um segundo provedor está pendente de chave** (decisão em
+  aberto 15; padrão: entregar a fase 1 sem ele e ligar quando a chave existir).
+- **Segundo provedor: pronto e desligado.** O `OpenAiCompatibleLlmProvider` (2.3) é entregue na fase 1, testado
+  contra servidor HTTP falso, e fica fora de todas as cadeias enquanto não houver chave. Candidatos, na ordem de
+  preferência, com os limites verificados [externo, seção 1]:
+
+  | Candidato | Limite gratuito | Observação |
+  | --- | --- | --- |
+  | Groq (primeira escolha) | 30 RPM, 1.000 RPD, 8k TPM, 200k TPD por modelo (`openai/gpt-oss-120b`, `gpt-oss-20b`, `qwen/qwen3.8-27b`) [oficial] | Não treina com os dados [oficial]; sem cartão [terceiro]; `json_schema` strict. Cadastro e login falharam em 08/10/2026. |
+  | OpenRouter `:free` | 20 RPM; 50 pedidos/dia sem compra [oficial] | Lista de modelos muda sem aviso; treino depende do provedor de cada modelo. Só como reserva de emergência. |
+  | Mistral (Experiment) | 1 req/s, 500k tokens/min, 1 bilhão de tokens/mês por modelo [terceiro; página oficial deu 404] | Pede telefone; treina por padrão, com opt-out [terceiro]. |
+  | SambaNova | 20 RPM, 20 pedidos/dia, 200k tokens/dia por modelo [oficial] | Só `json_object` (sem esquema estrito); política de treino não verificada. |
+  | Cerebras | 5 RPM, 30k TPM, 1M tokens/dia [oficial] | **Exige cartão** [oficial]: fora pelo princípio 3. |
+  | Cloudflare Workers AI | 10.000 neurons/dia ≈ 50k tokens de saída/dia num 70B [oficial] | Não treina [oficial]; não usa o mesmo formato sem adaptação — pediria adaptador próprio. |
+
+  **Quando o Groq for ligado**: vira o principal da categorização em lote (não treina com as linhas do extrato,
+  fatos-externos 4.2, item 4) e a última reserva das demais cadeias. Na API é só configuração (chave no Render e
+  elos nas cadeias); antes disso o texto de privacidade ganha o provedor e a versão do aceite de IA sobe (7.3),
+  o que é uma mudança pequena de app, por OTA. **Trava para essa ordem**: a lista de provedores cobertos pelo
+  aceite vigente fica em código, junto da versão do aceite (`AiConsent.CurrentVersion`, 7.1; hoje só `gemini`),
+  e o gateway ignora, com aviso em log, todo elo de provedor fora dela (2.4, regra 4). Chave e elo configurados
+  antes da hora não enviam nada.
+- Descartados: Hugging Face, GitHub Models, Anthropic e OpenAI (sem gratuito utilizável, 2.1).
 - Atenção: o modelo padrão de hoje, `gemini-2.0-flash` (`GeminiOptions.cs:6`) [código], **não aparece** na
-  lista gratuita verificada (2.5 e 3.x) [externo]. A fase 1 troca o padrão para `gemini-2.5-flash`; os ids
-  3.x exatos ficam a confirmar e entram só por configuração.
-- **Conferir a cota real no AI Studio** (aistudio.google.com/rate-limit) é item da issue de checkpoint da
-  fase 1: o número decide a ordem do Assistente e os limites iniciais (2.5).
+  lista gratuita verificada [externo] e não foi testado com a chave real; `GEMINI_MODEL` não está definido no
+  Render. A fase 1 troca o padrão para `gemini-flash-latest`.
+- **Conferir a cota no AI Studio** (aistudio.google.com/rate-limit) deixou de ser necessário: é item opcional do
+  dono (seção 13). Sem esse número, a cadeia aprende a cota na prática (2.5).
 
 ### 2.3 Abstração `ILlmProvider`
 
@@ -142,7 +186,7 @@ Interfaces em `CoupleSync.Application.Common.Interfaces`; adaptadores em
 ```
 public interface ILlmProvider
 {
-    string Provider { get; }          // "gemini", "groq", "mistral", "fake"
+    string Provider { get; }          // "gemini", "fake"; "groq" etc. quando ligado
     string Model { get; }
     LlmCapabilities Capabilities { get; }   // JsonSchema, Images, Pdf
     Task<LlmResult> GenerateAsync(LlmRequest request, CancellationToken ct);
@@ -171,8 +215,8 @@ public interface ILlmGateway   // a cadeia; é isto que os serviços usam
 | Classe | Atende | Observação |
 | --- | --- | --- |
 | `GeminiLlmProvider` | Gemini | Evolução do `GeminiChatAdapter` atual: mesma chave `x-goog-api-key` (`GeminiChatAdapter.cs:50`), `generateContent` com `responseMimeType=application/json` + `responseSchema`; lê `usageMetadata` para tokens. Hoje o adaptador lê só `candidates[0].parts[0].text` (`:69-70`) [código]. |
-| `OpenAiCompatibleLlmProvider` | Groq e Mistral (e qualquer API no formato `chat/completions`) | `response_format = { type: "json_schema", json_schema: { strict: true, schema } }`; lê `usage.prompt_tokens/completion_tokens`. URL base e formato exatos a confirmar na documentação de cada um. |
-| `FakeLlmProvider` | Testes de integração e "App E2E" | Ligado por `Ai__UseFakeProvider=true`; quando ligado, é o único elo de todas as cadeias e **conta como provedor disponível** (`available=true` em `/ai/status`), para que a tela de boas-vindas e o Assistente apareçam no fluxo Maestro. **Monta a resposta a partir do pedido**, no esquema pedido: texto fixo em português sem números próprios; quando o pedido traz um pacote de fatos, copia para o texto 1–2 números existentes no pacote (ex.: `spend.total`) e põe em `refs` os primeiros ids do pacote; no Assistente sem pacote (fases 1–3), responde sem números. Teste de unidade: a saída do falso passa nos três validadores. Guarda de subida: a API **recusa iniciar** com o falso ligado se (a) alguma chave real (`GEMINI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`) tiver valor, ou (b) a variável `RENDER` existir no ambiente (o Render a define nos serviços; conferir na documentação do Render no início da fase 1, a confirmar). Não depende de `ASPNETCORE_ENVIRONMENT`, porque o App E2E sobe a imagem com `Production` (`scripts/app-e2e-api.sh`) [código]; o script do E2E passa a enviar `--env Ai__UseFakeProvider=true`. **Comportamento esperado no Render**: se alguém ligar a variável por engano, a nova versão falha na subida, o deploy aparece como falho, o Render mantém a versão anterior no ar e o `/health` continua mostrando o commit anterior — a esteira trata como deploy não confirmado. Nunca chega a responder a usuários reais. |
+| `OpenAiCompatibleLlmProvider` | Qualquer API no formato `chat/completions` (Groq como primeira escolha; OpenRouter, Mistral). **Entregue na fase 1 e desligado** | `response_format = { type: "json_schema", json_schema: { strict: true, schema } }`; lê `usage.prompt_tokens/completion_tokens`. Sem chave não entra em cadeia nenhuma (2.4, regra 4). Liga só por configuração: `Ai__OpenAiCompatible__0__Name=groq`, `__BaseUrl=…`, `__ApiKeyVariable=GROQ_API_KEY`, a chave com valor no Render e o elo nas cadeias (2.2). Testado contra servidor HTTP falso, porque não há chave para teste real. URL base e formato exatos a confirmar na documentação do provedor na hora de ligar. |
+| `FakeLlmProvider` | Testes de integração e "App E2E" | Ligado por `Ai__UseFakeProvider=true`; quando ligado, é o único elo de todas as cadeias e **conta como provedor disponível** (`available=true` em `/ai/status`), para que a tela de boas-vindas e o Assistente apareçam no fluxo Maestro. **Monta a resposta a partir do pedido**, no esquema pedido: texto fixo em português sem números próprios; quando o pedido traz um pacote de fatos, copia para o texto 1–2 números existentes no pacote (ex.: `spend.total`) e põe em `refs` os primeiros ids do pacote; no Assistente sem pacote (fases 1–3), responde sem números. Teste de unidade: a saída do falso passa nos três validadores. Guarda de subida: a API **recusa iniciar** com o falso ligado se (a) alguma chave real de provedor tiver valor (`GEMINI_API_KEY`, que já tem valor em produção, ou a chave de qualquer provedor compatível configurado, como `GROQ_API_KEY`), ou (b) a variável `RENDER` existir no ambiente (o Render a define nos serviços; conferir na documentação do Render no início da fase 1, a confirmar). Não depende de `ASPNETCORE_ENVIRONMENT`, porque o App E2E sobe a imagem com `Production` (`scripts/app-e2e-api.sh`) [código]; o script do E2E passa a enviar `--env Ai__UseFakeProvider=true`. **Comportamento esperado no Render**: se alguém ligar a variável por engano, a nova versão falha na subida, o deploy aparece como falho, o Render mantém a versão anterior no ar e o `/health` continua mostrando o commit anterior — a esteira trata como deploy não confirmado. Nunca chega a responder a usuários reais. |
 
 - Esquema JSON num subconjunto comum (objeto, array, string com `enum`, number, integer, boolean; todos os
   campos em `required`; `additionalProperties: false`; sem `oneOf`/`$ref`); cada adaptador traduz para o
@@ -184,14 +228,16 @@ public interface ILlmGateway   // a cadeia; é isto que os serviços usam
 ### 2.4 Regras da cadeia (`LlmGateway`)
 
 Configuração em listas indexadas (o `:` de nomes .NET e a `/` dos ids de modelo não servem em nome de
-variável no Render): `Ai__Chains__Assistant__0 = groq|openai/gpt-oss-120b`, `Ai__Chains__Assistant__1 = …`;
+variável no Render): `Ai__Chains__Assistant__0 = gemini|gemini-flash-latest`, `Ai__Chains__Assistant__1 = gemini|gemini-flash-lite-latest`;
 idem `Weekly`, `Daily`, `Categorize`, `Education`.
 
 1. Grupo sem IA ativada (seção 7) → não chama; `NotConsented`. A checagem é feita **imediatamente antes de
    cada chamada** (vale para jobs em andamento: desligar para na próxima chamada).
 2. `Ai__Disabled=true` → não chama; `Disabled`.
-3. Uso interativo com orçamento do grupo estourado (2.5) → não chama; `GroupBudgetExhausted`.
-4. Para cada elo: pula se o provedor não tem chave, se está em pausa (2.5) ou se a chamada estouraria o
+3. Uso interativo com orçamento do grupo estourado (2.5) → não chama; `GroupBudgetExhausted`. Uso interativo
+   com o teto global do dia atingido (2.5) → não chama; `GlobalBudgetExhausted`.
+4. Para cada elo: pula se o provedor não tem chave ou está fora da lista coberta pelo aceite vigente (2.2; com
+   aviso em log; o provedor falso não entra nessa regra), se está em pausa ou esgotado no dia (2.5) ou se a chamada estouraria o
    limite diário conhecido. Se só a janela do minuto está cheia: no modo `Interactive` pula; no modo `Job`
    **espera** a janela (até 60 s) em vez de cair para um modelo pior.
 5. `Ok` com JSON válido → grava uso e segue para os validadores (2.7). Outros desfechos → grava uso e tenta o
@@ -203,34 +249,56 @@ idem `Weekly`, `Daily`, `Categorize`, `Education`.
 - Tabela `ai_usage` (seção 9): **uma linha por chamada**, só com metadados (dia UTC, dia de Brasília,
   provedor, modelo, grupo, uso, tokens, desfecho, latência). Nunca o prompt nem a resposta. Os contadores são
   `COUNT`/`SUM` — sobrevivem ao sono da API e não têm disputa de escrita.
-- **Limite do provedor** por dia **UTC** (hora exata da virada de cada provedor: a confirmar), em
-  configuração indexada: `Ai__Limits__0__Provider=groq`, `__Model=openai/gpt-oss-120b`, `__Rpd=1000`,
-  `__Tpd=200000`, `__Rpm=30`, `__Tpm=8000`. A cadeia usa **90%** do limite. Valores iniciais: Groq pelos
-  números oficiais; Gemini pelo menor número de terceiros (100 RPD, 5 RPM por modelo) até a conferência no AI
-  Studio (2.2).
+- **Limite do provedor** por dia do provedor (hora exata da virada de cada um: a confirmar; até lá, dia
+  **UTC**), em configuração indexada: `Ai__Limits__0__Provider=gemini`, `__Model=gemini-flash-latest`,
+  `__Rpd=`, `__Tpd=`, `__Rpm=5`, `__Tpm=`. **Campo vazio = limite desconhecido** (não barra nada); com valor, a
+  cadeia usa **90%** dele. Valores iniciais dos modelos Gemini: só `Rpm=5` (o menor número citado por terceiros
+  [externo, terceiro], para dar ritmo aos jobs); `Rpd` e `Tpd` ficam vazios, porque **as cotas por dia do Gemini
+  não são publicadas e não foram medidas** — a cadeia as aprende, como descrito abaixo. Para o Groq, **quando
+  ligado**, valem os números oficiais: `Rpd=1000`, `Tpd=200000`, `Rpm=30`, `Tpm=8000` por modelo [externo].
 - Janela do minuto (RPM/TPM) em memória; janela do dia no banco.
-- **Pausa após 429**: o elo fica fora por 2 minutos (`RateLimitedMinute`). Vira `QuotaExhaustedDay` (fora até
-  a próxima virada UTC) quando o uso do dia daquele modelo já passou de 90% do RPD/TPD conhecido, ou quando
-  houve 3 pausas seguidas sem nenhum `Ok` entre elas. Tudo calculado das linhas de `ai_usage`.
+- **429: pausa crescente e, se insistir, elo esgotado no dia.** Quando a resposta diz de forma explícita que a
+  cota **do dia** acabou (detalhe do erro; formato a confirmar no início da fase 1), o elo fica esgotado até a
+  virada do dia do provedor (`QuotaExhaustedDay`) e a cadeia não volta a ele antes disso. Em qualquer outro 429
+  — limite por minuto ou resposta ambígua — o elo entra em pausa (`RateLimitedMinute`) de **2 minutos** no
+  primeiro, **10** no segundo e **30** no terceiro, contando os 429 seguidos sem nenhum `Ok` no meio; o quarto
+  seguido vira `QuotaExhaustedDay`. Um `Ok` zera a contagem. Assim um 429 ambíguo logo cedo não tira o modelo
+  do dia inteiro. Tudo é gravado em `ai_usage` e calculado dele, então o estado sobrevive ao sono da API.
+- **Cota aprendida**: o número de chamadas `Ok` de um modelo no dia em que veio o seu `QuotaExhaustedDay` é a
+  "cota observada" dele. É só informação — aparece no consumo (`/ai/usage`, 10.2) e serve para o dono preencher
+  `Rpd` depois; a cadeia não se limita sozinha por ela. Enquanto não houver 429 nem valor configurado, o limite
+  do modelo aparece como "ainda não conhecido". Quando há cota observada, a tela de consumo sugere ao dono o
+  `Rpd` do modelo, o orçamento por grupo e o teto global que cabem nela.
 - **Orçamento do grupo** — só para uso interativo (Assistente, insight diário, guia educativo, categorização em
   lote), por **dia de Brasília** (`BrazilTime`), para o **grupo inteiro**: `Ai__GroupDailyCalls = 25`,
   `Ai__GroupDailyTokens = 60.000` (decisão em aberto 6). Conta toda chamada que consumiu tokens (inclusive a
   que voltou inválida). Jobs semanal e mensal ficam **fora** do orçamento do grupo, com teto global próprio
   (`Ai__JobDailyCalls = 60`), para o resumo das 06:17 nunca comer a cota do Assistente. O limite de 30
   mensagens/hora do chat (`ChatRateLimiter.cs:7-25`) [código] continua como proteção curta.
+- **Teto global do uso interativo** — `Ai__GlobalDailyInteractiveCalls = 150` (configurável), contado em
+  `ai_usage` por **dia de Brasília**, somando todos os grupos. Vale além do orçamento por grupo e do
+  `Ai__JobDailyCalls`. Motivo: a chave é uma só e a cota é desconhecida — 10 grupos × 25 chamadas seriam 250
+  pedidos por dia num modelo cujo piso citado por terceiros é 100, e o orçamento por grupo limita o grupo, mas
+  não garante que sobre para os outros. Atingido o teto, nenhuma chamada interativa nova é feita até a
+  meia-noite de Brasília (`GlobalBudgetExhausted`). **O que o usuário vê: os fatos calculados continuam
+  aparecendo, sem o texto da IA** (resumo automático com o selo), e o Assistente responde com a frase de 7.5. Os
+  jobs semanal e mensal seguem no teto próprio deles.
 - Estimativa de consumo (10 grupos ativos, < 20 pessoas):
 
 | Uso | Chamadas/dia | Tokens por chamada | Tokens/dia | Principal |
 | --- | --- | --- | --- | --- |
-| Assistente (média 5 perguntas por grupo) | ~50 | média ~5.000 (máx. 6.400) | média ~250.000 (máx. 320.000) | Groq 120b (200k TPD) + reserva Gemini Flash |
-| Insight diário (só com fato novo) | ≤ 10 | ~3.000 | ≤ 30.000 | Groq 20b |
-| Categorização em lote | ~5 | ~4.000 | ~20.000 | Groq 20b |
-| Guia educativo (1 por pessoa por dia, se abrir) | ≤ 20 | ~4.000 | ≤ 80.000 | Gemini Pro (no piso de 100 RPD) |
-| Insight semanal / mensal | ~1,8 | ~6.000–8.000 | ~11.500 | Gemini Pro |
+| Assistente (média 5 perguntas por grupo) | ~50 | média ~5.000 (máx. 6.400) | média ~250.000 (máx. 320.000) | `gemini-flash-latest` |
+| Insight diário (só com fato novo) | ≤ 10 | ~3.000 | ≤ 30.000 | `gemini-flash-latest` |
+| Categorização em lote | ~5 | ~4.000 | ~20.000 | `gemini-flash-latest` |
+| Guia educativo (1 por pessoa por dia, se abrir) | ≤ 20 | ~4.000 | ≤ 80.000 | `gemini-3-flash-preview` |
+| Insight semanal / mensal | ~1,8 | ~6.000–8.000 | ~11.500 | `gemini-3-flash-preview` |
 | **Total** | **~87** | | **média ~390.000 (máx. ~460.000)** | |
 
-  O Groq 120b sozinho não carrega todo o Assistente num dia cheio (200k TPD); o excedente cai no Gemini
-  Flash. O Groq 20b leva diário e categorização com folga (~50k de 200k).
+  Por modelo: ~65 chamadas/dia no `gemini-flash-latest` (Assistente, diário, categorização) e ~22 no
+  `gemini-3-flash-preview` (guia, semanal, mensal). Cabe se cada modelo tiver ao menos o piso citado por
+  terceiros (100 pedidos/dia [externo, terceiro]) — **não confirmado**, e nada se sabe do limite em tokens por
+  dia. Se a cota real for menor, o excedente cai nas reservas (2.2) e, esgotadas todas, no resumo automático.
+  Com o Groq ligado, somam-se 1.000 pedidos e 200k tokens por dia por modelo dele [externo, oficial].
 
 ### 2.6 Higiene contra injeção de prompt
 
@@ -493,7 +561,10 @@ Orçamento (tokens estimados em código = caracteres ÷ 3,5, arredondado para ci
 | Insights e guia | ≤ 800 | ≤ 3.000 | — | — | ≤ 1.200 | ≤ 5.000 |
 | Assistente | ≤ 800 | ≤ 2.500 | ≤ 1.500 | ≤ 600 (2.000 caracteres) | ≤ 1.000 | ≤ 6.400 |
 
-Tudo abaixo dos 8k TPM do Groq; o total é **regra testada** (teste com pergunta de 2.000 caracteres e 20
+O pacote compacto vale mesmo sem o Groq: as cotas gratuitas do Gemini (por minuto e por dia, em pedidos e em
+tokens) são desconhecidas, e chamada menor rende mais chamadas; o orçamento do grupo é de 60.000 tokens por dia
+(2.5); e a rota síncrona tem 20 s (2.3). De quebra, tudo fica abaixo dos 8k tokens/min do Groq [externo], de
+modo que ligar o segundo provedor não exige mexer no pacote. O total é **regra testada** (teste com pergunta de 2.000 caracteres e 20
 itens de histórico de 2.000 caracteres). O validador do chat continua aceitando 20 itens de 2.000 caracteres
 (`ChatRequestValidator.cs:12-31`) [código] — o APK antigo não muda —, e o **servidor corta** o histórico: da
 mensagem mais recente para a mais antiga, inteiras, até 1.500 tokens estimados. Limites por seção do pacote:
@@ -570,7 +641,7 @@ pessoa quando o fato é de uma pessoa (decisão em aberto 8).
 - **Insights** (`mobile/app/(main)/insights/index.tsx`, aba oculta com pai Painel): abas Hoje / Semana / Mês;
   histórico paginado; "novo" se não lido pela pessoa.
 - **Detalhe** (`mobile/app/(main)/insights/detail.tsx?id=`): resumo, itens com valores do pacote, botão da
-  ação, rodapé "Gerado em … por Google Gemini / Groq" ou "Resumo automático (sem IA)", link **"Ver os dados
+  ação, rodapé "Gerado em … por {provedor}" (hoje sempre "Google Gemini") ou "Resumo automático (sem IA)", link **"Ver os dados
   que a IA recebeu"** — abre `GET /api/v1/ai/insights/{id}/facts`, que devolve o `facts_json` **daquele**
   insight com os nomes trocados (não recalcula). Abrir marca como lido para a pessoa.
 
@@ -781,7 +852,7 @@ CVM 19 e 20). Cada decisão de investimento é sua."
   consentimento enviado no upload (`GeminiCategoryClassifier.cs:19-20,35-36`; `ImportJob.AiCategorizationConsent`)
   [código].
 - Novo: `BatchCategoryClassifier` junta as linhas sem categoria por chave de estabelecimento (sem repetir,
-  depois do filtro de 3.8), até 100 por chamada, cadeia "categorização" (Groq primeiro, 2.2), temperatura 0,
+  depois do filtro de 3.8), até 100 por chamada, cadeia "categorização" (2.2), temperatura 0,
   esquema `{ "items": [ { "i": 0, "cat": "ALIMENTACAO | TRANSPORTE | COMPRAS | SAUDE | LAZER | MORADIA | OUTROS" } ] }`
   com `enum`; fora do enum → `OUTROS`.
 - Vale com a IA ativada no grupo **ou** com o `AiCategorizationConsent` que o app antigo ainda manda no upload
@@ -789,7 +860,7 @@ CVM 19 e 20). Cada decisão de investimento é sua."
 
 ### 6.4 OCR de imagem e PDF escaneado — fase 12 (futuro)
 
-O Gemini gratuito lê PDF (até 50 MB / 1.000 páginas, 258 tokens por página) e imagem; o Groq lê imagem
+O Gemini gratuito lê PDF (até 50 MB / 1.000 páginas, 258 tokens por página) e imagem; o Groq, se ligado, lê imagem
 (`qwen3.8-27b`, 3 por chamada) [externo]. Cabe na cota, mas a imagem leva nome, CPF e número de conta, que o
 filtro de 3.8 não alcança. Fica para depois, com aviso próprio no texto de privacidade ("a imagem do extrato
 vai ao Google") e esquema igual ao dos leitores locais.
@@ -833,13 +904,17 @@ Decisão em aberto 7 sobre manter ou apagar o histórico ao desligar.
   "transferência"); títulos das metas; nomes das rendas; números de conta ou cartão. Nomes de vocês, CPF,
   telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como
   aparecem no extrato.
-- Para onde: Google (Gemini) e Groq, nos Estados Unidos — transferência internacional de dados.
+- Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.
 - Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e
-  revisores humanos podem lê-lo. O Groq não usa o conteúdo para treinar modelos."
+  revisores humanos podem lê-lo."
 - Quem ativa liga a análise para o grupo inteiro; o outro membro é avisado no app e pode desligar a qualquer
   hora em Configurações; desligar não apaga o histórico, que pode ser apagado à parte.
 - O resumo semanal por e-mail é opcional, por pessoa, enviado pela Brevo (o serviço de e-mail que o app já usa).
 - Os cálculos (assinaturas, parcelas, previsão) são feitos no próprio servidor do app e funcionam sem a IA.
+
+Hoje o único destino é o Google. Se um segundo provedor for ligado (2.2, decisão em aberto 15), o texto passa a
+citá-lo (nome, país e se treina com o conteúdo) e a versão do aceite de IA sobe (7.1): o grupo aceita de novo
+antes de qualquer envio a ele.
 
 **`CONSENT_VERSION` do app não sobe.** Em `consent.ts`, um registro com versão diferente de `CONSENT_VERSION` é
 lido como vazio (`data.version !== CONSENT_VERSION` → `EMPTY_CONSENT`) [código]: subir para 2 apagaria, no
@@ -862,7 +937,7 @@ versão.
 - **Painel**: enquanto o grupo não ativou, cartão "Análise com IA desligada — Ativar" (os fatos continuam).
 - **Configurações → Inteligência artificial** (`mobile/app/(main)/settings/ai.tsx`): estado ("Ativada por X em
   …" / "Desligada"), ativar/desligar para o grupo, retirar meu aceite, apagar histórico, e-mail semanal (fase
-  6), consumo (hoje e 30 dias; % da cota diária de cada provedor; orçamento do grupo), link para privacidade.
+  6), consumo (hoje e 30 dias; % da cota diária de cada modelo, quando conhecida — 2.5; orçamento do grupo), link para privacidade.
 - **Onde fica o Assistente** — a barra já tem sete abas e um comentário em `_layout.tsx` diz que sete é o que
   cabe com o rótulo inteiro [código]. Padrão recomendado (decisão em aberto 4): **o Assistente não vira aba**.
   Entra como **botão fixo no cabeçalho do Painel** e como botão **"Perguntar ao Assistente"** na seção Insights
@@ -884,12 +959,13 @@ versão.
 | `NotConsented` | Cartão "Análise com IA desligada — Ativar"; fatos com resumo automático | Explicação + **Ativar** |
 | `Disabled` (`Ai__Disabled`) ou sem chave | Só resumo automático, sem cartão de ativar | Botão some (`available=false`) |
 | `GroupBudgetExhausted` | Resumo automático com o selo | "A cota de IA do grupo para hoje acabou. Volta à meia-noite." |
+| `GlobalBudgetExhausted` (teto global do dia, 2.5) | Fatos calculados com o resumo automático e o selo, sem o texto da IA | "A IA do app atingiu o limite de uso de hoje. Volta à meia-noite. Os números do app continuam atualizados." |
 | `AllProvidersFailed` | Resumo automático com o selo | "A IA não respondeu agora. Tente de novo em alguns minutos." |
 | Item reprovado pelos validadores | Item "sem texto da IA" (frase fixa com os fatos) | "Não consegui responder com segurança com os dados que tenho. Tente perguntar de outro jeito." |
 
 ### 7.6 LGPD
 
-Enviar fatos a Google e Groq é transferência internacional (art. 33). O desenho usa consentimento específico e
+Enviar fatos ao Google (e a um segundo provedor, se ligado) é transferência internacional (art. 33). O desenho usa consentimento específico e
 em destaque (7.3) mais filtro campo a campo (3.8). Pseudonimizado continua sendo dado pessoal, e o dado é das
 duas pessoas: a decisão do dono (um aceite vale para o grupo) é mantida, com aviso visível ao outro membro e
 desligamento a um toque — registrado como risco aceito na seção 13.
@@ -961,6 +1037,9 @@ jobs:
   Tipos: `MarketDaily` (dia, global), `RecurrenceRefresh` (dia, por grupo), `WeeklyInsight` (semana, por
   grupo), `MonthlyInsight` (mês, por grupo), `WeeklyEmail` (semana, por pessoa — grupo + `user_id`),
   `DailyInsight` (dia, por grupo), `DuplicatesScan` (dia, por grupo, fase 11), `UsageCleanup` (dia, global).
+  **O conjunto de tarefas é extensível por nome** (`kind` gravado pelo nome): tarefa nova é um nome novo e o seu
+  executor, sem mudar a rota interna, a tabela nem o workflow. É justamente o que permite ao Open Finance
+  acrescentar depois a tarefa `OpenFinanceSync` (ver "Convivência", abaixo).
 - **Gatilho** (`EnqueueDueWork`): cria as linhas que faltam para o período corrente. Roda (a) na rota interna e
   (b) 2 minutos depois de a API subir — nesses dois casos para todos os grupos e para as tarefas globais; e (c)
   **quando o Painel chama `GET /api/v1/ai/status`** (rota da fase 2, que o Painel chama a cada foco) — nesse caso
@@ -974,10 +1053,13 @@ jobs:
 - `AiJobsWorker` (`BackgroundService`, mesmo padrão do `OcrBackgroundJob`): puxa linhas `Pending` a cada 5 s,
   marca `Running`, processa **filtrando `couple_id` explicitamente** (jobs rodam sem filtro global,
   `CurrentCoupleId == null` — fatos-codigo item 14), fecha. Ao subir, linhas presas em `Running` voltam a
-  `Pending` contando tentativa. Uma tarefa por vez; chamadas ao Groq no modo `Job` (esperam a janela do minuto).
+  `Pending` contando tentativa. Uma tarefa por vez; chamadas no modo `Job` (esperam a janela do minuto).
 - Nada é gerado duas vezes: chave única em `ai_insights` e em `job_runs`.
-- Convivência: o agendador diário do Open Finance (06:00, "só se a API estiver acordada") ganha a chamada das
-  06:17 como despertador, sem mudança nele.
+- Convivência: o agendador diário do Open Finance (06:00, "só se a API estiver acordada") não muda. A chamada
+  das 06:17 acorda a API **depois** das 06:00 e **não** dispara a sincronização dele: garantir a sincronização
+  diária com a API dormindo **continua pendente do Open Finance** (linha 7 da tabela de fases daquele desenho).
+  O caminho previsto é uma issue de acompanhamento do Open Finance, depois da fase 5a, que acrescenta a tarefa
+  `OpenFinanceSync` a este agendamento (1.3). Nenhuma fase deste plano a entrega.
 
 ## 9. Dados e migrations
 
@@ -1013,7 +1095,7 @@ Rotas de usuário: `[RequireCouple]` (grupo do token, `RequireCoupleAttribute.cs
 
 | Método e rota | Mudança | Erros |
 | --- | --- | --- |
-| `POST /api/v1/ai/chat` (existente, `ChatController.cs`) | Passa pela cadeia com esquema `{ "answer": string, "refs": [ids] }`, filtro de privacidade, corte de histórico (3.9) e só o `OutputSafetyValidator` (o `NumberGroundingValidator` entra no chat na fase 4, quando existe o pacote de fatos contra o qual comparar); resposta igual, mais `provider` opcional. Ainda atrás de `AI_CHAT_ENABLED` e do aceite do aparelho, como hoje (o app não muda nesta fase) | mantidos: `404 AI_CHAT_DISABLED`, `429 CHAT_RATE_LIMITED`, `503`; `502 AI_PROVIDER_FAILED` quando todos os elos falham; resposta reprovada duas vezes → 200 com a frase de 7.5 |
+| `POST /api/v1/ai/chat` (existente, `ChatController.cs`) | Passa pela cadeia com esquema `{ "answer": string, "refs": [ids] }`, filtro de privacidade, corte de histórico (3.9) e só o `OutputSafetyValidator` (o `NumberGroundingValidator` entra no chat na fase 4, quando existe o pacote de fatos contra o qual comparar); resposta igual, mais `provider` opcional. Ainda atrás de `AI_CHAT_ENABLED` e do aceite do aparelho, como hoje (o app não muda nesta fase) | mantidos: `404 AI_CHAT_DISABLED`, `429 CHAT_RATE_LIMITED`, `503`; orçamento do grupo ou teto global estourado nesta fase → o mesmo `429 CHAT_RATE_LIMITED` que o app já conhece (os códigos próprios `AI_BUDGET_EXHAUSTED` e `AI_GLOBAL_BUDGET_EXHAUSTED` só nascem na fase 2, com o app que os trata); `502 AI_PROVIDER_FAILED` quando todos os elos falham; resposta reprovada duas vezes → 200 com a frase de 7.5 |
 
 ### 10.2 Fase 2 — ativação e Assistente visível
 
@@ -1023,8 +1105,8 @@ Rotas de usuário: `[RequireCouple]` (grupo do token, `RequireCoupleAttribute.cs
 | `POST /api/v1/ai/consent` | `{version}` | status | `409 AI_CONSENT_VERSION_OUTDATED`; `503 AI_UNAVAILABLE` |
 | `DELETE /api/v1/ai/consent?scope=mine\|group` | — | status | `400 INVALID_SCOPE` |
 | `PATCH /api/v1/ai/preferences` | `{weeklyEmail?, onboardingAnswered?}` | status | `422 EMAIL_NOT_VERIFIED`; `503 EMAIL_NOT_CONFIGURED` (existente) |
-| `GET /api/v1/ai/usage?days=30` | — | `days[] {day, calls, inputTokens, outputTokens, failures}`, `byFeature[]`, `providersToday[] {name, model, calls, limit, percentUsed}`, `groupBudget` | `400 INVALID_DAYS` (1–90) |
-| `POST /api/v1/ai/chat` | igual | igual | novos: `403 AI_CONSENT_REQUIRED`, `429 AI_DAILY_BUDGET_EXHAUSTED`; `404 AI_CHAT_DISABLED` agora quando `available=false` |
+| `GET /api/v1/ai/usage?days=30` | — | `days[] {day, calls, inputTokens, outputTokens, failures}`, `byFeature[]`, `providersToday[] {name, model, calls, limit?, percentUsed?, exhaustedToday}` (`limit` e `percentUsed` nulos enquanto a cota do modelo não é conhecida, 2.5), `groupBudget` | `400 INVALID_DAYS` (1–90) |
+| `POST /api/v1/ai/chat` | igual | igual | novos: `403 AI_CONSENT_REQUIRED`, `429 AI_DAILY_BUDGET_EXHAUSTED` (grupo), `429 AI_GLOBAL_BUDGET_EXHAUSTED` (teto global, 2.5); `404 AI_CHAT_DISABLED` agora quando `available=false` |
 
 No app, o Assistente deixa de olhar o aceite local `aiChat` (`chat/api/chatApi.ts:22-25`, `ChatScreen.tsx:171-175`)
 [código]: quem decide é `GET /ai/status` (`available` e `enabled`). Assim há uma única pergunta, a do servidor. O
@@ -1120,10 +1202,11 @@ trabalho assíncrono preso a `getSessionEpoch`.
 
 ## 11. Segurança, testes e regras da casa
 
-- Chaves: `GEMINI_API_KEY` (já no `render.yaml`, `sync: false`; se tem valor em produção, a confirmar),
-  `GROQ_API_KEY` (nova), `MISTRAL_API_KEY` (só se a decisão em aberto 3 for "sim"), `INTERNAL_JOBS_SECRET`
-  (nova, igual no Render e no GitHub). Sem chave de nenhum provedor: `available=false`, fatos e resumo
-  automático seguem funcionando.
+- Chaves: `GEMINI_API_KEY` (no `render.yaml`, `sync: false`; **com valor em produção desde 08/10/2026**),
+  `INTERNAL_JOBS_SECRET` (**já criado**, igual no Render e nos segredos do GitHub Actions) e `GROQ_API_KEY`
+  (declarada no `render.yaml`, `sync: false`, **sem valor**: é a chave do segundo provedor, pendente — decisão em
+  aberto 15; outro provedor compatível usaria variável própria). Sem chave de nenhum provedor:
+  `available=false`, fatos e resumo automático seguem funcionando.
 - Logs nunca registram prompt, resposta, pacote, estabelecimento nem segredo; só uso, desfecho e tempo.
 - Isolamento: toda consulta filtra pelo grupo do token; tabelas sem filtro global têm teste próprio; job sempre
   com `couple_id` explícito.
@@ -1143,11 +1226,11 @@ quando muda JavaScript. Nenhuma exige APK. Tamanho alvo: um PR revisável (~20�
 
 | # | Issue | Objetivo | Entregáveis | Depende de | Publicação | Pronto quando |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Gateway de IA com cotas e validadores | Toda chamada de IA por uma cadeia segura e medida | `ILlmProvider`, `GeminiLlmProvider` (modelo padrão trocado), `OpenAiCompatibleLlmProvider` (Groq), `FakeLlmProvider` com guarda, `LlmGateway` (cadeias, limites, pausas, orçamento), `ai_usage`, `FactPackPrivacyFilter` (parte de texto livre), `PromptText`, `OutputSafetyValidator`, `NumberGroundingValidator` (classe e testes; no chat só a partir da fase 4), corte de histórico; chat atual pela cadeia só com o `OutputSafetyValidator` (10.1); `render.yaml` com `GROQ_API_KEY` | nada | API | O chat atual responde por Groq ou Gemini, com uso gravado, e cai para o outro quando um falha |
+| 1 | Gateway de IA com cotas e validadores | Toda chamada de IA por uma cadeia segura e medida | `ILlmProvider`, `GeminiLlmProvider` (modelo padrão `gemini-flash-latest`), `OpenAiCompatibleLlmProvider` (pronto e desligado; testado com servidor HTTP falso), `FakeLlmProvider` com guarda, `LlmGateway` (cadeias só com modelos Gemini Flash, limites, pausa crescente após 429 e elo esgotado no dia, orçamento por grupo, teto global do uso interativo, trava de provedor fora do aceite), `ai_usage`, `FactPackPrivacyFilter` (parte de texto livre), `PromptText`, `OutputSafetyValidator`, `NumberGroundingValidator` (classe e testes; no chat só a partir da fase 4), corte de histórico; chat atual pela cadeia só com o `OutputSafetyValidator` (10.1); `render.yaml` com `GROQ_API_KEY` (declarada, sem valor) | nada | API | O chat atual responde pela cadeia de modelos Gemini Flash, com uso gravado, e cai para o modelo seguinte quando um falha ou esgota a cota; o elo compatível com OpenAI passa nos testes e fica desligado enquanto não houver chave; atingido o teto global do uso interativo, a chamada seguinte não vai ao provedor e os fatos calculados continuam aparecendo |
 | 2 | Ativação da IA e Assistente visível | Todo mundo vê e entende a IA no primeiro uso | `ai_consents`, `ai_user_preferences`, rotas 10.2, chat exige ativação, `Ai__Disabled` no lugar de `AI_CHAT_ENABLED`, provedor falso contando como disponível; app: boas-vindas, `couple-setup`, Assistente no Painel (ou aba, conforme decisão 4), Configurações → IA com consumo, texto de privacidade (7.3, sem subir `CONSENT_VERSION`), fim de `EXPO_PUBLIC_AI_CHAT_ENABLED` e do gate local `aiChat` no Assistente (`chatApi.ts`, `ChatScreen.tsx`; quem decide é `/ai/status`); Maestro | 1 | API + OTA | Qualquer pessoa vê a pergunta no primeiro uso (uma única pergunta, a do servidor), ativa para o grupo, o parceiro vê "ativada por X" e o Assistente abre pelo Painel |
 | 3 | Assinaturas e recorrências | Achar o que se paga todo mês sem perceber | `MerchantKey`, regra de transferência a pessoa, detector (3.3), parcelas (3.4), hábitos, `recurring_streams`, `recurring_stream_items`, rotas 10.3, tela e cartão no Painel | nada (não usa IA) | API + OTA | A tela lista assinaturas, contas fixas (inclusive variáveis), parcelas e pequenos gastos com custo anual, e a pessoa corrige o que estiver errado |
 | 4 | Pacote de fatos e Assistente com contexto | A IA conversa sobre o que aconteceu de verdade | `FinancialFactsBuilder` (absorve #29): gastos, rendas, anomalias, economias, orçamento, metas; filtro de privacidade completo (3.8) com teste de nomes; orçamento de tokens; `/ai/facts`; Assistente com o pacote e com o `NumberGroundingValidator` ligado; provedor falso passa a montar a resposta a partir do pacote | 1, 2, 3 | API (+ OTA só se a tela de Configurações ganhar "o que a IA veria") | O Assistente responde "quanto gastamos com assinaturas?" com os números do pacote, e nenhum nome sai |
-| 5a | Agendamento gratuito | Tarefas por horário com a API que dorme | `job_runs` (chave com `Guid.Empty`), `AiJobsWorker` com tentativas, `EnqueueDueWork` (rota interna, subida, `/ai/status` só do grupo do token), `POST /internal/jobs/run`, workflow 8.1 (sem o passo do Tesouro), tarefas `RecurrenceRefresh` e `UsageCleanup` | 2, 3 | API (+ workflow) | O cron das 06:17 acorda a API e recalcula as recorrências de cada grupo; sem o cron, a primeira abertura do Painel faz o mesmo para o próprio grupo |
+| 5a | Agendamento gratuito | Tarefas por horário com a API que dorme | `job_runs` (chave com `Guid.Empty`), `AiJobsWorker` com tentativas, `EnqueueDueWork` (rota interna, subida, `/ai/status` só do grupo do token), `POST /internal/jobs/run`, workflow 8.1 (sem o passo do Tesouro), tarefas `RecurrenceRefresh` e `UsageCleanup`; tipos de tarefa extensíveis por nome (8.3) | 2, 3 | API (+ workflow) | O cron das 06:17 acorda a API e recalcula as recorrências de cada grupo; sem o cron, a primeira abertura do Painel faz o mesmo para o próprio grupo |
 | 5b | Insights semanal e mensal | Resumo da semana e do mês, guardado com histórico | `ai_insights` (ou colunas novas), `ai_insight_user_states`, `InsightTemplates`, tarefas `WeeklyInsight` e `MonthlyInsight`, retenção e "apagar histórico", rotas 10.5; seção Insights no Painel, histórico e detalhe | 4, 5a | API + OTA | O resumo da semana aparece na segunda-feira no app, mesmo se o cron falhar (a primeira abertura recupera) |
 | 6 | Resumo semanal por e-mail | O resumo chega a quem pediu | `IReliableEmailSender` + implementação sobre `BrevoEmailClient`, tarefa `WeeklyEmail`, modelo de e-mail só com texto aprovado, interruptor em Configurações | 5b | API + OTA | Quem ligou recebe o e-mail da semana uma vez, mesmo com a API reiniciando no meio |
 | 7 | Insight diário e previsão de caixa nova | Um aviso útil por dia e um fim de mês mais realista | `/ai/insights/today`, tarefa `DailyInsight`, `ISpendForecaster` (linear + recorrências), campo `forecast`; item do dia no Painel; Fluxo com faixa e contas que ainda vão cair | 3, 5b | API + OTA | Ao abrir o app há um aviso do dia; a previsão do fim do mês considera as contas fixas e mostra a faixa |
@@ -1166,7 +1249,7 @@ Riscos por fase:
 
 | # | Riscos específicos |
 | --- | --- |
-| 1 | Cota real do Gemini desconhecida (limites iniciais conservadores; conferência no AI Studio no checkpoint); id de modelo 3.x a confirmar; formato exato da API do Groq a confirmar. |
+| 1 | Cota real do Gemini desconhecida (a cadeia aprende pelo 429; conferência no AI Studio é opcional); um só provedor até existir a chave do segundo (decisão em aberto 15); alias `-latest` apontando para o mesmo modelo de outro elo (conferir no início da fase); formato do erro 429 do Gemini e formato da API do Groq a confirmar. |
 | 2 | Barra de abas (decisão 4); texto de privacidade julgado "relevante" exigir a migração do registro local antes de subir `CONSENT_VERSION` (7.3). |
 | 3 | Falsos positivos (compras repetidas, contas variáveis): duas bandas, ≥ 3/≥ 4 ocorrências e correção que sobrevive; "15/10" lido como parcela (exige série consecutiva); Pix para a mesma pessoa todo mês some da lista por virar `transferencia_pessoa` (aceito: privacidade primeiro). |
 | 4 | Lista de nomes próprios incompleta deixando passar um nome de pessoa num estabelecimento (marcadores de transferência cobrem a maior parte; teste com fixtures). |
@@ -1192,16 +1275,25 @@ Riscos por fase:
 | 512 MB de memória | Nenhum modelo local (fatos-externos 1.11); totais no banco; projeção com teto no detector; CSV do Tesouro no runner; pacote limitado. |
 | CVM | Linha "educação com exemplos, sem recomendação" (5.5), lista fixa de exemplos, validador, aviso fixo em código. Não é parecer jurídico. |
 | LGPD | Consentimento específico e em destaque, filtro campo a campo, aviso ao outro membro, desligar a um toque, retenção definida. Risco aceito pelo dono: um aceite vale para o grupo, e o Gemini gratuito pode usar o conteúdo (termos pedem não enviar dado pessoal). |
-| Limites do Groq (8k TPM, 200k TPD por modelo) | Chamadas ≤ 6.400 tokens (regra testada); jobs esperam a janela do minuto; excedente do Assistente cai no Gemini. |
+| Um só provedor hoje (Gemini), com cotas por dia desconhecidas | Dois ou três modelos Flash com cotas separadas por cadeia; 429 põe o elo em pausa crescente e, se insistir, fora até a virada do dia; teto global do uso interativo protege a chave única (2.5); queda do Google ou bloqueio da chave → resumo automático em tudo e o Assistente avisa (7.5); segundo provedor pronto para ligar quando houver chave (decisão em aberto 15). Chamadas ≤ 6.400 tokens (regra testada), já dentro dos 8k tokens/min do Groq; jobs esperam a janela do minuto. Os aliases `-latest` mudam de alvo sem aviso: dois elos que passam a se esgotar juntos são sinal de que apontam para o mesmo modelo — trocar um deles por id fixo. |
 | Workflow desativado por 60 dias | Commits frequentes; recuperação ao abrir o app. |
 
 Itens manuais do dono (nada além disto):
 
-1. Criar a chave gratuita do Groq (console.groq.com) e pôr em `GROQ_API_KEY` no Render.
-2. Conferir que `GEMINI_API_KEY` tem valor no Render (criar no AI Studio se não tiver) e, no checkpoint da fase
-   1, anotar a cota diária dos modelos Gemini mostrada em aistudio.google.com/rate-limit.
-3. Gerar um segredo aleatório de pelo menos 32 bytes e pôr o mesmo valor em `INTERNAL_JOBS_SECRET` no Render e
-   no segredo `INTERNAL_JOBS_SECRET` do repositório no GitHub.
+1. **Feito em 08/10/2026.** `GEMINI_API_KEY` (chave gratuita do AI Studio, sem cartão) com valor no serviço
+   `couplesync-api` do Render, posta pelo controlador pela API do Render.
+2. **Feito em 08/10/2026.** `INTERNAL_JOBS_SECRET` criado pelo controlador e posto, com o mesmo valor, no Render
+   (API do Render) e nos segredos do GitHub Actions do repositório.
+3. **Pendente e opcional.** Criar a conta e a chave gratuita de um segundo provedor (Groq, em console.groq.com,
+   como primeira escolha; alternativas em 2.2) e entregá-la ao controlador. Sem ela a fase 1 sai do mesmo jeito
+   (decisão em aberto 15).
+4. Opcional: anotar a cota diária dos modelos Gemini mostrada em aistudio.google.com/rate-limit. Sem isso a
+   cadeia aprende a cota pelo 429 (2.5).
+
+As variáveis dos itens 1 e 2 foram gravadas no Render pelo controlador da sessão, pela API do Render (chave do
+dono em arquivo local), **a pedido do dono em 08/10/2026**. Ou seja: o controlador consegue definir variáveis de
+ambiente do Render sem o painel. Não é permissão permanente — cada variável ou segredo novo continua exigindo o
+"sim" do dono na sessão, como manda a regra de segredos do `CLAUDE.md`.
 
 Fora do plano: push (fase 12); OCR de imagem (fase 12); modelo local; provedor pago; IR e custos de corretora
 nas simulações; ações individuais, FIIs, BDRs, fundos nomeados e cripto (salvo decisão 1); cotações de mercado
@@ -1215,8 +1307,8 @@ A fase que depende de cada decisão usa o padrão se o dono não responder antes
 | # | Pergunta | Padrão recomendado | Fase |
 | --- | --- | --- | --- |
 | 1 | Exemplos de investimento: além do Tesouro e de CDB/LCI/LCA sem emissor, citar fundos de índice da lista fixa (ex.: BOVA11, IVVB11) só para explicar o que a classe é? Ações individuais e cripto também? | Sim para a lista fixa de fundos de índice amplos (5.4); **não** para ações individuais, FIIs, BDRs e cripto — ficam mais perto de "análise de valor mobiliário específico" (Res. CVM 20 §1º). Alternativa mais conservadora: só Tesouro. | 9 |
-| 2 | Ordem dos provedores no Assistente | Groq `gpt-oss-120b` primeiro, Gemini Flash de reserva (cota oficial). Rever no checkpoint da fase 1: se o AI Studio mostrar ≥ 250 pedidos/dia no `gemini-2.5-flash`, Gemini primeiro. Trocar é só configuração. | 1 |
-| 3 | Mistral como terceiro provedor | Não por agora (números de terceiros, treino ligado por padrão); a abstração já atende. | 1 |
+| 2 | Ordem dos modelos no Assistente | `gemini-flash-latest` primeiro, `gemini-flash-lite-latest` de reserva; o `gemini-3-flash-preview` fica só para os resumos e o guia. Rever quando a cota for conhecida (aprendida pelo 429 ou lida no AI Studio) ou quando o segundo provedor for ligado. Trocar é só configuração. | 1 |
+| 3 | Mistral como segundo provedor | Não por agora (pede telefone; números de terceiros; treino ligado por padrão, com opt-out); só se o dono não conseguir conta no Groq e preferir a Mistral. A abstração já atende. | 1 |
 | 4 | Onde fica o Assistente (a barra já tem 7 abas) | Botão fixo no cabeçalho do Painel e dentro da seção Insights; a aba "Chat IA" some. Alternativa: "Assistente" no lugar da aba Relatórios, com Relatórios virando link no Painel. | 2 |
 | 5 | Percentuais da alocação de exemplo (pós-fixado / inflação / prefixado / renda variável) | Conservador 70/20/10/0; Moderado 45/25/10/20; Arrojado 25/20/10/45 — conteúdo editorial do app, sem fonte externa. | 9 |
 | 6 | Quanto de IA por grupo por dia | 25 chamadas e 60.000 tokens por dia de Brasília, para o grupo inteiro, só uso interativo; resumos semanal e mensal fora dessa conta. | 1 |
@@ -1227,9 +1319,11 @@ A fase que depende de cada decisão usa o padrão se o dono não responder antes
 | 11 | Dia do e-mail semanal | Segunda-feira, depois da execução das 06:17. | 6 |
 | 12 | O insight diário chama a IA? | Sim, uma chamada curta só quando há fato novo e o grupo ativou; senão resumo automático. Alternativa mais barata: só resumo automático. | 7 |
 | 13 | Quem pode desligar a IA do grupo | Qualquer membro (protege quem não aceitou; quem quer liga de novo). | 2 |
-| 14 | Fechar a #29 como absorvida e atualizar o desenho do Open Finance | Sim, ao abrir as issues. | — |
+| 14 | Fechar a #29 como absorvida e atualizar o desenho do Open Finance | **Feito** em 08/10/2026: issues #37–#48 abertas, #29 fechada como absorvida, desenho do Open Finance apontando para cá. | — |
+| 15 | Segundo provedor de IA: hoje o fallback é só entre modelos do Gemini (mesmo provedor, cotas separadas) e não há chave do Groq | **Entregar a fase 1 sem ele; ligar quando a chave existir.** Groq como primeira escolha; alternativas e limites em 2.2. Ligar pede a chave no Render, o elo nas cadeias e o provedor no texto de privacidade, com versão nova do aceite de IA (7.3). | 1 |
 
-Resolvidas no texto (técnicas): categorização em lote vai primeiro ao Groq (2.2); transferências a pessoas vão
+Resolvidas no texto (técnicas): categorização em lote vai ao `gemini-flash-latest` e, quando o Groq for ligado,
+primeiro a ele (2.2); transferências a pessoas vão
 só como "transferência" (3.8); o dia do orçamento do grupo é o de Brasília (2.5).
 
 ## 15. Histórico de revisão
@@ -1289,3 +1383,42 @@ aplicados:
   pergunta nenhuma); comportamento do guarda do provedor falso no Render escrito (deploy falha, versão anterior
   segue no ar; conferir que o Render define `RENDER`); conta de tokens do Assistente como média ~5.000 e máximo
   6.400 em 2.5 e 3.9.
+
+**Emenda de 08/10/2026 (chave real)** — o controlador testou a chave gratuita real do dono (uma chamada por
+modelo) e configurou os segredos; os fatos (`fatos-chave-real.md`) derrubaram duas premissas do desenho:
+
+- (a) Provedor (2.1, 2.2, 2.3, 2.4): nenhum modelo "Pro" do Gemini responde no plano gratuito (429 com cota zero
+  ou 404), e `gemini-2.5-pro` e `gemini-2.5-flash-lite` não existem mais para chave nova; não há chave do Groq
+  (cadastro falhou). A tabela "tarefa → principal → reservas" virou uma cadeia só com modelos Gemini Flash de
+  cotas separadas: qualidade primeiro no semanal, mensal e guia (`gemini-3-flash-preview` →
+  `gemini-flash-latest` → `gemini-flash-lite-latest`); rapidez e cota primeiro no Assistente, na categorização
+  e no diário (`gemini-flash-latest` → lite). Aliases `-latest` como padrão, ids fixos por configuração. O
+  `OpenAiCompatibleLlmProvider` continua na fase 1, pronto e desligado, com a lista de candidatos e limites. A
+  decisão "ao menos um fallback" está atendida hoje só entre modelos do Gemini; o segundo provedor virou a
+  decisão em aberto 15 (padrão: entregar a fase 1 sem ele e ligar quando a chave existir).
+- (b) Cotas (2.5): saíram a soma com o Groq e o piso atribuído ao Pro; as cotas por dia do Gemini seguem não
+  publicadas e não medidas, e a cadeia as aprende — 429 marca o elo como esgotado até a virada do dia do
+  provedor, gravado em `ai_usage`; limite desconhecido aparece como tal no consumo (10.2). Números do Groq
+  ficaram só como "quando ligado".
+- (c) Resto do texto: princípio 4; orçamento do pacote (3.9) mantido e justificado sem o Groq; rodapé do
+  insight (4.5); categorização (6.3) e OCR (6.4); texto de privacidade e LGPD só com o Google (7.3, 7.6); worker
+  (8.3); chaves e guarda do provedor falso (2.3, seção 11); fase 1 e riscos (seção 12); riscos gerais (seção 13);
+  decisões em aberto 2, 3 e 14.
+- (d) Itens manuais do dono (seção 13): `GEMINI_API_KEY` e `INTERNAL_JOBS_SECRET` gravados no Render pelo
+  controlador, pela API do Render, a pedido do dono em 08/10/2026 (o segredo dos jobs também no GitHub); resta,
+  opcional, a chave do segundo provedor. Cada variável ou segredo novo continua exigindo o "sim" do dono.
+
+**Revisão da emenda (08/10/2026)** — 2 importantes e 5 menores, todos aplicados:
+
+- I1: teto global do uso interativo, `Ai__GlobalDailyInteractiveCalls = 150`, contado em `ai_usage` por dia de
+  Brasília, além do orçamento por grupo e do teto dos jobs; desfecho `GlobalBudgetExhausted` com frase própria
+  (2.4, 2.5, 7.5, 10.2) e critério na fase 1 (seção 12).
+- I2: a sincronização diária do Open Finance com a API dormindo **não** foi absorvida por este plano: segue
+  pendente do Open Finance; as tarefas do agendamento são extensíveis por nome, e a tarefa `OpenFinanceSync`
+  entra por issue de acompanhamento depois da fase 5a (1.3, 8.3).
+- Menores: 429 que não é claramente "do dia" vira pausa crescente (2, 10, 30 minutos) antes de o elo ser dado
+  como esgotado (2.5); o Assistente não usa o `gemini-3-flash-preview`, principal dos resumos (2.2, decisão em
+  aberto 2); "o melhor Flash" virou "o Flash mais capaz disponível, a confirmar por teste na fase 1" (2.2);
+  trava que ignora provedor configurado fora da lista coberta pelo aceite vigente (2.2, 2.4); sintoma de alias
+  apontando para o mesmo modelo registrado como risco (seção 13); a gravação das variáveis no Render ficou
+  descrita como feita a pedido do dono em 08/10/2026, sem permissão permanente (seção 13 e item (d) acima).
