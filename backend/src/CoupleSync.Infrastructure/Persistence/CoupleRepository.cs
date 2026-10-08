@@ -124,6 +124,48 @@ public sealed class CoupleRepository : ICoupleRepository
         }
     }
 
+    public async Task<IReadOnlyList<Guid>> RemoveOpenFinanceOfMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken)
+    {
+        // On PostgreSQL the connection is locked before it is read: a request changing its credentials or storing
+        // an item under it at this moment finishes first (or waits for this one), so what is deleted is what is
+        // stored, and the delete never meets a secret other than the one read here.
+        if (IsPostgres(_dbContext))
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                "SELECT 1 FROM bank_connections WHERE user_id = {0} AND couple_id = {1} FOR UPDATE",
+                [userId, coupleId],
+                cancellationToken);
+        }
+
+        // As in StopDeliveriesToMemberAsync: the caller's couple claim may not be this couple's, so the query
+        // filters are bypassed and user and couple are stated explicitly.
+        var connections = await _dbContext.BankConnections
+            .IgnoreQueryFilters()
+            .Where(c => c.UserId == userId && c.CoupleId == coupleId)
+            .ToListAsync(cancellationToken);
+        if (connections.Count == 0)
+        {
+            return [];
+        }
+
+        var connectionIds = connections.Select(c => c.Id).ToList();
+        var items = await _dbContext.BankItems
+            .IgnoreQueryFilters()
+            .Where(i => connectionIds.Contains(i.ConnectionId))
+            .ToListAsync(cancellationToken);
+        var itemIds = items.Select(i => i.Id).ToList();
+        var accounts = await _dbContext.BankAccounts
+            .IgnoreQueryFilters()
+            .Where(a => itemIds.Contains(a.ItemId))
+            .ToListAsync(cancellationToken);
+
+        // The save orders the deletes by the foreign keys: accounts, then items, then the connection.
+        _dbContext.BankAccounts.RemoveRange(accounts);
+        _dbContext.BankItems.RemoveRange(items);
+        _dbContext.BankConnections.RemoveRange(connections);
+        return connectionIds;
+    }
+
     public async Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken)
     {
         var refreshTokens = await _dbContext.RefreshTokens
@@ -159,6 +201,9 @@ public sealed class CoupleRepository : ICoupleRepository
         return DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
     }
 
+    private static bool IsPostgres(AppDbContext dbContext) =>
+        dbContext.Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
+
     /// <summary>
     /// The transaction of one membership change. On PostgreSQL the rows are locked with FOR NO KEY UPDATE: it
     /// queues other membership changes of the same user or group, and (unlike FOR UPDATE) does not hold up
@@ -181,7 +226,7 @@ public sealed class CoupleRepository : ICoupleRepository
 
         public async Task LockRowAsync(string table, Guid id, CancellationToken cancellationToken)
         {
-            if (_dbContext.Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) != true)
+            if (!IsPostgres(_dbContext))
             {
                 return;
             }

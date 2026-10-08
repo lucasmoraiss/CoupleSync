@@ -29,7 +29,18 @@ internal static class DbSaveTranslator
         if (IsUniqueViolation(ex))
             return new UniqueViolationException(ex.Message, ex);
 
+        if (IsForeignKeyViolation(ex))
+            return new ForeignKeyViolationException(ex.Message, ex);
+
         return new DataStoreException(ex.Message, ex);
+    }
+
+    /// <summary>True when a save failed on a foreign key (PostgreSQL 23503, or SQLite's "FOREIGN KEY constraint failed").</summary>
+    private static bool IsForeignKeyViolation(DbUpdateException ex)
+    {
+        var message = ex.InnerException?.Message ?? ex.Message;
+        return message.Contains("23503", StringComparison.Ordinal)
+            || message.Contains("foreign key", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>True when a save failed on a unique index (PostgreSQL 23505, or SQLite's "UNIQUE constraint failed").</summary>

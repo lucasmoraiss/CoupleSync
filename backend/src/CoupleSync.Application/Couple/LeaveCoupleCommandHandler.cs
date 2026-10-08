@@ -20,7 +20,8 @@ public sealed record LeaveCoupleResult(string AccessToken, string RefreshToken, 
 /// <summary>
 /// The user leaves one of their groups. Transactions they entered stay in the group; the group is kept even
 /// when nobody is left in it (it simply becomes unreachable). The old refresh token is replaced, so no session
-/// opened before the exit can renew itself into the group.
+/// opened before the exit can renew itself into the group. Their Open Finance in that group (connection,
+/// credentials, items and accounts) is deleted in the same save.
 /// </summary>
 public sealed class LeaveCoupleCommandHandler
 {
@@ -29,6 +30,7 @@ public sealed class LeaveCoupleCommandHandler
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IJwtTokenService _jwtTokenService;
     private readonly ITokenHasher _tokenHasher;
+    private readonly IPluggyClient _pluggy;
     private readonly JwtOptions _jwtOptions;
 
     public LeaveCoupleCommandHandler(
@@ -37,6 +39,7 @@ public sealed class LeaveCoupleCommandHandler
         IDateTimeProvider dateTimeProvider,
         IJwtTokenService jwtTokenService,
         ITokenHasher tokenHasher,
+        IPluggyClient pluggy,
         IOptions<JwtOptions> jwtOptions)
     {
         _coupleRepository = coupleRepository;
@@ -44,6 +47,7 @@ public sealed class LeaveCoupleCommandHandler
         _dateTimeProvider = dateTimeProvider;
         _jwtTokenService = jwtTokenService;
         _tokenHasher = tokenHasher;
+        _pluggy = pluggy;
         _jwtOptions = jwtOptions.Value;
     }
 
@@ -96,11 +100,19 @@ public sealed class LeaveCoupleCommandHandler
         await _coupleRepository.StopDeliveriesToMemberAsync(
             user.Id, coupleId, user.ActiveCoupleId ?? remaining.FirstOrDefault()?.CoupleId, cancellationToken);
 
+        var bankConnectionIds = await _coupleRepository.RemoveOpenFinanceOfMemberAsync(user.Id, coupleId, cancellationToken);
+
         var (accessToken, refreshToken) = await SessionTokens.ReplaceAsync(
             user, _jwtTokenService, _authRepository, _tokenHasher, now, _jwtOptions.RefreshTokenTtlDays, cancellationToken);
 
         await _coupleRepository.SaveChangesAsync(cancellationToken);
         await change.CommitAsync(cancellationToken);
+
+        // Only once the connections are really gone: the Pluggy API keys kept for them are dropped.
+        foreach (var connectionId in bankConnectionIds)
+        {
+            _pluggy.ForgetConnection(connectionId);
+        }
 
         return new LeaveCoupleResult(accessToken, refreshToken, user.ActiveCoupleId);
     }

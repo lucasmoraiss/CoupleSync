@@ -29,6 +29,14 @@ public interface ICoupleRepository
     /// </summary>
     Task StopDeliveriesToMemberAsync(Guid userId, Guid coupleId, Guid? remainingCoupleId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Takes the user's Open Finance out of the group: their bank connection there (with the stored credentials),
+    /// its items and their accounts are deleted. Their connections in other groups and the connections of the
+    /// other members are not touched. Nothing is decrypted, so it works on a server without the encryption key.
+    /// Applied on the next <see cref="SaveChangesAsync"/>. Returns the ids of the connections being deleted.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> RemoveOpenFinanceOfMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken);
+
     /// <summary>Deletes the user's refresh token so the session cannot be renewed. Applied on the next <see cref="SaveChangesAsync"/>.</summary>
     Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken);
 

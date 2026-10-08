@@ -23,6 +23,10 @@ public sealed class OpenFinanceService
     public const string StoredCredentialsRefusedMessage =
         "O Pluggy recusou as credenciais guardadas nesta conexão. Desconecte e conecte de novo com o Client ID e o Client Secret certos.";
 
+    /// <summary>
+    /// Leaving a group deletes the person's connection there (issue #31), so this only names connections stored
+    /// before that, by someone who connected and then left.
+    /// </summary>
     private const string FormerMemberName = "Pessoa que saiu do grupo";
 
     private const int MaxDisconnectAttempts = 3;
@@ -276,7 +280,8 @@ public sealed class OpenFinanceService
 
     /// <summary>
     /// Stores what a verification at Pluggy found, unless the person disconnected (or connected again) while Pluggy
-    /// was answering: then nothing is written and the verification answers that the connection changed.
+    /// was answering, or left the group (which deletes the connection): then nothing is written and the verification
+    /// answers that the connection changed.
     /// </summary>
     private async Task SaveVerificationAsync(BankConnection connection, CancellationToken ct)
     {
@@ -285,8 +290,9 @@ public sealed class OpenFinanceService
         {
             await _repository.SaveChangesAsync(ct);
         }
-        catch (ConcurrencyConflictException)
+        catch (DataStoreException ex) when (ex is ConcurrencyConflictException or ForeignKeyViolationException)
         {
+            // A foreign key refuses the write when the connection itself is gone: an item cannot be stored under it.
             // This verification may have asked Pluggy for an API key with the credentials it had in memory, after
             // they were erased or replaced: that key is not kept for the connection.
             _pluggy.ForgetConnection(connection.Id);

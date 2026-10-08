@@ -17,12 +17,14 @@ public sealed class GroupManagementHandlerTests
 
     private readonly FakeCoupleRepository _couples = new();
     private readonly FakeAuthRepository _auth = new();
+    private readonly RecordingPluggyClient _pluggy;
     private readonly Couple _group = Couple.Create("ABC123", T0);
     private readonly User _owner = NewUser("owner");
     private readonly User _member = NewUser("member");
 
     public GroupManagementHandlerTests()
     {
+        _pluggy = new RecordingPluggyClient(_couples.Steps);
         _group.AddMember(_owner, T0);
         _group.AddMember(_member, T0.AddDays(1));
         _couples.Users.AddRange([_owner, _member]);
@@ -35,10 +37,10 @@ public sealed class GroupManagementHandlerTests
 
     private LeaveCoupleCommandHandler LeaveHandler(DateTime now) => new(
         _couples, _auth, new FixedDateTimeProvider(now), new StubJwtTokenService { Token = "no-group-token" },
-        new Sha256TokenHasher(), Options.Create(new JwtOptions()));
+        new Sha256TokenHasher(), _pluggy, Options.Create(new JwtOptions()));
 
     private RemoveCoupleMemberCommandHandler RemoveHandler(DateTime now) => new(
-        _couples, new StubMembership(_group), new FixedDateTimeProvider(now));
+        _couples, new StubMembership(_group), new FixedDateTimeProvider(now), _pluggy);
 
     private RegenerateJoinCodeCommandHandler RegenerateHandler(DateTime now, string code = "NEWCODE8") => new(
         _couples, new StubMembership(_group), new FixedCode(code), new FixedDateTimeProvider(now));
@@ -62,6 +64,74 @@ public sealed class GroupManagementHandlerTests
         Assert.Equal(new Sha256TokenHasher().Hash(result.RefreshToken), stored.TokenHash);
         Assert.Contains((_member.Id, _group.Id, (Guid?)null), _couples.StoppedDeliveries);
         Assert.Equal(1, _couples.SaveChangesCalls);
+    }
+
+    [Fact]
+    public async Task Leave_TakesTheLeaversOpenFinanceOutOfThatGroup_InTheSameSave_AndForgetsThePluggyKeyOnlyAfterTheCommit()
+    {
+        var otherGroup = Guid.NewGuid();
+        var mine = Guid.NewGuid();
+        var mineElsewhere = Guid.NewGuid();
+        var theOwners = Guid.NewGuid();
+        _couples.BankConnections.AddRange([
+            (_member.Id, _group.Id, mine), (_member.Id, otherGroup, mineElsewhere), (_owner.Id, _group.Id, theOwners)]);
+
+        await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_member.Id, _group.Id), default);
+
+        Assert.Equal(
+            [$"begin:{_member.Id}", $"lock:{_group.Id}", $"openfinance:{_member.Id}:{_group.Id}", "save", "commit", $"forget:{mine}"],
+            _couples.Steps);
+        Assert.Equal([mineElsewhere, theOwners], _couples.BankConnections.Select(c => c.ConnectionId));
+    }
+
+    [Fact]
+    public async Task Leave_WithoutABankConnection_ForgetsNothing()
+    {
+        await LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_member.Id, _group.Id), default);
+
+        Assert.Empty(_pluggy.Forgotten);
+        Assert.Equal([$"begin:{_member.Id}", $"lock:{_group.Id}", $"openfinance:{_member.Id}:{_group.Id}", "save", "commit"], _couples.Steps);
+    }
+
+    [Fact]
+    public async Task Leave_WhenTheSaveFails_IsNotCommitted_AndNoPluggyKeyIsForgotten()
+    {
+        _couples.BankConnections.Add((_member.Id, _group.Id, Guid.NewGuid()));
+        _couples.SaveChangesException = new DataStoreException("the database refused", new InvalidOperationException());
+
+        await Assert.ThrowsAsync<DataStoreException>(
+            () => LeaveHandler(T0.AddDays(2)).HandleAsync(new LeaveCoupleCommand(_member.Id, _group.Id), default));
+
+        Assert.Equal(0, _couples.Commits);
+        Assert.Empty(_pluggy.Forgotten);
+    }
+
+    [Fact]
+    public async Task Remove_TakesTheMembersOpenFinanceOutOfTheGroup_InTheSameSave_AndForgetsThePluggyKeyOnlyAfterTheCommit()
+    {
+        var mine = Guid.NewGuid();
+        var theOwners = Guid.NewGuid();
+        _couples.BankConnections.AddRange([(_member.Id, _group.Id, mine), (_owner.Id, _group.Id, theOwners)]);
+
+        await RemoveHandler(T0.AddDays(2)).HandleAsync(new RemoveCoupleMemberCommand(_owner.Id, _member.Id, _group.Id), default);
+
+        Assert.Equal(
+            [$"begin:{_member.Id}", $"lock:{_group.Id}", $"openfinance:{_member.Id}:{_group.Id}", "save", "commit", $"forget:{mine}"],
+            _couples.Steps);
+        Assert.Equal([theOwners], _couples.BankConnections.Select(c => c.ConnectionId));
+    }
+
+    [Fact]
+    public async Task Remove_WhenTheSaveFails_IsNotCommitted_AndNoPluggyKeyIsForgotten()
+    {
+        _couples.BankConnections.Add((_member.Id, _group.Id, Guid.NewGuid()));
+        _couples.SaveChangesException = new DataStoreException("the database refused", new InvalidOperationException());
+
+        await Assert.ThrowsAsync<DataStoreException>(
+            () => RemoveHandler(T0.AddDays(2)).HandleAsync(new RemoveCoupleMemberCommand(_owner.Id, _member.Id, _group.Id), default));
+
+        Assert.Equal(0, _couples.Commits);
+        Assert.Empty(_pluggy.Forgotten);
     }
 
     [Fact]
