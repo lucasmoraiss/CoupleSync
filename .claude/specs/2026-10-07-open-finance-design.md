@@ -256,7 +256,7 @@ bancários importados** com confirmação em duas etapas.
 | 4 | Entradas e Contas | Entradas como renda do mês; `credit_card_bills`; tela Contas; "Faturas a vencer" no Painel | Vê saldos e o que vai vencer |
 | 5 | Investimentos e Patrimônio | `investments`, `balance_snapshots`; tela Patrimônio com evolução | Vê o patrimônio do grupo |
 | 6 | Base para IA — absorvida | Saiu deste plano: ver o desenho de IA (`.claude/specs/2026-10-08-ia-financeira-design.md`, issues #37–#48; issue #29 fechada como absorvida) | — |
-| 7 | Depois | Webhook do Pluggy. As dicas de investimento com dados de mercado e o agendamento com a API dormindo foram absorvidos pelo desenho de IA (`.claude/specs/2026-10-08-ia-financeira-design.md`, issues #37–#48) | |
+| 7 | Depois | Webhook do Pluggy. Agendamento da sincronização diária com a API dormindo: **continua pendente deste plano** — a rota `/internal/jobs/run` da fase 5a do plano de IA (#41) aceita tarefas nomeadas, e uma tarefa `OpenFinanceSync` pode ser acrescentada por uma issue de acompanhamento do Open Finance depois que a 5a existir. Só as dicas de investimento com dados de mercado foram absorvidas pelo desenho de IA (`.claude/specs/2026-10-08-ia-financeira-design.md`, issues #37–#48) | |
 
 Cada fase: migration aditiva, testes que falham antes e passam depois, esteira completa, OTA. A fase 1 só mostra
 a tela como disponível depois que o dono criar `OPENFINANCE_ENCRYPTION_KEY` no Render.
