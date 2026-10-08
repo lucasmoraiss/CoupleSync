@@ -42,9 +42,11 @@ conteúdo educativo de investimento com os números oficiais do dia; e, em segun
 6. **Saída estruturada sempre.** Toda chamada pede JSON com esquema; texto livre só dentro de campos do
    esquema, e todo texto do modelo passa pelos validadores da seção 2.7 antes de ser gravado, mostrado ou
    enviado por e-mail.
-7. **Pseudonimização definida campo a campo** (seção 3.8). Pessoas viram A, B, C; nomes dos membros,
-   beneficiários de transferência, títulos de meta, nomes de renda, CPF, telefone, e-mail, chave Pix e
-   número de conta nunca saem da API. Nomes de lojas saem como aparecem no extrato, porque são o assunto.
+7. **Pseudonimização definida campo a campo** (seção 3.8). Pessoas viram A, B, C; nomes dos membros, CPF,
+   telefone, e-mail e chave Pix nunca saem da API — nem quando digitados numa pergunta. Títulos de meta, nomes
+   de renda, beneficiários de transferência e números de conta ou cartão a API não envia por conta própria
+   (a meta vai como `g1`, a transferência só como tipo); o que a pessoa escreve numa pergunta vai como ela
+   escreveu, depois do filtro de texto livre. Nomes de lojas saem como aparecem no extrato, porque são o assunto.
 8. **Regras da casa** (`CLAUDE.md` de `main`): somas só em BRL; categorias pelas 7 chaves canônicas
    (`TransactionCategories`); mês pelo `BrazilTime`; grupo sempre o do token; gravação pelo
    `DbSaveTranslator`, Application sem EF (`LayeringGuardTests`); migrations só aditivas; API nova atende o
@@ -922,11 +924,11 @@ Decisão em aberto 7 sobre manter ou apagar o histórico ao desligar.
 - O que vai: resumos calculados das finanças do grupo (totais por categoria, lojas, assinaturas, parcelas,
   valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente, como
   foram escritas.
-- O que nunca vai: nomes, e-mails e CPF de vocês; nomes de quem recebeu ou enviou transferências (vão só como
-  "transferência"). O que o app não envia por conta própria: nomes das metas, nomes das rendas e números de conta
-  ou cartão. O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta, ele vai
-  junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio.
-  Nomes de lojas vão como aparecem no extrato.
+- O que nunca vai: nomes, e-mails e CPF de vocês. O que o app não envia por conta própria: nomes das metas, nomes
+  das rendas, números de conta ou cartão e nomes de quem recebeu ou enviou transferências (elas vão só como
+  "transferência"). O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta ou
+  de quem recebeu uma transferência, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados
+  numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.
 - Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.
 - Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e
   revisores humanos podem lê-lo."
