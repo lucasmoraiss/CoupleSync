@@ -57,6 +57,10 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
 
+    public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
+
+    public DbSet<BankTransaction> BankTransactions => Set<BankTransaction>();
+
     public DbSet<AiUsage> AiUsages => Set<AiUsage>();
 
     public DbSet<AiConsent> AiConsents => Set<AiConsent>();
@@ -632,6 +636,138 @@ public sealed class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(x => x.ItemId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SyncRun>(entity =>
+        {
+            entity.ToTable("sync_runs");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.ConnectionId).HasColumnName("connection_id").IsRequired();
+            // A concurrency token: a run is taken (Pending → Running) and finished by whoever still sees the status it
+            // read. Two workers (two instances during a deploy) never execute the same run, and a run failed by the
+            // recovery of another process keeps that verdict.
+            entity.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(16).IsRequired().IsConcurrencyToken();
+            entity.Property(x => x.TriggeredBy).HasColumnName("triggered_by").HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(x => x.ForceItemUpdate).HasColumnName("force_item_update").IsRequired();
+            entity.Property(x => x.AiCategorizationConsent).HasColumnName("ai_categorization_consent").IsRequired();
+            entity.Property(x => x.StartedAtUtc).HasColumnName("started_at_utc");
+            entity.Property(x => x.FinishedAtUtc).HasColumnName("finished_at_utc");
+            entity.Property(x => x.TransactionsNew).HasColumnName("transactions_new").IsRequired();
+            entity.Property(x => x.TransactionsUpdated).HasColumnName("transactions_updated").IsRequired();
+            entity.Property(x => x.ErrorCode).HasColumnName("error_code").HasMaxLength(SyncRun.MaxErrorCodeLength);
+            entity.Property(x => x.ErrorMessage).HasColumnName("error_message").HasMaxLength(SyncRun.MaxErrorMessageLength);
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+            entity.Ignore(x => x.IsOpen);
+
+            entity.HasIndex(x => new { x.ConnectionId, x.CreatedAtUtc });
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.CoupleId);
+            // At most one run waiting or running per connection, guaranteed by the database: the queue is serial
+            // per connection even when two requests (or a request and the scheduler) enqueue at the same moment.
+            entity.HasIndex(x => x.ConnectionId, "IX_sync_runs_one_open_per_connection")
+                .IsUnique()
+                .HasFilter("status IN ('Pending', 'Running')");
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<BankConnection>()
+                .WithMany()
+                .HasForeignKey(x => x.ConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BankTransaction>(entity =>
+        {
+            entity.ToTable("bank_transactions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(x => x.BankAccountId).HasColumnName("bank_account_id").IsRequired();
+            entity.Property(x => x.PluggyTransactionId).HasColumnName("pluggy_transaction_id").HasMaxLength(BankTransaction.MaxPluggyIdLength).IsRequired();
+            entity.Property(x => x.Date).HasColumnName("date").IsRequired();
+            entity.Property(x => x.LocalDate).HasColumnName("local_date").IsRequired();
+            entity.Property(x => x.Amount).HasColumnName("amount").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.Type).HasColumnName("type").HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(BankTransaction.MaxCurrencyLength).IsRequired();
+            entity.Property(x => x.Description).HasColumnName("description").HasMaxLength(BankTransaction.MaxDescriptionLength);
+            entity.Property(x => x.DescriptionRaw).HasColumnName("description_raw").HasMaxLength(BankTransaction.MaxDescriptionLength);
+            entity.Property(x => x.PluggyCategory).HasColumnName("pluggy_category").HasMaxLength(BankTransaction.MaxCategoryLength);
+            entity.Property(x => x.PluggyCategoryId).HasColumnName("pluggy_category_id").HasMaxLength(BankTransaction.MaxCategoryIdLength);
+            entity.Property(x => x.MerchantName).HasColumnName("merchant_name").HasMaxLength(BankTransaction.MaxMerchantNameLength);
+            entity.Property(x => x.MerchantCnpj).HasColumnName("merchant_cnpj").HasMaxLength(BankTransaction.MaxCnpjLength);
+            entity.Property(x => x.MerchantCategory).HasColumnName("merchant_category").HasMaxLength(BankTransaction.MaxCategoryLength);
+            entity.Property(x => x.PaymentMethod).HasColumnName("payment_method").HasMaxLength(BankTransaction.MaxPaymentMethodLength);
+            entity.Property(x => x.InstallmentNumber).HasColumnName("installment_number");
+            entity.Property(x => x.InstallmentTotal).HasColumnName("installment_total");
+            entity.Property(x => x.BillId).HasColumnName("bill_id").HasMaxLength(BankTransaction.MaxPluggyIdLength);
+            entity.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(x => x.BalanceAfter).HasColumnName("balance_after").HasPrecision(18, 2);
+            // The token: a review written over a state it did not read (confirm and discard of the same line at the
+            // same moment) is refused, so a line is never left discarded with a transaction created from it.
+            entity.Property(x => x.ReviewState).HasColumnName("review_state").HasConversion<string>().HasMaxLength(16).IsRequired().IsConcurrencyToken();
+            entity.Property(x => x.LinkedTransactionId).HasColumnName("linked_transaction_id");
+            entity.Property(x => x.LinkedIncomeSourceId).HasColumnName("linked_income_source_id");
+            entity.Property(x => x.MatchedTransactionId).HasColumnName("matched_transaction_id");
+            entity.Property(x => x.AutoReason).HasColumnName("auto_reason").HasMaxLength(BankTransaction.MaxAutoReasonLength);
+            entity.Property(x => x.SuggestedCategory).HasColumnName("suggested_category").HasMaxLength(BankTransaction.MaxSuggestedCategoryLength);
+            entity.Property(x => x.ReviewedAtUtc).HasColumnName("reviewed_at_utc");
+            // The transaction exactly as Pluggy sent it. Never logged, never returned by the API.
+            entity.Property(x => x.RawJson).HasColumnName("raw_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(x => x.SyncRunId).HasColumnName("sync_run_id");
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+            entity.Ignore(x => x.IsExpense);
+            entity.Ignore(x => x.AbsoluteAmount);
+
+            // A Pluggy transaction is mirrored once in the whole database: synchronising again never duplicates.
+            entity.HasIndex(x => x.PluggyTransactionId).IsUnique();
+            entity.HasIndex(x => new { x.CoupleId, x.LocalDate });
+            entity.HasIndex(x => new { x.CoupleId, x.ReviewState });
+            entity.HasIndex(x => x.BankAccountId);
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => x.LinkedTransactionId);
+            entity.HasIndex(x => x.LinkedIncomeSourceId);
+            entity.HasIndex(x => x.SyncRunId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<BankAccount>()
+                .WithMany()
+                .HasForeignKey(x => x.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Deleting the transaction (or the income) never takes the line of the mirror with it: the link is cleared.
+            entity.HasOne<Transaction>()
+                .WithMany()
+                .HasForeignKey(x => x.LinkedTransactionId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
+
+            entity.HasOne<IncomeSource>()
+                .WithMany()
+                .HasForeignKey(x => x.LinkedIncomeSourceId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
+
+            entity.HasOne<SyncRun>()
+                .WithMany()
+                .HasForeignKey(x => x.SyncRunId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
         });
 
         modelBuilder.Entity<AiUsage>(entity =>

@@ -86,6 +86,14 @@ internal sealed class PostgresApiFactory : TestApiFactory
             var ocrBackgroundJob = services.FirstOrDefault(d =>
                 d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(OcrBackgroundJob));
             if (ocrBackgroundJob is not null) services.Remove(ocrBackgroundJob);
+
+            // The Open Finance queue is worked only by the hosts that ask for it (with the server key and the fake
+            // Pluggy): a second host on the same database, without the key, would take runs and fail them.
+            foreach (var job in services.Where(d => d.ServiceType == typeof(IHostedService)
+                         && (d.ImplementationType == typeof(OpenFinanceSyncJob) || d.ImplementationType == typeof(OpenFinanceDailyScheduler))).ToList())
+            {
+                services.Remove(job);
+            }
         });
     }
 

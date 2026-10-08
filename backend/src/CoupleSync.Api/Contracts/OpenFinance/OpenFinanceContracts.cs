@@ -66,3 +66,71 @@ public sealed record BankAccountResponse(
     decimal? MinimumPayment,
     string? Brand,
     bool SyncEnabled);
+
+/// <summary>A synchronisation of a connection with Pluggy: waiting, running, done or failed (with the reason, in Portuguese).</summary>
+public sealed record SyncRunResponse(
+    Guid Id,
+    Guid ConnectionId,
+    string Status,
+    string TriggeredBy,
+    DateTime CreatedAtUtc,
+    DateTime? StartedAtUtc,
+    DateTime? FinishedAtUtc,
+    int TransactionsNew,
+    int TransactionsUpdated,
+    string? ErrorCode,
+    string? ErrorMessage);
+
+/// <summary>
+/// A bank transaction waiting for the review (or discarded). <c>Amount</c> is the value of the expense, positive.
+/// <c>BankStatus</c> is <c>Posted</c> or <c>Pending</c> (not settled at the bank yet: cannot be confirmed).
+/// </summary>
+public sealed record BankReviewLineResponse(
+    Guid Id,
+    DateOnly Day,
+    string? Merchant,
+    string? Description,
+    decimal Amount,
+    string Currency,
+    string SuggestedCategory,
+    string BankStatus,
+    string BankName,
+    string AccountName,
+    int? InstallmentNumber,
+    int? InstallmentTotal);
+
+public sealed record BankReviewMonthResponse(string Month, int Pending);
+
+/// <summary>
+/// The review of a month (of Brazil). <c>PendingTotalBrl</c> adds only the expenses in reais.
+/// <c>PendingAllMonths</c> counts, in every month, the expenses that can be confirmed (settled at the bank, with a
+/// value, in reais). <c>PendingByMonth</c> counts everything that waits in each month, also what can only be discarded.
+/// </summary>
+public sealed record BankReviewResponse(
+    string Month,
+    IReadOnlyList<BankReviewLineResponse> Expenses,
+    IReadOnlyList<BankReviewLineResponse> Discarded,
+    decimal PendingTotalBrl,
+    int PendingAllMonths,
+    IReadOnlyList<BankReviewMonthResponse> PendingByMonth);
+
+/// <summary>The value is never editable: only the category and the description.</summary>
+public sealed record ConfirmExpenseRequest(Guid Id, string? Category, string? Description);
+
+public sealed record ConfirmBankReviewRequest(IReadOnlyList<ConfirmExpenseRequest>? Expenses, IReadOnlyList<Guid>? Discard);
+
+public sealed record BankReviewCreatedResponse(Guid Id, Guid TransactionId);
+
+/// <summary>
+/// <c>Skipped</c>: lines sent in <c>expenses</c> that cannot become an expense: no value (zero), or a currency that
+/// is not BRL. They do not fail the request; they stay in the review, where they can be discarded.
+/// <c>SkippedOtherCurrency</c>: the ones of <c>Skipped</c> that were skipped for the currency.
+/// </summary>
+public sealed record ConfirmBankReviewResponse(
+    IReadOnlyList<BankReviewCreatedResponse> Created,
+    IReadOnlyList<Guid> Discarded,
+    int AlreadyConfirmed,
+    IReadOnlyList<Guid> Skipped,
+    IReadOnlyList<Guid> SkippedOtherCurrency);
+
+public sealed record RestoreBankReviewResponse(IReadOnlyList<Guid> Restored);

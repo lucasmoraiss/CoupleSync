@@ -566,3 +566,78 @@ export interface AiUsageResponse {
     readonly resetsAtLocal: string;
   };
 }
+
+// --- Open Finance: sincronização e revisão do banco ---
+
+export interface SyncRunResponse {
+  readonly id: string;
+  readonly connectionId: string;
+  /** 'Pending' | 'Running' | 'Done' | 'Failed' */
+  readonly status: string;
+  /** 'User' | 'AppOpen' | 'Scheduler' */
+  readonly triggeredBy: string;
+  readonly createdAtUtc: string;
+  readonly startedAtUtc: string | null;
+  readonly finishedAtUtc: string | null;
+  readonly transactionsNew: number;
+  readonly transactionsUpdated: number;
+  readonly errorCode: string | null;
+  /** Em português, pronto para exibir. */
+  readonly errorMessage: string | null;
+}
+
+export interface BankReviewLineResponse {
+  readonly id: string;
+  /** "AAAA-MM-DD": o dia do lançamento no Brasil. */
+  readonly day: string;
+  readonly merchant: string | null;
+  readonly description: string | null;
+  /** O valor da despesa, sempre positivo. Não é editável. */
+  readonly amount: number;
+  readonly currency: string;
+  /** Chave de categoria do app (ex.: 'ALIMENTACAO'). */
+  readonly suggestedCategory: string;
+  /** 'Posted' | 'Pending' (ainda não efetivado no banco: não pode ser confirmado). */
+  readonly bankStatus: string;
+  readonly bankName: string;
+  readonly accountName: string;
+  readonly installmentNumber: number | null;
+  readonly installmentTotal: number | null;
+}
+
+export interface BankReviewMonthResponse {
+  /** "AAAA-MM" */
+  readonly month: string;
+  readonly pending: number;
+}
+
+export interface BankReviewResponse {
+  readonly month: string;
+  readonly expenses: readonly BankReviewLineResponse[];
+  readonly discarded: readonly BankReviewLineResponse[];
+  /** Soma das despesas esperando neste mês, só as em reais. */
+  readonly pendingTotalBrl: number;
+  /** Quantas despesas podem ser confirmadas, em todos os meses (sem as pendentes no banco, sem valor ou em outra moeda). */
+  readonly pendingAllMonths: number;
+  /** Por mês, tudo o que espera na revisão (também o que só pode ser descartado). */
+  readonly pendingByMonth: readonly BankReviewMonthResponse[];
+}
+
+export interface ConfirmBankReviewRequest {
+  readonly expenses?: ReadonlyArray<{ readonly id: string; readonly category?: string; readonly description?: string }>;
+  readonly discard?: readonly string[];
+}
+
+export interface ConfirmBankReviewResponse {
+  readonly created: ReadonlyArray<{ readonly id: string; readonly transactionId: string }>;
+  readonly discarded: readonly string[];
+  readonly alreadyConfirmed: number;
+  /** Linhas enviadas para confirmar que não têm valor ou estão em outra moeda: o servidor não as confirma e elas continuam na revisão. */
+  readonly skipped?: readonly string[];
+  /** As de `skipped` que foram puladas por estarem em outra moeda. */
+  readonly skippedOtherCurrency?: readonly string[];
+}
+
+export interface RestoreBankReviewResponse {
+  readonly restored: readonly string[];
+}

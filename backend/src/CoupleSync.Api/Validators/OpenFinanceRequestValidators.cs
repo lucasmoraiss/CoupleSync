@@ -1,5 +1,7 @@
 using CoupleSync.Api.Contracts.OpenFinance;
+using CoupleSync.Application.OpenFinance;
 using CoupleSync.Domain.Entities;
+using CoupleSync.Domain.ValueObjects;
 using FluentValidation;
 
 namespace CoupleSync.Api.Validators;
@@ -49,5 +51,26 @@ public sealed class UpdateBankAccountRequestValidator : AbstractValidator<Update
     public UpdateBankAccountRequestValidator()
     {
         RuleFor(x => x.SyncEnabled).NotNull();
+    }
+}
+
+public sealed class ConfirmBankReviewRequestValidator : AbstractValidator<ConfirmBankReviewRequest>
+{
+    public ConfirmBankReviewRequestValidator()
+    {
+        RuleFor(x => x.Expenses)
+            .Must(lines => lines is null || lines.Count <= BankReviewService.MaxLinesPerRequest)
+            .WithMessage($"Envie no máximo {BankReviewService.MaxLinesPerRequest} lançamentos por vez.");
+        RuleFor(x => x.Discard)
+            .Must(lines => lines is null || lines.Count <= BankReviewService.MaxLinesPerRequest)
+            .WithMessage($"Envie no máximo {BankReviewService.MaxLinesPerRequest} lançamentos por vez.");
+        RuleForEach(x => x.Expenses).ChildRules(line =>
+        {
+            line.RuleFor(l => l.Id).NotEmpty();
+            line.RuleFor(l => l.Category)
+                .Must(category => string.IsNullOrWhiteSpace(category) || TransactionCategories.TryNormalize(category) is not null)
+                .WithMessage(TransactionCategories.InvalidMessage);
+            line.RuleFor(l => l.Description).MaximumLength(BankTransaction.MaxDescriptionLength);
+        });
     }
 }

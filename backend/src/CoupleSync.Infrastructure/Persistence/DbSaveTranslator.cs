@@ -21,6 +21,32 @@ internal static class DbSaveTranslator
         }
     }
 
+    /// <summary>
+    /// As <see cref="SaveAsync(DbContext, CancellationToken)"/>, but a save refused by a concurrency token is first
+    /// handed to <paramref name="resolve"/>: when it answers true (it brought the tracked rows up to date), the save
+    /// is tried again; when it answers false, the refusal is translated as any other.
+    /// </summary>
+    public static async Task SaveAsync(
+        DbContext dbContext, Func<DbUpdateConcurrencyException, CancellationToken, Task<bool>> resolve, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                if (!await resolve(ex, cancellationToken)) throw Translate(ex);
+            }
+            catch (DbUpdateException ex)
+            {
+                throw Translate(ex);
+            }
+        }
+    }
+
     public static DataStoreException Translate(DbUpdateException ex)
     {
         if (ex is DbUpdateConcurrencyException)

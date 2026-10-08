@@ -59,6 +59,11 @@ import type {
   BankAccountResponse,
   TestCredentialsResponse,
   CreateBankConnectionRequest,
+  SyncRunResponse,
+  BankReviewResponse,
+  ConfirmBankReviewRequest,
+  ConfirmBankReviewResponse,
+  RestoreBankReviewResponse,
 } from '@/types/api';
 
 // 10.0.2.2 is the Android emulator alias for the host machine's localhost.
@@ -473,6 +478,29 @@ export const openFinanceApiClient = {
   /** Só quem conectou. Apaga as credenciais na hora; bancos e contas continuam visíveis. */
   disconnect: (connectionId: string): Promise<AxiosResponse<void>> =>
     axiosInstance.delete<void>(`/api/v1/openfinance/connections/${connectionId}`),
+
+  /**
+   * Só quem conectou. Põe uma sincronização na fila do servidor e responde na hora (202); `query` vem de
+   * syncQuery(). Com uma em andamento: 409 SYNC_ALREADY_RUNNING. Uma por conexão a cada 10 minutos (409
+   * SYNC_TOO_SOON); 5 pedidos por minuto por usuário.
+   */
+  requestSync: (connectionId: string, query: string = ''): Promise<AxiosResponse<SyncRunResponse>> =>
+    axiosInstance.post<SyncRunResponse>(`/api/v1/openfinance/connections/${connectionId}/sync${query}`),
+
+  getSyncRun: (runId: string): Promise<AxiosResponse<SyncRunResponse>> =>
+    axiosInstance.get<SyncRunResponse>(`/api/v1/openfinance/sync-runs/${runId}`),
+
+  /** As despesas do banco esperando a revisão no mês ("AAAA-MM"; sem ele, o mês corrente) e as descartadas. */
+  getReview: (month?: string): Promise<AxiosResponse<BankReviewResponse>> =>
+    axiosInstance.get<BankReviewResponse>('/api/v1/openfinance/review', { params: month ? { month } : undefined }),
+
+  /** Confirma despesas (viram transações) e descarta outras. Tudo ou nada por chamada; linha sem valor ou em outra moeda é pulada (`skipped`). */
+  confirmReview: (body: ConfirmBankReviewRequest): Promise<AxiosResponse<ConfirmBankReviewResponse>> =>
+    axiosInstance.post<ConfirmBankReviewResponse>('/api/v1/openfinance/review/confirm', body),
+
+  /** Descartadas voltam a esperar a revisão. */
+  restoreReview: (ids: readonly string[]): Promise<AxiosResponse<RestoreBankReviewResponse>> =>
+    axiosInstance.post<RestoreBankReviewResponse>('/api/v1/openfinance/review/restore', ids),
 };
 
 // --- Análise com IA: ativação do grupo, preferências e consumo ---

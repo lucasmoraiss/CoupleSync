@@ -8,7 +8,8 @@ import {
   DASHBOARD_STEPS,
   MEU_PLUGGY_STEPS,
   MEU_PLUGGY_URL,
-  WIZARD_DONE_MESSAGE,
+  WIZARD_STEP_TITLES,
+  WIZARD_TOTAL_STEPS,
   UNAVAILABLE_TITLE,
   canContinueFromBanks,
   canCreateConnection,
@@ -174,6 +175,9 @@ describe('progresso do wizard', () => {
     expect(parseProgress(serializeProgress(progress), 'couple-1')).toEqual(progress);
     const withConnection = { ...progress, step: 4 as const, connectionId: 'conn-1' };
     expect(parseProgress(serializeProgress(withConnection), 'couple-1')).toEqual(withConnection);
+    // O passo 5 (período) também é retomado.
+    const atPeriod = { ...progress, step: 5 as const, connectionId: 'conn-1' };
+    expect(parseProgress(serializeProgress(atPeriod), 'couple-1')).toEqual(atPeriod);
   });
 
   it('progresso de outro grupo não vale: começa do zero no grupo atual', () => {
@@ -210,6 +214,15 @@ describe('em que passo o wizard abre', () => {
     expect(startingStep({ progress: { ...base, step: 2 }, consentAccepted: true, myConnection: null })).toBe(2);
     expect(startingStep({ progress: { ...base, step: 4 }, consentAccepted: true, myConnection: null })).toBe(3);
     expect(startingStep({ progress: base, consentAccepted: true, myConnection: null })).toBe(2);
+  });
+
+  it('passo 5 (período) guardado: com a conexão, retoma no 5; sem conexão ou desconectada, volta ao 3', () => {
+    const atPeriod = { ...base, step: 5 as const, connectionId: 'conn-1' };
+    expect(startingStep({ progress: atPeriod, consentAccepted: true, myConnection: connection({}) })).toBe(5);
+    expect(startingStep({ progress: atPeriod, consentAccepted: true, myConnection: null })).toBe(3);
+    expect(startingStep({ progress: atPeriod, consentAccepted: true, myConnection: connection({ status: 'Disconnected', clientIdHint: null }) })).toBe(3);
+    // Progresso de outra conexão (desconectou e conectou de novo em outro aparelho): adicionar banco, passo 4.
+    expect(startingStep({ progress: { ...atPeriod, connectionId: 'conn-antiga' }, consentAccepted: true, myConnection: connection({}) })).toBe(4);
   });
 });
 
@@ -372,8 +385,10 @@ describe('textos e links do wizard', () => {
     expect(text).toMatch(/conta do Meu Pluggy/);
   });
 
-  it('o wizard termina avisando que a sincronização vem na próxima atualização', () => {
-    expect(WIZARD_DONE_MESSAGE).toBe('Conexão pronta. A sincronização chega na próxima atualização do app.');
+  it('o wizard tem 5 passos e o último é o período', () => {
+    expect(WIZARD_TOTAL_STEPS).toBe(5);
+    expect(WIZARD_STEP_TITLES[5]).toBe('Período');
+    expect(Object.keys(WIZARD_STEP_TITLES)).toHaveLength(5);
   });
 });
 

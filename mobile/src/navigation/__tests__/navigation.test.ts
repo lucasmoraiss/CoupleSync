@@ -98,6 +98,102 @@ describe('voltar das abas ocultas (M-I2)', () => {
     expect(screen.match(/\.isMine\b/g)).toHaveLength(1);
   });
 
+  it('Open Finance: "Sincronizar agora" só aparece pela regra testada (canSyncNow), força a leitura no banco e mostra a última sincronização', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/const syncAction = syncActionOf\(connection, available\);/);
+    expect(screen).toMatch(/\{syncAction === 'syncNow' \? \(\s*<View style=\{styles\.syncBox\}>[\s\S]{0,400}syncNow\(connection\)/);
+    expect(screen.match(/syncNow\(connection\)/g)).toHaveLength(1);
+    expect(screen).toMatch(/sync\.start\(connection\.id, \{\s*force: true,/);
+    expect(screen).toMatch(/\{lastSyncText\(connection\)\}/);
+    expect(screen).not.toContain('próxima atualização do app');
+  });
+
+  it('Open Finance: antes da primeira sincronização a tela leva ao passo "Período" do wizard, em vez de sincronizar (revisão 1, I7)', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/\{syncAction === 'choosePeriod' \? \(\s*<View style=\{styles\.syncBox\}>[\s\S]{0,500}choosePeriod\(connection\)/);
+    expect(screen.match(/choosePeriod\(connection\)/g)).toHaveLength(1);
+    // Guarda "passo 5 desta conexão" e abre o wizard, que retoma nele (startingStep, testada em wizard.test.ts).
+    expect(screen).toMatch(/store\.save\(\{ step: 5, connectionId: connection\.id \}\);[\s\S]{0,120}openWizard\(\);/);
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    // No wizard, o período só é pedido (e só é enviado) enquanto a conexão nunca sincronizou.
+    expect(wizard).toMatch(/setPeriodChoosable\(neverSynced\(mine\)\);/);
+    expect(wizard).toMatch(/historyMonths: periodChoosable \? historyMonths : undefined,/);
+    // Ao guardar as credenciais (passo 3), o período vem da mesma regra: reconectar não manda "3" por cima do
+    // que foi escolhido (revisão 3, I1).
+    expect(wizard).toMatch(/historyMonths: historyMonthsWithCredentials\(mine\),/);
+    expect(wizard).not.toMatch(/historyMonths: 3,/);
+    expect(wizard).toMatch(/\{periodChoosable \? \(\s*<View accessibilityRole="radiogroup"/);
+  });
+
+  it('Open Finance: ao voltar à tela, o resultado da sincronização anterior some; uma em andamento continua (revisão 1, I4)', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(
+      /useOnRefocus\(\(\) => \{\s*if \(shouldClearSyncOnRefocus\(sync\.phase\)\) sync\.reset\(\);\s*void refetch\(\{ cancelRefetch: false \}\);\s*\}\);/,
+    );
+  });
+
+  it('Open Finance: o wizard termina quando o servidor aceita o pedido, não quando a sincronização acaba (revisão 1, M1)', () => {
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    // finish() é o aviso de aceite passado a sync.start (requestAndFollowSync, testada em sync.test.ts) e não roda depois dela.
+    expect(wizard).toMatch(/sync\.start\(\s*connectionId,\s*\{[\s\S]{0,200}\},[\s\S]{0,300}\(\) => void useWizardStore\.getState\(\)\.finish\(\),\s*\);/);
+    expect(wizard.match(/useWizardStore\.getState\(\)\.finish\(\)/g)).toHaveLength(1);
+    const hook = read('../src/modules/openfinance/useSyncRun.ts');
+    expect(hook).toMatch(/requestAndFollowSync\(connectionId, options, \{[\s\S]{0,600}onAccepted,\s*\}\)/);
+  });
+
+  it('Open Finance: a linha da revisão que não pode ser confirmada mostra o motivo que vem da regra testada (revisão 1, I5)', () => {
+    const review = read('(main)/openfinance/review.tsx');
+    expect(review).toMatch(/const whyNot = unselectableReason\(line\);/);
+    expect(review).toMatch(/\{whyNot \? <Text style=\{styles\.pendingText\}>\{whyNot\}<\/Text> : null\}/);
+    // O laço dos lotes (parada no erro, o que já entrou, sessão trocada) é confirmInBatches, testada em review.test.ts.
+    expect(review).toMatch(/await confirmInBatches\(batches, \{[\s\S]{0,200}isCurrent: \(\) => getSessionEpoch\(\) === epoch,\s*\}\)/);
+    expect(review).not.toMatch(/for \(const batch of batches\)/);
+    // O valor de cada linha sai na moeda dela (lineAmountText, testada): a tela não formata dinheiro por conta própria.
+    expect(review).toMatch(/\{lineAmountText\(line\.amount, line\.currency\)\}/);
+    expect(review).not.toMatch(/Intl\.NumberFormat|\|\| 'BRL'/);
+  });
+
+  it('Open Finance: a revisão do banco volta para Transações, é remontada a cada visita e usa as regras testadas', () => {
+    expect(parentRouteOf('openfinance/review')).toBe('/(main)/transactions');
+    const review = read('(main)/openfinance/review.tsx');
+    expect(review).toMatch(/export default resetOnFocus\(BankReviewScreen\)/);
+    expect(review).toMatch(/goToParent\('openfinance\/review'\)/);
+    // "Selecionar tudo" e os lotes vêm de review.ts; a caixa só existe em linha selecionável.
+    expect(review).toMatch(/new Set\(selectAllIds\(expenses\)\)/);
+    expect(review).toMatch(/buildConfirmBatches\(expenses, selected, chosen\)/);
+    expect(review).toMatch(/\{selectable \? \(\s*<TouchableOpacity[\s\S]{0,400}accessibilityRole="checkbox"/);
+    expect(review).toContain('Selecionar tudo');
+    expect(review).toContain('Confirmar selecionadas');
+    // O valor não é editável: a tela não tem campo de texto.
+    expect(review).not.toMatch(/<TextInput\b/);
+  });
+
+  it('Open Finance: o atalho da tela de Transações só é desenhado quando há algo do banco para revisar', () => {
+    const transactions = read('(main)/transactions/index.tsx');
+    expect(transactions).toMatch(/const bankReviewShortcut = reviewShortcutLabel\(bankReview\.pending\);/);
+    expect(transactions).toMatch(/\{bankReviewShortcut !== null && \(\s*<TouchableOpacity[\s\S]{0,200}router\.push\('\/\(main\)\/openfinance\/review'/);
+    expect(transactions.match(/\(main\)\/openfinance\/review/g)).toHaveLength(1);
+    expect(transactions).toMatch(/useOnRefocus\(\(\) => bankReview\.refetch\(\)\)/);
+  });
+
+  it('Open Finance: o pedido silencioso ao abrir o app é ligado no layout principal, só com sessão e grupo', () => {
+    expect(layout).toMatch(/useAutoSyncOnOpen\(gate === 'app'\);/);
+    const hook = read('../src/modules/openfinance/useAutoSync.ts');
+    expect(hook).toMatch(/registerUserDataCleaner\(/);
+    expect(hook).toMatch(/getEpoch: getSessionEpoch/);
+    // Só APIs do próprio React Native: nenhum módulo nativo novo.
+    expect(hook).toMatch(/import \{ AppState \} from 'react-native'/);
+  });
+
+  it('Open Finance: o passo 5 do wizard manda o período escolhido e termina no botão da revisão', () => {
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    expect(wizard).toMatch(/sync\.start\(\s*connectionId,\s*\{\s*historyMonths: periodChoosable \? historyMonths : undefined,/);
+    expect(wizard).toMatch(/HISTORY_OPTIONS\.map\(/);
+    expect(wizard).toContain('Conectar e sincronizar');
+    expect(wizard).toMatch(/reviewDoneLabel\(toReview\)/);
+    expect(wizard).toMatch(/router\.push\('\/\(main\)\/openfinance\/review'/);
+  });
+
   it('Open Finance: na tela de gestão, o texto de saldo e limite (com a data da leitura) vem da regra testada (accountBalanceText)', () => {
     const screen = read('(main)/settings/openfinance/index.tsx');
     expect(screen).toMatch(/\{accountBalanceText\(account, formatMoney\)\}/);
@@ -140,6 +236,7 @@ describe('voltar das abas ocultas (M-I2)', () => {
       '(main)/settings/verify-email.tsx',
       '(main)/settings/capture-consent.tsx',
       '(main)/settings/openfinance/wizard.tsx',
+      '(main)/openfinance/review.tsx',
     ];
     const missing = mustReset.filter((file) => !/export default resetOnFocus\(/.test(read(file)));
     expect(missing).toEqual([]);

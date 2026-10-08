@@ -50,3 +50,56 @@ public sealed record BankAccountDto(
     decimal? MinimumPayment,
     string? Brand,
     bool SyncEnabled);
+
+public sealed record SyncRunDto(
+    Guid Id,
+    Guid ConnectionId,
+    string Status,
+    string TriggeredBy,
+    DateTime CreatedAtUtc,
+    DateTime? StartedAtUtc,
+    DateTime? FinishedAtUtc,
+    int TransactionsNew,
+    int TransactionsUpdated,
+    string? ErrorCode,
+    string? ErrorMessage);
+
+/// <summary>What the review shows of a bank transaction. Never the raw JSON Pluggy sent.</summary>
+public sealed record BankReviewLineDto(
+    Guid Id,
+    DateOnly Day,
+    string? Merchant,
+    string? Description,
+    decimal Amount,
+    string Currency,
+    string SuggestedCategory,
+    string BankStatus,
+    string BankName,
+    string AccountName,
+    int? InstallmentNumber,
+    int? InstallmentTotal);
+
+public sealed record BankReviewMonthDto(string Month, int Pending);
+
+public sealed record BankReviewDto(
+    string Month,
+    IReadOnlyList<BankReviewLineDto> Expenses,
+    IReadOnlyList<BankReviewLineDto> Discarded,
+    decimal PendingTotalBrl,
+    int PendingAllMonths,
+    IReadOnlyList<BankReviewMonthDto> PendingByMonth);
+
+public sealed record ConfirmExpenseInput(Guid Id, string? Category, string? Description);
+
+public sealed record BankReviewCreatedDto(Guid Id, Guid TransactionId);
+
+/// <summary>
+/// <c>Skipped</c>: lines asked to be confirmed that cannot become an expense (no value, or another currency); they
+/// stay waiting (to be discarded). <c>SkippedOtherCurrency</c>: the ones of them skipped for the currency.
+/// </summary>
+public sealed record BankReviewConfirmResult(
+    IReadOnlyList<BankReviewCreatedDto> Created,
+    IReadOnlyList<Guid> Discarded,
+    int AlreadyConfirmed,
+    IReadOnlyList<Guid> Skipped,
+    IReadOnlyList<Guid> SkippedOtherCurrency);

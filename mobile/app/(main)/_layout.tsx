@@ -12,6 +12,7 @@ import { useCaptureConsentSync } from '@/modules/integrations/notification-captu
 import { registerPushToken } from '@/services/pushTokenService';
 // Carregado com o app (e não só ao abrir o wizard): é o módulo que registra a limpeza do progresso ao sair da conta.
 import '@/modules/openfinance/wizardStore';
+import { useAutoSyncOnOpen } from '@/modules/openfinance/useAutoSync';
 import { colors } from '@/theme';
 
 
@@ -55,6 +56,9 @@ export default function MainLayout() {
 
   // Captura de notificações só com o aceite do usuário (consentimento por usuário; ver useCaptureConsentSync).
   useCaptureConsentSync();
+
+  // Open Finance: ao abrir o app, pede em silêncio a sincronização da minha conexão se a última tem mais de 6 horas.
+  useAutoSyncOnOpen(gate === 'app');
 
   // AC-007: Register FCM device token once authenticated
   useEffect(() => {
@@ -113,6 +117,7 @@ export default function MainLayout() {
       <Tabs.Screen name="settings/capture-consent" options={{ href: null }} />
       <Tabs.Screen name="settings/openfinance/index" options={{ href: null }} />
       <Tabs.Screen name="settings/openfinance/wizard" options={{ href: null }} />
+      <Tabs.Screen name="openfinance/review" options={{ href: null }} />
       <Tabs.Screen name="ocr-upload" options={{ href: null }} />
       <Tabs.Screen name="ocr-review" options={{ href: null }} />
       <Tabs.Screen name="transactions/new" options={{ href: null }} />

@@ -20,6 +20,8 @@ export const PARENT_ROUTE = {
   // A tela de boas-vindas da IA e o Assistente abrem do Painel e voltam para ele.
   'ai/welcome': '/',
   'chat/index': '/',
+  // Revisão do banco (Open Finance): aberta do atalho da tela de Transações e do fim do wizard.
+  'openfinance/review': '/(main)/transactions',
 } as const;
 
 export type ChildScreen = keyof typeof PARENT_ROUTE;

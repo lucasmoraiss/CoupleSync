@@ -4,5 +4,6 @@ public enum TransactionSource
 {
     Manual = 0,
     OcrImport = 1,
-    Notification = 2
+    Notification = 2,
+    OpenFinance = 3
 }

@@ -122,7 +122,8 @@ export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
     title: 'O que o CoupleSync passa a ver',
     paragraphs: [
       'Com as suas credenciais, o servidor do CoupleSync consulta no Pluggy os dados dos bancos que você conectou: extrato da conta, cartão de crédito e faturas, saldos e investimentos.',
-      'Nesta versão o app só confere a conexão e mostra as contas encontradas, com saldo e limite. As transações do banco começam a chegar na próxima atualização do app, e nada entra nas suas finanças sem você revisar.',
+      'Quando você sincroniza, o servidor guarda uma cópia das transações desses bancos (data, valor, descrição, estabelecimento e categoria), do período que você escolher: 3, 6 ou 12 meses. Depois da primeira vez, o app pede a sincronização sozinho ao ser aberto e o servidor repete uma vez por dia.',
+      'Nada entra nas suas finanças sem alguém do grupo revisar e confirmar. O que for descartado não vira despesa.',
     ],
   },
   {
@@ -136,14 +137,19 @@ export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
     title: 'Como as credenciais são guardadas',
     paragraphs: [
       'O Client ID e o Client Secret são guardados cifrados no servidor do CoupleSync e nunca são mostrados de novo por inteiro: só os 4 últimos caracteres do Client ID aparecem, para o grupo reconhecer a conexão. No seu celular eles não ficam guardados.',
-      'Ao desconectar, as credenciais são apagadas na hora. As contas já encontradas continuam visíveis para o grupo.',
+      'Ao desconectar, as credenciais são apagadas na hora. As contas já encontradas continuam visíveis para o grupo, e as transações já trazidas continuam na revisão.',
       'Se você sair do grupo, ou for removido dele, a sua conexão, os seus bancos e as suas contas são apagados daquele grupo.',
+      'As transações do banco que ainda estavam na revisão são apagadas junto. As despesas que já tinham sido confirmadas ficam no grupo.',
     ],
   },
   {
     title: 'Inteligência artificial',
     paragraphs: [
-      `Conectar um banco não liga a IA nem muda o aceite dela. ${AI_OWN_CONSENT_NOTE}`,
+      // O que é verdade com a sincronização (issue #25) e a análise com IA do grupo (issue #38) juntas: a descrição
+      // de uma linha do banco não vai a provedor nenhum (a categorização por IA está desligada no servidor); o que
+      // a IA recebe das despesas do banco é o que recebe de qualquer despesa do grupo — os totais por categoria —
+      // e só das que foram confirmadas na revisão, que é quando viram despesa do grupo.
+      `Conectar um banco não liga a IA nem muda o aceite dela. Sem a análise com IA ativada para o grupo, nada do que vier do banco é enviado à IA. Com ela ativada, as despesas do banco que alguém do grupo confirmou na revisão entram, como qualquer outra despesa, nos resumos calculados das finanças do grupo (totais por categoria). ${AI_OWN_CONSENT_NOTE}`,
     ],
   },
 ];
@@ -164,7 +170,7 @@ export function privacySections(): readonly TextSection[] {
         'Importação de extratos: o PDF que você envia é lido no servidor para extrair as transações e é apagado depois de processado.',
         'Captura de notificações (só se você aceitar): banco, valor, estabelecimento e data e hora das compras. O texto das notificações não é enviado.',
         'Alertas: o código do seu aparelho para enviar notificações do app (push).',
-        'Open Finance (só se você conectar): o Client ID e o Client Secret da sua aplicação no Pluggy, guardados cifrados, e as contas e cartões dos bancos que você conectou, com saldo, limite e os últimos dígitos do número.',
+        'Open Finance (só se você conectar): o Client ID e o Client Secret da sua aplicação no Pluggy, guardados cifrados, e as contas e cartões dos bancos que você conectou, com saldo, limite e os últimos dígitos do número, e as transações dessas contas e cartões.',
       ],
     },
     {
