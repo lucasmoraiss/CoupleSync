@@ -37,6 +37,20 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
         Assert.Contains("Pagina 3 do extrato", text);
     }
 
+    [Theory]
+    [InlineData("Hello World from CoupleSync bank statement extractor")]
+    [InlineData("Hi")]
+    public void TheCasesOfTheOldReaderTests_GiveTheSameTextThroughTheChild(string line)
+    {
+        // The same single-page documents PdfPigTextExtractorTests feeds the in-process reader (short content included).
+        var expected = new PdfPigTextExtractor().ExtractText(PdfPigTextExtractorTests.BuildMinimalTextPdf(line));
+
+        var text = new ChildProcessPdfTextExtractor(Options()).ExtractText(PdfPigTextExtractorTests.BuildMinimalTextPdf(line));
+
+        Assert.Equal(expected, text);
+        Assert.Contains(line, text);
+    }
+
     [Fact]
     public void APdfWithAPassword_FailsWithPdfEncrypted()
     {
