@@ -76,8 +76,8 @@ public interface IBankSyncRepository
     /// <summary>The expenses of the group whose day in Brazil is in [<paramref name="from"/>, <paramref name="toExclusive"/>), waiting or discarded.</summary>
     Task<IReadOnlyList<BankTransaction>> GetReviewExpensesAsync(Guid coupleId, DateOnly from, DateOnly toExclusive, CancellationToken ct);
 
-    /// <summary>The day in Brazil of every expense of the group still waiting for the review.</summary>
-    Task<IReadOnlyList<DateOnly>> GetPendingExpenseDaysAsync(Guid coupleId, CancellationToken ct);
+    /// <summary>Every expense of the group still waiting for the review: its day in Brazil and what says whether it can be confirmed.</summary>
+    Task<IReadOnlyList<PendingBankExpense>> GetPendingExpensesAsync(Guid coupleId, CancellationToken ct);
 
     Task<IReadOnlyList<BankTransaction>> FindByIdsAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct);
 
@@ -93,3 +93,5 @@ public interface IBankSyncRepository
 }
 
 public sealed record BankAccountNames(string BankName, string AccountName);
+
+public sealed record PendingBankExpense(DateOnly Day, BankTransactionStatus Status, decimal Amount, string Currency);

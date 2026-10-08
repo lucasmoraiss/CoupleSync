@@ -633,6 +633,113 @@ public sealed class OpenFinanceSyncPostgresTests
     }
 
     [PostgresFact]
+    public async Task WhenTheDatabaseRefusesASaveInTheMiddleOfARun_TheRunIsSyncFailed_TheConnectionIsLeftAsItWas_AndTheNextRunEndsWell()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        var before = await database.ScalarAsync<DateTime>("SELECT last_sync_at_utc FROM bank_connections");
+        pluggy.Transactions[FakePluggyServer.CheckingAccountId].Add(
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-0000000000f1", DateTime.UtcNow.Date.AddDays(-1).AddHours(13), -31.00m) { Description = "Padaria Exemplo" });
+        // The error aborts the transaction the run saves in (the connection locked): the verdict has to be written after it.
+        await database.ExecuteAsync(
+            """
+            CREATE FUNCTION refuse_mirror() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'falha simulada do banco de dados'; END $$;
+            CREATE TRIGGER refuse_mirror BEFORE INSERT ON bank_transactions FOR EACH ROW EXECUTE FUNCTION refuse_mirror();
+            """);
+
+        var failed = await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"));
+
+        Assert.Equal("Failed", failed.GetProperty("status").GetString());
+        Assert.Equal("SYNC_FAILED", failed.GetProperty("errorCode").GetString());
+        Assert.Equal("Não foi possível sincronizar agora. Tente de novo em alguns minutos.", failed.GetProperty("errorMessage").GetString());
+        var connection = Assert.Single(await database.RowsAsync("SELECT status, last_sync_at_utc, last_error_code FROM bank_connections"));
+        Assert.Equal(new object?[] { "Active", before, null }, connection);
+        Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+
+        await database.ExecuteAsync("DROP TRIGGER refuse_mirror ON bank_transactions");
+        var next = await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"));
+
+        Assert.True("Done" == next.GetProperty("status").GetString(), next.ToString());
+        Assert.Equal(6, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+        Assert.True(await database.ScalarAsync<DateTime>("SELECT last_sync_at_utc FROM bank_connections") > before);
+    }
+
+    [PostgresFact]
+    public async Task WhenTheLinesOfARunAreReviewedAgainAtEachOfItsFourAttemptsToSave_TheRunIsSyncFailed_AndTheMirrorAndTheReviewsStay()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        var saves = new SaveHook();
+        await using var host = WithOpenFinanceSync(factory, pluggy, database, saves);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var first = (await SyncAsync(ana, connectionId)).GetProperty("id").GetGuid();
+        var before = await database.ScalarAsync<DateTime>("SELECT last_sync_at_utc FROM bank_connections");
+        var restaurant = await database.ScalarAsync<Guid>("SELECT id FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.RestaurantTransactionId));
+        var ride = await database.ScalarAsync<Guid>("SELECT id FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.RideTransactionId));
+        var descriptionBefore = await database.ScalarAsync<string>("SELECT description FROM bank_transactions WHERE id = @id", ("id", restaurant));
+        var listed = pluggy.Transactions[FakePluggyServer.CheckingAccountId];
+        var index = listed.FindIndex(t => t.Id == FakePluggyServer.RestaurantTransactionId);
+        listed[index] = listed[index] with { Description = "Cantina Exemplo Centro" };
+
+        // Every time the run is about to save the lines of the checking account (inside its transaction, the
+        // connection locked), someone has just reviewed one of them.
+        var attempts = 0;
+        Func<Task> review = null!;
+        review = async () =>
+        {
+            var attempt = Interlocked.Increment(ref attempts);
+            var answer = attempt switch
+            {
+                1 => await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { restaurant } }),
+                2 => await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { ride } }),
+                3 => await ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { ride }),
+                _ => await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { ride } }),
+            };
+            Assert.True(HttpStatusCode.OK == answer.StatusCode, await answer.Content.ReadAsStringAsync());
+            if (attempt < 4) saves.BeforeNextSave = review;
+        };
+        var once = 0;
+        pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path == "/transactions"
+                && request.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal)
+                && Interlocked.Exchange(ref once, 1) == 0)
+            {
+                saves.BeforeNextSave = review;
+            }
+
+            return Task.CompletedTask;
+        };
+
+        var failed = await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"));
+
+        Assert.Equal(4, attempts);
+        Assert.Equal("Failed", failed.GetProperty("status").GetString());
+        Assert.Equal("SYNC_FAILED", failed.GetProperty("errorCode").GetString());
+        var lines = (await database.RowsAsync("SELECT id, review_state, description, sync_run_id FROM bank_transactions"))
+            .ToDictionary(r => (Guid)r[0]!);
+        Assert.Equal(5, lines.Count);
+        Assert.Equal(new object?[] { restaurant, "Discarded", descriptionBefore, first }, lines[restaurant]);
+        Assert.Equal("Discarded", lines[ride][1]);
+        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM transactions"));
+        var connection = Assert.Single(await database.RowsAsync("SELECT status, last_sync_at_utc, last_error_code FROM bank_connections"));
+        Assert.Equal(new object?[] { "Active", before, null }, connection);
+
+        var next = await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"));
+
+        Assert.True("Done" == next.GetProperty("status").GetString(), next.ToString());
+        Assert.Equal("Cantina Exemplo Centro", await database.ScalarAsync<string>("SELECT description FROM bank_transactions WHERE id = @id", ("id", restaurant)));
+        Assert.Equal("Discarded", await database.ScalarAsync<string>("SELECT review_state FROM bank_transactions WHERE id = @id", ("id", restaurant)));
+    }
+
+    [PostgresFact]
     public async Task ARunLeftRunning_IsFailedWhenTheApiStarts()
     {
         await using var database = await _server.CreateDatabaseAsync();

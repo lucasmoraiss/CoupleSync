@@ -141,6 +141,13 @@ public sealed class BankTransaction : ICoupleScoped
     /// <summary>The value of the expense, always positive.</summary>
     public decimal AbsoluteAmount => Math.Abs(Amount);
 
+    /// <summary>
+    /// What can become an expense of the app in this phase: settled at the bank, with a value, in reais. Anything
+    /// else waits in the review to be discarded (or, pending at the bank, for the bank to settle it).
+    /// </summary>
+    public static bool CanBecomeExpense(BankTransactionStatus status, decimal amount, string? currency)
+        => status == BankTransactionStatus.Posted && amount != 0 && CurrencyRules.IsBrl(currency);
+
     public static BankTransaction Create(
         Guid coupleId,
         Guid userId,

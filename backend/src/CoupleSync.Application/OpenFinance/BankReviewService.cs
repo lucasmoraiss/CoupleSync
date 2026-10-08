@@ -68,13 +68,13 @@ public sealed class BankReviewService
         var (key, from) = ParseMonth(month);
         var rows = await _sync.GetReviewExpensesAsync(coupleId, from, from.AddMonths(1), ct);
         var names = await _sync.GetAccountNamesAsync(coupleId, ct);
-        var pendingDays = await _sync.GetPendingExpenseDaysAsync(coupleId, ct);
+        var pending = await _sync.GetPendingExpensesAsync(coupleId, ct);
 
         var expenses = rows.Where(r => r.ReviewState == BankTransactionReviewState.Pending).ToList();
         var discarded = rows.Where(r => r.ReviewState == BankTransactionReviewState.Discarded).ToList();
 
-        var byMonth = pendingDays
-            .GroupBy(d => $"{d.Year:D4}-{d.Month:D2}", StringComparer.Ordinal)
+        var byMonth = pending
+            .GroupBy(p => $"{p.Day.Year:D4}-{p.Day.Month:D2}", StringComparer.Ordinal)
             .OrderByDescending(g => g.Key, StringComparer.Ordinal)
             .Select(g => new BankReviewMonthDto(g.Key, g.Count()))
             .ToList();
@@ -85,7 +85,9 @@ public sealed class BankReviewService
             Order(discarded).Select(r => MapLine(r, names)).ToList(),
             // Sums in reais count only reais: a purchase in another currency is listed, never added.
             expenses.Where(r => CurrencyRules.IsBrl(r.Currency)).Sum(r => r.AbsoluteAmount),
-            pendingDays.Count,
+            // "N to review" is what can be confirmed. What cannot (pending at the bank, without a value, in another
+            // currency) is still listed in its month, and counted there, to be discarded.
+            pending.Count(p => BankTransaction.CanBecomeExpense(p.Status, p.Amount, p.Currency)),
             byMonth);
     }
 
@@ -138,6 +140,7 @@ public sealed class BankReviewService
         var transactions = new List<Transaction>();
         var created = new List<BankReviewCreatedDto>();
         var skipped = new List<Guid>();
+        var skippedOtherCurrency = new List<Guid>();
         var alreadyConfirmed = 0;
 
         foreach (var input in expenses)
@@ -154,6 +157,15 @@ public sealed class BankReviewService
             if (row.AbsoluteAmount <= 0)
             {
                 skipped.Add(row.Id);
+                continue;
+            }
+
+            // Every sum and every list of the app is in reais, and every other way of entering a transaction
+            // refuses another currency: in this phase a purchase in another currency is skipped the same way.
+            if (!CurrencyRules.IsBrl(row.Currency))
+            {
+                skipped.Add(row.Id);
+                skippedOtherCurrency.Add(row.Id);
                 continue;
             }
 
@@ -180,11 +192,12 @@ public sealed class BankReviewService
             var timestamp = row.EventTimestampUtc();
 
             // Whoever confirms, the expense belongs to who connected the account.
+            // Only reais get here (anything else was skipped above).
             var ingest = TransactionEventIngest.Create(
-                coupleId, row.UserId, TransactionEventIngest.OpenFinanceBank, row.AbsoluteAmount, row.Currency,
+                coupleId, row.UserId, TransactionEventIngest.OpenFinanceBank, row.AbsoluteAmount, CurrencyRules.Brl,
                 timestamp, description, merchant, rawNotificationTextRedacted: null, now);
             var transaction = Transaction.Create(
-                coupleId, row.UserId, fingerprint, bankName, row.AbsoluteAmount, row.Currency, timestamp,
+                coupleId, row.UserId, fingerprint, bankName, row.AbsoluteAmount, CurrencyRules.Brl, timestamp,
                 description, merchant, category, ingest.Id, now, TransactionSource.OpenFinance);
 
             ingests.Add(ingest);
@@ -223,7 +236,7 @@ public sealed class BankReviewService
 
         await RaiseAlertsAsync(coupleId, transactions, ct);
 
-        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed, skipped);
+        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed, skipped, skippedOtherCurrency);
     }
 
     /// <summary>

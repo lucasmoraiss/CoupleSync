@@ -103,7 +103,8 @@ public sealed record BankReviewMonthResponse(string Month, int Pending);
 
 /// <summary>
 /// The review of a month (of Brazil). <c>PendingTotalBrl</c> adds only the expenses in reais.
-/// <c>PendingAllMonths</c> and <c>PendingByMonth</c> count what waits in every month.
+/// <c>PendingAllMonths</c> counts, in every month, the expenses that can be confirmed (settled at the bank, with a
+/// value, in reais). <c>PendingByMonth</c> counts everything that waits in each month, also what can only be discarded.
 /// </summary>
 public sealed record BankReviewResponse(
     string Month,
@@ -121,13 +122,15 @@ public sealed record ConfirmBankReviewRequest(IReadOnlyList<ConfirmExpenseReques
 public sealed record BankReviewCreatedResponse(Guid Id, Guid TransactionId);
 
 /// <summary>
-/// <c>Skipped</c>: lines sent in <c>expenses</c> that have no value (zero) and so cannot become an expense. They do
-/// not fail the request; they stay in the review, where they can be discarded.
+/// <c>Skipped</c>: lines sent in <c>expenses</c> that cannot become an expense: no value (zero), or a currency that
+/// is not BRL. They do not fail the request; they stay in the review, where they can be discarded.
+/// <c>SkippedOtherCurrency</c>: the ones of <c>Skipped</c> that were skipped for the currency.
 /// </summary>
 public sealed record ConfirmBankReviewResponse(
     IReadOnlyList<BankReviewCreatedResponse> Created,
     IReadOnlyList<Guid> Discarded,
     int AlreadyConfirmed,
-    IReadOnlyList<Guid> Skipped);
+    IReadOnlyList<Guid> Skipped,
+    IReadOnlyList<Guid> SkippedOtherCurrency);
 
 public sealed record RestoreBankReviewResponse(IReadOnlyList<Guid> Restored);

@@ -384,6 +384,21 @@ public sealed class OpenFinanceReviewTests
         await AssertErrorAsync(await bruno.Client.GetAsync($"{Base}/sync-runs/{id}"), HttpStatusCode.Forbidden, "COUPLE_REQUIRED");
     }
 
+    [Fact]
+    public async Task AskingForASynchronisation_WhileTheConnectionGoesAwayWithWhoLeft_Answers404()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana);
+        // Between the moment the request read the connection and the moment it stores the run, the connection is deleted.
+        factory.BeforeNextSave = () => factory.ExecuteAsync("DELETE FROM bank_connections");
+
+        var asked = await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null);
+
+        await AssertErrorAsync(asked, HttpStatusCode.NotFound, "BANK_CONNECTION_NOT_FOUND", "Conexão bancária não encontrada.");
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM sync_runs"));
+    }
+
     // ---------------------------------------------------------------- GET review
 
     [Fact]
@@ -466,10 +481,11 @@ public sealed class OpenFinanceReviewTests
         Assert.Equal("Primeiro instante do mes", Assert.Single(current.GetProperty("expenses").EnumerateArray()).GetProperty("description").GetString());
         Assert.Equal(7.25m, current.GetProperty("pendingTotalBrl").GetDecimal());
 
-        // Every month counts what is waiting in all of them; without "month" the answer is the current month.
+        // Every month counts what is waiting in all of them (the purchase in dollars waits in its month, but is not
+        // one of the "to review": it cannot be confirmed); without "month" the answer is the current month.
         foreach (var review in new[] { previous, current, await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review") })
         {
-            Assert.Equal(4, review.GetProperty("pendingAllMonths").GetInt32());
+            Assert.Equal(3, review.GetProperty("pendingAllMonths").GetInt32());
             Assert.Equal(
                 new[] { (monthKey, 1), (lastKey, 3) },
                 review.GetProperty("pendingByMonth").EnumerateArray().Select(m => (m.GetProperty("month").GetString()!, m.GetProperty("pending").GetInt32())));
@@ -509,7 +525,8 @@ public sealed class OpenFinanceReviewTests
         Assert.Equal(0, review.GetProperty("discarded").GetArrayLength());
         Assert.Equal(0, review.GetProperty("pendingAllMonths").GetInt32());
         Assert.Equal(0, review.GetProperty("pendingByMonth").GetArrayLength());
-        Assert.Equal(4, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review")).GetProperty("pendingAllMonths").GetInt32());
+        // Of the 4 expenses of the fixture, the one still pending at the bank is not "to review" yet.
+        Assert.Equal(3, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review")).GetProperty("pendingAllMonths").GetInt32());
     }
 
     // ---------------------------------------------------------------- POST review/confirm
@@ -721,7 +738,7 @@ public sealed class OpenFinanceReviewTests
         var line = Assert.Single(review.GetProperty("discarded").EnumerateArray());
         Assert.Equal(ride, line.GetProperty("id").GetGuid());
         Assert.Equal("Corrida Exemplo", line.GetProperty("description").GetString());
-        Assert.Equal(3, review.GetProperty("pendingAllMonths").GetInt32());
+        Assert.Equal(2, review.GetProperty("pendingAllMonths").GetInt32());
         // Discarding again changes nothing; confirming a discarded line asks for a refresh.
         Assert.Equal(HttpStatusCode.OK, (await ConfirmAsync(ana, new { discard = new[] { ride } })).StatusCode);
         await AssertErrorAsync(await ConfirmAsync(ana, new { expenses = new[] { new { id = ride } } }), HttpStatusCode.Conflict, "BANK_TRANSACTION_NOT_PENDING");
@@ -735,7 +752,7 @@ public sealed class OpenFinanceReviewTests
         Assert.Null(row["reviewed_at_utc"]);
         review = await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review?month={month}");
         Assert.Equal(0, review.GetProperty("discarded").GetArrayLength());
-        Assert.Equal(4, review.GetProperty("pendingAllMonths").GetInt32());
+        Assert.Equal(3, review.GetProperty("pendingAllMonths").GetInt32());
         // Restoring a line that is waiting changes nothing.
         Assert.Equal(0, (await JsonAsync(await ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { ride }))).GetProperty("restored").GetArrayLength());
     }
@@ -853,6 +870,7 @@ public sealed class OpenFinanceReviewTests
         var body = await JsonAsync(confirmed);
         Assert.Equal(new[] { restaurant, ride }, body.GetProperty("created").EnumerateArray().Select(c => c.GetProperty("id").GetGuid()));
         Assert.Equal(new[] { zero }, body.GetProperty("skipped").EnumerateArray().Select(s => s.GetGuid()));
+        Assert.Equal(0, body.GetProperty("skippedOtherCurrency").GetArrayLength());
         Assert.Equal(0, body.GetProperty("alreadyConfirmed").GetInt32());
         Assert.Equal(2, (await factory.RowsAsync("SELECT id FROM transactions")).Count);
         // It stays waiting, without a transaction, and can be discarded.
@@ -1080,7 +1098,50 @@ public sealed class OpenFinanceReviewTests
     }
 
     [Fact]
-    public async Task APurchaseInAnotherCurrency_BecomesATransactionInThatCurrency_AndADateWithoutTimeKeepsItsDay()
+    public async Task APurchaseInAnotherCurrency_IsNotConfirmedInThisPhase_ItIsSkippedWithItsOwnReason_AndStaysToBeDiscarded()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var day = DateTime.UtcNow.Date.AddDays(-4);
+        const string dollarsId = "c1b2c3d4-0000-4000-8000-0000000000d1";
+        const string reaisId = "c1b2c3d4-0000-4000-8000-0000000000d2";
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId] = [];
+        factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId] =
+        [
+            new FakeTransaction(dollarsId, day, -25.00m) { Description = "Loja no exterior", CurrencyCode = "USD" },
+            new FakeTransaction(reaisId, day.AddHours(14), -10.00m) { Description = "Loja daqui" },
+        ];
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        var dollars = await LineIdAsync(factory, dollarsId);
+        var reais = await LineIdAsync(factory, reaisId);
+
+        // "Selecionar tudo" of an app that still sent it: the purchase in dollars does not hold the other back.
+        var confirmed = await ConfirmAsync(ana, new { expenses = new[] { new { id = dollars }, new { id = reais } } });
+
+        Assert.True(HttpStatusCode.OK == confirmed.StatusCode, await confirmed.Content.ReadAsStringAsync());
+        var body = await JsonAsync(confirmed);
+        Assert.Equal(new[] { reais }, body.GetProperty("created").EnumerateArray().Select(c => c.GetProperty("id").GetGuid()));
+        Assert.Equal(new[] { dollars }, body.GetProperty("skipped").EnumerateArray().Select(s => s.GetGuid()));
+        Assert.Equal(new[] { dollars }, body.GetProperty("skippedOtherCurrency").EnumerateArray().Select(s => s.GetGuid()));
+        // Nothing in dollars was stored anywhere a sum or a list in reais reads from.
+        Assert.Equal("BRL", Assert.Single(await factory.RowsAsync("SELECT currency FROM transactions"))["currency"]);
+        Assert.Equal("BRL", Assert.Single(await factory.RowsAsync("SELECT currency FROM transaction_event_ingests"))["currency"]);
+        var line = await MirrorRowAsync(factory, dollarsId);
+        Assert.Equal("Pending", line["review_state"]);
+        Assert.Null(line["linked_transaction_id"]);
+
+        // Alone it is not an error either, and it can still be discarded.
+        var alone = await ConfirmAsync(ana, new { expenses = new[] { new { id = dollars } } });
+        Assert.True(HttpStatusCode.OK == alone.StatusCode, await alone.Content.ReadAsStringAsync());
+        Assert.Equal(0, (await JsonAsync(alone)).GetProperty("created").GetArrayLength());
+        Assert.Single(await factory.RowsAsync("SELECT id FROM transactions"));
+        Assert.Equal(HttpStatusCode.OK, (await ConfirmAsync(ana, new { discard = new[] { dollars } })).StatusCode);
+        Assert.Equal("Discarded", (await MirrorRowAsync(factory, dollarsId))["review_state"]);
+    }
+
+    [Fact]
+    public async Task ADateWithoutTime_BecomesATransactionAtNoonOfThatDayInBrasilia()
     {
         await using var factory = NewFactory();
         var ana = await factory.RegisterAsync("Ana");
@@ -1089,18 +1150,48 @@ public sealed class OpenFinanceReviewTests
         factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId] = [];
         factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId] =
         [
-            new FakeTransaction("c1b2c3d4-0000-4000-8000-0000000000d1", day, -25.00m) { Description = "Loja no exterior", CurrencyCode = "USD" },
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-0000000000d3", day, -25.00m) { Description = "Loja sem hora" },
         ];
         Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
 
-        (await ConfirmAsync(ana, new { expenses = new[] { new { id = await LineIdAsync(factory, "c1b2c3d4-0000-4000-8000-0000000000d1") } } })).EnsureSuccessStatusCode();
+        (await ConfirmAsync(ana, new { expenses = new[] { new { id = await LineIdAsync(factory, "c1b2c3d4-0000-4000-8000-0000000000d3") } } })).EnsureSuccessStatusCode();
 
         var transaction = Assert.Single(await factory.RowsAsync("SELECT * FROM transactions"));
-        Assert.Equal("USD", transaction["currency"]);
+        Assert.Equal("BRL", transaction["currency"]);
         Assert.Equal("OUTROS", transaction["category"]);
         // Midnight UTC is a date without a time: the transaction is at noon of that day in Brasília (15:00 UTC).
         var at = DateTime.Parse((string)transaction["event_timestamp_utc"]!, System.Globalization.CultureInfo.InvariantCulture);
         Assert.Equal(day.AddHours(15), at);
+    }
+
+    [Fact]
+    public async Task TheCounterOfWhatWaits_CountsOnlyWhatCanBeConfirmed_NotWhatIsPendingAtTheBank_HasNoValue_OrIsInAnotherCurrency()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var at = DateTime.UtcNow.Date.AddDays(-2).AddHours(16);
+        // On top of the fixture (3 expenses settled and 1 still pending at the bank): one without value, one in dollars.
+        factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId].Add(
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-0000000000e0", at, 0m) { Description = "Tarifa Exemplo Zerada" });
+        factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId].Add(
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-0000000000e1", at, -25.00m) { Description = "Loja no exterior", CurrencyCode = "USD" });
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+
+        var review = await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review");
+
+        Assert.Equal(3, review.GetProperty("pendingAllMonths").GetInt32());
+        // The months still say everything that waits in them: those lines are shown there, to be discarded.
+        Assert.Equal(6, review.GetProperty("pendingByMonth").EnumerateArray().Sum(m => m.GetProperty("pending").GetInt32()));
+
+        var confirmable = new[] { FakePluggyServer.RestaurantTransactionId, FakePluggyServer.RideTransactionId, FakePluggyServer.CardPurchaseTransactionId };
+        var ids = new List<Guid>();
+        foreach (var id in confirmable) ids.Add(await LineIdAsync(factory, id));
+        (await ConfirmAsync(ana, new { expenses = ids.Select(id => new { id }).ToArray() })).EnsureSuccessStatusCode();
+
+        review = await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review");
+        Assert.Equal(0, review.GetProperty("pendingAllMonths").GetInt32());
+        Assert.Equal(3, review.GetProperty("pendingByMonth").EnumerateArray().Sum(m => m.GetProperty("pending").GetInt32()));
     }
 
     [Fact]
@@ -1146,6 +1237,6 @@ public sealed class OpenFinanceReviewTests
         // Disconnecting keeps the mirror (and the review of what was already read).
         Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
         Assert.Equal(5, (await MirrorAsync(factory)).Count);
-        Assert.Equal(4, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review")).GetProperty("pendingAllMonths").GetInt32());
+        Assert.Equal(3, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review")).GetProperty("pendingAllMonths").GetInt32());
     }
 }

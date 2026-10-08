@@ -333,14 +333,14 @@ public sealed class OpenFinanceSyncTests
     // ---------------------------------------------------------------- what vanished at the bank
 
     [Fact]
-    public async Task ALineStillPendingAtTheBank_ThatPluggyNoLongerLists_LeavesTheMirror_AndTheReviewCounter()
+    public async Task ALineStillPendingAtTheBank_ThatPluggyNoLongerLists_LeavesTheMirror_AndTheReview()
     {
         await using var factory = NewFactory();
         var ana = await factory.RegisterAsync("Ana");
         var connectionId = await ConnectWithBankAsync(ana);
         await SyncAsync(factory, ana, connectionId);
         Assert.Equal("Pending", (await MirrorRowAsync(factory, FakePluggyServer.CardPendingTransactionId))["status"]);
-        Assert.Equal(4, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review")).GetProperty("pendingAllMonths").GetInt32());
+        Assert.Equal(4, await WaitingAsync());
 
         // The pre-authorisation fell at the bank: Pluggy stops listing it.
         factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId].RemoveAll(t => t.Id == FakePluggyServer.CardPendingTransactionId);
@@ -351,7 +351,12 @@ public sealed class OpenFinanceSyncTests
         Assert.DoesNotContain(FakePluggyServer.CardPendingTransactionId, ids);
         // Everything else is where it was: settled lines are never taken out, listed or not.
         Assert.Equal(4, ids.Count);
-        Assert.Equal(3, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review")).GetProperty("pendingAllMonths").GetInt32());
+        Assert.Equal(3, await WaitingAsync());
+
+        // Everything that waits in the review, month by month (also what cannot be confirmed yet).
+        async Task<int> WaitingAsync()
+            => (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review"))
+                .GetProperty("pendingByMonth").EnumerateArray().Sum(m => m.GetProperty("pending").GetInt32());
     }
 
     [Fact]
@@ -794,6 +799,258 @@ public sealed class OpenFinanceSyncTests
         // Someone reviewed it: never touched by a run again.
         Assert.Equal("Discarded", (await MirrorRowAsync(factory, FakePluggyServer.CardPendingTransactionId))["review_state"]);
         Assert.Equal(5, (await MirrorAsync(factory)).Count);
+    }
+
+    // ---------------------------------------------------------------- a run that fails for a reason nobody foresaw
+
+    [Fact]
+    public async Task WhenTheStoreRefusesASaveInTheMiddleOfARun_TheRunIsSyncFailed_TheConnectionIsLeftAsItWas_OnlyTheKindIsLogged_AndTheNextRunEndsWell()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        var before = Assert.Single(await factory.RowsAsync("SELECT last_sync_at_utc FROM bank_connections"))["last_sync_at_utc"];
+        Assert.NotNull(before);
+        factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId].Add(
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-0000000000f1", DateTime.UtcNow.Date.AddDays(-1).AddHours(13), -31.00m) { Description = "Padaria Exemplo" });
+        // The store refuses the new line of this run, for a reason that is none of the foreseen ones (not a
+        // concurrency token, not a key): the run has already saved the item and the accounts by then.
+        await factory.ExecuteAsync(
+            "CREATE TRIGGER refuse_mirror BEFORE INSERT ON bank_transactions BEGIN SELECT RAISE(ABORT, 'falha simulada do banco de dados'); END");
+
+        var failed = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal("Failed", failed["status"]);
+        Assert.Equal("SYNC_FAILED", failed["error_code"]);
+        Assert.Equal("Não foi possível sincronizar agora. Tente de novo em alguns minutos.", failed["error_message"]);
+        Assert.NotNull(failed["finished_at_utc"]);
+        var connection = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("Active", connection["status"]);
+        Assert.Equal(before, connection["last_sync_at_utc"]);
+        Assert.Null(connection["last_error_code"]);
+        Assert.Null(connection["last_error_message"]);
+        Assert.NotNull(connection["client_secret_encrypted"]);
+        Assert.Equal(5, (await MirrorAsync(factory)).Count);
+        // The log of the run says which kind of failure it was, and nothing of what was being written.
+        var logged = Assert.Single(factory.Logs.Lines, l => l.StartsWith("Error CoupleSync.Application.OpenFinance.SyncConnectionService:", StringComparison.Ordinal));
+        Assert.Matches(@"^Error CoupleSync\.Application\.OpenFinance\.SyncConnectionService: Open Finance run [0-9a-f-]{36} failed with DataStoreException\. $", logged);
+        Assert.DoesNotContain(factory.Logs.Lines, l => l.Contains("Padaria Exemplo", StringComparison.Ordinal));
+
+        await factory.ExecuteAsync("DROP TRIGGER refuse_mirror");
+        var next = await SyncAsync(factory, ana, connectionId);
+
+        Assert.True("Done" == (string)next["status"]!, $"{next["error_code"]}: {next["error_message"]}");
+        Assert.Equal(6, (await MirrorAsync(factory)).Count);
+        var after = (string)Assert.Single(await factory.RowsAsync("SELECT last_sync_at_utc FROM bank_connections"))["last_sync_at_utc"]!;
+        Assert.True(string.CompareOrdinal(after, (string)before!) > 0, $"{after} should be after {before}");
+    }
+
+    [Fact]
+    public async Task WhenTheLinesOfARunAreReviewedAgainAtEachOfItsFourAttemptsToSave_TheRunIsSyncFailed_AndTheMirrorAndTheReviewsStayAsPeopleLeftThem()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var first = await SyncAsync(factory, ana, connectionId);
+        Assert.Equal("Done", first["status"]);
+        var before = Assert.Single(await factory.RowsAsync("SELECT last_sync_at_utc FROM bank_connections"))["last_sync_at_utc"];
+        var restaurant = Guid.Parse((string)(await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId))["id"]!);
+        var ride = Guid.Parse((string)(await MirrorRowAsync(factory, FakePluggyServer.RideTransactionId))["id"]!);
+        var descriptionBefore = (await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId))["description"];
+        var listed = factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId];
+        var index = listed.FindIndex(t => t.Id == FakePluggyServer.RestaurantTransactionId);
+        listed[index] = listed[index] with { Description = "Cantina Exemplo Centro" };
+
+        // Every time the run is about to save the lines of the checking account, someone has just reviewed one of them.
+        var attempts = 0;
+        Func<Task> review = null!;
+        review = async () =>
+        {
+            var attempt = Interlocked.Increment(ref attempts);
+            var answer = attempt switch
+            {
+                1 => await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { restaurant } }),
+                2 => await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { ride } }),
+                3 => await ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { ride }),
+                _ => await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { ride } }),
+            };
+            Assert.True(HttpStatusCode.OK == answer.StatusCode, await answer.Content.ReadAsStringAsync());
+            // The fifth save, if the run tried one, would find nobody in its way and go through.
+            if (attempt < 4) factory.BeforeNextSave = review;
+        };
+        var once = 0;
+        factory.Pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path == "/transactions"
+                && request.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal)
+                && Interlocked.Exchange(ref once, 1) == 0)
+            {
+                factory.BeforeNextSave = review;
+            }
+
+            return Task.CompletedTask;
+        };
+
+        var failed = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal(4, attempts);
+        Assert.Equal("Failed", failed["status"]);
+        Assert.Equal("SYNC_FAILED", failed["error_code"]);
+        Assert.Equal("Não foi possível sincronizar agora. Tente de novo em alguns minutos.", failed["error_message"]);
+        // The reviews are as people left them, and nothing the run read was written over the mirror.
+        var restaurantLine = await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        Assert.Equal("Discarded", restaurantLine["review_state"]);
+        Assert.NotNull(restaurantLine["reviewed_at_utc"]);
+        Assert.Equal(descriptionBefore, restaurantLine["description"]);
+        Assert.Equal(first["id"], restaurantLine["sync_run_id"]);
+        Assert.Equal("Discarded", (await MirrorRowAsync(factory, FakePluggyServer.RideTransactionId))["review_state"]);
+        Assert.Equal(5, (await MirrorAsync(factory)).Count);
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM transactions"));
+        var connection = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("Active", connection["status"]);
+        Assert.Equal(before, connection["last_sync_at_utc"]);
+        Assert.Null(connection["last_error_code"]);
+
+        // The next run, with nobody reviewing at the same moment, reads them again and keeps the reviews.
+        var next = await SyncAsync(factory, ana, connectionId);
+
+        Assert.True("Done" == (string)next["status"]!, $"{next["error_code"]}: {next["error_message"]}");
+        restaurantLine = await MirrorRowAsync(factory, FakePluggyServer.RestaurantTransactionId);
+        Assert.Equal("Cantina Exemplo Centro", restaurantLine["description"]);
+        Assert.Equal("Discarded", restaurantLine["review_state"]);
+    }
+
+    // ---------------------------------------------------------------- branches the final reading found without a test
+
+    [Fact]
+    public async Task ARunOfAConnectionWithoutAnyBank_FailsAsNoBank_WithoutCallingPluggy()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana); // credentials stored, no bank verified yet
+        var calls = factory.Pluggy.Requests.Count;
+
+        var run = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal("Failed", run["status"]);
+        Assert.Equal("SYNC_NO_BANK", run["error_code"]);
+        Assert.Equal("Nenhum banco verificado nesta conexão. Adicione um banco e sincronize de novo.", run["error_message"]);
+        Assert.Equal(calls, factory.Pluggy.Requests.Count);
+        var connection = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("Active", connection["status"]);
+        Assert.Null(connection["last_sync_at_utc"]);
+        Assert.Null(connection["last_error_code"]);
+    }
+
+    [Fact]
+    public async Task ARunThatSomeoneElseEndedWhileItWasBeingTaken_IsLeftAsItIs_AndTheJobGoesOn()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var calls = factory.Pluggy.Requests.Count;
+        // The next save of the API is the job taking the run (Pending → Running): right before it, another process
+        // gives the run its verdict.
+        factory.BeforeNextSave = () => factory.ExecuteAsync(
+            "UPDATE sync_runs SET status = 'Failed', error_code = 'SYNC_INTERRUPTED', error_message = 'Encerrada por outro processo.'");
+
+        var taken = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal("SYNC_INTERRUPTED", taken["error_code"]);
+        await Task.Delay(300); // several passes of the job
+        var row = Assert.Single(await factory.RowsAsync("SELECT * FROM sync_runs"));
+        Assert.Equal("Failed", row["status"]);
+        Assert.Equal("Encerrada por outro processo.", row["error_message"]);
+        Assert.Null(row["started_at_utc"]);
+        Assert.Equal(calls, factory.Pluggy.Requests.Count);
+        Assert.DoesNotContain(factory.Logs.Lines, l => l.Contains("Unhandled error in the OpenFinanceSyncJob", StringComparison.Ordinal));
+
+        var next = await SyncAsync(factory, ana, connectionId);
+        Assert.True("Done" == (string)next["status"]!, $"{next["error_code"]}: {next["error_message"]}");
+    }
+
+    [Fact]
+    public async Task ARunRunningForTooLong_ThatGoesAwayWhileThePassWasFailingIt_DoesNotStopTheJob()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var bruno = await factory.RegisterAsync("Bruno");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var other = await ConnectAsync(bruno, "Bancos do Bruno");
+        await AddItemAsync(bruno, other, FakePluggyServer.OtherItemWithAccounts);
+        await EnqueueAsync(factory, ana, connectionId, status: "Running");
+        // The next save of the API is the pass failing that run: right before it the run is deleted (the person left).
+        factory.BeforeNextSave = () => factory.ExecuteAsync("DELETE FROM sync_runs");
+
+        factory.Clock.Advance(TimeSpan.FromMinutes(10.5));
+        await WaitUntilAsync(async () => (await factory.RowsAsync("SELECT id FROM sync_runs")).Count == 0);
+
+        // The same pass, and the ones after it, still look at the queue.
+        var next = await SyncAsync(factory, bruno, other);
+        Assert.True("Done" == (string)next["status"]!, $"{next["error_code"]}: {next["error_message"]}");
+        Assert.DoesNotContain(factory.Logs.Lines, l => l.Contains("Could not fail Open Finance runs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenPluggyRefusesTheCredentials_AndThePersonDisconnectsAtThatVeryMoment_TheRunFails_AndTheConnectionStaysDisconnected_NotInError()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        factory.Pluggy.ExpireIssuedKeys();
+        factory.Pluggy.AuthStatus = HttpStatusCode.Unauthorized;
+        // The run is about to write "error" on the connection when the person disconnects it.
+        var once = 0;
+        factory.Pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path == "/auth" && Interlocked.Exchange(ref once, 1) == 0)
+            {
+                factory.BeforeNextSave = async () =>
+                    Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        var run = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal("Failed", run["status"]);
+        Assert.Equal("PLUGGY_INVALID_CREDENTIALS", run["error_code"]);
+        var connection = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("Disconnected", connection["status"]);
+        Assert.Null(connection["last_error_code"]);
+        Assert.Null(connection["last_error_message"]);
+        Assert.Null(connection["client_secret_encrypted"]);
+    }
+
+    [Fact]
+    public async Task TheScheduler_WhenSomeoneAsksForARunOfAConnectionAtThatVeryMoment_EnqueuesNoSecondOne_AndGoesOnToTheOtherConnections()
+    {
+        await using var factory = new OpenFinanceApiFactory(); // slow job, scheduler off: the pass is called here
+        var today = BrazilDay(DateTime.UtcNow);
+        factory.Clock.SetNow(BrazilTime.ToUtc(today.ToDateTime(new TimeOnly(6, 30))));
+        var ana = await factory.RegisterAsync("Ana");
+        var first = await ConnectWithBankAsync(ana);
+        var bruno = await factory.RegisterAsync("Bruno");
+        var second = await ConnectAsync(bruno, "Bancos do Bruno");
+        await AddItemAsync(bruno, second, FakePluggyServer.OtherItemWithAccounts);
+        await factory.ExecuteAsync("UPDATE bank_connections SET last_sync_at_utc = @at", ("@at", factory.Clock.UtcNow.AddHours(-30)));
+        // The scheduler is about to store the run of Ana's connection (the older one) when she asks for one herself.
+        factory.BeforeNextSave = async () => await EnqueueAsync(factory, ana, first);
+
+        int enqueued;
+        using (var scope = factory.Services.CreateScope())
+        {
+            enqueued = await scope.ServiceProvider.GetRequiredService<CoupleSync.Application.OpenFinance.SyncRunService>()
+                .EnqueueDailyRunsAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(1, enqueued);
+        var runs = await factory.RowsAsync("SELECT connection_id, triggered_by FROM sync_runs ORDER BY triggered_by");
+        Assert.Equal(
+            new[] { (second.ToString().ToUpperInvariant(), "Scheduler"), (first.ToString().ToUpperInvariant(), "User") },
+            runs.Select(r => ((string)r["connection_id"]!, (string)r["triggered_by"]!)));
     }
 
     // ---------------------------------------------------------------- the run never writes a connection that changed

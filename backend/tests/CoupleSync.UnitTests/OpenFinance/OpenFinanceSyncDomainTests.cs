@@ -360,4 +360,15 @@ public sealed class OpenFinanceSyncDomainTests
         Assert.Contains("MANUAL", TransactionEventIngest.NonNotificationBanks);
         Assert.Contains("OCR", TransactionEventIngest.NonNotificationBanks);
     }
+
+    [Theory]
+    [InlineData(BankTransactionStatus.Posted, -58.90, "BRL", true)]
+    [InlineData(BankTransactionStatus.Posted, 300.00, "brl", true)]
+    [InlineData(BankTransactionStatus.Pending, -58.90, "BRL", false)]
+    [InlineData(BankTransactionStatus.Posted, 0, "BRL", false)]
+    [InlineData(BankTransactionStatus.Posted, -25.00, "USD", false)]
+    [InlineData(BankTransactionStatus.Posted, -25.00, "", false)]
+    public void OnlyWhatIsSettledAtTheBank_HasAValue_AndIsInReais_CanBecomeAnExpense(
+        BankTransactionStatus status, double amount, string currency, bool expected)
+        => Assert.Equal(expected, BankTransaction.CanBecomeExpense(status, (decimal)amount, currency));
 }

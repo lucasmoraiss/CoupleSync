@@ -176,7 +176,7 @@ public sealed class OpenFinanceController : ControllerBase
     /// <summary>
     /// Turns the chosen expenses into transactions (of who connected the account) and discards the others. All or
     /// nothing. A line not settled at the bank yet answers 422 TRANSACTION_NOT_POSTED; a line of another group, 404.
-    /// A line without a value is not an error: it is left waiting and listed in <c>skipped</c>.
+    /// A line without a value, or in a currency that is not BRL, is not an error: it is left waiting and listed in <c>skipped</c>.
     /// </summary>
     [HttpPost("review/confirm")]
     [ProducesResponseType(typeof(ConfirmBankReviewResponse), StatusCodes.Status200OK)]
@@ -195,7 +195,8 @@ public sealed class OpenFinanceController : ControllerBase
             result.Created.Select(c => new BankReviewCreatedResponse(c.Id, c.TransactionId)).ToList(),
             result.Discarded,
             result.AlreadyConfirmed,
-            result.Skipped));
+            result.Skipped,
+            result.SkippedOtherCurrency));
     }
 
     /// <summary>Discarded lines go back to waiting for the review.</summary>

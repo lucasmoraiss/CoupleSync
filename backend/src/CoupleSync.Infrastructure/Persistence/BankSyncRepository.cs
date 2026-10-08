@@ -250,13 +250,13 @@ public sealed class BankSyncRepository : IBankSyncRepository
                         && ReviewStates.Contains(t.ReviewState))
             .ToListAsync(ct);
 
-    public async Task<IReadOnlyList<DateOnly>> GetPendingExpenseDaysAsync(Guid coupleId, CancellationToken ct)
+    public async Task<IReadOnlyList<PendingBankExpense>> GetPendingExpensesAsync(Guid coupleId, CancellationToken ct)
         => await _dbContext.BankTransactions
             .AsNoTracking()
             .Where(t => t.CoupleId == coupleId
                         && t.Type == BankTransactionType.Debit
                         && t.ReviewState == BankTransactionReviewState.Pending)
-            .Select(t => t.LocalDate)
+            .Select(t => new PendingBankExpense(t.LocalDate, t.Status, t.Amount, t.Currency))
             .ToListAsync(ct);
 
     public async Task<IReadOnlyList<BankTransaction>> FindByIdsAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct)
