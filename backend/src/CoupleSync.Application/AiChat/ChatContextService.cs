@@ -32,6 +32,21 @@ public sealed class ChatContextService
 
     public async Task<string> BuildSystemPromptAsync(Guid coupleId, CancellationToken ct)
     {
+        var sb = new StringBuilder();
+        sb.AppendLine("Você é um assistente financeiro do CoupleSync, um aplicativo de finanças para casais.");
+        sb.AppendLine("Responda de forma clara, objetiva e sem julgamentos sobre as finanças do casal.");
+        sb.Append(await BuildFactsAsync(coupleId, ct));
+        sb.AppendLine("IMPORTANTE: Para questões sobre investimentos, decisões legais ou fiscais, recomende que o casal consulte um profissional qualificado.");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Only the data of the group (date, budget, spending by category, goals), one fact per line, with no
+    /// instruction to the model: the Assistant sends it in a message of its own, apart from the rules.
+    /// </summary>
+    public async Task<string> BuildFactsAsync(Guid coupleId, CancellationToken ct)
+    {
         var budget = await _budgetService.GetCurrentPlanAsync(coupleId, ct);
         var now = _dateTimeProvider.UtcNow;
         var since = now.AddDays(-30);
@@ -40,8 +55,6 @@ public sealed class ChatContextService
         var (_, goals) = await _goalRepository.GetPagedAsync(coupleId, includeArchived: false, ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine("Você é um assistente financeiro do CoupleSync, um aplicativo de finanças para casais.");
-        sb.AppendLine("Responda de forma clara, objetiva e sem julgamentos sobre as finanças do casal.");
         sb.AppendLine($"Data de hoje: {BrDate(now)}");
 
         if (budget is not null)
@@ -90,8 +103,6 @@ public sealed class ChatContextService
                 sb.AppendLine($"  - {safeTitle}: alvo {BrlFormat.Format(goal.TargetAmount)}, progresso {BrlFormat.Format(progress)} ({(long)Math.Floor(percent)}%), prazo {deadlineStr}");
             }
         }
-
-        sb.AppendLine("IMPORTANTE: Para questões sobre investimentos, decisões legais ou fiscais, recomende que o casal consulte um profissional qualificado.");
 
         return sb.ToString();
     }
