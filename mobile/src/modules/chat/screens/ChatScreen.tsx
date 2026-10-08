@@ -199,10 +199,12 @@ function ChatConversation() {
     <SafeAreaView style={styles.safeArea}>
       <AssistantHeader />
 
+      {/* No Android a janela já encolhe sozinha quando o teclado abre (adjustResize). Com behavior="height" a
+          conta era feita duas vezes e sem descontar a barra de abas: o campo e o botão de enviar iam parar atrás
+          dela, fora da tela, justamente na hora de enviar. Mesmo padrão de transactions/new.tsx. */}
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {messages.length === 0 && !isLoading ? (
           <ScrollView contentContainerStyle={styles.emptyContent} keyboardShouldPersistTaps="handled">
