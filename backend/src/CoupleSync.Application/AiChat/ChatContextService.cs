@@ -11,7 +11,11 @@ namespace CoupleSync.Application.AiChat;
 
 /// <summary>The data message of the Assistant, and the titles of the goals it cites only by marker.</summary>
 /// <param name="GoalTitles">Marker ("g1", "g2"...) to the title of the goal. The titles never leave the API.</param>
-public sealed record ChatFacts(string Text, IReadOnlyDictionary<string, string> GoalTitles);
+/// <param name="OtherGoalTitles">
+/// Titles of the goals of the group that are not in the data (archived, completed). They do not leave either: an
+/// earlier answer, sent back as history, may still cite one of them.
+/// </param>
+public sealed record ChatFacts(string Text, IReadOnlyDictionary<string, string> GoalTitles, IReadOnlyList<string> OtherGoalTitles);
 
 public sealed class ChatContextService
 {
@@ -49,7 +53,8 @@ public sealed class ChatContextService
         var since = now.AddDays(-30);
         var recentTxns = await _transactionRepository.GetRecentByCoupleAsync(coupleId, since, ct);
 
-        var (_, goals) = await _goalRepository.GetPagedAsync(coupleId, includeArchived: false, ct);
+        // Every goal of the group: only the active ones go in the data, but the title of none of them may leave.
+        var (_, goals) = await _goalRepository.GetPagedAsync(coupleId, includeArchived: true, ct);
 
         var sb = new StringBuilder();
         sb.AppendLine($"Data de hoje: {BrDate(now)}");
@@ -98,7 +103,8 @@ public sealed class ChatContextService
             }
         }
 
-        return new ChatFacts(sb.ToString(), goalTitles);
+        var otherTitles = goals.Where(g => g.Status != GoalStatus.Active).Select(g => g.Title).ToList();
+        return new ChatFacts(sb.ToString(), goalTitles, otherTitles);
     }
 
     // Fixed dd/MM/yyyy: with a named format the "/" would follow the host culture.

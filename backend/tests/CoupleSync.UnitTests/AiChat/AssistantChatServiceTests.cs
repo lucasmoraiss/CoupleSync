@@ -378,6 +378,50 @@ public sealed class AssistantChatServiceTests : IDisposable
         Assert.Equal("E a {{g1}}? E a {{g2}}, e as {{g3}}? Viagens são outra coisa.", request.Messages[3].Text);
     }
 
+    /// <summary>
+    /// I1, the paths that are left: the goal cited in an earlier answer was archived since, or renamed or deleted
+    /// (its old title is nowhere any more). An answer shows a title between quotes, so what is still between quotes
+    /// in an answer that comes back is not sent either.
+    /// </summary>
+    [Fact]
+    public async Task TheTitleOfAGoalThatIsNoLongerActiveOrNoLongerExists_DoesNotLeaveInTheHistoryEither()
+    {
+        AddGoal("Reserva");
+        AddGoal("Carro do João");
+        _goals.Goals[1].Archive(_kit.Clock.UtcNow);
+        var history = new List<ChatMessage>
+        {
+            new("user", "E o carro do joão?"),
+            new("model", "Faltam R$ 900,00 para \"Carro do João\", R$ 50,00 para \"Sítio em Atibaia\" e R$ 10,00 para \"Reserva\"."),
+        };
+
+        await AskAsync("E agora?", history);
+
+        var request = Assert.Single(_first.Requests);
+        var sent = request.SystemPrompt + "\n" + string.Join("\n", request.Messages.Select(m => m.Text));
+        foreach (var forbidden in new[] { "Carro", "carro", "Sítio", "Atibaia", "Reserva" }) Assert.DoesNotContain(forbidden, sent);
+        Assert.Equal("E o uma meta?", request.Messages[1].Text);
+        Assert.Equal("Faltam R$ 900,00 para uma meta, R$ 50,00 para uma meta e R$ 10,00 para {{g1}}.", request.Messages[2].Text);
+        // Only the active goal is in the data.
+        Assert.Contains("{{g1}}", request.Messages[0].Text);
+        Assert.DoesNotContain("{{g2}}", request.Messages[0].Text);
+    }
+
+    [Fact]
+    public async Task ATitleWithQuotes_IsShownWithoutThem_SoWhatComesBackBetweenQuotesIsTheWholeTitle()
+    {
+        AddGoal("Casa \"nova\" na praia");
+        _first.Then(Answer("Faltam R$ 5.000,00 para {{g1}}."));
+
+        var reply = await AskAsync();
+        Assert.Equal("Faltam R$ 5.000,00 para \"Casa nova na praia\".", reply.Reply);
+
+        await AskAsync("E agora?", [new("user", "Quanto falta?"), new("model", reply.Reply)]);
+        var again = _first.Requests[^1];
+        Assert.Equal("Faltam R$ 5.000,00 para {{g1}}.", again.Messages[2].Text);
+        Assert.DoesNotContain("praia", string.Join("\n", again.Messages.Select(m => m.Text)));
+    }
+
     /// <summary>I2: the model does not always write the marker exactly as asked; none of its spellings reaches the person.</summary>
     [Theory]
     [InlineData("{{G1}}")]

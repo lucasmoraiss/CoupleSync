@@ -154,17 +154,21 @@ public sealed class AssistantChatService
     private static LlmRequest BuildRequest(IReadOnlyList<AiPerson> people, ChatFacts facts, string message, IReadOnlyList<ChatMessage> history)
     {
         // The history is what the app showed: an answer of the model comes back with the titles of the goals put
-        // back in it. Titles never leave, so in the history and in the question they become markers again.
+        // back in it. Titles never leave, so in the history and in the question they become markers again; and in
+        // an answer that comes back, what is still between quotes (a goal renamed or deleted since) goes away too.
         var filteredHistory = history
-            .Select(h => new LlmMessage(
-                string.Equals(h.Role, "model", StringComparison.OrdinalIgnoreCase) ? "model" : "user",
-                Clean(FactPackPrivacyFilter.ReplaceGoalTitles(h.Content, facts.GoalTitles), people)))
+            .Select(h =>
+            {
+                var fromModel = string.Equals(h.Role, "model", StringComparison.OrdinalIgnoreCase);
+                var text = WithoutGoalTitles(h.Content, facts);
+                return new LlmMessage(fromModel ? "model" : "user", Clean(fromModel ? FactPackPrivacyFilter.ReplaceQuoted(text) : text, people));
+            })
             .Where(m => m.Text.Length > 0)
             .ToList();
 
         var messages = new List<LlmMessage> { new("user", FactsMessage(facts.Text, people)) };
         messages.AddRange(ChatHistoryTrimmer.Trim(filteredHistory));
-        messages.Add(new LlmMessage("user", Clean(FactPackPrivacyFilter.ReplaceGoalTitles(message, facts.GoalTitles), people)));
+        messages.Add(new LlmMessage("user", Clean(WithoutGoalTitles(message, facts), people)));
 
         return new LlmRequest(
             LlmFeatures.Chat,
@@ -174,6 +178,10 @@ public sealed class AssistantChatService
             LlmFeatures.TemperatureOf(LlmFeatures.Chat),
             MaxOutputTokens);
     }
+
+    /// <summary>Every title of a goal of the group, in the data or not, out of a text that came from the app.</summary>
+    private static string WithoutGoalTitles(string text, ChatFacts facts)
+        => FactPackPrivacyFilter.ReplaceGoalTitles(text, facts.GoalTitles, facts.OtherGoalTitles);
 
     /// <summary>What a person typed: privacy filter first, then the prompt hygiene, at the length the validator accepts.</summary>
     private static string Clean(string text, IReadOnlyList<AiPerson> people)

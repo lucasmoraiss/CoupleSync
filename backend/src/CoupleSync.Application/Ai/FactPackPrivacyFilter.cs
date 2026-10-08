@@ -14,6 +14,12 @@ public static partial class FactPackPrivacyFilter
 {
     public const string Removed = "[removido]";
 
+    /// <summary>What stands for a goal that has no marker in the data sent.</summary>
+    public const string UnnamedGoal = "uma meta";
+
+    [GeneratedRegex(@"""[^""]*""", RegexOptions.CultureInvariant)]
+    private static partial Regex Quoted();
+
     private static readonly HashSet<string> NameParticles = new(StringComparer.Ordinal) { "de", "da", "do", "das", "dos", "e", "di", "du" };
 
     [GeneratedRegex(@"[^\s@]+@[^\s@]+\.[^\s@]+", RegexOptions.CultureInvariant)]
@@ -79,9 +85,9 @@ public static partial class FactPackPrivacyFilter
     /// </summary>
     public static string RestoreGoalTitles(string text, IReadOnlyDictionary<string, string> titlesByMarker)
         => GoalMarker().Replace(text, match =>
-            titlesByMarker.TryGetValue(GoalKey(match), out var title) && !string.IsNullOrWhiteSpace(title)
-                ? $"\"{title.Trim()}\""
-                : "uma meta");
+            titlesByMarker.TryGetValue(GoalKey(match), out var title) && ShownTitle(title).Length > 0
+                ? $"\"{ShownTitle(title)}\""
+                : UnnamedGoal);
 
     /// <summary>True when the text names a person marker ({{B}}...) that belongs to nobody in the group.</summary>
     public static bool MentionsUnknownPerson(string text, IReadOnlyList<AiPerson> people)
@@ -103,26 +109,51 @@ public static partial class FactPackPrivacyFilter
     /// marker again before anything is sent — compared without accents or case, with any white space between its
     /// words, whole words only, the longest title first, with or without the quotes of the answer.
     /// </summary>
-    public static string ReplaceGoalTitles(string? text, IReadOnlyDictionary<string, string> titlesByMarker)
+    /// <param name="titlesByMarker">The goals that are in the data sent: each title becomes its marker.</param>
+    /// <param name="otherTitles">
+    /// Titles of goals of the group that are not in the data (archived, completed): they do not leave either, and
+    /// with no marker to stand for them they become "uma meta".
+    /// </param>
+    public static string ReplaceGoalTitles(
+        string? text,
+        IReadOnlyDictionary<string, string> titlesByMarker,
+        IEnumerable<string>? otherTitles = null)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
 
         var titles = titlesByMarker
-            .Select(pair => (Marker: pair.Key, Words: PromptText.Fold(pair.Value).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)))
+            .Select(pair => (Order: pair.Key, Replacement: Marker(pair.Key), Title: pair.Value))
+            .Concat((otherTitles ?? []).Select(title => (Order: "~", Replacement: UnnamedGoal, Title: title)))
+            .Select(title => (title.Order, title.Replacement, Words: TitleWords(title.Title)))
             .Where(title => title.Words.Length > 0)
             .OrderByDescending(title => title.Words.Sum(word => word.Length) + title.Words.Length)
-            .ThenBy(title => title.Marker, StringComparer.Ordinal)
+            .ThenBy(title => title.Order, StringComparer.Ordinal)
             .ToList();
 
         var result = text;
-        foreach (var (marker, words) in titles)
+        foreach (var (_, replacement, words) in titles)
         {
-            var pattern = @"(?<![\p{L}\p{N}])""?" + string.Join(@"\s+", words.Select(Regex.Escape)) + @"""?(?![\p{L}\p{N}])";
-            result = ReplaceFolded(result, new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), Marker(marker));
+            // Quotes around the title (the answer shows it so) or around one of its words go with it.
+            var pattern = @"(?<![\p{L}\p{N}])""?" + string.Join(@"""?\s+""?", words.Select(Regex.Escape)) + @"""?(?![\p{L}\p{N}])";
+            result = ReplaceFolded(result, new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), replacement);
         }
 
         return result;
     }
+
+    /// <summary>
+    /// For an answer of the model that comes back as history: a title is shown between quotes, so whatever is still
+    /// between quotes after <see cref="ReplaceGoalTitles"/> may be the title of a goal that was renamed or deleted
+    /// since (nobody knows the old title any more). It does not leave: it becomes "uma meta".
+    /// </summary>
+    public static string ReplaceQuoted(string text) => Quoted().Replace(text, UnnamedGoal);
+
+    /// <summary>The words of a title as they are compared: folded, without the double quotes an answer never shows.</summary>
+    private static string[] TitleWords(string? title)
+        => PromptText.Fold(ShownTitle(title)).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>The title as an answer shows it: trimmed and without double quotes (the answer puts its own around it).</summary>
+    private static string ShownTitle(string? title) => (title ?? string.Empty).Replace("\"", string.Empty, StringComparison.Ordinal).Trim();
 
     /// <summary>
     /// Replaces what <paramref name="pattern"/> finds in the folded text (lower case, no accents), in the text as it
