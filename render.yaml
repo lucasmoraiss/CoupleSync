@@ -52,6 +52,12 @@ services:
         value: "false"
       - key: GEMINI_API_KEY
         sync: false
+      # Chave de um segundo provedor de IA (compatível com OpenAI; Groq é a primeira escolha). Fica sem valor até
+      # essa chave existir: sem ela o provedor não entra em cadeia nenhuma. Ligar pede também
+      # Ai__OpenAiCompatible__0__{Name,BaseUrl,ApiKeyVariable}, o elo nas cadeias (Ai__Chains__...) e o provedor
+      # no texto de privacidade com versão nova do aceite de IA.
+      - key: GROQ_API_KEY
+        sync: false
 
       # Envio de e-mail (recuperação de senha e confirmação de e-mail) pela API HTTP da Brevo,
       # porque o Render gratuito bloqueia as portas SMTP. Sem Email__Provider=brevo, a chave e o
