@@ -1,4 +1,6 @@
-// AC-142, AC-143, AC-144, AC-145, AC-147, AC-148: AI Chat screen — ephemeral message history
+// Assistente (aba oculta, aberta pelo Painel): conversa com a IA sobre as finanças do grupo. O histórico vive só
+// enquanto o app está aberto. Quem decide se há conversa é o servidor (GET /ai/status): IA indisponível, grupo
+// sem ativação (explicação e "Ativar") ou pronta.
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -13,78 +15,139 @@ import {
   ActivityIndicator,
   ScrollView,
 } from 'react-native';
+import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useChat } from '../hooks/useChat';
 import type { Message } from '../hooks/useChat';
 import { colors, spacing, typography, borderRadius } from '@/theme';
-import { EmptyState } from '@/components/EmptyState';
-import { TextSections } from '@/components/TextSections';
-import { AI_CHAT_SECTIONS, AI_CHAT_TITLE } from '@/modules/privacy/privacyContent';
-import { useConsentStore } from '@/modules/privacy/consentStore';
+import { ErrorState } from '@/components/ErrorState';
+import { goToParent } from '@/navigation/resetOnFocus';
+import { assistantGate } from '@/modules/ai/aiStatus';
+import { useAiStatus } from '@/modules/ai/useAiStatus';
+import { AI_ANALYSIS_SUMMARY } from '@/modules/privacy/privacyContent';
 
-/** SEG-10: primeira abertura do chat: aviso de envio ao Google Gemini, com aceitar / não usar. */
-function AiChatDisclosure({ declined }: { declined: boolean }) {
-  const [failed, setFailed] = useState(false);
-  // Só considera feito se a resposta foi registrada; senão fica na tela e avisa.
-  const answer = async (accept: boolean) => {
-    setFailed(false);
-    const store = useConsentStore.getState();
-    const saved = accept ? await store.acceptAiChat() : await store.declineAiChat();
-    if (!saved) setFailed(true);
-  };
+// Sugestões da tela vazia: um toque envia a pergunta.
+const SUGGESTED_QUESTIONS: readonly string[] = [
+  'Quanto gastamos este mês?',
+  'Em que categoria gastamos mais?',
+  'Como estão as nossas metas?',
+];
+
+// A resposta leva de 1 a 15 segundos (às vezes mais): depois deste tempo o aviso de espera muda, para a pessoa
+// saber que o app não travou.
+const SLOW_ANSWER_AFTER_MS = 6000;
+
+function AssistantHeader() {
+  return (
+    <View style={styles.header}>
+      <TouchableOpacity
+        style={styles.backBtn}
+        onPress={() => goToParent('chat/index')}
+        accessibilityRole="button"
+        accessibilityLabel="Voltar para o Painel"
+      >
+        <Ionicons name="chevron-back" size={22} color={colors.primaryLight} />
+      </TouchableOpacity>
+      <Ionicons name="sparkles" size={20} color={colors.primary} />
+      <Text style={styles.headerTitle} accessibilityRole="header">Assistente</Text>
+    </View>
+  );
+}
+
+/** Tela do Assistente para quem não pode conversar agora: um texto e, quando há o que fazer, um botão. */
+function AssistantNotice({
+  title,
+  text,
+  actionLabel,
+  actionAccessibilityLabel,
+  onAction,
+}: {
+  title: string;
+  text: string;
+  actionLabel?: string;
+  actionAccessibilityLabel?: string;
+  onAction?: () => void;
+}) {
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.disclosureContent}>
-        <Text style={styles.disclosureTitle} accessibilityRole="header">{AI_CHAT_TITLE}</Text>
-        {declined && (
-          <Text style={styles.disclosureNote}>O Chat IA está desativado. Você pode aceitar quando quiser.</Text>
-        )}
-        <TextSections sections={AI_CHAT_SECTIONS} />
-      </ScrollView>
-      <View style={styles.disclosureActions}>
-        {failed && (
-          <Text style={styles.disclosureError} accessibilityRole="alert" accessibilityLiveRegion="assertive">
-            Não foi possível registrar a sua resposta. Tente novamente.
-          </Text>
-        )}
-        <TouchableOpacity
-          style={styles.acceptBtn}
-          onPress={() => void answer(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Aceitar e usar o Chat IA. Meus dados financeiros serão enviados ao Google Gemini."
-        >
-          <Text style={styles.acceptText}>Aceitar e usar o Chat IA</Text>
-        </TouchableOpacity>
-        {!declined && (
+      <AssistantHeader />
+      <ScrollView contentContainerStyle={styles.noticeContent}>
+        <Text style={styles.noticeTitle} accessibilityRole="header">{title}</Text>
+        <Text style={styles.noticeText}>{text}</Text>
+        {actionLabel && onAction ? (
           <TouchableOpacity
-            style={styles.declineBtn}
-            onPress={() => void answer(false)}
+            style={styles.noticeBtn}
+            onPress={onAction}
             accessibilityRole="button"
-            accessibilityLabel="Não usar o Chat IA"
+            accessibilityLabel={actionAccessibilityLabel ?? actionLabel}
           >
-            <Text style={styles.declineText}>Não usar</Text>
+            <Text style={styles.noticeBtnText}>{actionLabel}</Text>
           </TouchableOpacity>
-        )}
-      </View>
+        ) : null}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 export default function ChatScreen() {
-  const consentLoaded = useConsentStore((s) => s.loaded);
-  const aiRecord = useConsentStore((s) => s.record.aiChat);
-  const accepted = consentLoaded && aiRecord.acceptedAt !== null;
+  const { status, loadFailed, refresh } = useAiStatus();
+  const gate = assistantGate(status, loadFailed);
 
-  if (!consentLoaded) {
+  if (gate === 'loading') {
     return (
-      <SafeAreaView style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator color={colors.primary} />
+      <SafeAreaView style={styles.safeArea}>
+        <AssistantHeader />
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.primary} accessibilityLabel="Carregando o Assistente" />
+        </View>
       </SafeAreaView>
     );
   }
-  if (!accepted) return <AiChatDisclosure declined={aiRecord.declinedAt !== null} />;
+  if (gate === 'error') {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <AssistantHeader />
+        <ErrorState message="Não foi possível abrir o Assistente. Verifique a internet e tente novamente." onRetry={() => void refresh()} />
+      </SafeAreaView>
+    );
+  }
+  if (gate === 'unavailable') {
+    return (
+      <AssistantNotice
+        title="Assistente indisponível"
+        text="A análise com IA não está disponível no momento. O restante do app funciona normalmente, com os números atualizados."
+      />
+    );
+  }
+  if (gate === 'needs-activation') {
+    return (
+      <AssistantNotice
+        title="A análise com IA está desligada para este grupo"
+        text={`O Assistente responde às suas perguntas sobre gastos, orçamento e metas do grupo. ${AI_ANALYSIS_SUMMARY} Uma pessoa ativa e vale para o grupo inteiro; qualquer um desliga quando quiser.`}
+        actionLabel="Ativar"
+        actionAccessibilityLabel="Ativar a análise com IA: ver o que é enviado e decidir"
+        onAction={() => router.push('/(main)/ai/welcome' as any)}
+      />
+    );
+  }
   return <ChatConversation />;
+}
+
+/** Aviso de espera da resposta: muda depois de alguns segundos, para ficar claro que a IA ainda está respondendo. */
+function WaitingBubble() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), SLOW_ANSWER_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  const text = slow ? 'Ainda pensando… a resposta pode levar até meio minuto.' : 'Pensando na resposta…';
+  return (
+    <View style={styles.loadingBubble} accessible accessibilityLabel={text} accessibilityLiveRegion="polite">
+      <ActivityIndicator size="small" color={colors.textMuted} />
+      <Text style={styles.loadingText}>{text}</Text>
+    </View>
+  );
 }
 
 function ChatConversation() {
@@ -134,10 +197,7 @@ function ChatConversation() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <Ionicons name="sparkles" size={20} color={colors.primary} />
-        <Text style={styles.headerTitle} accessibilityRole="header">Chat IA</Text>
-      </View>
+      <AssistantHeader />
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -145,10 +205,22 @@ function ChatConversation() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
       >
         {messages.length === 0 && !isLoading ? (
-          <EmptyState
-            title="Olá! Sou seu assistente financeiro"
-            subtitle="Pergunte sobre seu orçamento, gastos ou metas. Ex: 'Qual meu saldo em alimentação este mês?'"
-          />
+          <ScrollView contentContainerStyle={styles.emptyContent} keyboardShouldPersistTaps="handled">
+            <Text style={styles.emptyTitle} accessibilityRole="header">Olá! Sou o Assistente do grupo</Text>
+            <Text style={styles.emptyText}>Pergunte sobre o orçamento, os gastos ou as metas. Por exemplo:</Text>
+            {SUGGESTED_QUESTIONS.map((question) => (
+              <TouchableOpacity
+                key={question}
+                style={styles.suggestion}
+                onPress={() => sendMessage(question)}
+                accessibilityRole="button"
+                accessibilityLabel={`Perguntar: ${question}`}
+              >
+                <Text style={styles.suggestionText}>{question}</Text>
+              </TouchableOpacity>
+            ))}
+            <Text style={styles.emptyHint}>A resposta pode levar alguns segundos.</Text>
+          </ScrollView>
         ) : (
           <FlatList
             ref={flatListRef}
@@ -157,14 +229,7 @@ function ChatConversation() {
             renderItem={renderBubble}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
-            ListFooterComponent={
-              isLoading ? (
-                <View style={styles.loadingBubble} accessible accessibilityLabel="Analisando sua pergunta" accessibilityLiveRegion="polite">
-                  <ActivityIndicator size="small" color={colors.textMuted} />
-                  <Text style={styles.loadingText}>Analisando...</Text>
-                </View>
-              ) : null
-            }
+            ListFooterComponent={isLoading ? <WaitingBubble /> : null}
           />
         )}
 
@@ -177,7 +242,7 @@ function ChatConversation() {
         )}
 
         <View style={styles.inputRow}>
-          <TextInput accessibilityLabel="Pergunta para o Chat IA"
+          <TextInput accessibilityLabel="Pergunta para o Assistente"
             style={styles.textInput}
             value={inputText}
             onChangeText={setInputText}
@@ -210,15 +275,6 @@ function ChatConversation() {
 }
 
 const styles = StyleSheet.create({
-  disclosureContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.lg },
-  disclosureTitle: { fontSize: typography.fontSize.xxl, fontWeight: typography.fontWeight.semibold, color: colors.text, marginBottom: spacing.md },
-  disclosureError: { color: colors.errorLight, fontSize: typography.fontSize.md, textAlign: 'center' },
-  disclosureNote: { fontSize: typography.fontSize.md, color: colors.warning, marginBottom: spacing.md },
-  disclosureActions: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, paddingTop: spacing.sm, gap: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
-  acceptBtn: { minHeight: 48, borderRadius: borderRadius.lg, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  acceptText: { color: colors.text, fontSize: typography.fontSize.lg, fontWeight: typography.fontWeight.semibold },
-  declineBtn: { minHeight: 48, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  declineText: { color: colors.textSubtle, fontSize: typography.fontSize.lg, fontWeight: typography.fontWeight.semibold },
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -226,20 +282,43 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  backBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.semibold,
     color: colors.text,
   },
+  noticeContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.lg },
+  noticeTitle: { fontSize: typography.fontSize.xxl, fontWeight: typography.fontWeight.semibold, color: colors.text, marginBottom: spacing.md },
+  noticeText: { fontSize: typography.fontSize.md, color: colors.textSubtle, lineHeight: 21, marginBottom: spacing.lg },
+  noticeBtn: { minHeight: 48, borderRadius: borderRadius.lg, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  noticeBtnText: { color: colors.text, fontSize: typography.fontSize.lg, fontWeight: typography.fontWeight.semibold },
+  emptyContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.lg },
+  emptyTitle: { fontSize: typography.fontSize.xl, fontWeight: typography.fontWeight.semibold, color: colors.text, marginBottom: spacing.sm, textAlign: 'center' },
+  emptyText: { fontSize: typography.fontSize.md, color: colors.textSubtle, marginBottom: spacing.md, textAlign: 'center' },
+  suggestion: {
+    minHeight: 48,
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  suggestionText: { fontSize: typography.fontSize.md, color: colors.primaryLight, fontWeight: typography.fontWeight.semibold },
+  emptyHint: { fontSize: typography.fontSize.sm, color: colors.textMuted, marginTop: spacing.sm, textAlign: 'center' },
   listContent: {
     flexGrow: 1,
     paddingHorizontal: spacing.md,

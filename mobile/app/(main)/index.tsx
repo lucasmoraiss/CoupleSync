@@ -26,6 +26,9 @@ import { ErrorState } from '@/components/ErrorState';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { GroupSwitcher } from '@/components/GroupSwitcher';
 import { spokenBRL } from '@/utils/a11y';
+import { isAssistantVisible, shouldOpenWelcome, shouldShowActivationCard } from '@/modules/ai/aiStatus';
+import { useAiStatusStore, wasWelcomeShown } from '@/modules/ai/aiStatusStore';
+import { useAiStatus } from '@/modules/ai/useAiStatus';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -123,6 +126,14 @@ export default function DashboardScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Análise com IA: o status é consultado a cada vez que o Painel recebe foco. Quem ainda não respondeu à pergunta
+  // (ou não viu que o outro membro ativou) é levado à tela de boas-vindas, uma vez por abertura do app.
+  const { status: aiStatus } = useAiStatus((fresh) => {
+    if (!shouldOpenWelcome(fresh, wasWelcomeShown())) return;
+    useAiStatusStore.getState().markWelcomeShown();
+    router.push('/(main)/ai/welcome' as any);
+  });
+
   const [refreshing, setRefreshing] = React.useState(false);
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -148,18 +159,46 @@ export default function DashboardScreen() {
               <Text style={styles.subtitle}>Resumo financeiro do casal</Text>
             )}
           </View>
-          <TouchableOpacity accessibilityRole="button"
-            style={styles.transactionsBtn}
-            onPress={() => router.push('/transactions' as any)}
-            accessibilityLabel="Ver transações"
-          >
-            <Ionicons name="receipt-outline" size={22} color={colors.primaryLight} />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            {/* Só existe quando o servidor diz que há IA (GET /ai/status: available). */}
+            {isAssistantVisible(aiStatus) && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                style={styles.assistantBtn}
+                onPress={() => router.push('/(main)/chat' as any)}
+                accessibilityLabel="Abrir o Assistente"
+              >
+                <Ionicons name="sparkles" size={18} color={colors.primaryLight} />
+                <Text style={styles.assistantBtnText}>Assistente</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity accessibilityRole="button"
+              style={styles.transactionsBtn}
+              onPress={() => router.push('/transactions' as any)}
+              accessibilityLabel="Ver transações"
+            >
+              <Ionicons name="receipt-outline" size={22} color={colors.primaryLight} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <GroupSwitcher />
 
         <EmailVerificationBanner />
+
+        {/* Enquanto o grupo não ativou a análise com IA (os números do Painel continuam iguais). */}
+        {shouldShowActivationCard(aiStatus) && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.aiCard}
+            onPress={() => router.push('/(main)/ai/welcome' as any)}
+            accessibilityLabel="Análise com IA desligada. Ativar"
+          >
+            <Ionicons name="sparkles-outline" size={20} color={colors.primaryLight} />
+            <Text style={styles.aiCardText}>Análise com IA desligada</Text>
+            <Text style={styles.aiCardAction}>Ativar</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Loading state */}
         {isLoading && <LoadingState />}
@@ -228,6 +267,34 @@ const styles = StyleSheet.create({
   greeting: { fontSize: 22, fontWeight: '700', color: TEXT },
   subtitle: { fontSize: 14, color: MUTED, marginTop: 2 },
   transactionsBtn: { minHeight: 44, minWidth: 44, backgroundColor: CARD, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: BORDER },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  assistantBtn: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: CARD,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: PRIMARY,
+  },
+  assistantBtnText: { color: colors.primaryLight, fontSize: 14, fontWeight: '600' },
+  aiCard: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: CARD,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  aiCardText: { flex: 1, color: TEXT, fontSize: 14, fontWeight: '500' },
+  aiCardAction: { color: colors.primaryLight, fontSize: 14, fontWeight: '700' },
   centered: { alignItems: 'center', paddingVertical: 48 },
   loadingText: { color: MUTED, marginTop: 12, fontSize: 14 },
   card: {

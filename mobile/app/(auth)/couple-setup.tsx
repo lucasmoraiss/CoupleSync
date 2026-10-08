@@ -21,6 +21,7 @@ import { canAddGroup, groupChangeNotice, groupCountText } from '@/modules/couple
 import { isCaptureAllowedNow } from '@/modules/privacy/consentStore';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { GroupList } from '@/components/GroupSwitcher';
+import { routeAfterGroupSetup } from '@/modules/ai/aiStatusStore';
 import { colors } from '@/theme';
 
 export default function CoupleSetupScreen() {
@@ -28,6 +29,8 @@ export default function CoupleSetupScreen() {
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [createdCode, setCreatedCode] = useState<string | null>(null);
+  // Saindo desta tela para o app (consultando se a pergunta da análise com IA é devida).
+  const [leaving, setLeaving] = useState(false);
   // ?add=1: o usuário já tem grupo e veio criar ou entrar em mais um (há para onde voltar).
   const { add } = useLocalSearchParams<{ add?: string }>();
   // Quem chega aqui pode já participar de grupos (foi removido do grupo ativo, ou quer mais um): eles aparecem
@@ -91,7 +94,7 @@ export default function CoupleSetupScreen() {
       // O grupo em que entrou passa a ser o ativo: guarda o token dele e esquece o que era do grupo anterior.
       await applyGroupSession({ accessToken: data.accessToken, refreshToken: data.refreshToken, coupleId: data.coupleId });
       announceGroupChange();
-      router.replace('/' as any);
+      await enterApp();
     } catch (err: any) {
       Alert.alert('Erro', getApiErrorMessage(err, 'Erro ao entrar no grupo. Tente novamente.'));
     } finally {
@@ -124,8 +127,20 @@ export default function CoupleSetupScreen() {
     }
   };
 
-  const goToHome = () => {
-    router.replace('/' as any);
+  // Com o grupo pronto: a tela de boas-vindas da análise com IA, se o servidor disser que a pergunta é devida a
+  // esta pessoa neste grupo; senão (ou se o status não vier) o Painel.
+  const enterApp = async () => {
+    router.replace((await routeAfterGroupSetup()) as any);
+  };
+
+  const goToHome = async () => {
+    if (leaving) return;
+    setLeaving(true);
+    try {
+      await enterApp();
+    } finally {
+      setLeaving(false);
+    }
   };
 
   // Show the join code after creating a group
@@ -165,11 +180,12 @@ export default function CoupleSetupScreen() {
           <TouchableOpacity
             style={styles.button}
             onPress={goToHome}
+            disabled={leaving}
             activeOpacity={0.8}
             accessibilityLabel="Ir para o Painel"
             accessibilityRole="button"
           >
-            <Text style={styles.buttonText}>Ir para o Painel</Text>
+            {leaving ? <ActivityIndicator color={colors.text} /> : <Text style={styles.buttonText}>Ir para o Painel</Text>}
           </TouchableOpacity>
         </ScrollView>
       </View>

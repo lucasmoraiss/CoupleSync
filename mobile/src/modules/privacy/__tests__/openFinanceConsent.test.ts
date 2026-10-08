@@ -102,9 +102,10 @@ describe('texto do passo "O que é"', () => {
     );
   });
 
-  it('a IA segue o consentimento que já existe: nada de novo é enviado ao Gemini por causa do Open Finance', () => {
-    expect(text).toMatch(/Chat IA/);
-    expect(text).toMatch(/aviso do Chat IA/);
+  it('conectar um banco não liga a IA: o aceite dela é outro, em Configurações > Inteligência artificial', () => {
+    expect(text).toContain('Conectar um banco não liga a IA nem muda o aceite dela.');
+    expect(text).toContain('A análise com IA tem aceite próprio; veja Configurações > Inteligência artificial.');
+    expect(text).not.toMatch(/Chat IA/);
   });
 
   it('nesta versão nenhuma transação é trazida do banco', () => {
@@ -113,8 +114,8 @@ describe('texto do passo "O que é"', () => {
 });
 
 describe('tela Privacidade', () => {
-  it.each([true, false])('cita o Pluggy na coleta e no compartilhamento (IA no app: %p)', (aiAvailable) => {
-    const sections = privacySections(aiAvailable);
+  it('cita o Pluggy na coleta e no compartilhamento', () => {
+    const sections = privacySections();
     const collected = sections.find((s) => s.title === 'Dados que o CoupleSync coleta')!.paragraphs.join('\n');
     const shared = sections.find((s) => s.title === 'Com quem são compartilhados')!.paragraphs.join('\n');
 
@@ -127,8 +128,8 @@ describe('tela Privacidade', () => {
   it('o aceite do Open Finance aparece em "Suas respostas" só para quem aceitou', () => {
     const date = (iso: string) => `[${iso.slice(0, 10)}]`;
 
-    expect(consentStatusLines(EMPTY_CONSENT, false, date)).toEqual(['Captura de notificações: não aceita.']);
-    expect(consentStatusLines(acceptOpenFinance(EMPTY_CONSENT, NOW), false, date)).toEqual([
+    expect(consentStatusLines(EMPTY_CONSENT, date)).toEqual(['Captura de notificações: não aceita.']);
+    expect(consentStatusLines(acceptOpenFinance(EMPTY_CONSENT, NOW), date)).toEqual([
       'Captura de notificações: não aceita.',
       'Open Finance (Meu Pluggy): aceito em [2026-10-07].',
     ]);

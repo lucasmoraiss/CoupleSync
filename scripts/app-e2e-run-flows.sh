@@ -53,6 +53,7 @@ FLOW_NAMES=(
   "05-metas-e-rendas"
   "06-abas"
   "$CAPTURE_FLOW"
+  "08-ia-ativar-e-assistente"
 )
 # Flows listed here are reported but do not fail the job. Empty on purpose: every flow is required.
 INFORMATIONAL_FLOWS=()

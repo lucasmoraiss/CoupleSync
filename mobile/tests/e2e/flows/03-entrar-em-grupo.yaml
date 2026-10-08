@@ -35,6 +35,8 @@ name: 03 - Entrar em grupo
 - inputText: ${output.codigo}
 - hideKeyboard
 - tapOn: "Confirmar entrada no grupo"
+# Quem entra num grupo também é perguntado pela análise com IA antes do Painel.
+- runFlow: comum/responder-agora-nao-a-ia.yaml
 - extendedWaitUntil:
     visible: "Total de gastos"
     timeout: 60000

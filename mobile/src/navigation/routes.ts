@@ -16,6 +16,10 @@ export const PARENT_ROUTE = {
   'transactions/edit': '/(main)/transactions',
   'ocr-upload': '/(main)/transactions',
   'ocr-review': '/(main)/transactions',
+  'settings/ai': '/(main)/settings',
+  // A tela de boas-vindas da IA e o Assistente abrem do Painel e voltam para ele.
+  'ai/welcome': '/',
+  'chat/index': '/',
 } as const;
 
 export type ChildScreen = keyof typeof PARENT_ROUTE;

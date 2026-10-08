@@ -48,7 +48,8 @@ describe('visita de tela (M-I1): o estado não sobrevive a uma nova visita', () 
 
 describe('voltar das abas ocultas (M-I2)', () => {
   const layout = read('(main)/_layout.tsx');
-  const hiddenScreens = [...layout.matchAll(/<Tabs\.Screen name="([^"]+)" options=\{\{ href: null \}\} \/>/g)].map((m) => m[1]);
+  // Uma aba oculta pode ter título (o Assistente): continua sendo aba oculta, com tela-mãe.
+  const hiddenScreens = [...layout.matchAll(/<Tabs\.Screen name="([^"]+)" options=\{\{ (?:title: '[^']*', )?href: null \}\} \/>/g)].map((m) => m[1]);
 
   it('o layout registra abas ocultas (a leitura do arquivo funcionou)', () => {
     expect(hiddenScreens.length).toBeGreaterThanOrEqual(10);

@@ -109,18 +109,12 @@ public static class DependencyInjection
         services.AddScoped<IGeminiAdapter, GeminiChatAdapter>();
         services.AddSingleton<ChatRateLimiter>();
 
-        // AI auto-categorization: the real classifier only when the AI is not switched off (Ai__Disabled) and Gemini
-        // has a key. Decided when first used, from the final configuration. Whether a statement may be sent is
-        // decided per import, by the group's consent on the server.
-        services.AddScoped<GeminiCategoryClassifier>();
-        services.AddScoped<ICategoryClassifier>(provider =>
-        {
-            var ai = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<AiOptions>>().Value;
-            var gemini = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<GeminiOptions>>().Value;
-            return !ai.Disabled && !string.IsNullOrWhiteSpace(gemini.ApiKey)
-                ? provider.GetRequiredService<GeminiCategoryClassifier>()
-                : new NullCategoryClassifier();
-        });
+        // AI auto-categorization of imported statements stays OFF until it goes through the chain with the privacy
+        // filter (design 6.3, the "categorize" phase). GeminiCategoryClassifier sends the raw description of each
+        // statement line, which may carry the name of who received a transfer — and the AI text the group accepts
+        // says those names never leave. So no line is sent to a provider for categorization in this phase; the
+        // import job already checks the group's consent on the server for when the classifier comes back.
+        services.AddScoped<ICategoryClassifier, NullCategoryClassifier>();
 
         AddOpenFinance(services);
         AddAiGateway(services, configuration);

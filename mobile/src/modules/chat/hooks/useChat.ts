@@ -1,7 +1,8 @@
 // AC-AI-Chat: Ephemeral chat state hook — history lives only for the session
-import { getApiErrorMessage } from '@/services/apiError';
 import { useState, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
+import { chatErrorChangesStatus, chatErrorMessage } from '@/modules/ai/aiStatus';
+import { useAiStatusStore } from '@/modules/ai/aiStatusStore';
 import { chatApi } from '../api/chatApi';
 import type { ChatHistoryItem } from '../api/chatApi';
 
@@ -38,8 +39,11 @@ export function useChat(): UseChatReturn {
       ]);
       setError(null);
     },
-    onError: (err: any) => {
-      setError(getApiErrorMessage(err, 'Erro ao enviar mensagem. Tente novamente.'));
+    onError: (err: unknown) => {
+      // Cota do grupo, limite do app, IA fora do ar, sem internet: cada desfecho tem a sua frase.
+      setError(chatErrorMessage(err));
+      // A IA foi desligada (no servidor ou pelo outro membro) no meio da conversa: a tela passa a mostrar isso.
+      if (chatErrorChangesStatus(err)) void useAiStatusStore.getState().refresh();
     },
   });
 
