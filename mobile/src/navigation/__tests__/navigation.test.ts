@@ -99,11 +99,48 @@ describe('voltar das abas ocultas (M-I2)', () => {
 
   it('Open Finance: "Sincronizar agora" só aparece pela regra testada (canSyncNow), força a leitura no banco e mostra a última sincronização', () => {
     const screen = read('(main)/settings/openfinance/index.tsx');
-    expect(screen).toMatch(/\{canSyncNow\(connection, available, false\) \? \(\s*<View style=\{styles\.syncBox\}>[\s\S]{0,400}syncNow\(connection\)/);
+    expect(screen).toMatch(/const syncAction = syncActionOf\(connection, available\);/);
+    expect(screen).toMatch(/\{syncAction === 'syncNow' \? \(\s*<View style=\{styles\.syncBox\}>[\s\S]{0,400}syncNow\(connection\)/);
     expect(screen.match(/syncNow\(connection\)/g)).toHaveLength(1);
     expect(screen).toMatch(/sync\.start\(connection\.id, \{\s*force: true,/);
     expect(screen).toMatch(/\{lastSyncText\(connection\)\}/);
     expect(screen).not.toContain('próxima atualização do app');
+  });
+
+  it('Open Finance: antes da primeira sincronização a tela leva ao passo "Período" do wizard, em vez de sincronizar (revisão 1, I7)', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/\{syncAction === 'choosePeriod' \? \(\s*<View style=\{styles\.syncBox\}>[\s\S]{0,500}choosePeriod\(connection\)/);
+    expect(screen.match(/choosePeriod\(connection\)/g)).toHaveLength(1);
+    // Guarda "passo 5 desta conexão" e abre o wizard, que retoma nele (startingStep, testada em wizard.test.ts).
+    expect(screen).toMatch(/store\.save\(\{ step: 5, connectionId: connection\.id \}\);[\s\S]{0,120}openWizard\(\);/);
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    // No wizard, o período só é pedido (e só é enviado) enquanto a conexão nunca sincronizou.
+    expect(wizard).toMatch(/setPeriodChoosable\(neverSynced\(mine\)\);/);
+    expect(wizard).toMatch(/historyMonths: periodChoosable \? historyMonths : undefined,/);
+    expect(wizard).toMatch(/\{periodChoosable \? \(\s*<View accessibilityRole="radiogroup"/);
+  });
+
+  it('Open Finance: ao voltar à tela, o resultado da sincronização anterior some; uma em andamento continua (revisão 1, I4)', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(
+      /useOnRefocus\(\(\) => \{\s*if \(shouldClearSyncOnRefocus\(sync\.phase\)\) sync\.reset\(\);\s*void refetch\(\{ cancelRefetch: false \}\);\s*\}\);/,
+    );
+  });
+
+  it('Open Finance: o wizard termina quando o servidor aceita o pedido, não quando a sincronização acaba (revisão 1, M1)', () => {
+    const wizard = read('(main)/settings/openfinance/wizard.tsx');
+    // finish() é o aviso de aceite passado a sync.start (requestAndFollowSync, testada em sync.test.ts) e não roda depois dela.
+    expect(wizard).toMatch(/sync\.start\(\s*connectionId,\s*\{[\s\S]{0,200}\},[\s\S]{0,300}\(\) => void useWizardStore\.getState\(\)\.finish\(\),\s*\);/);
+    expect(wizard.match(/useWizardStore\.getState\(\)\.finish\(\)/g)).toHaveLength(1);
+    const hook = read('../src/modules/openfinance/useSyncRun.ts');
+    expect(hook).toMatch(/requestAndFollowSync\(connectionId, options, \{[\s\S]{0,600}onAccepted,\s*\}\)/);
+  });
+
+  it('Open Finance: a linha da revisão que não pode ser confirmada mostra o motivo que vem da regra testada (revisão 1, I5)', () => {
+    const review = read('(main)/openfinance/review.tsx');
+    expect(review).toMatch(/const whyNot = unselectableReason\(line\);/);
+    expect(review).toMatch(/\{whyNot \? <Text style=\{styles\.pendingText\}>\{whyNot\}<\/Text> : null\}/);
+    expect(review).toMatch(/confirmResultMessage\(created, already, skipped\)/);
   });
 
   it('Open Finance: a revisão do banco volta para Transações, é remontada a cada visita e usa as regras testadas', () => {
@@ -140,7 +177,7 @@ describe('voltar das abas ocultas (M-I2)', () => {
 
   it('Open Finance: o passo 5 do wizard manda o período escolhido e termina no botão da revisão', () => {
     const wizard = read('(main)/settings/openfinance/wizard.tsx');
-    expect(wizard).toMatch(/sync\.start\(connectionId, \{\s*historyMonths,/);
+    expect(wizard).toMatch(/sync\.start\(\s*connectionId,\s*\{\s*historyMonths: periodChoosable \? historyMonths : undefined,/);
     expect(wizard).toMatch(/HISTORY_OPTIONS\.map\(/);
     expect(wizard).toContain('Conectar e sincronizar');
     expect(wizard).toMatch(/reviewDoneLabel\(toReview\)/);

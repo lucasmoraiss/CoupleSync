@@ -25,7 +25,16 @@ import { colors } from '@/theme';
 import { OPEN_FINANCE_STATUS_KEY, useOpenFinanceStatus } from '@/modules/openfinance/useOpenFinanceStatus';
 import { BANK_REVIEW_KEY } from '@/modules/openfinance/useBankReview';
 import { useSyncRun } from '@/modules/openfinance/useSyncRun';
-import { SYNC_STILL_RUNNING_TEXT, canSyncNow, lastSyncText, runProgressText, runResultText } from '@/modules/openfinance/sync';
+import {
+  CHOOSE_PERIOD_BUTTON,
+  CHOOSE_PERIOD_TEXT,
+  SYNC_STILL_RUNNING_TEXT,
+  lastSyncText,
+  runProgressText,
+  runResultText,
+  shouldClearSyncOnRefocus,
+  syncActionOf,
+} from '@/modules/openfinance/sync';
 import { isAiChatAllowedNow } from '@/modules/privacy/consentStore';
 import { AI_FEATURE_ENABLED } from '@/modules/chat/aiAvailability';
 import { aiConsentForUpload } from '@/modules/ocr/uploadForm';
@@ -78,9 +87,23 @@ export default function OpenFinanceScreen() {
     await refetch({ cancelRefetch: false });
   };
 
+  // Primeira sincronização: a pessoa escolhe antes quanto do passado trazer, no passo "Período" do wizard (que
+  // abre nele quando o progresso guardado aponta para esta conexão).
+  const choosePeriod = async (connection: BankConnectionResponse) => {
+    const epoch = getSessionEpoch();
+    const store = useWizardStore.getState();
+    await store.load();
+    if (getSessionEpoch() !== epoch) return;
+    await store.save({ step: 5, connectionId: connection.id });
+    if (getSessionEpoch() !== epoch) return;
+    openWizard();
+  };
+
   // A tela é uma aba oculta e continua montada: o que o parceiro conectou, o status e os saldos mudam sem ela
-  // saber. Busca de novo a cada volta à tela e ao puxar para atualizar.
+  // saber. Busca de novo a cada volta à tela e ao puxar para atualizar. O resultado da sincronização pedida numa
+  // visita anterior ("concluída…", "sincronizada há pouco…") não fica para esta.
   useOnRefocus(() => {
+    if (shouldClearSyncOnRefocus(sync.phase)) sync.reset();
     void refetch({ cancelRefetch: false });
   });
   const handleRefresh = useCallback(async () => {
@@ -207,6 +230,7 @@ export default function OpenFinanceScreen() {
         {connections.map((connection) => {
           const controls = connectionControls(connection, available);
           const errorHelp = connectionErrorHelp(connection);
+          const syncAction = syncActionOf(connection, available);
           return (
             <View key={connection.id} style={styles.card}>
               <Text style={styles.cardTitle}>{connection.label}</Text>
@@ -261,7 +285,23 @@ export default function OpenFinanceScreen() {
                 );
               })}
 
-              {canSyncNow(connection, available, false) ? (
+              {syncAction === 'choosePeriod' ? (
+                <View style={styles.syncBox}>
+                  <Text style={styles.cardText}>{CHOOSE_PERIOD_TEXT}</Text>
+                  <TouchableOpacity
+                    style={[styles.primaryBtn, disconnecting && styles.disabledBtn]}
+                    onPress={() => void choosePeriod(connection)}
+                    disabled={disconnecting}
+                    accessibilityRole="button"
+                    accessibilityLabel={CHOOSE_PERIOD_BUTTON}
+                    accessibilityState={{ disabled: disconnecting }}
+                  >
+                    <Text style={styles.primaryText}>{CHOOSE_PERIOD_BUTTON}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {syncAction === 'syncNow' ? (
                 <View style={styles.syncBox}>
                   <TouchableOpacity
                     style={[styles.primaryBtn, (sync.phase === 'working' || disconnecting) && styles.disabledBtn]}

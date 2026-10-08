@@ -9,9 +9,17 @@ import {
   historyLabel,
   isRunFinished,
   lastSyncText,
+  neverSynced,
+  requestAndFollowSync,
   runProgressText,
   runResultText,
+  shouldClearSyncOnRefocus,
+  syncActionOf,
   syncQuery,
+  RUN_POLL_MS,
+  RUN_WAIT_LIMIT_MS,
+  type FollowSyncDeps,
+  type SyncRunState,
 } from '../sync';
 import type { BankConnectionResponse, OpenFinanceStatusResponse, SyncRunResponse } from '@/types/api';
 
@@ -116,6 +124,148 @@ describe('tela Open Finance', () => {
     expect(lastSyncText(connection({ lastSyncAtUtc: '2026-10-07T01:30:00Z' }))).toBe('Última sincronização: 06/10/2026 às 22:30');
     expect(lastSyncText(connection({ lastSyncAtUtc: null }))).toBe('Ainda sem sincronização.');
     expect(lastSyncText(connection({ lastSyncAtUtc: 'não é data' }))).toBe('Ainda sem sincronização.');
+  });
+});
+
+describe('primeira sincronização: o período é escolhido antes (revisão 1, I7)', () => {
+  it('conexão que nunca sincronizou leva à escolha do período, não a "Sincronizar agora"', () => {
+    expect(syncActionOf(connection({ lastSyncAtUtc: null }), true)).toBe('choosePeriod');
+    expect(syncActionOf(connection({ lastSyncAtUtc: null, status: 'Error' }), true)).toBe('choosePeriod');
+    expect(syncActionOf(connection({ lastSyncAtUtc: 'não é data' }), true)).toBe('choosePeriod');
+  });
+
+  it('depois da primeira sincronização o período não aparece mais: só "Sincronizar agora"', () => {
+    expect(syncActionOf(connection(), true)).toBe('syncNow');
+    expect(syncActionOf(connection({ status: 'Error' }), true)).toBe('syncNow');
+  });
+
+  it('quem não conectou, conexão desligada, sem banco ou servidor indisponível: nenhum dos dois', () => {
+    for (const lastSyncAtUtc of [null, '2026-10-07T06:00:00Z']) {
+      expect(syncActionOf(connection({ lastSyncAtUtc, isMine: false }), true)).toBe('none');
+      expect(syncActionOf(connection({ lastSyncAtUtc, status: 'Disconnected' }), true)).toBe('none');
+      expect(syncActionOf(connection({ lastSyncAtUtc, items: [] }), true)).toBe('none');
+      expect(syncActionOf(connection({ lastSyncAtUtc }), false)).toBe('none');
+    }
+  });
+
+  it('"nunca sincronizou": sem data, com data inválida ou sem conexão carregada ainda', () => {
+    expect(neverSynced(connection({ lastSyncAtUtc: null }))).toBe(true);
+    expect(neverSynced(connection({ lastSyncAtUtc: 'ontem' }))).toBe(true);
+    expect(neverSynced(null)).toBe(true);
+    expect(neverSynced(connection())).toBe(false);
+  });
+});
+
+describe('pedir e acompanhar uma sincronização', () => {
+  /** O servidor de mentira: responde ao pedido com `accepted` e, a cada consulta, com o próximo de `polls`. */
+  function follow(accepted: SyncRunResponse | Error | object, polls: Array<SyncRunResponse | Error> = []) {
+    const states: SyncRunState[] = [];
+    const acceptedCalls: Array<{ run: SyncRunResponse; phasesSoFar: string[] }> = [];
+    const asked: string[] = [];
+    let clock = 0;
+    let current = true;
+    let next = 0;
+    const deps: { -readonly [K in keyof FollowSyncDeps]: FollowSyncDeps[K] } = {
+      requestSync: async (connectionId, query) => {
+        asked.push(`${connectionId}${query}`);
+        if (accepted instanceof Error || !('id' in accepted)) throw accepted;
+        return accepted as SyncRunResponse;
+      },
+      getSyncRun: async () => {
+        const answer = polls[Math.min(next++, polls.length - 1)];
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+      wait: async (ms) => {
+        clock += ms;
+      },
+      now: () => clock,
+      isCurrent: () => current,
+      onState: (state) => states.push(state),
+      onAccepted: (accepted) => acceptedCalls.push({ run: accepted, phasesSoFar: states.map((s) => `${s.phase}:${s.run?.status ?? '-'}`) }),
+    };
+    return { deps, states, acceptedCalls, asked, leave: () => (current = false), polled: () => next };
+  }
+
+  it('avisa que o pedido foi aceito assim que o servidor responde, antes de a sincronização terminar (M1)', async () => {
+    const f = follow(run(), [run({ status: 'Running' }), run({ status: 'Done', transactionsNew: 4 })]);
+
+    const result = await requestAndFollowSync('conn-1', { historyMonths: 6 }, f.deps);
+
+    expect(f.asked).toEqual(['conn-1?historyMonths=6']);
+    expect(f.acceptedCalls).toHaveLength(1);
+    expect(f.acceptedCalls[0].run.status).toBe('Pending');
+    // Quando o aceite foi avisado, a tela só tinha mostrado "pedindo": nada da execução ainda.
+    expect(f.acceptedCalls[0].phasesSoFar).toEqual(['working:-']);
+    expect(result?.status).toBe('Done');
+    expect(f.states.map((s) => `${s.phase}:${s.run?.status ?? '-'}`)).toEqual([
+      'working:-',
+      'working:Pending',
+      'working:Running',
+      'working:Done',
+      'done:Done',
+    ]);
+  });
+
+  it('quem sai da tela no meio já teve o aceite avisado, e nada mais é mostrado nem consultado', async () => {
+    const f = follow(run(), [run({ status: 'Running' })]);
+    f.deps.wait = async () => {
+      f.leave();
+    };
+
+    await expect(requestAndFollowSync('conn-1', {}, f.deps)).resolves.toBeNull();
+
+    expect(f.acceptedCalls).toHaveLength(1);
+    expect(f.polled()).toBe(0);
+    expect(f.states.map((s) => s.phase)).toEqual(['working', 'working']);
+  });
+
+  it('pedido recusado ("já há uma sincronização em andamento"): mostra o texto do servidor e não avisa aceite', async () => {
+    const refused = { response: { status: 409, data: { code: 'SYNC_ALREADY_RUNNING', message: 'Já há uma sincronização em andamento para esta conexão. Aguarde ela terminar.' } } };
+    const f = follow(refused);
+
+    await expect(requestAndFollowSync('conn-1', { force: true }, f.deps)).resolves.toBeNull();
+
+    expect(f.acceptedCalls).toEqual([]);
+    expect(f.states[f.states.length - 1]).toEqual({
+      phase: 'failed',
+      run: null,
+      requestError: 'Já há uma sincronização em andamento para esta conexão. Aguarde ela terminar.',
+    });
+  });
+
+  it('a sincronização que falha termina em "failed" com a sincronização (o texto vem dela)', async () => {
+    const f = follow(run(), [run({ status: 'Failed', errorCode: 'SYNC_TIMED_OUT', errorMessage: 'A sincronização demorou demais e foi encerrada. Sincronize de novo.' })]);
+
+    const result = await requestAndFollowSync('conn-1', {}, f.deps);
+
+    expect(result?.status).toBe('Failed');
+    const last = f.states[f.states.length - 1];
+    expect(last.phase).toBe('failed');
+    expect(runResultText(last.run!)).toBe('A sincronização demorou demais e foi encerrada. Sincronize de novo.');
+  });
+
+  it('consulta que falha (rede) não encerra; no limite de espera a tela desiste e a sincronização segue', async () => {
+    const f = follow(run(), [new Error('sem rede'), run({ status: 'Running' })]);
+
+    const result = await requestAndFollowSync('conn-1', {}, f.deps);
+
+    expect(result?.status).toBe('Running');
+    expect(f.states[f.states.length - 1].phase).toBe('stillRunning');
+    expect(f.polled()).toBeGreaterThanOrEqual(Math.floor(RUN_WAIT_LIMIT_MS / RUN_POLL_MS));
+  });
+});
+
+describe('volta à tela Open Finance (aba oculta que continua montada; revisão 1, I4)', () => {
+  it('o resultado de uma sincronização pedida numa visita anterior não fica para a seguinte', () => {
+    expect(shouldClearSyncOnRefocus('done')).toBe(true);
+    expect(shouldClearSyncOnRefocus('failed')).toBe(true);
+    expect(shouldClearSyncOnRefocus('stillRunning')).toBe(true);
+  });
+
+  it('uma sincronização ainda em andamento continua sendo acompanhada; sem nada, não há o que limpar', () => {
+    expect(shouldClearSyncOnRefocus('working')).toBe(false);
+    expect(shouldClearSyncOnRefocus('idle')).toBe(false);
   });
 });
 

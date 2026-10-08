@@ -144,7 +144,7 @@ const GEMINI_SHARING_WHEN_AVAILABLE =
   'Com o Google Gemini, somente depois que você aceita o aviso do Chat IA e somente quando o servidor está com a IA ligada: a sua pergunta e os dados financeiros do grupo (chat) e as descrições das linhas dos extratos importados e das despesas vindas do banco pelo Open Finance (categorização).';
 
 const GEMINI_SHARING_WHEN_UNAVAILABLE =
-  'Com o Google Gemini, apenas quando o recurso de IA estiver disponível no app. Nesta versão ele está desligado e nada é enviado ao Gemini. Quando estiver disponível, o app vai pedir o seu aceite antes; só então poderão ser enviados a sua pergunta e os dados financeiros do grupo (chat) e as descrições das linhas dos extratos importados (categorização).';
+  'Com o Google Gemini, apenas quando o recurso de IA estiver disponível no app. Nesta versão ele está desligado e nada é enviado ao Gemini. Quando estiver disponível, o app vai pedir o seu aceite antes; só então poderão ser enviados a sua pergunta e os dados financeiros do grupo (chat) e as descrições das linhas dos extratos importados e das despesas vindas do banco pelo Open Finance (categorização).';
 
 /**
  * As seções da tela Privacidade. `aiAvailable` diz se o Chat IA existe nesta versão do app: quando não existe,

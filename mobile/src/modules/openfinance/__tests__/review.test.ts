@@ -19,6 +19,7 @@ import {
   selectedTotalBrl,
   shiftMonth,
   toggleSelected,
+  unselectableReason,
 } from '../review';
 import type { BankReviewLineResponse } from '@/types/api';
 
@@ -81,6 +82,31 @@ describe('Selecionar tudo', () => {
     expect(selectedTotalBrl(lines, new Set(['a', 'u', 'b']))).toBeCloseTo(82.3, 2);
     expect(selectedTotalBrl(lines, new Set(['u']))).toBe(0);
     expect(selectedTotalBrl(lines, new Set())).toBe(0);
+  });
+});
+
+describe('lançamento sem valor (revisão 1, I5)', () => {
+  const zero = line({ id: 'z', amount: 0, description: 'Tarifa Exemplo Zerada', merchant: null });
+  const withZero = [posted, zero, other];
+
+  it('não é selecionável, nem por toque, e "Selecionar tudo" não o marca', () => {
+    expect(isSelectable(zero)).toBe(false);
+    expect(selectAllIds(withZero)).toEqual(['a', 'b']);
+    expect([...toggleSelected(new Set<string>(), zero)]).toEqual([]);
+    expect(allSelected(withZero, new Set(['a', 'b']))).toBe(true);
+  });
+
+  it('nunca entra num lote de confirmação nem no total, mesmo que estivesse marcado', () => {
+    const forced = new Set(['a', 'z', 'b']);
+    expect(buildConfirmBatches(withZero, forced, {})).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }] }]);
+    expect([...pruneSelection(forced, withZero)]).toEqual(['a', 'b']);
+    expect(selectedTotalBrl(withZero, forced)).toBeCloseTo(82.3);
+  });
+
+  it('a linha diz por que não pode ser confirmada: sem valor, ou pendente no banco', () => {
+    expect(unselectableReason(zero)).toBe('Sem valor: não vira despesa. Você pode descartar.');
+    expect(unselectableReason(pendingAtBank)).toBe('Pendente no banco: poderá ser confirmado quando o banco efetivar.');
+    expect(unselectableReason(posted)).toBeNull();
   });
 });
 
@@ -198,5 +224,11 @@ describe('textos', () => {
     expect(confirmResultMessage(3, 2)).toBe('3 despesas registradas. 2 já estavam registradas.');
     expect(confirmResultMessage(0, 1)).toBe('1 já estava registrada.');
     expect(confirmResultMessage(0, 0)).toBe('Nada a registrar.');
+  });
+
+  it('o aviso diz quando o servidor pulou linhas sem valor (elas continuam na revisão)', () => {
+    expect(confirmResultMessage(2, 0, 1)).toBe('2 despesas registradas. 1 sem valor continua na revisão.');
+    expect(confirmResultMessage(0, 0, 3)).toBe('3 sem valor continuam na revisão.');
+    expect(confirmResultMessage(2, 1, 0)).toBe('2 despesas registradas. 1 já estava registrada.');
   });
 });

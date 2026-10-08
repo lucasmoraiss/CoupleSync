@@ -3,6 +3,7 @@
 //
 // A sincronização roda no servidor: o app só pede (POST connections/{id}/sync) e acompanha (GET sync-runs/{id}).
 // Só quem conectou pede. Ao abrir o app, o pedido é silencioso: nenhum erro dele aparece.
+import { getApiErrorMessage } from '@/services/apiError';
 import { formatBrazilDate, formatBrazilTime } from '@/utils/brazilDateTime';
 import type { BankConnectionResponse, OpenFinanceStatusResponse, SyncRunResponse } from '@/types/api';
 
@@ -67,6 +68,82 @@ export function runResultText(run: Pick<SyncRunResponse, 'status' | 'transaction
   return added === 1 ? 'Sincronização concluída. 1 transação nova.' : `Sincronização concluída. ${added} transações novas.`;
 }
 
+export type SyncPhase = 'idle' | 'working' | 'done' | 'failed' | 'stillRunning';
+
+export interface SyncRunState {
+  readonly phase: SyncPhase;
+  /** A sincronização acompanhada (null antes da resposta do pedido). */
+  readonly run: SyncRunResponse | null;
+  /** Por que não deu para pedir (texto da API, em português), quando phase é 'failed' sem run. */
+  readonly requestError: string | null;
+}
+
+export const SYNC_IDLE: SyncRunState = { phase: 'idle', run: null, requestError: null };
+
+export interface FollowSyncDeps {
+  readonly requestSync: (connectionId: string, query: string) => Promise<SyncRunResponse>;
+  readonly getSyncRun: (runId: string) => Promise<SyncRunResponse>;
+  readonly wait: (ms: number) => Promise<void>;
+  readonly now: () => number;
+  /** Falso quando a tela saiu, outro pedido começou ou a sessão mudou: nada mais é mostrado nem pedido. */
+  readonly isCurrent: () => boolean;
+  readonly onState: (state: SyncRunState) => void;
+  /** O servidor aceitou o pedido (a sincronização está na fila): chamado uma vez, antes de acompanhar. */
+  readonly onAccepted?: (run: SyncRunResponse) => void;
+}
+
+/**
+ * Pede uma sincronização e acompanha até terminar, ou até o limite de espera (ela segue no servidor). Devolve a
+ * sincronização como ficou, ou null quando o pedido foi recusado ou deixou de ser o atual.
+ */
+export async function requestAndFollowSync(
+  connectionId: string,
+  options: SyncOptions,
+  deps: FollowSyncDeps,
+): Promise<SyncRunResponse | null> {
+  deps.onState({ phase: 'working', run: null, requestError: null });
+  let run: SyncRunResponse;
+  try {
+    run = await deps.requestSync(connectionId, syncQuery(options));
+  } catch (error) {
+    if (deps.isCurrent()) deps.onState({ phase: 'failed', run: null, requestError: getApiErrorMessage(error, SYNC_FAILED_TEXT) });
+    return null;
+  }
+  if (!deps.isCurrent()) return null;
+  deps.onAccepted?.(run);
+  deps.onState({ phase: 'working', run, requestError: null });
+
+  const deadline = deps.now() + RUN_WAIT_LIMIT_MS;
+  while (!isRunFinished(run)) {
+    if (deps.now() > deadline) {
+      if (deps.isCurrent()) deps.onState({ phase: 'stillRunning', run, requestError: null });
+      return run;
+    }
+    await deps.wait(RUN_POLL_MS);
+    if (!deps.isCurrent()) return null;
+    try {
+      run = await deps.getSyncRun(run.id);
+    } catch {
+      // Uma consulta que falhou (rede) não encerra o acompanhamento: tenta de novo até o limite de espera.
+      continue;
+    }
+    if (!deps.isCurrent()) return null;
+    deps.onState({ phase: 'working', run, requestError: null });
+  }
+
+  deps.onState({ phase: run.status === 'Done' ? 'done' : 'failed', run, requestError: null });
+  return run;
+}
+
+/**
+ * A tela Open Finance continua montada entre visitas: o resultado de uma sincronização ("concluída…",
+ * "sincronizada há pouco…") é de quando foi pedido e some na visita seguinte. Uma sincronização ainda em andamento
+ * continua sendo acompanhada.
+ */
+export function shouldClearSyncOnRefocus(phase: SyncPhase): boolean {
+  return phase !== 'idle' && phase !== 'working';
+}
+
 // ---------------------------------------------------------------- tela Open Finance
 
 /** O botão "Sincronizar agora": de quem conectou, com o servidor disponível, a conexão ligada e algum banco. */
@@ -77,6 +154,29 @@ export function canSyncNow(
 ): boolean {
   return !busy && available && connection.isMine === true && connection.status !== 'Disconnected' && connection.items.length > 0;
 }
+
+/** Nunca sincronizou: quem conectou ainda não escolheu quanto do passado trazer. */
+export function neverSynced(connection: Pick<BankConnectionResponse, 'lastSyncAtUtc'> | null | undefined): boolean {
+  const at = connection?.lastSyncAtUtc;
+  return !at || Number.isNaN(Date.parse(at));
+}
+
+/**
+ * O que a tela Open Finance oferece para sincronizar uma conexão. Antes da primeira sincronização a pessoa escolhe
+ * o período (passo "Período" do wizard): 'choosePeriod'. Depois da primeira o período não aparece mais: 'syncNow'.
+ */
+export type SyncAction = 'none' | 'choosePeriod' | 'syncNow';
+
+export function syncActionOf(
+  connection: Pick<BankConnectionResponse, 'isMine' | 'status' | 'items' | 'lastSyncAtUtc'>,
+  available: boolean,
+): SyncAction {
+  if (!canSyncNow(connection, available, false)) return 'none';
+  return neverSynced(connection) ? 'choosePeriod' : 'syncNow';
+}
+
+export const CHOOSE_PERIOD_TEXT = 'Antes da primeira sincronização, escolha quanto do passado trazer.';
+export const CHOOSE_PERIOD_BUTTON = 'Escolher período e sincronizar';
 
 export function lastSyncText(connection: Pick<BankConnectionResponse, 'lastSyncAtUtc'>): string {
   const at = connection.lastSyncAtUtc;

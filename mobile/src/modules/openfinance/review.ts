@@ -9,12 +9,24 @@ import type { BankReviewLineResponse, BankReviewMonthResponse, ConfirmBankReview
 /** Linhas por chamada de confirmação. O servidor aceita até 500. */
 export const CONFIRM_BATCH_SIZE = 200;
 
-/** Lançamento que o banco ainda não efetivou: aparece em cinza, sem caixa, e o servidor recusa confirmá-lo. */
-export function isSelectable(line: Pick<BankReviewLineResponse, 'bankStatus'>): boolean {
-  return line.bankStatus !== 'Pending';
+export const PENDING_AT_BANK_TEXT = 'Pendente no banco: poderá ser confirmado quando o banco efetivar.';
+export const NO_VALUE_TEXT = 'Sem valor: não vira despesa. Você pode descartar.';
+
+/**
+ * Por que a linha não pode ser confirmada (aparece em cinza e sem caixa); null quando pode. O banco ainda não
+ * efetivou o lançamento (o servidor recusa confirmá-lo), ou ele veio sem valor (o servidor o pula).
+ */
+export function unselectableReason(line: Pick<BankReviewLineResponse, 'bankStatus' | 'amount'>): string | null {
+  if (line.bankStatus === 'Pending') return PENDING_AT_BANK_TEXT;
+  if (!(line.amount > 0)) return NO_VALUE_TEXT;
+  return null;
 }
 
-/** "Selecionar tudo": todas as despesas da lista, menos as pendentes no banco. */
+export function isSelectable(line: Pick<BankReviewLineResponse, 'bankStatus' | 'amount'>): boolean {
+  return unselectableReason(line) === null;
+}
+
+/** "Selecionar tudo": todas as despesas da lista, menos as pendentes no banco e as sem valor. */
 export function selectAllIds(lines: readonly BankReviewLineResponse[]): string[] {
   return lines.filter(isSelectable).map((line) => line.id);
 }
@@ -24,7 +36,7 @@ export function allSelected(lines: readonly BankReviewLineResponse[], selected: 
   return ids.length > 0 && ids.every((id) => selected.has(id));
 }
 
-/** Marca ou desmarca uma linha (devolve um conjunto novo). Linha pendente no banco não muda nada. */
+/** Marca ou desmarca uma linha (devolve um conjunto novo). Linha que não pode ser confirmada não muda nada. */
 export function toggleSelected(selected: ReadonlySet<string>, line: BankReviewLineResponse): Set<string> {
   const next = new Set(selected);
   if (!isSelectable(line)) return next;
@@ -147,11 +159,15 @@ export function reviewDoneLabel(pending: number): string {
   return pending === 1 ? 'Ver 1 transação para revisar' : `Ver ${pending} transações para revisar`;
 }
 
-export function confirmResultMessage(created: number, alreadyConfirmed: number): string {
+/** `skipped`: linhas sem valor que o servidor pulou (continuam na revisão). */
+export function confirmResultMessage(created: number, alreadyConfirmed: number, skipped: number = 0): string {
   const parts: string[] = [];
   if (created > 0) parts.push(created === 1 ? '1 despesa registrada.' : `${created} despesas registradas.`);
   if (alreadyConfirmed > 0) {
     parts.push(alreadyConfirmed === 1 ? '1 já estava registrada.' : `${alreadyConfirmed} já estavam registradas.`);
+  }
+  if (skipped > 0) {
+    parts.push(skipped === 1 ? '1 sem valor continua na revisão.' : `${skipped} sem valor continuam na revisão.`);
   }
   return parts.length > 0 ? parts.join(' ') : 'Nada a registrar.';
 }

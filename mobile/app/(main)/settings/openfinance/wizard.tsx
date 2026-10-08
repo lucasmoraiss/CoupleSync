@@ -39,6 +39,7 @@ import {
   HISTORY_OPTIONS,
   SYNC_STILL_RUNNING_TEXT,
   historyLabel,
+  neverSynced,
   runProgressText,
   runResultText,
 } from '@/modules/openfinance/sync';
@@ -53,6 +54,7 @@ import {
   MAX_LABEL_LENGTH,
   MEU_PLUGGY_STEPS,
   MEU_PLUGGY_URL,
+  PERIOD_ALREADY_CHOSEN_TEXT,
   PERIOD_TEXT,
   UNAVAILABLE_TEXT,
   UNAVAILABLE_TITLE,
@@ -140,6 +142,11 @@ function OpenFinanceWizardScreen() {
   const [verifyingKey, setVerifyingKey] = useState<number | null>(null);
   // Passo 5
   const [historyMonths, setHistoryMonths] = useState<number>(3);
+  /**
+   * O período só é escolhido antes da primeira sincronização da conexão. Decidido ao chegar ao passo 5 (e não a
+   * cada desenho): a sincronização pedida aqui mesmo muda a conexão, e a tela não troca no meio.
+   */
+  const [periodChoosable, setPeriodChoosable] = useState(true);
   const sync = useSyncRun();
   /** Quantas despesas esperam a revisão depois da sincronização (null: ainda não se sabe). */
   const [toReview, setToReview] = useState<number | null>(null);
@@ -169,6 +176,7 @@ function OpenFinanceWizardScreen() {
       setConnectionId(mine.id);
       setHistoryMonths(mine.historyMonths);
     }
+    setPeriodChoosable(neverSynced(mine));
   }, [ready, step, consentAccepted, mine]);
 
   /** Muda de passo na tela e guarda o progresso (sem nada sensível). */
@@ -302,6 +310,7 @@ function OpenFinanceWizardScreen() {
 
   const handleToPeriod = () => {
     if (!canFinishWizard(items.map((item) => ({ verified: item.found !== null })))) return;
+    setPeriodChoosable(neverSynced(mine));
     goTo(5, { connectionId });
   };
 
@@ -312,14 +321,17 @@ function OpenFinanceWizardScreen() {
     const epoch = getSessionEpoch();
     setNotice(null);
     setToReview(null);
-    const run = await sync.start(connectionId, {
-      historyMonths,
-      aiConsent: aiConsentForUpload(AI_FEATURE_ENABLED, isAiChatAllowedNow()),
-    });
+    const run = await sync.start(
+      connectionId,
+      {
+        historyMonths: periodChoosable ? historyMonths : undefined,
+        aiConsent: aiConsentForUpload(AI_FEATURE_ENABLED, isAiChatAllowedNow()),
+      },
+      // Pedido aceito pelo servidor: o wizard terminou ali, não há mais o que retomar. Não espera a sincronização
+      // acabar: quem sair no meio não encontra o wizard preso neste passo.
+      () => void useWizardStore.getState().finish(),
+    );
     if (getSessionEpoch() !== epoch || !run) return;
-    // Pedido aceito: o wizard terminou, não há mais o que retomar.
-    await useWizardStore.getState().finish();
-    if (getSessionEpoch() !== epoch) return;
     void queryClient.invalidateQueries({ queryKey: OPEN_FINANCE_STATUS_KEY });
     void queryClient.invalidateQueries({ queryKey: BANK_REVIEW_KEY });
     if (run.status !== 'Done') return;
@@ -607,28 +619,30 @@ function OpenFinanceWizardScreen() {
 
           {step === 5 ? (
             <>
-              <Text style={styles.title} accessibilityRole="header">Quanto do passado trazer</Text>
-              <Text style={styles.subtitle}>{PERIOD_TEXT}</Text>
+              <Text style={styles.title} accessibilityRole="header">{periodChoosable ? 'Quanto do passado trazer' : 'Sincronizar'}</Text>
+              <Text style={styles.subtitle}>{periodChoosable ? PERIOD_TEXT : PERIOD_ALREADY_CHOSEN_TEXT}</Text>
 
-              <View accessibilityRole="radiogroup" accessibilityLabel="Período do histórico" style={styles.options}>
-                {HISTORY_OPTIONS.map((months) => {
-                  const chosen = historyMonths === months;
-                  const locked = sync.phase !== 'idle' && sync.phase !== 'failed';
-                  return (
-                    <TouchableOpacity
-                      key={months}
-                      style={[styles.option, chosen && styles.optionOn, locked && styles.disabled]}
-                      onPress={() => setHistoryMonths(months)}
-                      disabled={locked}
-                      accessibilityRole="radio"
-                      accessibilityLabel={`Últimos ${historyLabel(months)}`}
-                      accessibilityState={{ checked: chosen, disabled: locked }}
-                    >
-                      <Text style={[styles.optionText, chosen && styles.optionTextOn]}>{historyLabel(months)}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+              {periodChoosable ? (
+                <View accessibilityRole="radiogroup" accessibilityLabel="Período do histórico" style={styles.options}>
+                  {HISTORY_OPTIONS.map((months) => {
+                    const chosen = historyMonths === months;
+                    const locked = sync.phase !== 'idle' && sync.phase !== 'failed';
+                    return (
+                      <TouchableOpacity
+                        key={months}
+                        style={[styles.option, chosen && styles.optionOn, locked && styles.disabled]}
+                        onPress={() => setHistoryMonths(months)}
+                        disabled={locked}
+                        accessibilityRole="radio"
+                        accessibilityLabel={`Últimos ${historyLabel(months)}`}
+                        accessibilityState={{ checked: chosen, disabled: locked }}
+                      >
+                        <Text style={[styles.optionText, chosen && styles.optionTextOn]}>{historyLabel(months)}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : null}
 
               {sync.phase === 'idle' || sync.phase === 'failed' ? (
                 <TouchableOpacity
@@ -636,10 +650,12 @@ function OpenFinanceWizardScreen() {
                   onPress={() => void handleSync()}
                   disabled={!connectionId}
                   accessibilityRole="button"
-                  accessibilityLabel={sync.phase === 'failed' ? 'Tentar sincronizar de novo' : 'Conectar e sincronizar'}
+                  accessibilityLabel={sync.phase === 'failed' ? 'Tentar sincronizar de novo' : periodChoosable ? 'Conectar e sincronizar' : 'Sincronizar agora'}
                   accessibilityState={{ disabled: !connectionId }}
                 >
-                  <Text style={styles.primaryText}>{sync.phase === 'failed' ? 'Tentar de novo' : 'Conectar e sincronizar'}</Text>
+                  <Text style={styles.primaryText}>
+                    {sync.phase === 'failed' ? 'Tentar de novo' : periodChoosable ? 'Conectar e sincronizar' : 'Sincronizar agora'}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
 

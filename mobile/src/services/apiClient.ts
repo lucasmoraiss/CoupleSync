@@ -479,7 +479,8 @@ export const openFinanceApiClient = {
 
   /**
    * Só quem conectou. Põe uma sincronização na fila do servidor e responde na hora (202); `query` vem de
-   * syncQuery(). Uma por conexão a cada 10 minutos (409 SYNC_TOO_SOON); 5 pedidos por minuto por usuário.
+   * syncQuery(). Com uma em andamento: 409 SYNC_ALREADY_RUNNING. Uma por conexão a cada 10 minutos (409
+   * SYNC_TOO_SOON); 5 pedidos por minuto por usuário.
    */
   requestSync: (connectionId: string, query: string = ''): Promise<AxiosResponse<SyncRunResponse>> =>
     axiosInstance.post<SyncRunResponse>(`/api/v1/openfinance/connections/${connectionId}/sync${query}`),
@@ -491,7 +492,7 @@ export const openFinanceApiClient = {
   getReview: (month?: string): Promise<AxiosResponse<BankReviewResponse>> =>
     axiosInstance.get<BankReviewResponse>('/api/v1/openfinance/review', { params: month ? { month } : undefined }),
 
-  /** Confirma despesas (viram transações) e descarta outras. Tudo ou nada por chamada. */
+  /** Confirma despesas (viram transações) e descarta outras. Tudo ou nada por chamada; linha sem valor é pulada (`skipped`). */
   confirmReview: (body: ConfirmBankReviewRequest): Promise<AxiosResponse<ConfirmBankReviewResponse>> =>
     axiosInstance.post<ConfirmBankReviewResponse>('/api/v1/openfinance/review/confirm', body),
 

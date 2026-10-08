@@ -59,6 +59,10 @@ export const WIZARD_STEP_TITLES: Readonly<Record<WizardStep, string>> = {
 export const PERIOD_TEXT =
   'Escolha quanto do passado trazer na primeira sincronização. Nada entra direto: cada transação passa pela sua revisão antes de virar despesa.';
 
+/** Passo 5 de uma conexão que já sincronizou (banco adicionado depois): o período não é mais uma escolha. */
+export const PERIOD_ALREADY_CHOSEN_TEXT =
+  'O período do histórico foi escolhido na primeira sincronização e vale também para o banco adicionado agora. Nada entra direto: cada transação passa pela sua revisão antes de virar despesa.';
+
 // ---------------------------------------------------------------- progresso guardado
 
 export const PROGRESS_VERSION = 1;

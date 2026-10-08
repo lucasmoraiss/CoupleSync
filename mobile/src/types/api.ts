@@ -574,6 +574,8 @@ export interface ConfirmBankReviewResponse {
   readonly created: ReadonlyArray<{ readonly id: string; readonly transactionId: string }>;
   readonly discarded: readonly string[];
   readonly alreadyConfirmed: number;
+  /** Linhas enviadas para confirmar que não têm valor: o servidor não as confirma e elas continuam na revisão. */
+  readonly skipped?: readonly string[];
 }
 
 export interface RestoreBankReviewResponse {

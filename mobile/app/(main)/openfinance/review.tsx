@@ -46,6 +46,7 @@ import {
   selectedTotalBrl,
   shiftMonth,
   toggleSelected,
+  unselectableReason,
 } from '@/modules/openfinance/review';
 import type { BankReviewLineResponse } from '@/types/api';
 
@@ -128,6 +129,7 @@ function BankReviewScreen() {
     setNotice(null);
     let created = 0;
     let already = 0;
+    let skipped = 0;
     try {
       // Um lote por vez: cada chamada é tudo ou nada no servidor, e o que já entrou fica.
       for (const batch of batches) {
@@ -135,15 +137,16 @@ function BankReviewScreen() {
         if (getSessionEpoch() !== epoch) return;
         created += result.created.length;
         already += result.alreadyConfirmed;
+        skipped += result.skipped?.length ?? 0;
       }
       setSelected(new Set());
       setChosen({});
-      setNotice({ text: confirmResultMessage(created, already), error: false });
+      setNotice({ text: confirmResultMessage(created, already, skipped), error: false });
     } catch (err) {
       if (getSessionEpoch() !== epoch) return;
       const reason = getApiErrorMessage(err, 'Não foi possível confirmar. Tente novamente.');
       setNotice({
-        text: created + already > 0 ? `${confirmResultMessage(created, already)} O restante não entrou: ${reason}` : reason,
+        text: created + already > 0 ? `${confirmResultMessage(created, already, skipped)} O restante não entrou: ${reason}` : reason,
         error: true,
       });
     } finally {
@@ -361,6 +364,7 @@ function BankReviewScreen() {
         )}
         renderItem={({ item: line }) => {
           const selectable = isSelectable(line);
+          const whyNot = unselectableReason(line);
           const checked = selected.has(line.id);
           const category = chosen[line.id] ?? line.suggestedCategory;
           const installment = installmentText(line);
@@ -381,7 +385,7 @@ function BankReviewScreen() {
                   </View>
                 </TouchableOpacity>
               ) : (
-                // Pendente no banco: sem caixa. O espaço fica, para as linhas alinharem.
+                // Pendente no banco ou sem valor: sem caixa. O espaço fica, para as linhas alinharem.
                 <View style={styles.checkTouch} />
               )}
               <View style={styles.lineBody}>
@@ -400,9 +404,7 @@ function BankReviewScreen() {
                 <Text style={styles.muted} numberOfLines={1}>
                   {[line.bankName, line.accountName, installment].filter((part) => !!part).join(' · ')}
                 </Text>
-                {!selectable ? (
-                  <Text style={styles.pendingText}>Pendente no banco: poderá ser confirmado quando o banco efetivar.</Text>
-                ) : null}
+                {whyNot ? <Text style={styles.pendingText}>{whyNot}</Text> : null}
                 <View style={styles.lineActions}>
                   <TouchableOpacity
                     style={styles.chip}
