@@ -1,6 +1,6 @@
 // Revisão do banco (Open Finance): as despesas que a sincronização trouxe esperam aqui até alguém do grupo
 // confirmar. Nada entra sem confirmação; "Selecionar tudo" confirma num toque. O valor não é editável: só a
-// categoria. Lançamento que o banco ainda não efetivou aparece em cinza e sem caixa.
+// categoria. Lançamento que o banco ainda não efetivou, sem valor ou em outra moeda aparece em cinza e sem caixa.
 //
 // Aba oculta cujo pai é Transações. A tela é remontada a cada visita (resetOnFocus): seleção, categorias
 // trocadas e avisos de uma visita não ficam para a seguinte, e a lista é a que o servidor tem agora.
@@ -33,12 +33,13 @@ import { BANK_REVIEW_KEY, useBankReview } from '@/modules/openfinance/useBankRev
 import {
   allSelected,
   buildConfirmBatches,
-  confirmResultMessage,
+  confirmInBatches,
   dayLabel,
   groupByDay,
   initialReviewMonth,
   installmentText,
   isSelectable,
+  lineAmountText,
   lineTitle,
   monthTitle,
   pruneSelection,
@@ -49,15 +50,6 @@ import {
   unselectableReason,
 } from '@/modules/openfinance/review';
 import type { BankReviewLineResponse } from '@/types/api';
-
-function formatMoney(value: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currency || 'BRL' }).format(value);
-  } catch {
-    // Moeda que o aparelho não conhece: o número com o código da moeda.
-    return `${currency} ${value.toFixed(2).replace('.', ',')}`;
-  }
-}
 
 function leave() {
   goToParent('openfinance/review');
@@ -127,28 +119,18 @@ function BankReviewScreen() {
     if (batches.length === 0) return;
     setBusy('confirm');
     setNotice(null);
-    let created = 0;
-    let already = 0;
-    let skipped = 0;
     try {
-      // Um lote por vez: cada chamada é tudo ou nada no servidor, e o que já entrou fica.
-      for (const batch of batches) {
-        const { data: result } = await openFinanceApiClient.confirmReview(batch);
-        if (getSessionEpoch() !== epoch) return;
-        created += result.created.length;
-        already += result.alreadyConfirmed;
-        skipped += result.skipped?.length ?? 0;
-      }
-      setSelected(new Set());
-      setChosen({});
-      setNotice({ text: confirmResultMessage(created, already, skipped), error: false });
-    } catch (err) {
-      if (getSessionEpoch() !== epoch) return;
-      const reason = getApiErrorMessage(err, 'Não foi possível confirmar. Tente novamente.');
-      setNotice({
-        text: created + already > 0 ? `${confirmResultMessage(created, already, skipped)} O restante não entrou: ${reason}` : reason,
-        error: true,
+      // Um lote por vez; para no que falhar, e o que já entrou fica (regra em review.ts).
+      const outcome = await confirmInBatches(batches, {
+        confirm: async (batch) => (await openFinanceApiClient.confirmReview(batch)).data,
+        isCurrent: () => getSessionEpoch() === epoch,
       });
+      if (outcome.kind === 'stale') return;
+      if (outcome.kind === 'done') {
+        setSelected(new Set());
+        setChosen({});
+      }
+      setNotice({ text: outcome.text, error: outcome.kind === 'failed' });
     } finally {
       if (getSessionEpoch() === epoch) {
         setBusy(null);
@@ -284,7 +266,7 @@ function BankReviewScreen() {
         <Text style={styles.sectionTitle} accessibilityRole="header">Despesas ({expenses.length})</Text>
         {expenses.length > 0 ? (
           <Text style={styles.muted} accessibilityLabel={`Total esperando: ${spokenBRL(data.pendingTotalBrl)}`}>
-            {formatMoney(data.pendingTotalBrl, 'BRL')}
+            {lineAmountText(data.pendingTotalBrl, 'BRL')}
           </Text>
         ) : null}
       </View>
@@ -330,7 +312,7 @@ function BankReviewScreen() {
                 <View key={line.id} style={[styles.line, styles.lineMuted]}>
                   <View style={styles.lineBody}>
                     <Text style={styles.lineTitleMuted} numberOfLines={1}>{lineTitle(line)}</Text>
-                    <Text style={styles.muted}>{dayLabel(line.day)} · {formatMoney(line.amount, line.currency)}</Text>
+                    <Text style={styles.muted}>{dayLabel(line.day)} · {lineAmountText(line.amount, line.currency)}</Text>
                   </View>
                   <TouchableOpacity
                     style={styles.smallBtn}
@@ -385,7 +367,7 @@ function BankReviewScreen() {
                   </View>
                 </TouchableOpacity>
               ) : (
-                // Pendente no banco ou sem valor: sem caixa. O espaço fica, para as linhas alinharem.
+                // Pendente no banco, sem valor ou em outra moeda: sem caixa. O espaço fica, para as linhas alinharem.
                 <View style={styles.checkTouch} />
               )}
               <View style={styles.lineBody}>
@@ -393,9 +375,9 @@ function BankReviewScreen() {
                   <Text style={selectable ? styles.lineTitle : styles.lineTitleMuted} numberOfLines={1}>{title}</Text>
                   <Text
                     style={selectable ? styles.amount : styles.amountMuted}
-                    accessibilityLabel={line.currency === 'BRL' ? spokenBRL(line.amount) : formatMoney(line.amount, line.currency)}
+                    accessibilityLabel={line.currency === 'BRL' ? spokenBRL(line.amount) : lineAmountText(line.amount, line.currency)}
                   >
-                    {formatMoney(line.amount, line.currency)}
+                    {lineAmountText(line.amount, line.currency)}
                   </Text>
                 </View>
                 {line.description && line.description !== title ? (
@@ -435,7 +417,7 @@ function BankReviewScreen() {
       {selectableCount > 0 ? (
         <View style={styles.bar}>
           <Text style={styles.muted} accessibilityLiveRegion="polite">
-            {selectedCount === 0 ? 'Nenhuma selecionada' : `${selectedCount} selecionada${selectedCount === 1 ? '' : 's'} · ${formatMoney(total, 'BRL')}`}
+            {selectedCount === 0 ? 'Nenhuma selecionada' : `${selectedCount} selecionada${selectedCount === 1 ? '' : 's'} · ${lineAmountText(total, 'BRL')}`}
           </Text>
           <TouchableOpacity
             style={[styles.primaryBtn, (selectedCount === 0 || busy !== null) && styles.disabled]}

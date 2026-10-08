@@ -4,12 +4,14 @@ import {
   CONFIRM_BATCH_SIZE,
   allSelected,
   buildConfirmBatches,
+  confirmInBatches,
   confirmResultMessage,
   dayLabel,
   groupByDay,
   initialReviewMonth,
   installmentText,
   isSelectable,
+  lineAmountText,
   lineTitle,
   monthTitle,
   pruneSelection,
@@ -21,7 +23,7 @@ import {
   toggleSelected,
   unselectableReason,
 } from '../review';
-import type { BankReviewLineResponse } from '@/types/api';
+import type { BankReviewLineResponse, ConfirmBankReviewRequest, ConfirmBankReviewResponse } from '@/types/api';
 
 const line = (over: Partial<BankReviewLineResponse>): BankReviewLineResponse => ({
   id: 'l-1',
@@ -46,9 +48,10 @@ const dollars = line({ id: 'u', day: '2026-10-05', amount: 25, currency: 'USD', 
 const lines = [pendingAtBank, posted, dollars, other];
 
 describe('Selecionar tudo', () => {
-  it('marca todas as despesas, menos as que ainda estão pendentes no banco', () => {
-    expect(selectAllIds(lines)).toEqual(['a', 'u', 'b']);
+  it('marca todas as despesas, menos as que ainda estão pendentes no banco e as em outra moeda', () => {
+    expect(selectAllIds(lines)).toEqual(['a', 'b']);
     expect(selectAllIds(lines)).not.toContain('p');
+    expect(selectAllIds(lines)).not.toContain('u');
   });
 
   it('lançamento pendente no banco não é selecionável, nem por toque', () => {
@@ -67,14 +70,14 @@ describe('Selecionar tudo', () => {
   });
 
   it('"tudo selecionado" olha só o que pode ser selecionado; sem nada selecionável é falso', () => {
-    expect(allSelected(lines, new Set(['a', 'u', 'b']))).toBe(true);
+    expect(allSelected(lines, new Set(['a', 'b']))).toBe(true);
     expect(allSelected(lines, new Set(['a', 'u']))).toBe(false);
     expect(allSelected([pendingAtBank], new Set())).toBe(false);
     expect(allSelected([], new Set())).toBe(false);
   });
 
-  it('a seleção perde o que saiu da lista ou passou a estar pendente no banco', () => {
-    const selection = new Set(['a', 'b', 'gone', 'p']);
+  it('a seleção perde o que saiu da lista, passou a estar pendente no banco ou está em outra moeda', () => {
+    const selection = new Set(['a', 'b', 'gone', 'p', 'u']);
     expect([...pruneSelection(selection, lines)].sort()).toEqual(['a', 'b']);
   });
 
@@ -82,6 +85,49 @@ describe('Selecionar tudo', () => {
     expect(selectedTotalBrl(lines, new Set(['a', 'u', 'b']))).toBeCloseTo(82.3, 2);
     expect(selectedTotalBrl(lines, new Set(['u']))).toBe(0);
     expect(selectedTotalBrl(lines, new Set())).toBe(0);
+  });
+});
+
+describe('compra em outra moeda (revisão 5, I1)', () => {
+  it('não é selecionável, nem por toque: nesta fase só despesa em reais é confirmada', () => {
+    expect(isSelectable(dollars)).toBe(false);
+    expect(isSelectable(line({ currency: 'EUR' }))).toBe(false);
+    expect(isSelectable(line({ currency: '' }))).toBe(false);
+    expect([...toggleSelected(new Set<string>(), dollars)]).toEqual([]);
+    expect([...toggleSelected(new Set(['a']), dollars)]).toEqual(['a']);
+  });
+
+  it('a linha diz o motivo, em português, e que pode ser descartada', () => {
+    expect(unselectableReason(dollars)).toBe('Em outra moeda: ainda não pode virar despesa. Você pode descartar.');
+    // Pendente no banco vem primeiro: é o que muda sozinho.
+    expect(unselectableReason(line({ currency: 'USD', bankStatus: 'Pending' }))).toBe(
+      'Pendente no banco: poderá ser confirmado quando o banco efetivar.',
+    );
+    expect(unselectableReason(line({ currency: 'USD', amount: 0 }))).toBe('Sem valor: não vira despesa. Você pode descartar.');
+  });
+
+  it('nunca entra num lote de confirmação nem no total em reais, mesmo que estivesse marcada', () => {
+    const forced = new Set(['a', 'u', 'b']);
+    expect(buildConfirmBatches(lines, forced, { u: 'LAZER' })).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }] }]);
+    expect(selectedTotalBrl(lines, forced)).toBeCloseTo(82.3, 2);
+    expect(buildConfirmBatches([dollars], new Set(['u']), {})).toEqual([]);
+  });
+});
+
+describe('o valor da linha nunca aparece como reais sem ser reais (revisão 5, releitura)', () => {
+  const plain = (text: string) => text.replace(/\u00a0/g, ' ');
+
+  it('reais saem como reais; outra moeda, com o símbolo dela', () => {
+    expect(plain(lineAmountText(58.9, 'BRL'))).toBe('R$ 58,90');
+    expect(plain(lineAmountText(25, 'USD'))).toBe('US$ 25,00');
+    expect(plain(lineAmountText(25, 'USD'))).not.toContain('R$');
+  });
+
+  it('sem moeda: só o número, sem "R$"; moeda que o aparelho não conhece: o código e o número', () => {
+    expect(lineAmountText(25, '')).toBe('25,00');
+    expect(lineAmountText(25, null)).toBe('25,00');
+    expect(lineAmountText(25, undefined)).toBe('25,00');
+    expect(lineAmountText(25, 'X1')).toBe('X1 25,00');
   });
 });
 
@@ -117,8 +163,9 @@ describe('lotes de confirmação', () => {
   });
 
   it('manda a categoria só quando a pessoa escolheu outra que não a sugerida', () => {
-    const batches = buildConfirmBatches(lines, new Set(['a', 'b', 'u']), { a: 'LAZER', b: 'TRANSPORTE', gone: 'SAUDE' });
-    expect(batches).toEqual([{ expenses: [{ id: 'a', category: 'LAZER' }, { id: 'u' }, { id: 'b' }] }]);
+    const reais = line({ id: 'r', day: '2026-10-05', amount: 12, suggestedCategory: 'OUTROS' });
+    const batches = buildConfirmBatches([posted, reais, other], new Set(['a', 'b', 'r']), { a: 'LAZER', b: 'TRANSPORTE', gone: 'SAUDE' });
+    expect(batches).toEqual([{ expenses: [{ id: 'a', category: 'LAZER' }, { id: 'r' }, { id: 'b' }] }]);
   });
 
   it('nunca manda valor nem descrição: o valor não é editável', () => {
@@ -145,8 +192,177 @@ describe('lotes de confirmação', () => {
   });
 
   it('aceita outro tamanho de lote', () => {
-    const batches = buildConfirmBatches(lines, new Set(['a', 'u', 'b']), {}, 2);
-    expect(batches.map((b) => b.expenses!.map((e) => e.id))).toEqual([['a', 'u'], ['b']]);
+    const third = line({ id: 'c', day: '2026-10-01' });
+    const batches = buildConfirmBatches([posted, other, third], new Set(['a', 'b', 'c']), {}, 2);
+    expect(batches.map((b) => b.expenses!.map((e) => e.id))).toEqual([['a', 'b'], ['c']]);
+  });
+});
+
+describe('"Confirmar selecionadas": um lote por vez (revisão 5, I3)', () => {
+  const batchOf = (...ids: string[]): ConfirmBankReviewRequest => ({ expenses: ids.map((id) => ({ id })) });
+  const three = [batchOf('a1', 'a2'), batchOf('b1', 'b2'), batchOf('c1')];
+  const answer = (over: Partial<ConfirmBankReviewResponse>): ConfirmBankReviewResponse => ({
+    created: [],
+    discarded: [],
+    alreadyConfirmed: 0,
+    skipped: [],
+    ...over,
+  });
+  const createdFor = (batch: ConfirmBankReviewRequest) => (batch.expenses ?? []).map((e) => ({ id: e.id, transactionId: `t-${e.id}` }));
+
+  it('manda os lotes em ordem, um depois do outro, e soma o que cada um respondeu', async () => {
+    const sent: ConfirmBankReviewRequest[] = [];
+    const answers = [
+      answer({ created: createdFor(three[0]) }),
+      answer({ created: [{ id: 'b1', transactionId: 't-b1' }], alreadyConfirmed: 1 }),
+      answer({ skipped: ['c1'] }),
+    ];
+
+    const outcome = await confirmInBatches(three, {
+      confirm: async (batch) => {
+        sent.push(batch);
+        return answers[sent.length - 1];
+      },
+      isCurrent: () => true,
+    });
+
+    expect(sent).toEqual(three);
+    expect(outcome).toEqual({ kind: 'done', text: '3 despesas registradas. 1 já estava registrada. 1 sem valor continua na revisão.' });
+  });
+
+  it('erro no 2º de 3 lotes: para ali, diz quantas entraram e o motivo, e o 3º não é enviado', async () => {
+    const sent: ConfirmBankReviewRequest[] = [];
+
+    const outcome = await confirmInBatches(three, {
+      confirm: async (batch) => {
+        sent.push(batch);
+        if (sent.length === 2) throw { response: { status: 500 } };
+        return answer({ created: createdFor(batch) });
+      },
+      isCurrent: () => true,
+    });
+
+    expect(sent).toEqual([three[0], three[1]]);
+    expect(outcome).toEqual({
+      kind: 'failed',
+      text: '2 despesas registradas. O restante não entrou: Servidor com problemas. Tente novamente mais tarde.',
+    });
+  });
+
+  it('409 de conflito no meio: para, e mostra a mensagem do servidor depois do que já entrou', async () => {
+    const sent: ConfirmBankReviewRequest[] = [];
+    const conflict = {
+      response: {
+        status: 409,
+        data: { code: 'BANK_REVIEW_CONFLICT', message: 'A revisão mudou enquanto era confirmada. Atualize e tente de novo.' },
+      },
+    };
+
+    const outcome = await confirmInBatches(three, {
+      confirm: async (batch) => {
+        sent.push(batch);
+        if (sent.length === 2) throw conflict;
+        return answer({ created: [{ id: 'a1', transactionId: 't-a1' }], alreadyConfirmed: 1 });
+      },
+      isCurrent: () => true,
+    });
+
+    expect(sent).toHaveLength(2);
+    expect(outcome).toEqual({
+      kind: 'failed',
+      text: '1 despesa registrada. 1 já estava registrada. O restante não entrou: A revisão mudou enquanto era confirmada. Atualize e tente de novo.',
+    });
+  });
+
+  it('erro já no 1º lote: só o motivo (nada entrou), e nenhum outro lote é enviado', async () => {
+    const confirm = jest.fn(async () => {
+      throw { response: { status: 422, data: { code: 'TRANSACTION_NOT_POSTED', message: 'Este lançamento ainda está pendente no banco.' } } };
+    });
+
+    const outcome = await confirmInBatches(three, { confirm, isCurrent: () => true });
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ kind: 'failed', text: 'Este lançamento ainda está pendente no banco.' });
+  });
+
+  it('erro que não diz nada (nem resposta, nem rede): o texto fixo', async () => {
+    const outcome = await confirmInBatches([three[0]], {
+      confirm: async () => {
+        throw new Error('qualquer coisa');
+      },
+      isCurrent: () => true,
+    });
+
+    expect(outcome).toEqual({ kind: 'failed', text: 'Não foi possível confirmar. Tente novamente.' });
+  });
+
+  it('linhas puladas antes do erro, sem nenhuma registrada: só o motivo', async () => {
+    let calls = 0;
+    const outcome = await confirmInBatches(three, {
+      confirm: async () => {
+        calls += 1;
+        if (calls === 2) throw { response: { status: 500 } };
+        return answer({ skipped: ['a1', 'a2'] });
+      },
+      isCurrent: () => true,
+    });
+
+    expect(outcome).toEqual({ kind: 'failed', text: 'Servidor com problemas. Tente novamente mais tarde.' });
+  });
+
+  it('sessão trocada no meio (saiu da conta, trocou de grupo): para sem mandar o lote seguinte e sem aviso', async () => {
+    let current = true;
+    const sent: ConfirmBankReviewRequest[] = [];
+
+    const outcome = await confirmInBatches(three, {
+      confirm: async (batch) => {
+        sent.push(batch);
+        current = false; // a sessão muda enquanto o 1º lote está no servidor
+        return answer({ created: createdFor(batch) });
+      },
+      isCurrent: () => current,
+    });
+
+    expect(sent).toEqual([three[0]]);
+    expect(outcome).toEqual({ kind: 'stale' });
+  });
+
+  it('sessão trocada enquanto um lote falhava: o erro da sessão antiga não vira aviso', async () => {
+    let current = true;
+
+    const outcome = await confirmInBatches(three, {
+      confirm: async () => {
+        current = false;
+        throw { response: { status: 401 } };
+      },
+      isCurrent: () => current,
+    });
+
+    expect(outcome).toEqual({ kind: 'stale' });
+  });
+
+  it('servidor que ainda não manda `skipped`: conta como nenhuma pulada', async () => {
+    const outcome = await confirmInBatches([three[0]], {
+      confirm: async (batch) => ({ created: createdFor(batch), discarded: [], alreadyConfirmed: 0 }),
+      isCurrent: () => true,
+    });
+
+    expect(outcome).toEqual({ kind: 'done', text: '2 despesas registradas.' });
+  });
+
+  it('linhas em outra moeda puladas pelo servidor aparecem com o motivo delas', async () => {
+    const outcome = await confirmInBatches([three[0], three[1]], {
+      confirm: async (batch) =>
+        batch === three[0]
+          ? answer({ created: [{ id: 'a1', transactionId: 't-a1' }], skipped: ['a2'], skippedOtherCurrency: ['a2'] })
+          : answer({ skipped: ['b1', 'b2'], skippedOtherCurrency: ['b2'] }),
+      isCurrent: () => true,
+    });
+
+    expect(outcome).toEqual({
+      kind: 'done',
+      text: '1 despesa registrada. 1 sem valor continua na revisão. 2 em outra moeda continuam na revisão.',
+    });
   });
 });
 
@@ -230,5 +446,12 @@ describe('textos', () => {
     expect(confirmResultMessage(2, 0, 1)).toBe('2 despesas registradas. 1 sem valor continua na revisão.');
     expect(confirmResultMessage(0, 0, 3)).toBe('3 sem valor continuam na revisão.');
     expect(confirmResultMessage(2, 1, 0)).toBe('2 despesas registradas. 1 já estava registrada.');
+  });
+
+  it('o aviso separa as puladas por estarem em outra moeda das sem valor', () => {
+    expect(confirmResultMessage(2, 0, 1, 1)).toBe('2 despesas registradas. 1 em outra moeda continua na revisão.');
+    expect(confirmResultMessage(0, 0, 5, 3)).toBe('2 sem valor continuam na revisão. 3 em outra moeda continuam na revisão.');
+    // Nunca um número negativo de "sem valor", venha o que vier.
+    expect(confirmResultMessage(1, 0, 1, 4)).toBe('1 despesa registrada. 4 em outra moeda continuam na revisão.');
   });
 });

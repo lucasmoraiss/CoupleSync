@@ -144,7 +144,12 @@ describe('voltar das abas ocultas (M-I2)', () => {
     const review = read('(main)/openfinance/review.tsx');
     expect(review).toMatch(/const whyNot = unselectableReason\(line\);/);
     expect(review).toMatch(/\{whyNot \? <Text style=\{styles\.pendingText\}>\{whyNot\}<\/Text> : null\}/);
-    expect(review).toMatch(/confirmResultMessage\(created, already, skipped\)/);
+    // O laço dos lotes (parada no erro, o que já entrou, sessão trocada) é confirmInBatches, testada em review.test.ts.
+    expect(review).toMatch(/await confirmInBatches\(batches, \{[\s\S]{0,200}isCurrent: \(\) => getSessionEpoch\(\) === epoch,\s*\}\)/);
+    expect(review).not.toMatch(/for \(const batch of batches\)/);
+    // O valor de cada linha sai na moeda dela (lineAmountText, testada): a tela não formata dinheiro por conta própria.
+    expect(review).toMatch(/\{lineAmountText\(line\.amount, line\.currency\)\}/);
+    expect(review).not.toMatch(/Intl\.NumberFormat|\|\| 'BRL'/);
   });
 
   it('Open Finance: a revisão do banco volta para Transações, é remontada a cada visita e usa as regras testadas', () => {

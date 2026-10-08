@@ -560,8 +560,9 @@ export interface BankReviewResponse {
   readonly discarded: readonly BankReviewLineResponse[];
   /** Soma das despesas esperando neste mês, só as em reais. */
   readonly pendingTotalBrl: number;
-  /** Quantas despesas esperam a revisão em todos os meses. */
+  /** Quantas despesas podem ser confirmadas, em todos os meses (sem as pendentes no banco, sem valor ou em outra moeda). */
   readonly pendingAllMonths: number;
+  /** Por mês, tudo o que espera na revisão (também o que só pode ser descartado). */
   readonly pendingByMonth: readonly BankReviewMonthResponse[];
 }
 
@@ -574,8 +575,10 @@ export interface ConfirmBankReviewResponse {
   readonly created: ReadonlyArray<{ readonly id: string; readonly transactionId: string }>;
   readonly discarded: readonly string[];
   readonly alreadyConfirmed: number;
-  /** Linhas enviadas para confirmar que não têm valor: o servidor não as confirma e elas continuam na revisão. */
+  /** Linhas enviadas para confirmar que não têm valor ou estão em outra moeda: o servidor não as confirma e elas continuam na revisão. */
   readonly skipped?: readonly string[];
+  /** As de `skipped` que foram puladas por estarem em outra moeda. */
+  readonly skippedOtherCurrency?: readonly string[];
 }
 
 export interface RestoreBankReviewResponse {

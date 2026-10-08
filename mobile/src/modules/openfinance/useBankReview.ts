@@ -22,7 +22,7 @@ export function useBankReview(month: string | null) {
 }
 
 /**
- * Quantas despesas do banco esperam a revisão (todos os meses), para o atalho da tela de Transações. Qualquer erro
+ * Quantas despesas do banco podem ser confirmadas (todos os meses), para o atalho da tela de Transações. Qualquer erro
  * (servidor sem a rota, sem rede) é "nenhuma": o atalho só não aparece.
  */
 export function usePendingBankReviewCount(): { readonly pending: number; readonly refetch: () => void } {
