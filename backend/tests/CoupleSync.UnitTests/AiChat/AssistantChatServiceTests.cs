@@ -347,6 +347,121 @@ public sealed class AssistantChatServiceTests : IDisposable
         Assert.DoesNotContain("alguém do grupo", reply.Reply);
     }
 
+    // ---------------------------------------------------------------- issue #38, review 1
+
+    private void AddGoal(string title)
+        => _goals.Goals.Add(Goal.Create(_couple, Guid.NewGuid(), title, null, 5000m, "BRL", _kit.Clock.UtcNow.AddMonths(4), _kit.Clock.UtcNow.AddDays(-10)));
+
+    /// <summary>
+    /// I1: the answer shown to the person has the title of the goal, and the app sends that answer back as history.
+    /// "Titles of goals never go" has to hold on that path too, and for a title the person types in a question.
+    /// </summary>
+    [Fact]
+    public async Task TheTitleOfAGoal_ComingBackInTheHistoryOrTypedInTheQuestion_GoesAsItsMarker_NeverAsText()
+    {
+        AddGoal("Viagem para Recife");
+        AddGoal("Viagem");
+        AddGoal("Férias da Mariana");
+        var history = new List<ChatMessage>
+        {
+            new("user", "Quanto falta para a meta?"),
+            new("model", "Faltam R$ 5.000,00 para \"Viagem para Recife\" e R$ 100,00 para \"Férias da Mariana\"."),
+        };
+
+        await AskAsync("E a VIAGEM  PARA RECIFE? E a viágem, e as ferias da mariana? Viagens são outra coisa.", history);
+
+        var request = Assert.Single(_first.Requests);
+        var sent = request.SystemPrompt + "\n" + string.Join("\n", request.Messages.Select(m => m.Text));
+        foreach (var forbidden in new[] { "Viagem", "VIAGEM", "viágem", "Recife", "RECIFE", "Férias", "ferias", "Mariana", "mariana" }) Assert.DoesNotContain(forbidden, sent);
+        Assert.Equal("Faltam R$ 5.000,00 para {{g1}} e R$ 100,00 para {{g3}}.", request.Messages[2].Text);
+        // The longest title first ("Viagem para Recife" is not "{{g2}} para Recife"); only whole words ("Viagens" stays).
+        Assert.Equal("E a {{g1}}? E a {{g2}}, e as {{g3}}? Viagens são outra coisa.", request.Messages[3].Text);
+    }
+
+    /// <summary>I2: the model does not always write the marker exactly as asked; none of its spellings reaches the person.</summary>
+    [Theory]
+    [InlineData("{{G1}}")]
+    [InlineData("{{ g1 }}")]
+    [InlineData("{g1}")]
+    [InlineData("{{g 1}}")]
+    public async Task AGoalMarkerInAnotherSpelling_IsStillReplacedByTheTitle(string marker)
+    {
+        AddGoal("Viagem para Recife");
+        _first.Then(Answer($"Faltam R$ 5.000,00 para {marker}."));
+
+        var reply = await AskAsync();
+
+        Assert.Equal("Faltam R$ 5.000,00 para \"Viagem para Recife\".", reply.Reply);
+    }
+
+    [Theory]
+    [InlineData("{{a}} gastou mais do que {{ B }}.")]
+    [InlineData("{a} gastou mais do que {B}.")]
+    public async Task APersonMarkerInAnotherSpelling_IsStillReplacedByTheFirstName(string answer)
+    {
+        _first.Then(Answer(answer));
+
+        var reply = await AskAsync();
+
+        Assert.Equal("Mariana gastou mais do que João.", reply.Reply);
+    }
+
+    [Theory]
+    [InlineData("Faltam R$ 5.000,00 para {{meta1}}.")]
+    [InlineData("Faltam R$ 5.000,00 para {{g1.")]
+    [InlineData("Faltam R$ 5.000,00 para g1}}.")]
+    [InlineData("{{A e B}} gastaram menos.")]
+    public async Task AnAnswerWithWhatIsLeftOfAMarker_IsRejected_AndNeverShown(string leftover)
+    {
+        AddGoal("Viagem para Recife");
+        _first.Then(Answer(leftover));
+        _second.Then(Answer("Faltam R$ 5.000,00 para {{g1}}."));
+
+        var reply = await AskAsync();
+
+        // The next model had its chance, as with any other unsafe answer.
+        Assert.Equal("Faltam R$ 5.000,00 para \"Viagem para Recife\".", reply.Reply);
+        Assert.Equal((1, 1), (_first.Calls, _second.Calls));
+
+        _first.Then(Answer(leftover));
+        _second.Then(Answer(leftover));
+        var rejected = await AskAsync();
+        Assert.Equal(AssistantChatService.RejectedAnswer, rejected.Reply);
+        Assert.Null(rejected.Provider);
+    }
+
+    [Fact]
+    public async Task ATitleWithBraces_IsNotMistakenForALeftoverMarker()
+    {
+        AddGoal("Casa {nova}");
+        _first.Then(Answer("Faltam R$ 5.000,00 para {{g1}}."));
+
+        var reply = await AskAsync();
+
+        Assert.Equal("Faltam R$ 5.000,00 para \"Casa {nova}\".", reply.Reply);
+    }
+
+    /// <summary>I4: the app is for groups; a group of one person is never told about a "casal", in the rules or in the data.</summary>
+    [Fact]
+    public async Task NothingSentToTheModel_SaysCasal_ForAGroupOfOneOrOfTwo()
+    {
+        AddGoal("Reserva");
+
+        await AskAsync();
+        _people = [new AiPerson("A", "Mariana Souza Lima")];
+        await AskAsync();
+
+        Assert.Equal(2, _first.Requests.Count);
+        foreach (var request in _first.Requests)
+        {
+            var sent = request.SystemPrompt + "\n" + string.Join("\n", request.Messages.Select(m => m.Text));
+            Assert.DoesNotContain("casal", sent, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("casais", sent, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Metas do grupo:", request.Messages[0].Text);
+            Assert.Contains("finanças do grupo", request.SystemPrompt);
+        }
+    }
+
     private sealed class FixedPeople : IAiPeopleReader
     {
         private readonly IReadOnlyList<AiPerson> _people;

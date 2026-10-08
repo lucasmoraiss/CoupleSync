@@ -136,7 +136,7 @@ public sealed class ChatContextServiceTests
         {
             var facts = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
             var prompt = facts.Text;
-            Assert.Contains("Metas do casal", prompt);
+            Assert.Contains("Metas do grupo", prompt);
             Assert.Contains("R$ 5.000,00", prompt);
             // Issue #38: the title of a goal never leaves the API. The goal goes as a marker, and the title stays
             // here to be put back in the answer.
@@ -187,7 +187,7 @@ public sealed class ChatContextServiceTests
 
         var prompt = (await svc.BuildFactsAsync(coupleId, CancellationToken.None)).Text;
 
-        Assert.DoesNotContain("Metas do casal", prompt);
+        Assert.DoesNotContain("Metas do grupo", prompt);
     }
 
     [Fact]
@@ -210,6 +210,6 @@ public sealed class ChatContextServiceTests
 
         var prompt = (await svc.BuildFactsAsync(coupleId, CancellationToken.None)).Text;
 
-        Assert.DoesNotContain("Metas do casal", prompt);
+        Assert.DoesNotContain("Metas do grupo", prompt);
     }
 }

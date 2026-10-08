@@ -82,7 +82,7 @@ public sealed class ChatContextService
         var activeGoals = goals.Where(g => g.Status == GoalStatus.Active).ToList();
         if (activeGoals.Count > 0)
         {
-            sb.AppendLine("Metas do casal:");
+            sb.AppendLine("Metas do grupo:");
             var goalProgress = await _goalProgressReader.ReadAsync(coupleId, activeGoals, ct);
             foreach (var goal in activeGoals)
             {
