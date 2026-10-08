@@ -148,8 +148,9 @@ public sealed class ChildProcessPdfTextExtractor : IPdfTextExtractor
                 }
 
                 _logger.LogInformation(
-                    "PDF worker finished (exit code {ExitCode}, {ElapsedMs}ms, {Pages} page(s), ok={Ok}, code={Code}, error type={ErrorType}).",
-                    exitCode, clock.ElapsedMilliseconds, answer.Pages, answer.Ok, answer.Code ?? "-", PlainTypeName(answer.ErrorType) ?? "-");
+                    "PDF worker finished (exit code {ExitCode}, {ElapsedMs}ms, {Pages} page(s), ok={Ok}, code={Code}, error type={ErrorType}, oom score adj={OomScoreAdj}).",
+                    exitCode, clock.ElapsedMilliseconds, answer.Pages, answer.Ok, answer.Code ?? "-", PlainTypeName(answer.ErrorType) ?? "-",
+                    answer.OomScoreAdj?.ToString(CultureInfo.InvariantCulture) ?? "-");
 
                 if (!answer.Ok)
                     throw new OcrException(answer.Code!, answer.Message!);

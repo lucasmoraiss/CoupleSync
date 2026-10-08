@@ -301,6 +301,66 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
         Assert.Contains("Pagina 2 do extrato", text);
     }
 
+    // ── The child is the one that goes when the memory of the container runs out ──
+
+    [Fact]
+    public void TheWorkerProcess_MakesItselfTheFirstToBeKilledForMemory_AndTheParentRecordsIt()
+    {
+        // The heap limit is not a limit of the whole process. When the container runs out of memory the kernel kills
+        // the process with the highest score, and that must be the child, never the API (process 1: the container
+        // would go down). The worker raises its own score at start (Linux only) and tells the value it read back.
+        var logger = new ListLogger();
+
+        new ChildProcessPdfTextExtractor(Options(), logger).ExtractText(new MemoryStream(SyntheticPdf.Pages(2)));
+
+        var expected = OperatingSystem.IsLinux() ? "oom score adj=1000" : "oom score adj=-";
+        Assert.Contains(logger.Lines, line => line.StartsWith("Information") && line.Contains("ok=True") && line.Contains(expected));
+    }
+
+    [Fact]
+    public void TheWorkerProcess_LowersItsOwnPriority_SoTheApiGoesFirst()
+    {
+        // The child is watched from outside while it reads a document large enough to be seen running.
+        var seen = new System.Collections.Concurrent.ConcurrentBag<ProcessPriorityClass>();
+        var options = Options(id => _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var child = Process.GetProcessById(id);
+                while (!child.HasExited)
+                {
+                    child.Refresh();
+                    seen.Add(child.PriorityClass);
+                    await Task.Delay(10);
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+            {
+                // The child ended between two looks.
+            }
+        }));
+
+        new ChildProcessPdfTextExtractor(options).ExtractText(new MemoryStream(SyntheticPdf.Pages(50, linesPerPage: 200)));
+
+        Assert.Contains(ProcessPriorityClass.BelowNormal, seen);
+    }
+
+    [Fact]
+    public void ReadingInsideAnotherProcess_DoesNotTouchTheScoreOfThatProcess()
+    {
+        // PdfWorkerHost.Run is also called by tests, inside the test process: only the entry of the real worker
+        // process (RunProcess) changes the score.
+        var before = OperatingSystem.IsLinux() ? File.ReadAllText("/proc/self/oom_score_adj") : null;
+        using var output = new MemoryStream();
+
+        PdfWorkerHost.Run([PdfWorkerHost.Command], new MemoryStream(SyntheticPdf.Pages(1)), output);
+
+        using var answer = JsonDocument.Parse(output.ToArray());
+        Assert.False(answer.RootElement.TryGetProperty("oomScoreAdj", out _));
+        if (OperatingSystem.IsLinux())
+            Assert.Equal(before, File.ReadAllText("/proc/self/oom_score_adj"));
+    }
+
     // ── What comes back from the child ──────────────────────────────────────
 
     [Fact]

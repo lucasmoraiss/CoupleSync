@@ -7,8 +7,9 @@ public sealed record PdfWorkerOptions
     /// Limit of the managed heap of the child (DOTNET_GCHeapHardLimit): past it the child dies, not the API.
     /// Measured in the image (issue #14, review round 1): the largest statement the reader inside the API could read
     /// on the production instance (50 pages, 35 thousand lines of text) needs 96 MB of heap; statements whose size
-    /// comes from pictures (10 MB) need less than 64 MB. 192 MB is twice the need, and the whole child then stays
-    /// near 200 MB, which fits beside the API (about 130 MB) in the 512 MB of the instance.
+    /// comes from pictures (10 MB) need less than 64 MB. 192 MB is twice the need. It is a limit of the heap, not of
+    /// the process: the whole child was seen at up to about 250 MB, beside an API of about 130 MB in the 512 MB of
+    /// the instance. Should that ever not fit, the child is the process the kernel kills (see PdfWorkerHost).
     /// </summary>
     public const long DefaultHeapHardLimitBytes = 192L * 1024 * 1024;
 

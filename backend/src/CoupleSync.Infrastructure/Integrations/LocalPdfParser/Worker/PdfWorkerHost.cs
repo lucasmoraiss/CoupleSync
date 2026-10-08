@@ -30,7 +30,60 @@ public static class PdfWorkerHost
 
     internal static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
-    public static int Run(string[] args, Stream input, Stream output)
+    /// <summary>
+    /// Entry of the worker process itself (never called inside another process): first it makes this process the one
+    /// the kernel kills when the container runs out of memory, then it reads the PDF from the standard input.
+    /// </summary>
+    public static int RunProcess(string[] args)
+    {
+        var oomScoreAdj = BecomeTheFirstToBeKilledForMemory();
+        GiveWayToTheApi();
+        return Run(args, Console.OpenStandardInput(), Console.OpenStandardOutput(), oomScoreAdj);
+    }
+
+    /// <summary>
+    /// The worker shares a fraction of one processor with the API. Lowering its own priority (which needs no
+    /// privilege) lets the requests of the API go first while a PDF is read. When it cannot be done, nothing happens.
+    /// </summary>
+    private static void GiveWayToTheApi()
+    {
+        try
+        {
+            using var self = System.Diagnostics.Process.GetCurrentProcess();
+            self.PriorityClass = System.Diagnostics.ProcessPriorityClass.BelowNormal;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// The heap limit of the worker is not a limit of the whole process, and the API runs beside it in a container
+    /// with little memory. When that memory runs out the kernel kills the process with the highest score; raising
+    /// our own to the maximum (which needs no privilege) makes sure it is this process and not the API, whose end
+    /// would take the container down. Linux only; anywhere else, or when the file cannot be written, nothing happens.
+    /// Returns the value read back, for the parent to record.
+    /// </summary>
+    private static int? BecomeTheFirstToBeKilledForMemory()
+    {
+        const string path = "/proc/self/oom_score_adj";
+        if (!OperatingSystem.IsLinux())
+            return null;
+
+        try
+        {
+            File.WriteAllText(path, "1000");
+            return int.TryParse(File.ReadAllText(path).Trim(), System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var value)
+                ? value
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    public static int Run(string[] args, Stream input, Stream output, int? oomScoreAdj = null)
     {
         var maxPages = ParsePositive(args, MaxPagesArgument) ?? PdfPigTextExtractor.DefaultMaxPages;
         var inputBytes = ParsePositive(args, InputBytesArgument);
@@ -62,7 +115,7 @@ public static class PdfWorkerHost
                 ex.GetType().Name);
         }
 
-        JsonSerializer.Serialize(output, answer, Json);
+        JsonSerializer.Serialize(output, answer with { OomScoreAdj = oomScoreAdj }, Json);
         output.Flush();
         return 0;
     }
@@ -84,4 +137,9 @@ internal sealed record WorkerAnswer(
     [property: JsonPropertyName("text")] string? Text,
     [property: JsonPropertyName("code")] string? Code,
     [property: JsonPropertyName("message")] string? Message,
-    [property: JsonPropertyName("errorType")] string? ErrorType);
+    [property: JsonPropertyName("errorType")] string? ErrorType)
+{
+    /// <summary>The score for the out-of-memory killer the worker process set for itself (Linux), read back.</summary>
+    [JsonPropertyName("oomScoreAdj")]
+    public int? OomScoreAdj { get; init; }
+}
