@@ -35,4 +35,8 @@ name: 07 - Captura de notificação (consentimento)
 - extendedWaitUntil:
     visible: "Aceita em .* Ligada\\."
     timeout: 30000
-- assertVisible: "Sair da conta"
+# O resto da tela está lá: "Sair da conta" é o último item e pode ficar abaixo da dobra.
+- scrollUntilVisible:
+    element: "Sair da conta"
+    direction: DOWN
+    timeout: 20000
