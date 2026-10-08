@@ -106,6 +106,29 @@ describe('voltar das abas ocultas (M-I2)', () => {
     expect(screen).not.toContain('próxima atualização do app');
   });
 
+  it('Open Finance: a revisão do banco volta para Transações, é remontada a cada visita e usa as regras testadas', () => {
+    expect(parentRouteOf('openfinance/review')).toBe('/(main)/transactions');
+    const review = read('(main)/openfinance/review.tsx');
+    expect(review).toMatch(/export default resetOnFocus\(BankReviewScreen\)/);
+    expect(review).toMatch(/goToParent\('openfinance\/review'\)/);
+    // "Selecionar tudo" e os lotes vêm de review.ts; a caixa só existe em linha selecionável.
+    expect(review).toMatch(/new Set\(selectAllIds\(expenses\)\)/);
+    expect(review).toMatch(/buildConfirmBatches\(expenses, selected, chosen\)/);
+    expect(review).toMatch(/\{selectable \? \(\s*<TouchableOpacity[\s\S]{0,400}accessibilityRole="checkbox"/);
+    expect(review).toContain('Selecionar tudo');
+    expect(review).toContain('Confirmar selecionadas');
+    // O valor não é editável: a tela não tem campo de texto.
+    expect(review).not.toMatch(/<TextInput\b/);
+  });
+
+  it('Open Finance: o atalho da tela de Transações só é desenhado quando há algo do banco para revisar', () => {
+    const transactions = read('(main)/transactions/index.tsx');
+    expect(transactions).toMatch(/const bankReviewShortcut = reviewShortcutLabel\(bankReview\.pending\);/);
+    expect(transactions).toMatch(/\{bankReviewShortcut !== null && \(\s*<TouchableOpacity[\s\S]{0,200}router\.push\('\/\(main\)\/openfinance\/review'/);
+    expect(transactions.match(/\(main\)\/openfinance\/review/g)).toHaveLength(1);
+    expect(transactions).toMatch(/useOnRefocus\(\(\) => bankReview\.refetch\(\)\)/);
+  });
+
   it('Open Finance: o pedido silencioso ao abrir o app é ligado no layout principal, só com sessão e grupo', () => {
     expect(layout).toMatch(/useAutoSyncOnOpen\(gate === 'app'\);/);
     const hook = read('../src/modules/openfinance/useAutoSync.ts');
@@ -166,6 +189,7 @@ describe('voltar das abas ocultas (M-I2)', () => {
       '(main)/settings/verify-email.tsx',
       '(main)/settings/capture-consent.tsx',
       '(main)/settings/openfinance/wizard.tsx',
+      '(main)/openfinance/review.tsx',
     ];
     const missing = mustReset.filter((file) => !/export default resetOnFocus\(/.test(read(file)));
     expect(missing).toEqual([]);
