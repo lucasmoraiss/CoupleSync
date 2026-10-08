@@ -30,6 +30,9 @@ import { AI_STATUS_NOTICE_TEXT, aiStatusNotice, isAssistantVisible, shouldShowAc
 import { openWelcomeIfDue } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
 import { isCaptureConsentAhead } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
+import { useOnRefocus } from '@/navigation/resetOnFocus';
+import { recurringCardLabel, recurringCardText } from '@/modules/recurring/recurring';
+import { useRecurring } from '@/modules/recurring/useRecurring';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -143,11 +146,19 @@ export default function DashboardScreen() {
   // simplesmente não mostrar nada dela.
   const aiNotice = aiStatusNotice(aiStatus, ai.loadFailed, ai.retrying);
 
+  // Assinaturas e recorrências (sem IA, vale para qualquer grupo): o cartão só existe com a resposta do servidor
+  // em mãos; em erro ele some sozinho. O Painel fica montado entre visitas, então pergunta de novo a cada volta.
+  const recurring = useRecurring();
+  useOnRefocus(() => void recurring.refetch({ cancelRefetch: false }));
+
   const [refreshing, setRefreshing] = React.useState(false);
   const handleRefresh = async () => {
     setRefreshing(true);
+    // As recorrências são pedidas junto e esperadas no fim (em erro o cartão só some).
+    const recurringRefresh = recurring.refetch();
     // Puxar para atualizar também consulta o status da IA (não só os números do Painel).
     await Promise.all([refetch(), ai.refresh()]);
+    await recurringRefresh;
     setRefreshing(false);
   };
 
@@ -226,6 +237,20 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             )}
           </View>
+        )}
+
+        {/* Assinaturas e recorrências: quanto o grupo paga por mês no que se repete. Some sozinho em erro. */}
+        {recurring.data && !recurring.isError && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.aiCard}
+            onPress={() => router.push('/(main)/recurring' as any)}
+            accessibilityLabel={recurringCardLabel(recurring.data)}
+          >
+            <Ionicons name="repeat-outline" size={20} color={colors.primaryLight} />
+            <Text style={styles.aiCardText}>{recurringCardText(recurring.data)}</Text>
+            <Text style={styles.aiCardAction}>Ver</Text>
+          </TouchableOpacity>
         )}
 
         {/* Loading state */}

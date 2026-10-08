@@ -1,0 +1,69 @@
+# Abrir "Assinaturas e recorrências" pelo cartão do Painel, ver a assinatura que o servidor encontrou, abrir as
+# cobranças dela e marcar "Não é recorrente".
+# A conta, o grupo e as três cobranças mensais (estabelecimento inventado) são criados pela API de teste antes de
+# o app abrir (scripts/09-semear-recorrencia.js): o Maestro roda na máquina que dirige o emulador, onde a API
+# responde em 127.0.0.1 (porta de scripts/app-e2e-api.sh).
+appId: com.couplesync.app
+name: 09 - Assinaturas e recorrências
+env:
+  SENHA: SenhaSegura123
+  API_URL: http://127.0.0.1:5000
+---
+- runScript:
+    file: scripts/09-semear-recorrencia.js
+    env:
+      SENHA: ${SENHA}
+      API_URL: ${API_URL}
+
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Esqueci minha senha"
+    timeout: 120000
+- tapOn: "seu@email.com"
+- inputText: ${output.email}
+- tapOn: "••••••••"
+- inputText: ${SENHA}
+- hideKeyboard
+- tapOn: "Entrar"
+# No primeiro uso do grupo o app pergunta pela análise com IA antes de mostrar o Painel.
+- runFlow: comum/responder-agora-nao-a-ia.yaml
+
+# Painel: o cartão das recorrências com o total mensal da assinatura semeada.
+- extendedWaitUntil:
+    visible: "Recorrências: 39 reais e 90 centavos por mês.*"
+    timeout: 90000
+- tapOn: "Recorrências: 39 reais e 90 centavos por mês.*"
+
+# A tela lista a assinatura, com o total do mês.
+- extendedWaitUntil:
+    visible: "Assinaturas e recorrências"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Streaming E2E, 39 reais e 90 centavos por mês.*"
+    timeout: 30000
+- assertVisible: "Total por mês: 39 reais e 90 centavos"
+- assertNotVisible: "Tentar novamente"
+
+# O toque abre as cobranças e as correções.
+- tapOn: "Streaming E2E, 39 reais e 90 centavos por mês.*"
+- extendedWaitUntil:
+    visible: "Não é recorrente"
+    timeout: 30000
+- assertVisible: "Cancelei"
+- assertVisible: "É conta fixa"
+- assertVisible: "39 reais e 90 centavos"
+
+# "Não é recorrente": o item vai para Ocultas, marcado, e sai do total.
+- tapOn: "Não é recorrente"
+- extendedWaitUntil:
+    visible: "Streaming E2E, 39 reais e 90 centavos por mês. marcada como não recorrente.*"
+    timeout: 30000
+- assertVisible: "Total por mês: zero reais"
+
+# De volta ao Painel, o cartão mostra o total novo.
+- tapOn: "Voltar para o Painel"
+- extendedWaitUntil:
+    visible: "Recorrências: zero reais por mês.*"
+    timeout: 30000
+- assertNotVisible: "Algo deu errado"
