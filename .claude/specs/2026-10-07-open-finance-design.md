@@ -214,7 +214,7 @@ Tela **Open Finance** em Configurações: status, bancos e contas com interrupto
 agora**, **Adicionar banco** (volta ao passo 4), **Desconectar**. Na tela de privacidade: **Apagar dados
 bancários importados** com confirmação em duas etapas.
 
-## 8. Telas de Contas, Patrimônio e base para IA
+## 8. Telas de Contas e Patrimônio (a base para IA foi para o plano de IA)
 
 - **Contas** (`app/(main)/accounts/index.tsx`, aba oculta com pai Painel): por pessoa, contas com saldo e
   "atualizado há"; cartões com fatura atual (total, fechamento, vencimento, limite disponível) e anteriores.
@@ -222,13 +222,11 @@ bancários importados** com confirmação em duas etapas.
   recebe um campo novo opcional; app antigo ignora).
 - **Patrimônio** (`app/(main)/wealth/index.tsx`): total do grupo e por pessoa, por tipo, lista de posições e
   gráfico de 6 meses pelos snapshots (saldos de conta + investimentos). `GET /api/v1/openfinance/wealth?months=6`.
-- **Base para IA**: `FinancialContextBuilder` (Application) monta, para um grupo e um período, um resumo
-  compacto em JSON: gastos por categoria do app e por categoria do Pluggy, por estabelecimento, recorrências
-  (mesmo estabelecimento ou descrição normalizada, valor com variação até 15%, presente em 3 meses seguidos),
-  entradas, saldos, faturas, posições. O chat existente (`/api/v1/ai/chat`) inclui esse resumo no prompt
-  quando a pessoa consentiu com IA. "Insights do mês": gerado uma vez por mês por job, guardado em
-  `ai_insights` (couple, month, texto, created_at), mostrado no Painel. Dicas de investimento com dados de
-  mercado precisam de fornecedor de cotações: fora deste plano.
+- **Base para IA**: saiu deste plano. O resumo por grupo e período, a detecção de recorrências, o chat com
+  contexto, os insights do mês e as dicas de investimento com dados de mercado foram absorvidos pelo desenho de
+  IA (`.claude/specs/2026-10-08-ia-financeira-design.md`, issues #37–#48; a issue #29 foi fechada como
+  absorvida). O Open Finance só entrega os dados; como eles entram no pacote de fatos da IA está na seção 1.3
+  daquele desenho.
 
 ## 9. Segurança e regras da casa
 
@@ -257,8 +255,8 @@ bancários importados** com confirmação em duas etapas.
 | 3 | Conciliação | Regras 1–4 da seção 6; "É a mesma"/"É outra"; restaurar; apagar transação devolve ao espelho | Nada duplica |
 | 4 | Entradas e Contas | Entradas como renda do mês; `credit_card_bills`; tela Contas; "Faturas a vencer" no Painel | Vê saldos e o que vai vencer |
 | 5 | Investimentos e Patrimônio | `investments`, `balance_snapshots`; tela Patrimônio com evolução | Vê o patrimônio do grupo |
-| 6 | Base para IA | `FinancialContextBuilder`, recorrências, chat com contexto, Insights do mês | Conselho com base no que aconteceu |
-| 7 | Depois | Webhook do Pluggy e agendamento quando a API não dormir; dicas de investimento com dados de mercado | |
+| 6 | Base para IA — absorvida | Saiu deste plano: ver o desenho de IA (`.claude/specs/2026-10-08-ia-financeira-design.md`, issues #37–#48; issue #29 fechada como absorvida) | — |
+| 7 | Depois | Webhook do Pluggy. As dicas de investimento com dados de mercado e o agendamento com a API dormindo foram absorvidos pelo desenho de IA (`.claude/specs/2026-10-08-ia-financeira-design.md`, issues #37–#48) | |
 
 Cada fase: migration aditiva, testes que falham antes e passam depois, esteira completa, OTA. A fase 1 só mostra
 a tela como disponível depois que o dono criar `OPENFINANCE_ENCRYPTION_KEY` no Render.
