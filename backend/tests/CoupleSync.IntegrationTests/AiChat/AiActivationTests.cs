@@ -85,6 +85,25 @@ public sealed class AiActivationTests
         Assert.Matches(@"^\d{4}-\d{2}-\d{2}T00:00:00$", status.GetProperty("budget").GetProperty("resetsAtLocal").GetString()!);
     }
 
+    /// <summary>Review 1 (M11): the acceptance of an account that was deactivated does not keep the group switched on.</summary>
+    [Fact]
+    public async Task TheAcceptanceOfADeactivatedAccount_DoesNotCount()
+    {
+        await using var factory = new ChatWebApplicationFactory(enabled: true);
+        var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.True((await StatusOf(bruno.Client)).GetProperty("enabled").GetBoolean());
+
+        factory.Execute($"UPDATE users SET is_active = 0 WHERE upper(id) = '{ana.UserId.ToString().ToUpperInvariant()}'");
+
+        var status = await StatusOf(bruno.Client);
+        Assert.False(status.GetProperty("enabled").GetBoolean());
+        Assert.Equal(0, status.GetProperty("acceptedBy").GetArrayLength());
+        var chat = await bruno.Client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto gastamos?", History = Array.Empty<object>() });
+        Assert.Equal(HttpStatusCode.Forbidden, chat.StatusCode);
+        Assert.Equal("AI_CONSENT_REQUIRED", (await ErrorOf(chat)).Code);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(2)]
