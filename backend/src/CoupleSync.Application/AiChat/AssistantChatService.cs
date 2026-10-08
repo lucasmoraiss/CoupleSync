@@ -44,7 +44,7 @@ public sealed class AssistantChatService
         "3. Nunca escreva links, endereços de sites, e-mails, telefones, perfis de redes sociais, chaves Pix ou qualquer outro contato.\n" +
         "4. Nunca peça nem sugira nada fora do aplicativo: clicar, acessar um site, ligar, enviar mensagem, informar senha ou código, " +
         "transferir ou depositar dinheiro.\n" +
-        "5. " + PeopleRulePlaceholder + "\n" +
+        "5. " + PeopleRulePlaceholder + " As metas aparecem como {{g1}}, {{g2}}: refira-se a elas exatamente assim.\n" +
         "6. Para questões sobre investimentos, decisões legais ou fiscais, recomende que o casal consulte um profissional qualificado.\n" +
         "Responda em JSON: \"answer\" com o texto da resposta e \"refs\" com uma lista vazia.";
 
@@ -90,14 +90,16 @@ public sealed class AssistantChatService
         if (Clean(message, people).Length == 0) return new AssistantReply(RejectedAnswer, null);
 
         var facts = await _contextService.BuildFactsAsync(coupleId, ct);
-        var request = BuildRequest(people, facts, message, history);
+        var request = BuildRequest(people, facts.Text, message, history);
 
         var result = await _gateway.GenerateAsync<AssistantAnswer>(coupleId, request, LlmCallMode.Interactive, answer => IsSafe(answer, people), ct);
 
         switch (result.Outcome)
         {
             case LlmGatewayOutcome.Ok:
-                return new AssistantReply(FactPackPrivacyFilter.RestoreNames(result.Value!.Answer.Trim(), people), result.Provider);
+                // Names and goal titles never left the API: they are put back only now, in what the person reads.
+                var answer = FactPackPrivacyFilter.RestoreNames(result.Value!.Answer.Trim(), people);
+                return new AssistantReply(FactPackPrivacyFilter.RestoreGoalTitles(answer, facts.GoalTitles), result.Provider);
             case LlmGatewayOutcome.OutputRejected:
                 return new AssistantReply(RejectedAnswer, null);
             case LlmGatewayOutcome.GroupBudgetExhausted:

@@ -30,6 +30,9 @@ public static partial class FactPackPrivacyFilter
     [GeneratedRegex(@"\{\{([A-Z])\}\}", RegexOptions.CultureInvariant)]
     private static partial Regex PersonMarker();
 
+    [GeneratedRegex(@"\{\{(g[0-9]+)\}\}", RegexOptions.CultureInvariant)]
+    private static partial Regex GoalMarker();
+
     /// <summary>The text without the members' names, documents, phones, e-mails, random Pix keys and long numbers.</summary>
     public static string FilterFreeText(string? text, IReadOnlyList<AiPerson> people)
     {
@@ -66,6 +69,16 @@ public static partial class FactPackPrivacyFilter
             var firstName = person?.FullName.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
             return string.IsNullOrEmpty(firstName) ? "alguém do grupo" : firstName;
         });
+
+    /// <summary>
+    /// Puts the titles of the goals back in a text of the model, when answering the app (the titles never leave the
+    /// API: a goal goes as {{g1}}, {{g2}}...). A marker of no goal becomes "uma meta".
+    /// </summary>
+    public static string RestoreGoalTitles(string text, IReadOnlyDictionary<string, string> titlesByMarker)
+        => GoalMarker().Replace(text, match =>
+            titlesByMarker.TryGetValue(match.Groups[1].Value, out var title) && !string.IsNullOrWhiteSpace(title)
+                ? $"\"{title.Trim()}\""
+                : "uma meta");
 
     /// <summary>True when the text names a person marker ({{B}}...) that belongs to nobody in the group.</summary>
     public static bool MentionsUnknownPerson(string text, IReadOnlyList<AiPerson> people)

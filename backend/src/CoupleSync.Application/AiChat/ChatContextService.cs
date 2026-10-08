@@ -9,6 +9,10 @@ using CoupleSync.Domain.Entities;
 
 namespace CoupleSync.Application.AiChat;
 
+/// <summary>The data message of the Assistant, and the titles of the goals it cites only by marker.</summary>
+/// <param name="GoalTitles">Marker ("g1", "g2"...) to the title of the goal. The titles never leave the API.</param>
+public sealed record ChatFacts(string Text, IReadOnlyDictionary<string, string> GoalTitles);
+
 public sealed class ChatContextService
 {
     private readonly BudgetService _budgetService;
@@ -34,10 +38,12 @@ public sealed class ChatContextService
     /// <summary>
     /// Only the data of the group (date, budget, spending by category, goals), one fact per line, with no
     /// instruction to the model: the Assistant sends it in a message of its own, apart from the rules (which are
-    /// in <see cref="AssistantChatService"/>).
+    /// in <see cref="AssistantChatService"/>). The title of a goal is typed by a person and may name anything, so it
+    /// does not leave: each goal goes as {{g1}}, {{g2}}... and the title is put back when answering the app.
     /// </summary>
-    public async Task<string> BuildFactsAsync(Guid coupleId, CancellationToken ct)
+    public async Task<ChatFacts> BuildFactsAsync(Guid coupleId, CancellationToken ct)
     {
+        var goalTitles = new Dictionary<string, string>(StringComparer.Ordinal);
         var budget = await _budgetService.GetCurrentPlanAsync(coupleId, ct);
         var now = _dateTimeProvider.UtcNow;
         var since = now.AddDays(-30);
@@ -86,13 +92,13 @@ public sealed class ChatContextService
                 var deadlineStr = goal.Deadline != default
                     ? BrDate(goal.Deadline)
                     : "sem prazo definido";
-                // Typed by a person: the same hygiene as every other text that enters a prompt as data.
-                var safeTitle = PromptText.Sanitize(goal.Title);
-                sb.AppendLine($"  - {safeTitle}: alvo {BrlFormat.Format(goal.TargetAmount)}, progresso {BrlFormat.Format(progress)} ({(long)Math.Floor(percent)}%), prazo {deadlineStr}");
+                var marker = $"g{goalTitles.Count + 1}";
+                goalTitles[marker] = goal.Title;
+                sb.AppendLine($"  - Meta {{{{{marker}}}}}: alvo {BrlFormat.Format(goal.TargetAmount)}, progresso {BrlFormat.Format(progress)} ({(long)Math.Floor(percent)}%), prazo {deadlineStr}");
             }
         }
 
-        return sb.ToString();
+        return new ChatFacts(sb.ToString(), goalTitles);
     }
 
     // Fixed dd/MM/yyyy: with a named format the "/" would follow the host culture.
