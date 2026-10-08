@@ -22,6 +22,9 @@ public sealed class AiActivationTests
 {
     // The migration right before AddAiConsents (regenerated after the Open Finance one came in from main).
     private const string MigrationBefore = "20261008150513_AddOpenFinanceSync";
+
+    // This migration itself: what "only adds the two tables" is said of (later migrations change other tables).
+    private const string MigrationUnderTest = "20261008185726_AddAiConsents";
     private const string Status = "/api/v1/ai/status";
     private const string Consent = "/api/v1/ai/consent";
 
@@ -52,7 +55,7 @@ public sealed class AiActivationTests
         var transactionSum = await database.ScalarAsync<decimal>("SELECT sum(amount) FROM transactions");
         var columnsBefore = await ColumnsOfAsync(database, existingTables);
 
-        await MigrationTests.MigrateAsync(database);
+        await MigrationTests.MigrateAsync(database, MigrationUnderTest);
 
         foreach (var table in existingTables)
             Assert.Equal(countsBefore[table], await database.ScalarAsync<long>($"SELECT count(*) FROM \"{table}\""));
@@ -71,6 +74,7 @@ public sealed class AiActivationTests
         Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents"));
         Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM ai_user_preferences"));
 
+        await MigrationTests.MigrateAsync(database);
         await using var db = MigrationTests.Context(database);
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
     }
