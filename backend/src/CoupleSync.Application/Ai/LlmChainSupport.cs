@@ -90,8 +90,14 @@ public sealed class LlmMinuteWindow
 /// </summary>
 public sealed record LlmLinkState(bool ExhaustedToday, DateTime? PausedUntilUtc, int RateLimitsInARow)
 {
-    /// <summary>How far back the rows are read: a pause is at most 30 minutes and an exhausted link returns at the next UTC day.</summary>
-    public static readonly TimeSpan Lookback = TimeSpan.FromHours(24);
+    /// <summary>
+    /// How far back the rows are read: a pause is at most 30 minutes, and an exhausted link returns when the
+    /// provider said (a day's quota: less than 24 hours ahead) or, when it did not say, at the next UTC day.
+    /// </summary>
+    public static readonly TimeSpan Lookback = TimeSpan.FromHours(48);
+
+    /// <summary>The longest wait a provider may impose through its retry delay; anything beyond is cut to this.</summary>
+    public static readonly TimeSpan MaxRetryAfter = TimeSpan.FromHours(36);
 
     public const int MaxEvents = 16;
 
@@ -105,21 +111,31 @@ public sealed record LlmLinkState(bool ExhaustedToday, DateTime? PausedUntilUtc,
     /// <param name="newestFirst">The Ok / RateLimitedMinute / QuotaExhaustedDay rows of the link, newest first.</param>
     public static LlmLinkState From(IReadOnlyList<AiLinkEvent> newestFirst, DateTime nowUtc)
     {
+        // Out for the day: until the instant the provider gave; when it gave none, until its day (UTC) turns.
         var today = DateOnly.FromDateTime(nowUtc);
-        var exhausted = newestFirst.Any(e => e.Outcome == nameof(LlmOutcome.QuotaExhaustedDay) && e.DayUtc == today);
+        var exhausted = newestFirst.Any(e =>
+            e.Outcome == nameof(LlmOutcome.QuotaExhaustedDay)
+            && (e.RetryAtUtc is { } retryAt ? nowUtc < retryAt : e.DayUtc == today));
 
-        // 429s in a row with no Ok in between; an Ok — or the end of a day the link was out of — starts a new run.
-        var inARow = 0;
-        DateTime? last = null;
+        // 429s in a row with no Ok in between; an Ok — or the end of a time the link was out — starts a new run.
+        // Only the ones that did not say how long to wait make the pause grow (and, at the fourth, end the day).
+        var unexplainedInARow = 0;
+        AiLinkEvent? latest = null;
         foreach (var e in newestFirst)
         {
             if (e.Outcome != nameof(LlmOutcome.RateLimitedMinute)) break;
-            inARow++;
-            last ??= e.CreatedAtUtc;
+            latest ??= e;
+            if (e.RetryAtUtc is null) unexplainedInARow++;
         }
 
-        DateTime? pausedUntil = last is null ? null : last.Value + Pauses[Math.Min(inARow, Pauses.Length) - 1];
-        return new LlmLinkState(exhausted, pausedUntil, inARow);
+        DateTime? pausedUntil = null;
+        if (latest is not null)
+        {
+            pausedUntil = latest.RetryAtUtc
+                ?? latest.CreatedAtUtc + Pauses[Math.Min(Math.Max(unexplainedInARow, 1), Pauses.Length) - 1];
+        }
+
+        return new LlmLinkState(exhausted, pausedUntil, unexplainedInARow);
     }
 }
 

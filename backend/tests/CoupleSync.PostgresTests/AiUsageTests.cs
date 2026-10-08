@@ -87,6 +87,7 @@ public sealed class AiUsageTests
                 ["output_tokens"] = "integer not null",
                 ["outcome"] = "character varying(40) not null",
                 ["latency_ms"] = "integer not null",
+                ["retry_at_utc"] = "timestamp with time zone null",
             }.OrderBy(c => c.Key),
             columns.OrderBy(c => c.Key));
 
@@ -206,6 +207,67 @@ public sealed class AiUsageTests
     }
 
     [PostgresFact]
+    public async Task A429WithARetryDelay_KeepsTheLinkOutUntilThatInstant_ReadFromTheRow()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await MigrationTests.MigrateAsync(database);
+        var chain = new Chain(database);
+        var start = chain.Clock.UtcNow;
+
+        // The day's quota, back in 77,800 s (the delay of the real answer): beyond the next UTC midnight.
+        chain.First.Answer = () => Chain.Failed(LlmOutcome.QuotaExhaustedDay) with { RetryAfter = TimeSpan.FromSeconds(77_800) };
+        Assert.Equal(LlmGatewayOutcome.Ok, await chain.AskAsync(null));
+        Assert.Equal(
+            start.AddSeconds(77_800),
+            (await database.ScalarAsync<DateTime>("SELECT retry_at_utc FROM ai_usage WHERE outcome = 'QuotaExhaustedDay'")).ToUniversalTime());
+
+        chain.First.Answer = Chain.Ok;
+        chain.Clock.UtcNow = new DateTime(2026, 10, 9, 0, 0, 5, DateTimeKind.Utc);
+        Assert.Equal(LlmGatewayOutcome.Ok, await chain.AskAsync(null));
+        chain.Clock.UtcNow = start.AddSeconds(77_790);
+        Assert.Equal(LlmGatewayOutcome.Ok, await chain.AskAsync(null));
+        Assert.Equal(1, chain.First.Calls);
+        chain.Clock.UtcNow = start.AddSeconds(77_801);
+        Assert.Equal(LlmGatewayOutcome.Ok, await chain.AskAsync(null));
+        Assert.Equal(2, chain.First.Calls);
+
+        // A per-minute limit with its own wait: 40 s, whatever the growing pause would have been.
+        chain.First.Answer = () => Chain.Failed(LlmOutcome.RateLimitedMinute) with { RetryAfter = TimeSpan.FromSeconds(40) };
+        Assert.Equal(LlmGatewayOutcome.Ok, await chain.AskAsync(null));
+        Assert.Equal(3, chain.First.Calls);
+        chain.First.Answer = Chain.Ok;
+        chain.Clock.Advance(TimeSpan.FromSeconds(39));
+        Assert.Equal(LlmGatewayOutcome.Ok, await chain.AskAsync(null));
+        Assert.Equal(3, chain.First.Calls);
+        chain.Clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.Equal(LlmGatewayOutcome.Ok, await chain.AskAsync(null));
+        Assert.Equal(4, chain.First.Calls);
+    }
+
+    [PostgresFact]
+    public async Task ACallCancelledByTheClient_IsStoredByPostgres_AndCountsInTheGroupBudget()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await MigrationTests.MigrateAsync(database);
+        var chain = new Chain(database);
+        chain.Options.GroupDailyCalls = 1;
+        var group = Guid.NewGuid();
+        using var client = new CancellationTokenSource();
+        chain.First.Answer = () =>
+        {
+            client.Cancel();
+            throw new OperationCanceledException(client.Token);
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => chain.AskAsync(group, ct: client.Token));
+
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_usage WHERE outcome = 'Cancelled' AND couple_id = @g AND input_tokens > 0", ("g", group)));
+        chain.First.Answer = Chain.Ok;
+        Assert.Equal(LlmGatewayOutcome.GroupBudgetExhausted, await chain.AskAsync(group));
+        Assert.Equal(1, chain.First.Calls);
+    }
+
+    [PostgresFact]
     public async Task AKnownDailyLimit_IsCountedPerUtcDayAndModel_AndAnUnknownOneBlocksNothing()
     {
         await using var database = await _server.CreateDatabaseAsync();
@@ -270,7 +332,8 @@ public sealed class AiUsageTests
 
         public static LlmResult Failed(LlmOutcome outcome) => new(outcome, null, 0, 0, "HTTP_429", 7);
 
-        public async Task<LlmGatewayOutcome> AskAsync(Guid? coupleId, string feature = LlmFeatures.Chat, LlmCallMode mode = LlmCallMode.Interactive)
+        public async Task<LlmGatewayOutcome> AskAsync(
+            Guid? coupleId, string feature = LlmFeatures.Chat, LlmCallMode mode = LlmCallMode.Interactive, CancellationToken ct = default)
         {
             await using var db = MigrationTests.Context(_database);
             var gateway = new LlmGateway(
@@ -290,7 +353,7 @@ public sealed class AiUsageTests
                 LlmJsonSchema.Object("answer", ("answer", LlmJsonSchema.String()), ("refs", LlmJsonSchema.Array(LlmJsonSchema.String()))),
                 LlmFeatures.TemperatureOf(feature),
                 1000);
-            return (await gateway.GenerateAsync<Reply>(coupleId, request, mode, CancellationToken.None)).Outcome;
+            return (await gateway.GenerateAsync<Reply>(coupleId, request, mode, ct)).Outcome;
         }
     }
 

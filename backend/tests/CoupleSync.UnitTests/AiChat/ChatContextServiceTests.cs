@@ -37,7 +37,7 @@ public sealed class ChatContextServiceTests
         CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         try
         {
-            var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+            var prompt = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
             Assert.Contains("R$ 5.000,00", prompt);
             Assert.Contains("Renda bruta mensal", prompt);
         }
@@ -53,21 +53,23 @@ public sealed class ChatContextServiceTests
         var (svc, _, _, _) = Build();
         var coupleId = Guid.NewGuid();
 
-        var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+        var prompt = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
 
-        Assert.Contains("CoupleSync", prompt);
+        Assert.Contains("Data de hoje", prompt);
         Assert.DoesNotContain("Renda bruta mensal", prompt);
     }
 
     [Fact]
-    public async Task IncludesProfessionalAdviceDisclaimer()
+    public async Task TheFacts_CarryNoInstructionToTheModel_TheRulesAreInTheAssistantsSystemPrompt()
     {
         var (svc, _, _, _) = Build();
         var coupleId = Guid.NewGuid();
 
-        var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+        var prompt = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
 
-        Assert.Contains("profissional qualificado", prompt);
+        Assert.DoesNotContain("IMPORTANTE", prompt);
+        Assert.DoesNotContain("Você é", prompt);
+        Assert.DoesNotContain("profissional qualificado", prompt);
     }
 
     [Fact]
@@ -91,7 +93,7 @@ public sealed class ChatContextServiceTests
             createdAtUtc: FixedNow);
         txRepo.Transactions.Add(tx);
 
-        var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+        var prompt = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
 
         Assert.Contains("Alimentação", prompt);
         Assert.Contains("Gastos por categoria", prompt);
@@ -104,7 +106,7 @@ public sealed class ChatContextServiceTests
         var (svc, _, _, _) = Build(customNow);
         var coupleId = Guid.NewGuid();
 
-        var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+        var prompt = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
 
         Assert.Contains("15/01/2025", prompt);
     }
@@ -132,7 +134,7 @@ public sealed class ChatContextServiceTests
         CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         try
         {
-            var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+            var prompt = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
             Assert.Contains("Metas do casal", prompt);
             Assert.Contains("Viagem Europa", prompt);
             Assert.Contains("R$ 5.000,00", prompt);
@@ -161,7 +163,7 @@ public sealed class ChatContextServiceTests
         CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         try
         {
-            var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+            var prompt = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
             Assert.Contains("progresso R$ 500,00 (50%)", prompt);
         }
         finally
@@ -176,7 +178,7 @@ public sealed class ChatContextServiceTests
         var (svc, _, _, _) = Build();
         var coupleId = Guid.NewGuid();
 
-        var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+        var prompt = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
 
         Assert.DoesNotContain("Metas do casal", prompt);
     }
@@ -199,7 +201,7 @@ public sealed class ChatContextServiceTests
         goal.Archive(FixedNow);
         goalRepo.Goals.Add(goal);
 
-        var prompt = await svc.BuildSystemPromptAsync(coupleId, CancellationToken.None);
+        var prompt = await svc.BuildFactsAsync(coupleId, CancellationToken.None);
 
         Assert.DoesNotContain("Metas do casal", prompt);
     }

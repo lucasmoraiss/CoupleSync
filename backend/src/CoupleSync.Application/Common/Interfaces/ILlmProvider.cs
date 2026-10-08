@@ -43,15 +43,23 @@ public enum LlmOutcome
     InvalidOutput,
     Error,
     Timeout,
+
+    /// <summary>
+    /// The caller gave up (the client closed the connection) after the request had been sent: the provider counted
+    /// the call, so it is recorded and counts in the budgets like one that was answered.
+    /// </summary>
+    Cancelled,
 }
 
+/// <param name="RetryAfter">In a 429: how long the provider said to wait before trying again, when it said.</param>
 public sealed record LlmResult(
     LlmOutcome Outcome,
     string? Json,
     int InputTokens,
     int OutputTokens,
     string? ErrorCode,
-    int LatencyMs);
+    int LatencyMs,
+    TimeSpan? RetryAfter = null);
 
 public enum LlmJsonType
 {

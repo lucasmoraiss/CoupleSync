@@ -187,6 +187,78 @@ public sealed class LlmGatewayTests : IDisposable
     }
 
     [Fact]
+    public async Task ACallTheClientCancelledMidway_IsStillRecorded_AndCountsInTheBudgets()
+    {
+        using var client = new CancellationTokenSource();
+        var first = new ScriptedProvider(Gemini, Flash)
+            .Then(async (_, ct) =>
+            {
+                // The request reached the provider (it counts there); then the client dropped the connection.
+                client.Cancel();
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                return ScriptedProvider.OkResult();
+            })
+            .Then(ScriptedProvider.OkResult());
+        var second = new ScriptedProvider(Gemini, Lite);
+        _kit.Chain(AiChains.Assistant, first, second);
+        _kit.Options.GroupDailyCalls = 1;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _kit.Gateway().GenerateAsync<TestAnswer>(_couple, LlmGatewayTestKit.Request(), LlmCallMode.Interactive, client.Token));
+
+        var row = Assert.Single(_kit.Rows());
+        Assert.Equal(("Cancelled", Gemini, Flash, LlmFeatures.Chat), (row.Outcome, row.Provider, row.Model, row.Feature));
+        Assert.Equal(_couple, row.CoupleId);
+        Assert.True(row.InputTokens > 0, "the prompt was sent: its estimated tokens are charged");
+        Assert.Equal(0, second.Calls);
+
+        // It counts: in the group's budget...
+        Assert.Equal(LlmGatewayOutcome.GroupBudgetExhausted, (await _kit.AskAsync(_couple)).Outcome);
+        // ...in the ceiling of the whole app...
+        _kit.Options.GroupDailyCalls = 25;
+        _kit.Options.GlobalDailyInteractiveCalls = 1;
+        Assert.Equal(LlmGatewayOutcome.GlobalBudgetExhausted, (await _kit.AskAsync(Guid.NewGuid())).Outcome);
+        Assert.Equal(1, first.Calls);
+        // ...and in a known daily limit of the model (Rpd 2 → 1 usable).
+        _kit.Options.GlobalDailyInteractiveCalls = 150;
+        _kit.Options.Limits.Add(new AiLimit { Provider = Gemini, Model = Flash, Rpd = 2 });
+        Assert.Equal(Lite, (await _kit.AskAsync(Guid.NewGuid())).Model);
+        Assert.Equal(1, first.Calls);
+    }
+
+    [Fact]
+    public async Task AnAnswerThatArrived_IsRecorded_EvenIfTheClientLeftRightThen()
+    {
+        using var client = new CancellationTokenSource();
+        var first = new ScriptedProvider(Gemini, Flash).Then((_, _) =>
+        {
+            client.Cancel();
+            return Task.FromResult(ScriptedProvider.OkResult());
+        });
+        _kit.Chain(AiChains.Assistant, first);
+
+        await Record.ExceptionAsync(() =>
+            _kit.Gateway().GenerateAsync<TestAnswer>(_couple, LlmGatewayTestKit.Request(), LlmCallMode.Interactive, client.Token));
+
+        Assert.Equal("Ok", Assert.Single(_kit.Rows()).Outcome);
+    }
+
+    [Fact]
+    public async Task ATransientFailure_NeitherPausesNorExhaustsTheLink()
+    {
+        // 503 "high demand", 500 and timeouts: the next link answers now, and this one is tried again right away.
+        var first = new ScriptedProvider(Gemini, Flash, R(LlmOutcome.Error), R(LlmOutcome.Timeout), ScriptedProvider.OkResult());
+        var second = new ScriptedProvider(Gemini, Lite);
+        _kit.Chain(AiChains.Assistant, first, second);
+
+        Assert.Equal(Lite, (await _kit.AskAsync(_couple)).Model);
+        Assert.Equal(Lite, (await _kit.AskAsync(_couple)).Model);
+        Assert.Equal(Flash, (await _kit.AskAsync(_couple)).Model);
+        Assert.Equal(3, first.Calls);
+        Assert.Equal(["Error", "Timeout", "Ok"], _kit.Rows().Where(r => r.Model == Flash).Select(r => r.Outcome));
+    }
+
+    [Fact]
     public async Task AnInteractiveCall_StopsWhenItsTotalTimeIsOver()
     {
         var slow = new ScriptedProvider(Gemini, Flash).Then((_, _) =>
@@ -380,6 +452,86 @@ public sealed class LlmGatewayTests : IDisposable
     }
 
     [Fact]
+    public async Task A429ThatSaysHowLongToWait_PausesTheLinkForExactlyThatLong_AcrossRestarts()
+    {
+        var first = new ScriptedProvider(Gemini, Flash)
+            .Then(R(LlmOutcome.RateLimitedMinute) with { RetryAfter = TimeSpan.FromSeconds(31) })
+            .Then(R(LlmOutcome.RateLimitedMinute) with { RetryAfter = TimeSpan.FromSeconds(45) })
+            .Then(ScriptedProvider.OkResult());
+        var second = new ScriptedProvider(Gemini, Lite);
+        _kit.Chain(AiChains.Assistant, first, second);
+
+        Assert.Equal(Lite, (await _kit.AskAsync(_couple)).Model);            // 429, "retry in 31 s"
+        _kit.Clock.Advance(TimeSpan.FromSeconds(30));
+        Assert.Equal(Lite, (await _kit.AskAsync(_couple)).Model);            // still waiting (a new gateway: read from the row)
+        Assert.Equal(1, first.Calls);
+        _kit.Clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.Equal(Lite, (await _kit.AskAsync(_couple)).Model);            // tried again: 429, "retry in 45 s"
+        Assert.Equal(2, first.Calls);
+        _kit.Clock.Advance(TimeSpan.FromSeconds(44));
+        Assert.Equal(Lite, (await _kit.AskAsync(_couple)).Model);            // 45 s, not the 10 minutes of a second unexplained 429
+        Assert.Equal(2, first.Calls);
+        _kit.Clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.Equal(Flash, (await _kit.AskAsync(_couple)).Model);
+
+        var rows = _kit.Rows().Where(r => r.Model == Flash).ToList();
+        Assert.Equal(["RateLimitedMinute", "RateLimitedMinute", "Ok"], rows.Select(r => r.Outcome));
+        Assert.Equal(new DateTime(2026, 10, 8, 13, 0, 31, DateTimeKind.Utc), rows[0].RetryAtUtc);
+        Assert.Null(rows[2].RetryAtUtc);
+    }
+
+    [Fact]
+    public async Task ADaysQuota429_TakesTheLinkOutUntilTheInstantTheProviderGave_NotUntilAPresumedMidnight()
+    {
+        // 21 h 36 min 40 s, as in the answer to the real key: past the next UTC midnight.
+        var first = new ScriptedProvider(Gemini, Flash)
+            .Then(R(LlmOutcome.QuotaExhaustedDay) with { RetryAfter = TimeSpan.FromSeconds(77_800) })
+            .Then(ScriptedProvider.OkResult());
+        var second = new ScriptedProvider(Gemini, Lite);
+        _kit.Chain(AiChains.Assistant, first, second);
+        var start = _kit.Clock.UtcNow;
+
+        Assert.Equal(Lite, (await _kit.AskAsync(_couple)).Model);
+        Assert.Equal(start.AddSeconds(77_800), _kit.Rows().Single(r => r.Model == Flash).RetryAtUtc);
+
+        // The UTC day turned, but the provider said later: still out.
+        _kit.Clock.UtcNow = new DateTime(2026, 10, 9, 0, 0, 5, DateTimeKind.Utc);
+        Assert.Equal(Lite, (await _kit.AskAsync(Guid.NewGuid())).Model);
+        _kit.Clock.UtcNow = start.AddSeconds(77_799);
+        Assert.Equal(Lite, (await _kit.AskAsync(Guid.NewGuid())).Model);
+        Assert.Equal(1, first.Calls);
+
+        _kit.Clock.UtcNow = start.AddSeconds(77_801);
+        Assert.Equal(Flash, (await _kit.AskAsync(Guid.NewGuid())).Model);
+        Assert.Equal(2, first.Calls);
+    }
+
+    [Fact]
+    public async Task ADaysQuota429_ThatComesBackSoonerThanTheUtcMidnight_IsUsedAgainTheSameDay()
+    {
+        var first = new ScriptedProvider(Gemini, Flash)
+            .Then(R(LlmOutcome.QuotaExhaustedDay) with { RetryAfter = TimeSpan.FromHours(2) })
+            .Then(ScriptedProvider.OkResult());
+        var second = new ScriptedProvider(Gemini, Lite);
+        _kit.Chain(AiChains.Assistant, first, second);
+
+        Assert.Equal(Lite, (await _kit.AskAsync(_couple)).Model);
+        _kit.Clock.Advance(TimeSpan.FromHours(2.1)); // 15:06 UTC of the same day
+        Assert.Equal(Flash, (await _kit.AskAsync(_couple)).Model);
+    }
+
+    [Fact]
+    public async Task AnAbsurdRetryDelay_IsCut_SoThatABadAnswerCannotRemoveAModelForever()
+    {
+        var first = new ScriptedProvider(Gemini, Flash).Then(R(LlmOutcome.QuotaExhaustedDay) with { RetryAfter = TimeSpan.FromDays(300) });
+        _kit.Chain(AiChains.Assistant, first, new ScriptedProvider(Gemini, Lite));
+
+        await _kit.AskAsync(_couple);
+
+        Assert.Equal(_kit.Clock.UtcNow + LlmLinkState.MaxRetryAfter, _kit.Rows().Single(r => r.Model == Flash).RetryAtUtc);
+    }
+
+    [Fact]
     public async Task AnOk_ResetsTheCountOf429sInARow()
     {
         var first = new ScriptedProvider(Gemini, Flash,
@@ -551,7 +703,7 @@ public sealed class LlmGatewayTests : IDisposable
             new[]
             {
                 "couple_id", "created_at_utc", "day_brt", "day_utc", "feature", "id", "input_tokens", "latency_ms", "model",
-                "outcome", "output_tokens", "provider",
+                "outcome", "output_tokens", "provider", "retry_at_utc",
             },
             entity.GetProperties().Select(p => p.GetColumnName()).OrderBy(c => c, StringComparer.Ordinal));
 
@@ -562,7 +714,7 @@ public sealed class LlmGatewayTests : IDisposable
         command.CommandText = "SELECT * FROM ai_usage";
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
-        Assert.Equal(12, reader.FieldCount);
+        Assert.Equal(13, reader.FieldCount);
         for (var i = 0; i < reader.FieldCount; i++)
         {
             var value = reader.IsDBNull(i) ? string.Empty : Convert.ToString(reader.GetValue(i), System.Globalization.CultureInfo.InvariantCulture)!;

@@ -648,6 +648,7 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.OutputTokens).HasColumnName("output_tokens").IsRequired();
             entity.Property(x => x.Outcome).HasColumnName("outcome").HasMaxLength(AiUsage.MaxOutcomeLength).IsRequired();
             entity.Property(x => x.LatencyMs).HasColumnName("latency_ms").IsRequired();
+            entity.Property(x => x.RetryAtUtc).HasColumnName("retry_at_utc");
 
             entity.HasIndex(x => new { x.DayUtc, x.Provider, x.Model });
             entity.HasIndex(x => new { x.CoupleId, x.DayBrt });

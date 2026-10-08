@@ -18,6 +18,7 @@ namespace CoupleSync.Application.Ai;
 public sealed class LlmGateway : ILlmGateway
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan UsageWriteTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ILlmProviderCatalog _catalog;
     private readonly IAiUsageRepository _usage;
@@ -116,18 +117,34 @@ public sealed class LlmGateway : ILlmGateway
             // Rule 1 again, right before the call: a group that switched the AI off stops a job at its next call.
             if (!await _consent.IsEnabledAsync(coupleId, ct)) return Stop<T>(LlmGatewayOutcome.NotConsented, request);
 
-            var result = await CallAsync(provider, request, timeout, ct);
+            LlmResult result;
+            try
+            {
+                result = await CallAsync(provider, request, timeout, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // The caller gave up after the request was sent. The provider counted the call, so the budgets must
+                // too: otherwise sending and dropping the connection would be a way around every ceiling.
+                await RecordAsync(link, coupleId, request, LlmOutcome.Cancelled, PromptText.EstimateTokens(request) - request.MaxOutputTokens, 0, 0, null);
+                throw;
+            }
+
             var outcome = result.Outcome;
             T? value = null;
             if (outcome == LlmOutcome.Ok && !TryRead(result.Json, request.ResponseSchema, out value))
                 outcome = LlmOutcome.InvalidOutput;
-            if (outcome == LlmOutcome.RateLimitedMinute && state.TheNextRateLimitExhaustsTheDay)
+
+            // A 429 that says how long to wait is obeyed as said. One that does not is a growing pause and, at the
+            // fourth in a row, the end of the day for this link.
+            DateTime? retryAt = null;
+            if (outcome is LlmOutcome.RateLimitedMinute or LlmOutcome.QuotaExhaustedDay && result.RetryAfter is { } retryAfter && retryAfter > TimeSpan.Zero)
+                retryAt = _clock.UtcNow + (retryAfter < LlmLinkState.MaxRetryAfter ? retryAfter : LlmLinkState.MaxRetryAfter);
+            else if (outcome == LlmOutcome.RateLimitedMinute && state.TheNextRateLimitExhaustsTheDay)
                 outcome = LlmOutcome.QuotaExhaustedDay;
 
             // Rule 5: every call is recorded, whatever its outcome. No retry on the same link.
-            await _usage.AddAsync(
-                AiUsage.Record(_clock.UtcNow, link.Provider, link.Model, coupleId, request.Feature, result.InputTokens, result.OutputTokens, outcome.ToString(), result.LatencyMs),
-                ct);
+            await RecordAsync(link, coupleId, request, outcome, result.InputTokens, result.OutputTokens, result.LatencyMs, retryAt);
             _logger.LogInformation(
                 "AI call {Feature} {Provider}|{Model}: {Outcome} in {LatencyMs} ms ({ErrorCode}).",
                 request.Feature, link.Provider, link.Model, outcome, result.LatencyMs, result.ErrorCode ?? "-");
@@ -141,6 +158,18 @@ public sealed class LlmGateway : ILlmGateway
 
         // Rule 6.
         return Stop<T>(rejections > 0 ? LlmGatewayOutcome.OutputRejected : LlmGatewayOutcome.AllProvidersFailed, request);
+    }
+
+    /// <summary>
+    /// Writes the row with a token of its own (a few seconds), never the one of the request: when the client has
+    /// already closed the connection the call still has to be counted.
+    /// </summary>
+    private async Task RecordAsync(LlmLink link, Guid? coupleId, LlmRequest request, LlmOutcome outcome, int inputTokens, int outputTokens, int latencyMs, DateTime? retryAtUtc)
+    {
+        using var writeCts = new CancellationTokenSource(UsageWriteTimeout);
+        await _usage.AddAsync(
+            AiUsage.Record(_clock.UtcNow, link.Provider, link.Model, coupleId, request.Feature, inputTokens, outputTokens, outcome.ToString(), latencyMs, retryAtUtc),
+            writeCts.Token);
     }
 
     private LlmGatewayResult<T> Stop<T>(LlmGatewayOutcome outcome, LlmRequest request)
@@ -213,6 +242,7 @@ public sealed class LlmGateway : ILlmGateway
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            // The time of the link ran out: a transient failure of this link. (A cancellation by the caller goes up.)
             return new LlmResult(LlmOutcome.Timeout, null, 0, 0, "TIMEOUT", (int)timeout.TotalMilliseconds);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

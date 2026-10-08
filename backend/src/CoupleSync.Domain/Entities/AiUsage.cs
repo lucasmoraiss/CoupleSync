@@ -44,6 +44,12 @@ public sealed class AiUsage
 
     public int LatencyMs { get; private set; }
 
+    /// <summary>
+    /// Only in a 429 whose answer said how long to wait: the instant from which the model can be called again.
+    /// It is what keeps a paused or exhausted model out for exactly the time the provider asked, across restarts.
+    /// </summary>
+    public DateTime? RetryAtUtc { get; private set; }
+
     public static AiUsage Record(
         DateTime nowUtc,
         string provider,
@@ -53,7 +59,8 @@ public sealed class AiUsage
         int inputTokens,
         int outputTokens,
         string outcome,
-        int latencyMs)
+        int latencyMs,
+        DateTime? retryAtUtc = null)
     {
         var utc = nowUtc.Kind == DateTimeKind.Utc ? nowUtc : DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc);
         return new AiUsage
@@ -70,6 +77,7 @@ public sealed class AiUsage
             OutputTokens = Math.Max(0, outputTokens),
             Outcome = Cut(outcome, MaxOutcomeLength),
             LatencyMs = Math.Max(0, latencyMs),
+            RetryAtUtc = retryAtUtc is { } retry ? DateTime.SpecifyKind(retry, DateTimeKind.Utc) : null,
         };
     }
 

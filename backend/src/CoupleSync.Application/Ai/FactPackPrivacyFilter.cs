@@ -21,15 +21,6 @@ public static partial class FactPackPrivacyFilter
     [GeneratedRegex(@"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", RegexOptions.CultureInvariant)]
     private static partial Regex Uuid();
 
-    [GeneratedRegex(@"\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}", RegexOptions.CultureInvariant)]
-    private static partial Regex Cnpj();
-
-    [GeneratedRegex(@"\d{3}\.?\d{3}\.?\d{3}-?\d{2}", RegexOptions.CultureInvariant)]
-    private static partial Regex Cpf();
-
-    [GeneratedRegex(@"(?:\+?55\s?)?\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}", RegexOptions.CultureInvariant)]
-    private static partial Regex Phone();
-
     [GeneratedRegex(@"\d{6,}", RegexOptions.CultureInvariant)]
     private static partial Regex LongDigits();
 
@@ -44,12 +35,11 @@ public static partial class FactPackPrivacyFilter
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
 
-        // Order matters: an e-mail or a key may contain a name or digits; a CNPJ contains what looks like a CPF.
+        // Order matters: an e-mail or a key may contain a name or digits; documents and phones in every common
+        // spelling (ContactPatterns) come before the catch-all for long runs of digits.
         var result = Email().Replace(text, Removed);
         result = Uuid().Replace(result, Removed);
-        result = Cnpj().Replace(result, Removed);
-        result = Cpf().Replace(result, Removed);
-        result = Phone().Replace(result, Removed);
+        result = ContactPatterns.Replace(result, Removed);
         result = LongDigits().Replace(result, Removed);
 
         var markerOfName = NameTokens(people);

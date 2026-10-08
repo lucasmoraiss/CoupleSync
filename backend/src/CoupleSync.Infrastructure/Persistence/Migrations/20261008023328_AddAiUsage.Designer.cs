@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace CoupleSync.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261008013952_AddAiUsage")]
+    [Migration("20261008023328_AddAiUsage")]
     partial class AddAiUsage
     {
         /// <inheritdoc />
@@ -83,6 +83,10 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)")
                         .HasColumnName("provider");
+
+                    b.Property<DateTime?>("RetryAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("retry_at_utc");
 
                     b.HasKey("Id");
 

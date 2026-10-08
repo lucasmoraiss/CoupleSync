@@ -40,9 +40,14 @@ public sealed class AiOptions
     public const string GeminiProviderName = "gemini";
     public const string FakeProviderName = "fake";
 
+    // Measured with the real key on 2026-10-08: the alias gemini-flash-latest is the most capable Flash that answers
+    // (it resolves to 3.8); gemini-flash-lite-latest resolves to 3.5 lite; the three fixed ids answer as themselves.
+    // Five different models, each with a quota of its own.
     private const string FlashLatest = "gemini-flash-latest";
     private const string FlashLiteLatest = "gemini-flash-lite-latest";
     private const string Flash3Preview = "gemini-3-flash-preview";
+    private const string Flash25 = "gemini-2.5-flash";
+    private const string Flash31Lite = "gemini-3.1-flash-lite";
 
     /// <summary>Emergency switch: nothing is sent to any provider.</summary>
     public bool Disabled { get; set; }
@@ -72,23 +77,29 @@ public sealed class AiOptions
     /// <summary>The longest a job waits for a minute window before falling to the next link.</summary>
     public TimeSpan JobMaxWait { get; set; } = TimeSpan.FromSeconds(60);
 
-    /// <summary>Quality first where there are few calls; speed and quota first where there is volume (design 2.2).</summary>
+    /// <summary>
+    /// Quality first where there are few calls and the text matters (weekly, monthly, guide): the most capable Flash,
+    /// then the preview, then the lite alias. Speed and quota first where there is volume (Assistant, daily insight,
+    /// categorization): lite alias, then two fixed models — never the two models of the summaries, so that a day
+    /// full of conversation cannot exhaust them (design 2.2).
+    /// </summary>
     public Dictionary<string, IReadOnlyList<LlmLink>> Chains { get; } = new(StringComparer.OrdinalIgnoreCase)
     {
-        [AiChains.Assistant] = [new(GeminiProviderName, FlashLatest), new(GeminiProviderName, FlashLiteLatest)],
-        [AiChains.Categorize] = [new(GeminiProviderName, FlashLatest), new(GeminiProviderName, FlashLiteLatest)],
-        [AiChains.Daily] = [new(GeminiProviderName, FlashLatest), new(GeminiProviderName, FlashLiteLatest)],
-        [AiChains.Weekly] = [new(GeminiProviderName, Flash3Preview), new(GeminiProviderName, FlashLatest), new(GeminiProviderName, FlashLiteLatest)],
-        [AiChains.Education] = [new(GeminiProviderName, Flash3Preview), new(GeminiProviderName, FlashLatest), new(GeminiProviderName, FlashLiteLatest)],
+        [AiChains.Assistant] = [new(GeminiProviderName, FlashLiteLatest), new(GeminiProviderName, Flash25), new(GeminiProviderName, Flash31Lite)],
+        [AiChains.Categorize] = [new(GeminiProviderName, FlashLiteLatest), new(GeminiProviderName, Flash25), new(GeminiProviderName, Flash31Lite)],
+        [AiChains.Daily] = [new(GeminiProviderName, FlashLiteLatest), new(GeminiProviderName, Flash25), new(GeminiProviderName, Flash31Lite)],
+        [AiChains.Weekly] = [new(GeminiProviderName, FlashLatest), new(GeminiProviderName, Flash3Preview), new(GeminiProviderName, FlashLiteLatest)],
+        [AiChains.Education] = [new(GeminiProviderName, FlashLatest), new(GeminiProviderName, Flash3Preview), new(GeminiProviderName, FlashLiteLatest)],
     };
 
     /// <summary>Configured limits. A model without an entry gets the default of <see cref="LimitFor"/>.</summary>
     public List<AiLimit> Limits { get; } = new();
 
     /// <summary>
-    /// The limits of a model. Gemini models without an entry: only 5 requests per minute (the lowest number quoted by
-    /// third parties, to pace the jobs); their daily quotas are not published and were not measured, so they stay
-    /// unknown and the chain learns them from the 429.
+    /// The limits of a model. Gemini models without an entry get only a pace per minute: 5 requests (the lowest
+    /// number quoted by third parties, to pace the jobs), or 10 for the "lite" models (seven calls in a row to
+    /// gemini-flash-lite-latest went through with the real key). Their daily quotas are not published and were not
+    /// measured, so they stay unknown and the chain learns them from the 429. Replace per model with Ai__Limits.
     /// </summary>
     public AiLimit LimitFor(string provider, string model)
     {
@@ -97,10 +108,15 @@ public sealed class AiOptions
             && string.Equals(l.Model, model, StringComparison.OrdinalIgnoreCase));
         if (configured is not null) return configured;
 
-        return string.Equals(provider, GeminiProviderName, StringComparison.OrdinalIgnoreCase)
-            ? new AiLimit { Provider = provider, Model = model, Rpm = 5 }
-            : new AiLimit { Provider = provider, Model = model };
+        if (!string.Equals(provider, GeminiProviderName, StringComparison.OrdinalIgnoreCase))
+            return new AiLimit { Provider = provider, Model = model };
+
+        var lite = model.Contains("lite", StringComparison.OrdinalIgnoreCase);
+        return new AiLimit { Provider = provider, Model = model, Rpm = lite ? DefaultGeminiLiteRpm : DefaultGeminiRpm };
     }
+
+    public const int DefaultGeminiRpm = 5;
+    public const int DefaultGeminiLiteRpm = 10;
 
     /// <summary>A known limit is used up to 90%; never less than one.</summary>
     public static long Usable(long limit) => Math.Max(1, limit * 9 / 10);

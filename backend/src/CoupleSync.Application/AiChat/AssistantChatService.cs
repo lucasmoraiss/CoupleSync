@@ -79,6 +79,10 @@ public sealed class AssistantChatService
             throw new AppException("CHAT_NOT_CONFIGURED", "O assistente de IA não está configurado.", 503);
 
         var people = await _people.GetPeopleAsync(coupleId, ct);
+
+        // Nothing left of the question after the hygiene (only quotes, breaks...): no model is asked.
+        if (Clean(message, people).Length == 0) return new AssistantReply(RejectedAnswer, null);
+
         var facts = await _contextService.BuildFactsAsync(coupleId, ct);
         var request = BuildRequest(people, facts, message, history);
 

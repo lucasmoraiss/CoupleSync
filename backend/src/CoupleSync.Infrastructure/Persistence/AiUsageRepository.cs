@@ -12,8 +12,10 @@ namespace CoupleSync.Infrastructure.Persistence;
 /// </summary>
 public sealed class AiUsageRepository : IAiUsageRepository
 {
-    // The calls that spent tokens: the model answered (well or not). A 429, an error or a timeout spent none.
-    private static readonly string[] SpentTokens = [nameof(LlmOutcome.Ok), nameof(LlmOutcome.InvalidOutput)];
+    // The calls that count in the budgets: the model answered (well or not), or the request was sent and the caller
+    // left before the answer (the provider counted it all the same). A 429, an error or a timeout spent nothing.
+    private static readonly string[] SpentTokens =
+        [nameof(LlmOutcome.Ok), nameof(LlmOutcome.InvalidOutput), nameof(LlmOutcome.Cancelled)];
 
     // What decides whether a link is paused or exhausted.
     private static readonly string[] LinkEvents =
@@ -61,12 +63,17 @@ public sealed class AiUsageRepository : IAiUsageRepository
     }
 
     public async Task<IReadOnlyList<AiLinkEvent>> GetRecentLinkEventsAsync(string provider, string model, DateTime sinceUtc, int take, CancellationToken ct)
-        => await _dbContext.AiUsages.AsNoTracking()
-            .Where(u => u.Provider == provider && u.Model == model && u.CreatedAtUtc >= sinceUtc && LinkEvents.Contains(u.Outcome))
+    {
+        // The day comes first so that the (day_utc, provider, model) index serves the query.
+        var sinceDay = DateOnly.FromDateTime(sinceUtc);
+        return await _dbContext.AiUsages.AsNoTracking()
+            .Where(u => u.DayUtc >= sinceDay && u.Provider == provider && u.Model == model
+                        && u.CreatedAtUtc >= sinceUtc && LinkEvents.Contains(u.Outcome))
             .OrderByDescending(u => u.CreatedAtUtc)
             .Take(take)
-            .Select(u => new AiLinkEvent(u.CreatedAtUtc, u.DayUtc, u.Outcome))
+            .Select(u => new AiLinkEvent(u.CreatedAtUtc, u.DayUtc, u.Outcome, u.RetryAtUtc))
             .ToListAsync(ct);
+    }
 }
 
 /// <summary>The members of a group as A, B, C... by the order they joined. The group is named in the query.</summary>

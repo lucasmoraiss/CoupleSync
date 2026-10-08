@@ -81,6 +81,10 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasColumnType("character varying(40)")
                         .HasColumnName("provider");
 
+                    b.Property<DateTime?>("RetryAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("retry_at_utc");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CoupleId", "DayBrt");

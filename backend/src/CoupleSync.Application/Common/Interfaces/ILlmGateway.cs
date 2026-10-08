@@ -77,7 +77,8 @@ public interface ILlmWaiter
 
 public sealed record AiUsageTotals(int Calls, long Tokens);
 
-public sealed record AiLinkEvent(DateTime CreatedAtUtc, DateOnly DayUtc, string Outcome);
+/// <param name="RetryAtUtc">When the provider said the model can be called again (a 429 with a retry delay).</param>
+public sealed record AiLinkEvent(DateTime CreatedAtUtc, DateOnly DayUtc, string Outcome, DateTime? RetryAtUtc = null);
 
 /// <summary>A member of the group as the AI sees it: a letter. The name never leaves the API.</summary>
 /// <param name="Marker">"A", "B"... by order of joining the group.</param>
@@ -92,7 +93,10 @@ public interface IAiPeopleReader
 /// <summary>ai_usage has no global group filter: every method that reads by group takes the group.</summary>
 public interface IAiUsageRepository
 {
-    /// <summary>Stores the row at once.</summary>
+    /// <summary>
+    /// Stores the row at once. The token is not the one of the request: a call that reached the provider is recorded
+    /// even when the client has already gone.
+    /// </summary>
     Task AddAsync(AiUsage usage, CancellationToken ct);
 
     /// <summary>Calls that spent tokens, and the tokens, of one group in one Brasília day, in the given features.</summary>

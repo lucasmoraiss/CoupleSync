@@ -19,12 +19,24 @@ public sealed class GeminiLlmProvider : ILlmProvider
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly string _endpoint;
     private readonly string _apiKey;
+    private readonly int _thinkingHeadroomTokens;
 
-    public GeminiLlmProvider(IHttpClientFactory httpClientFactory, string endpoint, string apiKey, string model)
+    /// <param name="thinkingHeadroomTokens">
+    /// Added to the output limit of every request. The Flash models "think" before answering and those tokens count
+    /// in maxOutputTokens (measured: 358 thinking tokens for a 66-token answer): without room of their own the JSON
+    /// would be cut.
+    /// </param>
+    public GeminiLlmProvider(
+        IHttpClientFactory httpClientFactory,
+        string endpoint,
+        string apiKey,
+        string model,
+        int thinkingHeadroomTokens = Gemini.GeminiOptions.DefaultThinkingHeadroomTokens)
     {
         _httpClientFactory = httpClientFactory;
         _endpoint = endpoint.TrimEnd('/');
         _apiKey = apiKey;
+        _thinkingHeadroomTokens = Math.Max(0, thinkingHeadroomTokens);
         Model = model;
     }
 
@@ -62,7 +74,7 @@ public sealed class GeminiLlmProvider : ILlmProvider
             ["generationConfig"] = new JsonObject
             {
                 ["temperature"] = request.Temperature,
-                ["maxOutputTokens"] = request.MaxOutputTokens,
+                ["maxOutputTokens"] = request.MaxOutputTokens + _thinkingHeadroomTokens,
                 ["responseMimeType"] = "application/json",
                 ["responseSchema"] = LlmSchemaWriter.Gemini(request.ResponseSchema),
             },
@@ -82,7 +94,7 @@ public sealed class GeminiLlmProvider : ILlmProvider
         using (http)
         {
             var client = _httpClientFactory.CreateClient(HttpClientName);
-            return await LlmHttp.PostAsync(client, http, Parse, SaysTheDayIsOver, ct);
+            return await LlmHttp.PostAsync(client, http, Parse, (_, body) => ReadRateLimit(body), ct);
         }
     }
 
@@ -97,38 +109,35 @@ public sealed class GeminiLlmProvider : ILlmProvider
         var content = candidate is { } c ? LlmHttp.Child(c, "content") : null;
         var part = content is { } ct ? LlmHttp.First(LlmHttp.Child(ct, "parts")) : null;
         var text = part is { } p ? LlmHttp.Text(p, "text") : null;
-        return new LlmHttp.Parsed(text, input, output);
+        var truncated = candidate is { } stopped && LlmHttp.Text(stopped, "finishReason") == "MAX_TOKENS";
+        return new LlmHttp.Parsed(text, input, output, truncated);
     }
 
     /// <summary>
-    /// A 429 of Gemini is RESOURCE_EXHAUSTED for every kind of quota; the kind is in the QuotaFailure detail, whose
-    /// quotaId names the window ("...PerDay..." or "...PerMinute..."). The day is over only when a violation says
-    /// "PerDay". (Format taken from Google's error model; it could not be confirmed against the real key in this
-    /// phase — an answer in any other shape is treated as a per-minute limit, which only pauses the link.)
+    /// A 429 of Gemini is RESOURCE_EXHAUSTED for every kind of quota, and its QuotaFailure detail lists SEVERAL
+    /// violations at once — per day and per minute, requests and tokens, together (seen with the real key on
+    /// 2026-10-08) — so the quotaId does not tell which limit was hit. What tells is RetryInfo.retryDelay: seconds
+    /// for a per-minute limit, hours for the day's quota (77,800 s in that answer). Without RetryInfo nothing is
+    /// known: the link only pauses.
     /// </summary>
-    internal static bool SaysTheDayIsOver(string body)
+    internal static LlmHttp.RateLimit ReadRateLimit(string body)
     {
         try
         {
             using var document = JsonDocument.Parse(body);
             var details = LlmHttp.Child(LlmHttp.Child(document.RootElement, "error") ?? default, "details");
-            if (details is not { ValueKind: JsonValueKind.Array } list) return false;
+            if (details is not { ValueKind: JsonValueKind.Array } list) return new LlmHttp.RateLimit(null);
 
             foreach (var detail in list.EnumerateArray())
             {
-                if (LlmHttp.Child(detail, "violations") is not { ValueKind: JsonValueKind.Array } violations) continue;
-                foreach (var violation in violations.EnumerateArray())
-                {
-                    var quotaId = LlmHttp.Text(violation, "quotaId");
-                    if (quotaId is not null && quotaId.Contains("PerDay", StringComparison.OrdinalIgnoreCase)) return true;
-                }
+                if (LlmHttp.Seconds(LlmHttp.Text(detail, "retryDelay")) is { } wait) return new LlmHttp.RateLimit(wait);
             }
 
-            return false;
+            return new LlmHttp.RateLimit(null);
         }
         catch (JsonException)
         {
-            return false;
+            return new LlmHttp.RateLimit(null);
         }
     }
 }
@@ -190,7 +199,7 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider
         http.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
 
         var client = _httpClientFactory.CreateClient(HttpClientNameOf(Provider));
-        return await LlmHttp.PostAsync(client, http, Parse, SaysTheDayIsOver, ct);
+        return await LlmHttp.PostAsync(client, http, Parse, ReadRateLimit, ct);
     }
 
     private static LlmHttp.Parsed Parse(JsonElement root)
@@ -199,24 +208,32 @@ public sealed class OpenAiCompatibleLlmProvider : ILlmProvider
         var choice = LlmHttp.First(LlmHttp.Child(root, "choices"));
         var message = choice is { } c ? LlmHttp.Child(c, "message") : null;
         var text = message is { } m ? LlmHttp.Text(m, "content") : null;
-        return new LlmHttp.Parsed(text, LlmHttp.Int(usage, "prompt_tokens"), LlmHttp.Int(usage, "completion_tokens"));
+        var truncated = choice is { } stopped && LlmHttp.Text(stopped, "finish_reason") == "length";
+        return new LlmHttp.Parsed(text, LlmHttp.Int(usage, "prompt_tokens"), LlmHttp.Int(usage, "completion_tokens"), truncated);
     }
 
-    /// <summary>Groq names the window in the message ("... on tokens per day (TPD)"). Anything else is a pause.</summary>
-    private static bool SaysTheDayIsOver(string body)
+    /// <summary>
+    /// The standard Retry-After header (seconds) when it comes; otherwise the words of the message (Groq names the
+    /// window: "... on tokens per day (TPD)"). Anything else is a pause.
+    /// </summary>
+    private static LlmHttp.RateLimit ReadRateLimit(HttpResponseMessage response, string body)
     {
+        var wait = response.Headers.RetryAfter?.Delta;
+        if (wait is { } delta && delta > TimeSpan.Zero) return new LlmHttp.RateLimit(delta);
+
         try
         {
             using var document = JsonDocument.Parse(body);
             var message = LlmHttp.Text(LlmHttp.Child(document.RootElement, "error") ?? default, "message");
-            return message is not null
+            var dayIsOver = message is not null
                 && (message.Contains("per day", StringComparison.OrdinalIgnoreCase)
                     || message.Contains("(RPD)", StringComparison.OrdinalIgnoreCase)
                     || message.Contains("(TPD)", StringComparison.OrdinalIgnoreCase));
+            return new LlmHttp.RateLimit(null, dayIsOver);
         }
         catch (JsonException)
         {
-            return false;
+            return new LlmHttp.RateLimit(null);
         }
     }
 }

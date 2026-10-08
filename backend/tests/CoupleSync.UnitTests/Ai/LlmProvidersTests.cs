@@ -78,7 +78,10 @@ public sealed class LlmProvidersTests
         var config = body.GetProperty("generationConfig");
         Assert.Equal("application/json", config.GetProperty("responseMimeType").GetString());
         Assert.Equal(0.2m, config.GetProperty("temperature").GetDecimal());
-        Assert.Equal(1000, config.GetProperty("maxOutputTokens").GetInt32());
+        // The models "think", and the thinking counts in the output limit: the answer keeps its 1,000 tokens and the
+        // thinking gets room of its own on top (measured with the real key: 358 thinking tokens for a 66-token answer).
+        Assert.Equal(1000 + GeminiOptions.DefaultThinkingHeadroomTokens, config.GetProperty("maxOutputTokens").GetInt32());
+        Assert.True(GeminiOptions.DefaultThinkingHeadroomTokens >= 1000);
         var schema = config.GetProperty("responseSchema");
         Assert.Equal("OBJECT", schema.GetProperty("type").GetString());
         string[] all = ["answer", "refs", "kind", "n", "v", "ok"];
@@ -107,23 +110,89 @@ public sealed class LlmProvidersTests
         Assert.Equal("AQID", parts[1].GetProperty("inlineData").GetProperty("data").GetString());
     }
 
-    [Theory]
-    // The day's quota, said explicitly: the link is out until the provider's day turns.
-    [InlineData("""{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded.","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}}""", LlmOutcome.QuotaExhaustedDay)]
-    // A per-minute limit, or anything that does not clearly say "day": a pause, not the whole day.
-    [InlineData("""{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded.","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"31s"}]}}""", LlmOutcome.RateLimitedMinute)]
-    [InlineData("""{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Resource has been exhausted (e.g. check quota)."}}""", LlmOutcome.RateLimitedMinute)]
-    [InlineData("not json at all", LlmOutcome.RateLimitedMinute)]
-    [InlineData("", LlmOutcome.RateLimitedMinute)]
-    public async Task Gemini_A429_IsTheDaysQuotaOnlyWhenTheErrorSaysSo(string body, LlmOutcome expected)
+    /// <summary>
+    /// The body of a real 429 of the free tier (answer to the real key on 2026-10-08, model with no quota): ONE
+    /// QuotaFailure with the per-day and the per-minute violations together, and a RetryInfo.
+    /// </summary>
+    private static string Gemini429(string? retryDelay)
     {
-        var server = new FakeLlmServer(_ => FakeLlmServer.Json(HttpStatusCode.TooManyRequests, body));
+        var retryInfo = retryDelay is null ? string.Empty : """,{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"DELAY"}""".Replace("DELAY", retryDelay);
+        return """
+            {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.","status":"RESOURCE_EXHAUSTED","details":[
+              {"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://ai.google.dev/gemini-api/docs/rate-limits"}]},
+              {"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[
+                {"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.1-pro"}},
+                {"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.1-pro","location":"global"}},
+                {"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_input_token_count","quotaId":"GenerateContentInputTokensPerModelPerMinute-FreeTier","quotaDimensions":{"model":"gemini-3.1-pro","location":"global"}},
+                {"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_input_token_count","quotaId":"GenerateContentInputTokensPerModelPerDay-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.1-pro"}}]}RETRY_INFO]}}
+            """.Replace("RETRY_INFO", retryInfo);
+    }
+
+    [Theory]
+    // The wait the provider asks for is what tells the limits apart: hours = the day's quota...
+    [InlineData("77800s", LlmOutcome.QuotaExhaustedDay, 77800.0)]
+    [InlineData("601s", LlmOutcome.QuotaExhaustedDay, 601.0)]
+    // ...seconds or a few minutes = the per-minute limit.
+    [InlineData("31s", LlmOutcome.RateLimitedMinute, 31.0)]
+    [InlineData("31.5s", LlmOutcome.RateLimitedMinute, 31.5)]
+    [InlineData("0.25s", LlmOutcome.RateLimitedMinute, 0.25)]
+    [InlineData("600s", LlmOutcome.RateLimitedMinute, 600.0)]
+    public async Task Gemini_A429WithARetryDelay_IsClassifiedByTheDelay_NotByTheListOfViolations(string retryDelay, LlmOutcome expected, double seconds)
+    {
+        var server = new FakeLlmServer(_ => FakeLlmServer.Json(HttpStatusCode.TooManyRequests, Gemini429(retryDelay)));
 
         var result = await Gemini(server).GenerateAsync(Request(), CancellationToken.None);
 
-        Assert.Equal(expected, result.Outcome);
-        Assert.Equal("HTTP_429", result.ErrorCode);
+        Assert.Equal((expected, "HTTP_429"), (result.Outcome, result.ErrorCode));
+        Assert.Equal(TimeSpan.FromSeconds(seconds), result.RetryAfter);
         Assert.Null(result.Json);
+    }
+
+    [Theory]
+    // No RetryInfo: per-day and per-minute violations come together, so nothing says which limit it was. A pause.
+    [InlineData(null)]
+    [InlineData("""{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded.","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}}""")]
+    [InlineData("""{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Resource has been exhausted (e.g. check quota)."}}""")]
+    [InlineData("""{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"soon"}]}}""")]
+    [InlineData("""{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"-5s"}]}}""")]
+    [InlineData("not json at all")]
+    [InlineData("")]
+    public async Task Gemini_A429WithoutAUsableRetryDelay_IsOnlyAPause(string? body)
+    {
+        var server = new FakeLlmServer(_ => FakeLlmServer.Json(HttpStatusCode.TooManyRequests, body ?? Gemini429(null)));
+
+        var result = await Gemini(server).GenerateAsync(Request(), CancellationToken.None);
+
+        Assert.Equal((LlmOutcome.RateLimitedMinute, "HTTP_429"), (result.Outcome, result.ErrorCode));
+        Assert.Null(result.RetryAfter);
+    }
+
+    [Theory]
+    // Cut by the output limit: the JSON is incomplete even when some text came. The link failed; the next one is tried.
+    [InlineData("""{"candidates":[{"content":{"role":"model","parts":[{"text":"{\"answer\":\"Vocês gast"}]},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":300,"candidatesTokenCount":40,"thoughtsTokenCount":960}}""")]
+    [InlineData("""{"candidates":[{"content":{"role":"model"},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":300,"thoughtsTokenCount":1000}}""")]
+    public async Task Gemini_AnAnswerCutByTheOutputLimit_IsInvalidOutput_WithItsTokensCounted(string body)
+    {
+        var server = new FakeLlmServer(_ => FakeLlmServer.Json(HttpStatusCode.OK, body));
+
+        var result = await Gemini(server).GenerateAsync(Request(), CancellationToken.None);
+
+        Assert.Equal((LlmOutcome.InvalidOutput, "MAX_TOKENS"), (result.Outcome, result.ErrorCode));
+        Assert.Null(result.Json);
+        // Thinking tokens are part of what was spent.
+        Assert.Equal((300, 1000), (result.InputTokens, result.OutputTokens));
+    }
+
+    [Fact]
+    public async Task Gemini_A503HighDemand_IsATransientError_NotAQuotaProblem()
+    {
+        // Body of the answer the real key got on 2026-10-08.
+        const string body = """{"error":{"code":503,"message":"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.","status":"UNAVAILABLE"}}""";
+        var server = new FakeLlmServer(_ => FakeLlmServer.Json(HttpStatusCode.ServiceUnavailable, body));
+
+        var result = await Gemini(server).GenerateAsync(Request(), CancellationToken.None);
+
+        Assert.Equal((LlmOutcome.Error, "HTTP_503"), (result.Outcome, result.ErrorCode));
     }
 
     [Theory]
@@ -249,6 +318,8 @@ public sealed class LlmProvidersTests
     [InlineData(HttpStatusCode.BadRequest, """{"error":{"message":"bad schema"}}""", LlmOutcome.Error)]
     [InlineData(HttpStatusCode.OK, """{"choices":[]}""", LlmOutcome.InvalidOutput)]
     [InlineData(HttpStatusCode.OK, """{"choices":[{"message":{"role":"assistant","content":null}}]}""", LlmOutcome.InvalidOutput)]
+    [InlineData(HttpStatusCode.OK, """{"choices":[{"message":{"role":"assistant","content":"{\"answer\":\"cortad"},"finish_reason":"length"}]}""", LlmOutcome.InvalidOutput)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, """{"error":{"message":"overloaded"}}""", LlmOutcome.Error)]
     public async Task OpenAiCompatible_MapsFailuresToOutcomes(HttpStatusCode status, string body, LlmOutcome expected)
     {
         var server = new FakeLlmServer(_ => FakeLlmServer.Json(status, body));
@@ -256,6 +327,34 @@ public sealed class LlmProvidersTests
         var result = await Compatible(server).GenerateAsync(Request(), CancellationToken.None);
 
         Assert.Equal(expected, result.Outcome);
+    }
+
+    [Theory]
+    [InlineData("12", LlmOutcome.RateLimitedMinute, 12)]
+    [InlineData("3600", LlmOutcome.QuotaExhaustedDay, 3600)]
+    public async Task OpenAiCompatible_A429WithRetryAfter_IsClassifiedByTheWait(string retryAfter, LlmOutcome expected, int seconds)
+    {
+        var server = new FakeLlmServer(_ =>
+        {
+            var response = FakeLlmServer.Json(HttpStatusCode.TooManyRequests, """{"error":{"message":"Rate limit reached"}}""");
+            response.Headers.TryAddWithoutValidation("Retry-After", retryAfter);
+            return response;
+        });
+
+        var result = await Compatible(server).GenerateAsync(Request(), CancellationToken.None);
+
+        Assert.Equal(expected, result.Outcome);
+        Assert.Equal(TimeSpan.FromSeconds(seconds), result.RetryAfter);
+    }
+
+    [Fact]
+    public void Catalog_GivesTheGeminiModelsTheConfiguredThinkingHeadroom()
+    {
+        var providers = new LlmProvidersOptions();
+        AiConfiguration.Apply(providers, Config(("GEMINI_API_KEY", FakeKey)), new GeminiOptions { ThinkingHeadroomTokens = 512 });
+
+        Assert.Equal(512, providers.GeminiThinkingHeadroomTokens);
+        Assert.Equal(GeminiOptions.DefaultThinkingHeadroomTokens, new GeminiOptions().ThinkingHeadroomTokens);
     }
 
     // ---------------------------------------------------------------- the catalog: who is in a chain
@@ -331,14 +430,28 @@ public sealed class LlmProvidersTests
         Assert.Equal((25, 60_000L, 60, 150), (options.GroupDailyCalls, options.GroupDailyTokens, options.JobDailyCalls, options.GlobalDailyInteractiveCalls));
         Assert.Equal((20, 30, 60, 60), (options.InteractiveBudget.TotalSeconds, options.LinkTimeout.TotalSeconds, options.JobLinkTimeout.TotalSeconds, options.JobMaxWait.TotalSeconds));
 
-        string[] fast = ["gemini|gemini-flash-latest", "gemini|gemini-flash-lite-latest"];
-        string[] quality = ["gemini|gemini-3-flash-preview", "gemini|gemini-flash-latest", "gemini|gemini-flash-lite-latest"];
+        // Measured with the real key (2026-10-08): gemini-flash-latest is the most capable Flash that answers
+        // (it resolves to 3.8); every identifier below is a different model, with a quota of its own.
+        // Volume first: the Assistant, the daily insight and the categorization never use the two models of the summaries.
+        string[] fast = ["gemini|gemini-flash-lite-latest", "gemini|gemini-2.5-flash", "gemini|gemini-3.1-flash-lite"];
+        // Quality first: few calls, and the text matters.
+        string[] quality = ["gemini|gemini-flash-latest", "gemini|gemini-3-flash-preview", "gemini|gemini-flash-lite-latest"];
         Assert.Equal(fast, Links(options, AiChains.Assistant));
         Assert.Equal(fast, Links(options, AiChains.Categorize));
         Assert.Equal(fast, Links(options, AiChains.Daily));
         Assert.Equal(quality, Links(options, AiChains.Weekly));
         Assert.Equal(quality, Links(options, AiChains.Education));
         Assert.Equal(5, options.Chains.Count);
+        Assert.Empty(fast.Intersect(quality.Take(2)));
+
+        // Pace per minute, per model, replaceable in Ai__Limits: 5 for the models that think; 10 for the "lite" ones
+        // (seven calls in a row to gemini-flash-lite-latest went through with the real key). Daily quotas: unknown.
+        Assert.Equal(5, options.LimitFor("gemini", "gemini-flash-latest").Rpm);
+        Assert.Equal(5, options.LimitFor("gemini", "gemini-3-flash-preview").Rpm);
+        Assert.Equal(5, options.LimitFor("gemini", "gemini-2.5-flash").Rpm);
+        Assert.Equal(10, options.LimitFor("gemini", "gemini-flash-lite-latest").Rpm);
+        Assert.Equal(10, options.LimitFor("gemini", "gemini-3.1-flash-lite").Rpm);
+        Assert.All(options.Chains.Values.SelectMany(c => c), link => Assert.Null(options.LimitFor(link.Provider, link.Model).Rpd));
         Assert.All(options.Chains.Values.SelectMany(c => c), link =>
         {
             Assert.Equal("gemini", link.Provider);

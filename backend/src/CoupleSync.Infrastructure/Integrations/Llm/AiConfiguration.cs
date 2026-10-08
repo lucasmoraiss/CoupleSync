@@ -27,6 +27,8 @@ public sealed class LlmProvidersOptions
 
     public string GeminiApiKey { get; set; } = string.Empty;
 
+    public int GeminiThinkingHeadroomTokens { get; set; } = GeminiOptions.DefaultThinkingHeadroomTokens;
+
     public List<OpenAiCompatibleEntry> OpenAiCompatible { get; } = new();
 }
 
@@ -81,6 +83,7 @@ public static class AiConfiguration
     public static void Apply(LlmProvidersOptions options, IConfiguration configuration, GeminiOptions gemini)
     {
         options.GeminiEndpoint = gemini.Endpoint;
+        options.GeminiThinkingHeadroomTokens = gemini.ThinkingHeadroomTokens;
         options.GeminiApiKey = EffectiveGeminiKey(configuration, gemini.ApiKey);
 
         foreach (var entry in CompatibleProviders(configuration))
@@ -185,7 +188,7 @@ public sealed class LlmProviderCatalog : ILlmProviderCatalog
         if (string.Equals(provider, AiOptions.GeminiProviderName, StringComparison.OrdinalIgnoreCase))
         {
             return _providers.GeminiApiKey.Length > 0
-                ? new GeminiLlmProvider(_httpClientFactory, _providers.GeminiEndpoint, _providers.GeminiApiKey, model)
+                ? new GeminiLlmProvider(_httpClientFactory, _providers.GeminiEndpoint, _providers.GeminiApiKey, model, _providers.GeminiThinkingHeadroomTokens)
                 : null;
         }
 

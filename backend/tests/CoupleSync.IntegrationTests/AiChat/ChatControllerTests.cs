@@ -91,7 +91,7 @@ public sealed class ChatControllerTests
 
         // The call went through the chain and left its accounting row (metadata only).
         var usage = Assert.Single(factory.UsageRows());
-        Assert.Equal(("gemini", "gemini-flash-latest", "chat", "Ok"), (usage.Provider, usage.Model, usage.Feature, usage.Outcome));
+        Assert.Equal(("gemini", "gemini-flash-lite-latest", "chat", "Ok"), (usage.Provider, usage.Model, usage.Feature, usage.Outcome));
         Assert.NotNull(usage.CoupleId);
     }
 
@@ -171,7 +171,7 @@ public sealed class ChatControllerTests
         {
             ["Ai:GroupDailyCalls"] = "1000",
             ["Ai:Limits:0:Provider"] = "gemini",
-            ["Ai:Limits:0:Model"] = "gemini-flash-latest",
+            ["Ai:Limits:0:Model"] = "gemini-flash-lite-latest",
             ["Ai:Limits:0:Rpm"] = "1000",
         });
         using var client = factory.CreateClient();
@@ -198,8 +198,8 @@ public sealed class ChatControllerTests
     public async Task Chat_FallsToTheNextModel_WhenTheFirstIsOutOfQuota_AndRecordsBothCalls()
     {
         var catalog = new StubCatalog(
-            new StubLlmProvider("gemini", "gemini-flash-latest", _ => StubLlmProvider.Failed(LlmOutcome.QuotaExhaustedDay)),
-            new StubLlmProvider("gemini", "gemini-flash-lite-latest"));
+            new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Failed(LlmOutcome.QuotaExhaustedDay)),
+            new StubLlmProvider("gemini", "gemini-2.5-flash"));
         await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: catalog);
         using var client = await factory.ClientWithCoupleAsync();
 
@@ -212,15 +212,42 @@ public sealed class ChatControllerTests
         Assert.Equal(1, catalog.Providers[0].Calls);
         Assert.Equal(2, catalog.Providers[1].Calls);
         Assert.Equal(1, factory.UsageRows().Count(u => u.Outcome == "QuotaExhaustedDay"));
-        Assert.Equal(2, factory.UsageRows().Count(u => u.Outcome == "Ok" && u.Model == "gemini-flash-lite-latest"));
+        Assert.Equal(2, factory.UsageRows().Count(u => u.Outcome == "Ok" && u.Model == "gemini-2.5-flash"));
+    }
+
+    [Fact]
+    public async Task Chat_ARequestTheClientAbandons_StillLeavesItsRowInAiUsage()
+    {
+        using var abandon = new CancellationTokenSource();
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest")
+        {
+            AsyncAnswer = async (_, ct) =>
+            {
+                // The request reached the provider; the client closes the connection before the answer.
+                abandon.Cancel();
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                return StubLlmProvider.Answer("tarde demais");
+            },
+        };
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        using var client = await factory.ClientWithCoupleAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.PostAsJsonAsync("/api/v1/ai/chat", ValidRequest(), abandon.Token));
+
+        // The server finishes on its own time.
+        for (var i = 0; i < 100 && factory.UsageRows().Count == 0; i++) await Task.Delay(50);
+        var row = Assert.Single(factory.UsageRows());
+        Assert.Equal(("Cancelled", "chat"), (row.Outcome, row.Feature));
+        Assert.NotNull(row.CoupleId);
     }
 
     [Fact]
     public async Task Chat_Returns502AiProviderFailed_InTheSingleErrorFormat_WhenEveryLinkFails()
     {
         var catalog = new StubCatalog(
-            new StubLlmProvider("gemini", "gemini-flash-latest", _ => StubLlmProvider.Failed(LlmOutcome.Error)),
-            new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Failed(LlmOutcome.Timeout)));
+            new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Failed(LlmOutcome.Error)),
+            new StubLlmProvider("gemini", "gemini-2.5-flash", _ => StubLlmProvider.Failed(LlmOutcome.Timeout)));
         await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: catalog);
         using var client = await factory.ClientWithCoupleAsync();
 
@@ -238,8 +265,8 @@ public sealed class ChatControllerTests
     public async Task Chat_AnswersTheFixedSentenceWith200_WhenTheAnswerIsRejectedTwice()
     {
         var catalog = new StubCatalog(
-            new StubLlmProvider("gemini", "gemini-flash-latest", _ => StubLlmProvider.Answer("Clique em https://exemplo.test")),
-            new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Answer("Ligue para (11) 99999-9999")));
+            new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Answer("Clique em https://exemplo.test")),
+            new StubLlmProvider("gemini", "gemini-2.5-flash", _ => StubLlmProvider.Answer("Ligue para (11) 99999-9999")));
         await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: catalog);
         using var client = await factory.ClientWithCoupleAsync();
 
@@ -255,18 +282,21 @@ public sealed class ChatControllerTests
     public async Task Chat_TheGroupBudget_IsCountedInAiUsage_SurvivesARestart_AndAnswersChatRateLimited()
     {
         var database = $"couplesync-chat-budget-{Guid.NewGuid():N}";
-        var catalog = new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-latest"));
-        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: catalog, databaseName: database);
+        var catalog = new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-lite-latest"));
+        // One instant for the rows and for both hosts: the test does not depend on the wall clock staying in the
+        // same Brasília day between the seeding and the request.
+        var now = DateTime.UtcNow;
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: catalog, databaseName: database, frozenNow: now);
         using var client = await factory.ClientWithCoupleAsync();
         using var otherGroup = await factory.ClientWithCoupleAsync();
 
         // The rows are written straight into ai_usage: 24 answered calls and one that came back invalid.
         var coupleId = factory.CoupleIds().First();
-        factory.SeedUsage(24, coupleId, "Ok");
-        factory.SeedUsage(1, coupleId, "InvalidOutput");
+        factory.SeedUsage(24, coupleId, "Ok", now);
+        factory.SeedUsage(1, coupleId, "InvalidOutput", now);
 
         // "The API restarted": another host, with nothing in memory, on the same database.
-        await using var restarted = new ChatWebApplicationFactory(enabled: true, catalog: catalog, databaseName: database);
+        await using var restarted = new ChatWebApplicationFactory(enabled: true, catalog: catalog, databaseName: database, frozenNow: now);
         using var sameUser = restarted.CreateClient();
         sameUser.DefaultRequestHeaders.Authorization = client.DefaultRequestHeaders.Authorization;
 
@@ -288,7 +318,7 @@ public sealed class ChatControllerTests
     [Fact]
     public async Task Chat_TheGlobalCeiling_SumsEveryGroup_AndAnswersChatRateLimited()
     {
-        var catalog = new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-latest"));
+        var catalog = new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-lite-latest"));
         await using var factory = new ChatWebApplicationFactory(
             enabled: true, catalog: catalog, config: new() { ["Ai:GlobalDailyInteractiveCalls"] = "3" });
 
@@ -312,7 +342,7 @@ public sealed class ChatControllerTests
     [Fact]
     public async Task Chat_NeverSendsTheMembersNames_AndPutsTheFirstNameBackInTheReply()
     {
-        var provider = new StubLlmProvider("gemini", "gemini-flash-latest", _ => StubLlmProvider.Answer("{{A}} gastou menos neste mês."));
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest", _ => StubLlmProvider.Answer("{{A}} gastou menos neste mês."));
         await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
         using var client = await factory.ClientWithCoupleAsync(name: "Carolina Exemplo");
 
@@ -338,7 +368,7 @@ public sealed class ChatControllerTests
     [Fact]
     public async Task Chat_StillAcceptsTheLargestRequestOfTheInstalledApp_AndCutsItOnTheServer()
     {
-        var provider = new StubLlmProvider("gemini", "gemini-flash-latest");
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
         await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
         using var client = await factory.ClientWithCoupleAsync();
 
@@ -498,10 +528,13 @@ internal sealed class StubLlmProvider : ILlmProvider
 
     public int Calls => Requests.Count;
 
+    /// <summary>When set, answers instead of the fixed function (it sees the token of the call).</summary>
+    public Func<LlmRequest, CancellationToken, Task<LlmResult>>? AsyncAnswer { get; init; }
+
     public Task<LlmResult> GenerateAsync(LlmRequest request, CancellationToken ct)
     {
         Requests.Add(request);
-        return Task.FromResult(_answer(request));
+        return AsyncAnswer is not null ? AsyncAnswer(request, ct) : Task.FromResult(_answer(request));
     }
 
     public static LlmResult Answer(string text)
@@ -532,6 +565,7 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
 
     private readonly bool _enabled;
     private readonly bool _withGeminiKey;
+    private readonly DateTime? _frozenNow;
     private readonly ILlmProviderCatalog? _catalog;
     private readonly Dictionary<string, string?> _config;
     private readonly string _databaseConnectionString;
@@ -547,13 +581,15 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
         Dictionary<string, string?>? config = null,
         bool withGeminiKey = true,
         bool useRealCatalog = false,
-        string? databaseName = null)
+        string? databaseName = null,
+        DateTime? frozenNow = null)
     {
         _enabled = enabled;
+        _frozenNow = frozenNow;
         _withGeminiKey = withGeminiKey;
         _catalog = useRealCatalog
             ? null
-            : catalog ?? new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-latest"), new StubLlmProvider("gemini", "gemini-flash-lite-latest"));
+            : catalog ?? new StubCatalog(new StubLlmProvider("gemini", "gemini-flash-lite-latest"), new StubLlmProvider("gemini", "gemini-2.5-flash"));
         _config = config ?? new();
         _databaseConnectionString = $"Data Source={databaseName ?? $"couplesync-chat-tests-{Guid.NewGuid():N}"};Mode=Memory;Cache=Shared";
         Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
@@ -603,6 +639,12 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
             {
                 services.RemoveAll<ILlmProviderCatalog>();
                 services.AddSingleton(_catalog);
+            }
+
+            if (_frozenNow is { } frozen)
+            {
+                services.RemoveAll<IDateTimeProvider>();
+                services.AddSingleton<IDateTimeProvider>(new FrozenClock(frozen));
             }
 
             // Override GeminiOptions.Enabled to match the test scenario
@@ -657,12 +699,19 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
         return db.Couples.AsNoTracking().ToList().OrderBy(c => c.CreatedAtUtc).Select(c => c.Id).ToList();
     }
 
-    public void SeedUsage(int count, Guid coupleId, string outcome)
+    public void SeedUsage(int count, Guid coupleId, string outcome, DateTime atUtc)
     {
         using var db = NewContext();
         for (var i = 0; i < count; i++)
-            db.AiUsages.Add(AiUsage.Record(DateTime.UtcNow, "gemini", "gemini-flash-latest", coupleId, LlmFeatures.Chat, 100, 20, outcome, 5));
+            db.AiUsages.Add(AiUsage.Record(atUtc, "gemini", "gemini-flash-lite-latest", coupleId, LlmFeatures.Chat, 100, 20, outcome, 5));
         db.SaveChanges();
+    }
+
+    private sealed class FrozenClock : IDateTimeProvider
+    {
+        public FrozenClock(DateTime utcNow) => UtcNow = utcNow;
+
+        public DateTime UtcNow { get; }
     }
 
     protected override void Dispose(bool disposing)

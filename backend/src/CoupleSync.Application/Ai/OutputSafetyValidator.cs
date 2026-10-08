@@ -24,12 +24,6 @@ public static partial class OutputSafetyValidator
     [GeneratedRegex(@"\S+@\S+\.\S+|(?<![\w@])@\w+", RegexOptions.CultureInvariant)]
     private static partial Regex EmailOrHandle();
 
-    [GeneratedRegex(@"\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}|\b0800\b", RegexOptions.CultureInvariant)]
-    private static partial Regex Phone();
-
-    [GeneratedRegex(@"\d{3}\.?\d{3}\.?\d{3}-?\d{2}", RegexOptions.CultureInvariant)]
-    private static partial Regex Cpf();
-
     [GeneratedRegex(@"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", RegexOptions.CultureInvariant)]
     private static partial Regex Uuid();
 
@@ -50,8 +44,9 @@ public static partial class OutputSafetyValidator
         if (Link().IsMatch(folded)) return LlmValidationResult.Invalid("LINK");
         if (EmailOrHandle().IsMatch(folded)) return LlmValidationResult.Invalid("EMAIL_OR_HANDLE");
         if (Uuid().IsMatch(folded)) return LlmValidationResult.Invalid("RANDOM_KEY");
-        if (Cpf().IsMatch(folded)) return LlmValidationResult.Invalid("DOCUMENT");
-        if (Phone().IsMatch(folded)) return LlmValidationResult.Invalid("PHONE");
+        // Documents and phones by the pattern of the number, in the same spellings the privacy filter removes.
+        if (ContactPatterns.HasDocument(folded)) return LlmValidationResult.Invalid("DOCUMENT");
+        if (ContactPatterns.HasPhone(folded)) return LlmValidationResult.Invalid("PHONE");
         if (ContactOrAction().IsMatch(folded)) return LlmValidationResult.Invalid("CONTACT_OR_ACTION");
 
         if (pack is { } facts)

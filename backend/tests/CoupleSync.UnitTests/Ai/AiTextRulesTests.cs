@@ -202,6 +202,85 @@ public sealed class AiTextRulesTests
         Assert.Equal("{{B}} e {{B}} gastaram R$ 1.840,30 em 05/10/2026 da conta", filtered);
     }
 
+    [Theory]
+    // Mobile and landline, with and without area code, country code, dots, spaces and the detached 9.
+    [InlineData("98765-4321")]
+    [InlineData("9 8765-4321")]
+    [InlineData("9 8765 4321")]
+    [InlineData("987654321")]
+    [InlineData("(11) 9 8765-4321")]
+    [InlineData("(11) 98765-4321")]
+    [InlineData("11.98765.4321")]
+    [InlineData("11 98765 4321")]
+    [InlineData("11-98765-4321")]
+    [InlineData("011 98765-4321")]
+    [InlineData("+55 11 98765-4321")]
+    [InlineData("+55 (11) 9 8765-4321")]
+    [InlineData("+5511987654321")]
+    [InlineData("55 11 98765 4321")]
+    [InlineData("3333-4444")]
+    [InlineData("(11) 3333-4444")]
+    [InlineData("11 3333 4444")]
+    [InlineData("11.3333.4444")]
+    // CPF and CNPJ with dots, spaces or nothing.
+    [InlineData("000.000.001-91")]
+    [InlineData("000 000 001 91")]
+    [InlineData("000.000.001 91")]
+    [InlineData("000 000 001-91")]
+    [InlineData("00000000191")]
+    [InlineData("00.000.000/0001-91")]
+    [InlineData("00 000 000 0001 91")]
+    [InlineData("00.000.000 0001-91")]
+    [InlineData("00000000000191")]
+    public void PrivacyFilter_RemovesPhonesAndDocuments_InTheirCommonSpellings(string secret)
+    {
+        var filtered = FactPackPrivacyFilter.FilterFreeText($"Anote aí: {secret}, por favor.", People);
+
+        Assert.Equal("Anote aí: [removido], por favor.", filtered);
+    }
+
+    [Theory]
+    [InlineData("Gastamos R$ 1.840,30 em 05/10/2026.")]
+    [InlineData("Guardamos R$ 150.000,00 até 2026.")]
+    [InlineData("R$ 1.234.567,89 no total, R$ 12.345.678,90 no ano")]
+    [InlineData("Parcela 03/10 de R$ 99,90")]
+    [InlineData("12x de R$ 250,00 no cartão")]
+    [InlineData("Entre 2025-2026 subiu 13,5%")]
+    [InlineData("De 2019 a 2026, 3 de 12 parcelas, 100% em dia")]
+    [InlineData("Paguei 1500 e depois 2000 reais")]
+    [InlineData("Em 2026 foram 2500 e 3000 reais")]
+    [InlineData("No dia 5 gastei 45, 30 e 12345 pontos")]
+    [InlineData("Data de hoje: 08/10/2026\n  - Lazer: alocado R$ 400,00, gasto R$ 362,00, restante R$ 38,00")]
+    [InlineData("  - Viagem: alvo R$ 8.000,00, progresso R$ 3.100,00 (38%), prazo 01/06/2027")]
+    public void PrivacyFilter_KeepsAmountsDatesYearsAndInstallments(string text)
+        => Assert.Equal(text, FactPackPrivacyFilter.FilterFreeText(text, People));
+
+    [Theory]
+    [InlineData("Ligue 98765-4321")]
+    [InlineData("O número é 11.98765.4321")]
+    [InlineData("Chame no (11) 9 8765-4321")]
+    [InlineData("Fixo 3333-4444")]
+    [InlineData("Documento 000 000 001 91")]
+    public void OutputSafety_RejectsTheSamePhonesAndDocumentsTheFilterRemoves(string text)
+        => Assert.False(OutputSafetyValidator.Validate(text).IsValid, text);
+
+    [Theory]
+    [InlineData("Em 2026 foram 2500 e 3000 reais")]
+    [InlineData("em 2026 2500 3000 reais")]
+    [InlineData("Entre 2025-2026 o gasto subiu de R$ 12.345,67 para R$ 150.000,00")]
+    [InlineData("A parcela 03/10 vence em 05/10/2026")]
+    public void OutputSafety_DoesNotTakeAmountsAndYearsForPhones(string text)
+        => Assert.True(OutputSafetyValidator.Validate(text).IsValid, text);
+
+    [Fact]
+    public void PromptText_Sanitize_AlsoRemovesInvisibleFormattingCharacters()
+    {
+        // Right-to-left override, zero-width space, line and paragraph separators, byte order mark.
+        var dirty = "Viagem" + (char)0x202E + " de" + (char)0x200B + (char)0x2028 + "férias" + (char)0x2029 + (char)0xFEFF + "!";
+
+        Assert.Equal("Viagem de férias !", PromptText.Sanitize(dirty));
+    }
+
     [Fact]
     public void PrivacyFilter_PutsTheFirstNamesBackWhenAnsweringTheApp()
     {

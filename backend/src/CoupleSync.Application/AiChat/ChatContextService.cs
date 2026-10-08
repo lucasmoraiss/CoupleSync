@@ -1,6 +1,7 @@
 using CoupleSync.Domain.ValueObjects;
 using System.Globalization;
 using System.Text;
+using CoupleSync.Application.Ai;
 using CoupleSync.Application.Budget;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Goals;
@@ -30,20 +31,10 @@ public sealed class ChatContextService
         _dateTimeProvider = dateTimeProvider;
     }
 
-    public async Task<string> BuildSystemPromptAsync(Guid coupleId, CancellationToken ct)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("Você é um assistente financeiro do CoupleSync, um aplicativo de finanças para casais.");
-        sb.AppendLine("Responda de forma clara, objetiva e sem julgamentos sobre as finanças do casal.");
-        sb.Append(await BuildFactsAsync(coupleId, ct));
-        sb.AppendLine("IMPORTANTE: Para questões sobre investimentos, decisões legais ou fiscais, recomende que o casal consulte um profissional qualificado.");
-
-        return sb.ToString();
-    }
-
     /// <summary>
     /// Only the data of the group (date, budget, spending by category, goals), one fact per line, with no
-    /// instruction to the model: the Assistant sends it in a message of its own, apart from the rules.
+    /// instruction to the model: the Assistant sends it in a message of its own, apart from the rules (which are
+    /// in <see cref="AssistantChatService"/>).
     /// </summary>
     public async Task<string> BuildFactsAsync(Guid coupleId, CancellationToken ct)
     {
@@ -95,11 +86,8 @@ public sealed class ChatContextService
                 var deadlineStr = goal.Deadline != default
                     ? BrDate(goal.Deadline)
                     : "sem prazo definido";
-                var safeTitle = goal.Title
-                    .Replace("\r", string.Empty)
-                    .Replace("\n", string.Empty)
-                    .Trim();
-                if (safeTitle.Length > 100) safeTitle = safeTitle[..100];
+                // Typed by a person: the same hygiene as every other text that enters a prompt as data.
+                var safeTitle = PromptText.Sanitize(goal.Title);
                 sb.AppendLine($"  - {safeTitle}: alvo {BrlFormat.Format(goal.TargetAmount)}, progresso {BrlFormat.Format(progress)} ({(long)Math.Floor(percent)}%), prazo {deadlineStr}");
             }
         }

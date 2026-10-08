@@ -26,7 +26,8 @@ namespace CoupleSync.Infrastructure.Persistence.Migrations
                     input_tokens = table.Column<int>(type: "integer", nullable: false),
                     output_tokens = table.Column<int>(type: "integer", nullable: false),
                     outcome = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
-                    latency_ms = table.Column<int>(type: "integer", nullable: false)
+                    latency_ms = table.Column<int>(type: "integer", nullable: false),
+                    retry_at_utc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
