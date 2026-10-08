@@ -3,10 +3,15 @@
 //
 // Nada do banco vira transação sem alguém do grupo confirmar. O valor nunca é editável: o app manda só o id da
 // linha e, quando a pessoa trocou, a categoria.
+//
+// Conciliação: a linha que parece uma transação que o app já tinha (possível duplicada) não entra em "Selecionar
+// tudo" nem tem caixa; a pessoa responde "É a mesma" (nada é criado) ou "É outra" (vira despesa nova). O que o
+// servidor ignorou sozinho (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas.
 import { getApiErrorMessage } from '@/services/apiError';
 import { monthLabelFromIso } from '@/utils/format';
 import type {
   BankReviewLineResponse,
+  BankReviewMatchResponse,
   BankReviewMonthResponse,
   ConfirmBankReviewRequest,
   ConfirmBankReviewResponse,
@@ -34,11 +39,23 @@ export function unselectableReason(line: Confirmability): string | null {
   return null;
 }
 
-export function isSelectable(line: Confirmability): boolean {
-  return unselectableReason(line) === null;
+/** A linha parece uma transação que o app já tinha: espera "É a mesma" ou "É outra". */
+export function hasSuspectedDuplicate(line: Pick<BankReviewLineResponse, 'match'>): boolean {
+  return !!line.match;
 }
 
-/** "Selecionar tudo": todas as despesas da lista, menos as pendentes no banco, as sem valor e as em outra moeda. */
+/**
+ * A linha tem caixa e pode ir em "Confirmar selecionadas": pode virar despesa e não tem possível duplicada (essa
+ * só entra pela resposta da pessoa, uma a uma).
+ */
+export function isSelectable(line: Confirmability & Pick<BankReviewLineResponse, 'match'>): boolean {
+  return unselectableReason(line) === null && !hasSuspectedDuplicate(line);
+}
+
+/**
+ * "Selecionar tudo": todas as despesas da lista, menos as pendentes no banco, as sem valor, as em outra moeda e as
+ * que têm possível duplicada.
+ */
 export function selectAllIds(lines: readonly BankReviewLineResponse[]): string[] {
   return lines.filter(isSelectable).map((line) => line.id);
 }
@@ -144,6 +161,105 @@ export async function confirmInBatches(
     };
   }
   return { kind: 'done', text: confirmResultMessage(created, already, skipped, otherCurrency) };
+}
+
+// ---------------------------------------------------------------- possíveis duplicadas
+
+export const ANSWER_SAME_FAILED_TEXT = 'Não foi possível marcar como a mesma. Tente novamente.';
+export const ANSWER_OTHER_FAILED_TEXT = 'Não foi possível registrar como outra despesa. Tente novamente.';
+
+/** 'same': "É a mesma" (a transação que já existia fica; nada é criado). 'other': "É outra" (despesa nova). */
+export type DuplicateAnswer = 'same' | 'other';
+
+export function suspectedDuplicateCount(lines: readonly BankReviewLineResponse[]): number {
+  return lines.filter(hasSuspectedDuplicate).length;
+}
+
+/** Aviso do topo da revisão. null: nenhuma possível duplicada, sem aviso. */
+export function duplicateNoticeText(count: number): string | null {
+  if (!(count > 0)) return null;
+  return count === 1 ? '1 possível duplicada precisa de você' : `${count} possíveis duplicadas precisam de você`;
+}
+
+const MATCH_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  Manual: 'lançamento manual',
+  Notification: 'notificação',
+  OcrImport: 'extrato importado',
+};
+
+/** "2026-10-03" → "03/10". É um dia de calendário, não um instante; o que não vier nesse formato aparece como veio. */
+function shortDay(day: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day ?? '');
+  return match ? `${match[3]}/${match[2]}` : day;
+}
+
+/** "Parece a mesma de: Padaria · R$ 25,00 · notificação de 03/10". O valor sai na moeda da transação. */
+export function matchText(match: BankReviewMatchResponse): string {
+  const title = match.merchant?.trim() || match.description?.trim() || 'transação já registrada';
+  const source = MATCH_SOURCE_LABELS[match.source] ?? 'registro';
+  return `Parece a mesma de: ${title} · ${lineAmountText(match.amount, match.currency)} · ${source} de ${shortDay(match.day)}`;
+}
+
+/**
+ * "É a mesma" e "É outra" só valem para a linha com possível duplicada que pode virar despesa: o servidor recusa
+ * as duas respostas enquanto o banco não efetivou o lançamento.
+ */
+export function canAnswerDuplicate(line: BankReviewLineResponse): boolean {
+  return hasSuspectedDuplicate(line) && unselectableReason(line) === null;
+}
+
+/**
+ * O corpo de POST review/confirm para a resposta da pessoa. "É a mesma": só o id (nada é criado, a categoria da
+ * tela não vai). "É outra": o id em `asNew`; se a pessoa escolheu outra categoria que não a sugerida, vai como uma
+ * despesa comum com essa categoria (o servidor confirma do mesmo jeito e tira a marca de possível duplicada).
+ */
+export function answerDuplicateRequest(
+  answer: DuplicateAnswer,
+  line: BankReviewLineResponse,
+  categories: Readonly<Record<string, string>>,
+): ConfirmBankReviewRequest {
+  if (answer === 'same') return { reconcile: [{ id: line.id }] };
+  const chosen = categories[line.id];
+  return chosen && chosen !== line.suggestedCategory
+    ? { expenses: [{ id: line.id, category: chosen }] }
+    : { asNew: [line.id] };
+}
+
+export function answerDuplicateResultMessage(answer: DuplicateAnswer, result: ConfirmBankReviewResponse): string {
+  if (answer === 'same') {
+    return (result.reconciled?.length ?? 0) > 0
+      ? 'Marcada como a mesma: nenhuma despesa nova foi criada.'
+      : 'Nada foi alterado.';
+  }
+  return confirmResultMessage(
+    result.created.length,
+    result.alreadyConfirmed,
+    result.skipped?.length ?? 0,
+    result.skippedOtherCurrency?.length ?? 0,
+  );
+}
+
+// ---------------------------------------------------------------- ignoradas
+
+/** Por que o servidor ignorou a linha sozinho. */
+export function autoReasonText(reason: string | null | undefined): string {
+  if (reason === 'Transfer') return 'Transferência entre contas do grupo';
+  if (reason === 'BillPayment') return 'Pagamento de fatura do cartão';
+  return 'Ignorada automaticamente';
+}
+
+/** "05/10/2026 · R$ 500,00 · Transferência entre contas do grupo". O valor sai na moeda da linha. */
+export function ignoredLineText(line: Pick<BankReviewLineResponse, 'day' | 'amount' | 'currency' | 'type' | 'autoReason'>): string {
+  const amount = lineAmountText(line.amount, line.currency);
+  return `${dayLabel(line.day)} · ${line.type === 'Credit' ? `entrada de ${amount}` : amount} · ${autoReasonText(line.autoReason)}`;
+}
+
+/**
+ * Só a saída ignorada tem "restaurar" nesta tela: ela volta para as despesas. A entrada restaurada não teria onde
+ * aparecer aqui (a revisão de entradas ainda não existe).
+ */
+export function canRestoreIgnored(line: Pick<BankReviewLineResponse, 'type'>): boolean {
+  return line.type !== 'Credit';
 }
 
 // ---------------------------------------------------------------- linhas por dia
