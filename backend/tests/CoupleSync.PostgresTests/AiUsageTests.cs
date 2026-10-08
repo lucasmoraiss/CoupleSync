@@ -232,6 +232,9 @@ public sealed class AiUsageTests
         Assert.Equal(2, chain.First.Calls);
 
         // A per-minute limit with its own wait: 40 s, whatever the growing pause would have been.
+        // (One second later: the pause is decided by the NEWEST row of the model, and two rows of the same instant have
+        // no order. The real clock never gives two calls of one model the same microsecond.)
+        chain.Clock.Advance(TimeSpan.FromSeconds(1));
         chain.First.Answer = () => Chain.Failed(LlmOutcome.RateLimitedMinute) with { RetryAfter = TimeSpan.FromSeconds(40) };
         Assert.Equal(LlmGatewayOutcome.Ok, await chain.AskAsync(null));
         Assert.Equal(3, chain.First.Calls);
