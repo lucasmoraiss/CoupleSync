@@ -32,6 +32,8 @@
     <Compile Include="..\CoupleSync.UnitTests\Domain\TransactionCategoriesTests.cs" Link="TransactionCategoriesTests.cs" />
     <!-- The text rules of the AI layer compare without accents: the same cases, without ICU. -->
     <Compile Include="..\CoupleSync.UnitTests\Ai\AiTextRulesTests.cs" Link="AiTextRulesTests.cs" />
+    <!-- The key of an establishment and the transfer-to-a-person rule fold accents and case: the same cases, without ICU. -->
+    <Compile Include="..\CoupleSync.UnitTests\AiFacts\MerchantKeyTests.cs" Link="MerchantKeyTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
