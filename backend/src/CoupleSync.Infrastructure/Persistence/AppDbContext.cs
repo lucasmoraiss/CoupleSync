@@ -61,6 +61,8 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<BankTransaction> BankTransactions => Set<BankTransaction>();
 
+    public DbSet<AiUsage> AiUsages => Set<AiUsage>();
+
     // BudgetAllocation is NOT exposed as a top-level DbSet.
     // All allocation access must go through BudgetPlan.Allocations navigation
     // to ensure couple-level data isolation via ICoupleScoped query filter on BudgetPlan.
@@ -760,6 +762,30 @@ public sealed class AppDbContext : DbContext
                 .HasForeignKey(x => x.SyncRunId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .IsRequired(false);
+        });
+
+        modelBuilder.Entity<AiUsage>(entity =>
+        {
+            // Accounting of the AI calls: metadata only, never the prompt nor the answer. Not ICoupleScoped (there
+            // are calls without a group) and with no foreign key: every read by group names the group.
+            entity.ToTable("ai_usage");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+            entity.Property(x => x.DayUtc).HasColumnName("day_utc").IsRequired();
+            entity.Property(x => x.DayBrt).HasColumnName("day_brt").IsRequired();
+            entity.Property(x => x.Provider).HasColumnName("provider").HasMaxLength(AiUsage.MaxProviderLength).IsRequired();
+            entity.Property(x => x.Model).HasColumnName("model").HasMaxLength(AiUsage.MaxModelLength).IsRequired();
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id");
+            entity.Property(x => x.Feature).HasColumnName("feature").HasMaxLength(AiUsage.MaxFeatureLength).IsRequired();
+            entity.Property(x => x.InputTokens).HasColumnName("input_tokens").IsRequired();
+            entity.Property(x => x.OutputTokens).HasColumnName("output_tokens").IsRequired();
+            entity.Property(x => x.Outcome).HasColumnName("outcome").HasMaxLength(AiUsage.MaxOutcomeLength).IsRequired();
+            entity.Property(x => x.LatencyMs).HasColumnName("latency_ms").IsRequired();
+            entity.Property(x => x.RetryAtUtc).HasColumnName("retry_at_utc");
+
+            entity.HasIndex(x => new { x.DayUtc, x.Provider, x.Model });
+            entity.HasIndex(x => new { x.CoupleId, x.DayBrt });
         });
 
         ApplyCoupleQueryFilters(modelBuilder);

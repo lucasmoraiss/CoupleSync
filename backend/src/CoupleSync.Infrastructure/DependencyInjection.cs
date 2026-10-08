@@ -1,3 +1,4 @@
+using CoupleSync.Application.Ai;
 using CoupleSync.Application.AiChat;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.OcrImport;
@@ -8,6 +9,7 @@ using CoupleSync.Application.Common.Options;
 using CoupleSync.Infrastructure.Integrations.Email;
 using CoupleSync.Infrastructure.Integrations.Fcm;
 using CoupleSync.Infrastructure.Integrations.Gemini;
+using CoupleSync.Infrastructure.Integrations.Llm;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser.Parsers;
 using CoupleSync.Infrastructure.Integrations.Pluggy;
@@ -123,9 +125,42 @@ public static class DependencyInjection
             services.AddScoped<ICategoryClassifier, NullCategoryClassifier>();
 
         AddOpenFinance(services);
+        AddAiGateway(services, configuration);
 
         return services;
     }
+
+    /// <summary>
+    /// The chain every AI call goes through (issue #37). Options are read from the final configuration when first
+    /// used; a provider without a key is in no chain, so with no key at all nothing is ever sent.
+    /// </summary>
+    private static void AddAiGateway(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<AiOptions>().Configure<IConfiguration>(AiConfiguration.Apply);
+        services.AddOptions<LlmProvidersOptions>()
+            .Configure<IConfiguration, Microsoft.Extensions.Options.IOptions<GeminiOptions>>(
+                (options, config, gemini) => AiConfiguration.Apply(options, config, gemini.Value));
+
+        // One named client per provider. Keys travel in headers: they must not reach the log even with header
+        // logging (Trace) on. The time of each call is decided by the gateway; this is only a ceiling above it.
+        services.AddHttpClient(GeminiLlmProvider.HttpClientName, c => c.Timeout = LlmHttpTimeout)
+            .RedactLoggedHeaders([GeminiLlmProvider.ApiKeyHeader]);
+        foreach (var provider in AiConfiguration.CompatibleProviders(configuration))
+        {
+            services.AddHttpClient(OpenAiCompatibleLlmProvider.HttpClientNameOf(provider.Name), c => c.Timeout = LlmHttpTimeout)
+                .RedactLoggedHeaders(["Authorization"]);
+        }
+
+        services.AddSingleton<LlmMinuteWindow>();
+        services.AddSingleton<ILlmWaiter, SystemLlmWaiter>();
+        services.AddScoped<IAiConsentGate, DeviceAiConsentGate>();
+        services.AddScoped<ILlmProviderCatalog, LlmProviderCatalog>();
+        services.AddScoped<IAiUsageRepository, AiUsageRepository>();
+        services.AddScoped<IAiPeopleReader, AiPeopleReader>();
+        services.AddScoped<ILlmGateway, LlmGateway>();
+    }
+
+    private static readonly TimeSpan LlmHttpTimeout = TimeSpan.FromSeconds(90);
 
     /// <summary>
     /// Open Finance through Meu Pluggy. Registered always so that DI resolves; without a valid

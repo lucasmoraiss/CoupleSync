@@ -24,7 +24,7 @@ namespace CoupleSync.PostgresTests;
 [Collection(PostgresCollection.Name)]
 public sealed class OpenFinanceSyncPostgresTests
 {
-    private const string MigrationBefore = "20261007205425_AddOpenFinanceConnections";
+    private const string MigrationBefore = "20261008023328_AddAiUsage";
     private const string Base = "/api/v1/openfinance";
 
     private static readonly string[] NewTables = ["sync_runs", "bank_transactions"];
