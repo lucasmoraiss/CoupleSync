@@ -11,6 +11,7 @@ using CoupleSync.Infrastructure.Integrations.Gemini;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser.Worker;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser.Parsers;
+using CoupleSync.Infrastructure.Integrations.Pluggy;
 using CoupleSync.Infrastructure.Integrations.Storage;
 using CoupleSync.Infrastructure.Persistence;
 using CoupleSync.Infrastructure.Security;
@@ -45,6 +46,7 @@ public static class DependencyInjection
         services.AddScoped<INotificationEventRepository, NotificationEventRepository>();
         services.AddScoped<IImportJobRepository, ImportJobRepository>();
         services.AddScoped<IReportsRepository, ReportsRepository>();
+        services.AddScoped<IBankConnectionRepository, BankConnectionRepository>();
         services.AddScoped<ICategoryMatchingService, CategoryMatchingService>();
         services.AddScoped<ICoupleContext, HttpContextCoupleContext>();
         services.AddScoped<ICoupleMembership, CoupleMembership>();
@@ -120,6 +122,34 @@ public static class DependencyInjection
         else
             services.AddScoped<ICategoryClassifier, NullCategoryClassifier>();
 
+        AddOpenFinance(services);
+
         return services;
+    }
+
+    /// <summary>
+    /// Open Finance through Meu Pluggy. Registered always so that DI resolves; without a valid
+    /// OPENFINANCE_ENCRYPTION_KEY the cipher reports "unavailable" and the routes answer accordingly.
+    /// </summary>
+    private static void AddOpenFinance(IServiceCollection services)
+    {
+        // Read from the final configuration when first used (environment variables and test overrides included).
+        // The key comes only from its own variable, never from the OpenFinance section of a settings file.
+        services.AddOptions<OpenFinanceOptions>()
+            .Configure<IConfiguration>((options, config) =>
+            {
+                var baseUrl = config[$"{OpenFinanceOptions.SectionName}:{nameof(OpenFinanceOptions.PluggyBaseUrl)}"];
+                if (!string.IsNullOrWhiteSpace(baseUrl)) options.PluggyBaseUrl = baseUrl.Trim();
+                options.EncryptionKey = config[OpenFinanceOptions.EncryptionKeyVariable] ?? string.Empty;
+            });
+
+        services.AddSingleton<ICredentialCipher, AesGcmCredentialCipher>();
+        services.AddMemoryCache();
+        services.AddHttpClient(PluggyHttpClient.HttpClientName, c => c.Timeout = PluggyHttpClient.RequestTimeout)
+            // The API key travels in a header: it must not reach the log even with header logging (Trace) on...
+            .RedactLoggedHeaders([PluggyHttpClient.ApiKeyHeader])
+            // ...nor follow a redirect to another address: a 3xx is an answer Pluggy does not give, and it fails.
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddScoped<IPluggyClient, PluggyHttpClient>();
     }
 }

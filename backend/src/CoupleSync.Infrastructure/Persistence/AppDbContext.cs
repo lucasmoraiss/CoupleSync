@@ -51,6 +51,12 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<IncomeSource> IncomeSources => Set<IncomeSource>();
 
+    public DbSet<BankConnection> BankConnections => Set<BankConnection>();
+
+    public DbSet<BankItem> BankItems => Set<BankItem>();
+
+    public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
+
     // BudgetAllocation is NOT exposed as a top-level DbSet.
     // All allocation access must go through BudgetPlan.Allocations navigation
     // to ensure couple-level data isolation via ICoupleScoped query filter on BudgetPlan.
@@ -504,6 +510,121 @@ public sealed class AppDbContext : DbContext
             entity.HasOne<User>()
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BankConnection>(entity =>
+        {
+            entity.ToTable("bank_connections");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(x => x.Provider).HasColumnName("provider").HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Label).HasColumnName("label").HasMaxLength(BankConnection.MaxLabelLength).IsRequired();
+            // Encrypted (AES-256-GCM); null once the person disconnected.
+            entity.Property(x => x.ClientIdEncrypted).HasColumnName("client_id_encrypted").HasMaxLength(1024);
+            // A concurrency token: every encryption gives another text, so a write made on a copy read before the
+            // person disconnected (or connected again) is rejected instead of bringing the old state back.
+            entity.Property(x => x.ClientSecretEncrypted).HasColumnName("client_secret_encrypted").HasMaxLength(1024).IsConcurrencyToken();
+            entity.Property(x => x.ClientIdHint).HasColumnName("client_id_hint").HasMaxLength(BankConnection.ClientIdHintLength);
+            entity.Property(x => x.Status)
+                .HasColumnName("status")
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(x => x.LastSyncAtUtc).HasColumnName("last_sync_at_utc");
+            entity.Property(x => x.LastErrorCode).HasColumnName("last_error_code").HasMaxLength(64);
+            entity.Property(x => x.LastErrorMessage).HasColumnName("last_error_message").HasMaxLength(BankConnection.MaxErrorMessageLength);
+            entity.Property(x => x.HistoryMonths).HasColumnName("history_months").IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+            entity.Ignore(x => x.HasCredentials);
+
+            // One connection per person and group, guaranteed by the database.
+            entity.HasIndex(x => new { x.CoupleId, x.UserId }).IsUnique();
+            entity.HasIndex(x => x.UserId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BankItem>(entity =>
+        {
+            entity.ToTable("bank_items");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.ConnectionId).HasColumnName("connection_id").IsRequired();
+            entity.Property(x => x.PluggyItemId).HasColumnName("pluggy_item_id").HasMaxLength(BankItem.MaxPluggyIdLength).IsRequired();
+            entity.Property(x => x.ConnectorName).HasColumnName("connector_name").HasMaxLength(BankItem.MaxConnectorNameLength).IsRequired();
+            entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(BankItem.MaxStatusLength).IsRequired();
+            entity.Property(x => x.ExecutionStatus).HasColumnName("execution_status").HasMaxLength(BankItem.MaxStatusLength);
+            entity.Property(x => x.LastUpdatedAtUtc).HasColumnName("last_updated_at_utc");
+            entity.Property(x => x.LastErrorMessage).HasColumnName("last_error_message").HasMaxLength(BankItem.MaxErrorMessageLength);
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+
+            // A Pluggy item belongs to one connection in the whole database.
+            entity.HasIndex(x => x.PluggyItemId).IsUnique();
+            entity.HasIndex(x => x.ConnectionId);
+            entity.HasIndex(x => x.CoupleId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<BankConnection>()
+                .WithMany()
+                .HasForeignKey(x => x.ConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BankAccount>(entity =>
+        {
+            entity.ToTable("bank_accounts");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.ItemId).HasColumnName("item_id").IsRequired();
+            entity.Property(x => x.PluggyAccountId).HasColumnName("pluggy_account_id").HasMaxLength(BankAccount.MaxPluggyIdLength).IsRequired();
+            entity.Property(x => x.Type).HasColumnName("type").HasMaxLength(BankAccount.MaxTypeLength).IsRequired();
+            entity.Property(x => x.Subtype).HasColumnName("subtype").HasMaxLength(BankAccount.MaxTypeLength);
+            entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(BankAccount.MaxNameLength).IsRequired();
+            entity.Property(x => x.MarketingName).HasColumnName("marketing_name").HasMaxLength(BankAccount.MaxNameLength);
+            entity.Property(x => x.NumberMasked).HasColumnName("number_masked").HasMaxLength(BankAccount.MaskedNumberLength);
+            entity.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(BankAccount.MaxCurrencyLength).IsRequired();
+            entity.Property(x => x.Balance).HasColumnName("balance").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.BalanceAtUtc).HasColumnName("balance_at_utc").IsRequired();
+            entity.Property(x => x.CreditLimit).HasColumnName("credit_limit").HasPrecision(18, 2);
+            entity.Property(x => x.AvailableCreditLimit).HasColumnName("available_credit_limit").HasPrecision(18, 2);
+            entity.Property(x => x.BalanceCloseDate).HasColumnName("balance_close_date");
+            entity.Property(x => x.BalanceDueDate).HasColumnName("balance_due_date");
+            entity.Property(x => x.MinimumPayment).HasColumnName("minimum_payment").HasPrecision(18, 2);
+            entity.Property(x => x.Brand).HasColumnName("brand").HasMaxLength(BankAccount.MaxBrandLength);
+            entity.Property(x => x.SyncEnabled).HasColumnName("sync_enabled").IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+
+            // A Pluggy account is stored once in the whole database.
+            entity.HasIndex(x => x.PluggyAccountId).IsUnique();
+            entity.HasIndex(x => x.ItemId);
+            entity.HasIndex(x => x.CoupleId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<BankItem>()
+                .WithMany()
+                .HasForeignKey(x => x.ItemId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -51,6 +51,12 @@ import type {
   SpendingByCategoryResponse,
   CategoriesResponse,
   MonthlyTrendsResponse,
+  OpenFinanceStatusResponse,
+  BankConnectionResponse,
+  BankItemResponse,
+  BankAccountResponse,
+  TestCredentialsResponse,
+  CreateBankConnectionRequest,
 } from '@/types/api';
 
 // 10.0.2.2 is the Android emulator alias for the host machine's localhost.
@@ -438,4 +444,31 @@ export const reportsApiClient = {
 
   monthlyTrends: (months = 12): Promise<AxiosResponse<MonthlyTrendsResponse>> =>
     axiosInstance.get<MonthlyTrendsResponse>(`/api/v1/reports/monthly-trends?months=${months}`),
+};
+
+// --- Open Finance (Meu Pluggy) API ---
+// O Client Secret só trafega nas duas chamadas que o enviam (testar e criar); nenhuma resposta o devolve.
+export const openFinanceApiClient = {
+  /** O que o grupo conectou e se o servidor tem o Open Finance configurado (`available`). */
+  getStatus: (): Promise<AxiosResponse<OpenFinanceStatusResponse>> =>
+    axiosInstance.get<OpenFinanceStatusResponse>('/api/v1/openfinance/status'),
+
+  /** Pergunta ao Pluggy se as credenciais valem. Não grava nada. Limite: 5 por minuto por usuário. */
+  testCredentials: (clientId: string, clientSecret: string): Promise<AxiosResponse<TestCredentialsResponse>> =>
+    axiosInstance.post<TestCredentialsResponse>('/api/v1/openfinance/credentials/test', { clientId, clientSecret }),
+
+  /** Uma conexão por pessoa por grupo: 409 BANK_CONNECTION_ALREADY_EXISTS se já existe. */
+  createConnection: (data: CreateBankConnectionRequest): Promise<AxiosResponse<BankConnectionResponse>> =>
+    axiosInstance.post<BankConnectionResponse>('/api/v1/openfinance/connections', data),
+
+  /** Verifica um Item ID com as credenciais da conexão e devolve as contas encontradas. */
+  addItem: (connectionId: string, itemId: string): Promise<AxiosResponse<BankItemResponse>> =>
+    axiosInstance.post<BankItemResponse>(`/api/v1/openfinance/connections/${connectionId}/items`, { itemId }),
+
+  setAccountSync: (accountId: string, syncEnabled: boolean): Promise<AxiosResponse<BankAccountResponse>> =>
+    axiosInstance.patch<BankAccountResponse>(`/api/v1/openfinance/accounts/${accountId}`, { syncEnabled }),
+
+  /** Só quem conectou. Apaga as credenciais na hora; bancos e contas continuam visíveis. */
+  disconnect: (connectionId: string): Promise<AxiosResponse<void>> =>
+    axiosInstance.delete<void>(`/api/v1/openfinance/connections/${connectionId}`),
 };

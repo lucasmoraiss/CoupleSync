@@ -438,3 +438,74 @@ export interface MonthlyTrendsResponse {
   readonly months: readonly MonthlyTrend[];
 }
 
+// --- Open Finance (Meu Pluggy) ---
+// A API nunca devolve o Client Secret nem o Client ID inteiro: só o `clientIdHint` (4 últimos caracteres).
+export type BankConnectionStatus = 'Active' | 'Error' | 'Disconnected';
+
+export interface BankAccountResponse {
+  readonly id: string;
+  /** 'BANK' | 'CREDIT', como o Pluggy envia. */
+  readonly type: string;
+  /** 'CHECKING_ACCOUNT' | 'SAVINGS_ACCOUNT' | 'CREDIT_CARD', como o Pluggy envia. */
+  readonly subtype: string | null;
+  readonly name: string;
+  readonly marketingName: string | null;
+  /** Só os últimos caracteres do número da conta/cartão. */
+  readonly numberMasked: string | null;
+  readonly currency: string;
+  readonly balance: number;
+  readonly balanceAtUtc: string;
+  readonly creditLimit: number | null;
+  readonly availableCreditLimit: number | null;
+  /** 'AAAA-MM-DD'. */
+  readonly balanceCloseDate: string | null;
+  readonly balanceDueDate: string | null;
+  readonly minimumPayment: number | null;
+  readonly brand: string | null;
+  readonly syncEnabled: boolean;
+}
+
+export interface BankItemResponse {
+  readonly id: string;
+  /** Nome do banco. */
+  readonly connectorName: string;
+  readonly status: string;
+  readonly executionStatus: string | null;
+  readonly lastUpdatedAtUtc: string | null;
+  readonly lastErrorMessage: string | null;
+  readonly accounts: readonly BankAccountResponse[];
+}
+
+export interface BankConnectionResponse {
+  readonly id: string;
+  readonly label: string;
+  readonly userId: string;
+  readonly userName: string;
+  /** A conexão é de quem está logado: só ele adiciona bancos, liga/desliga contas e desconecta. */
+  readonly isMine: boolean;
+  readonly status: BankConnectionStatus | string;
+  readonly clientIdHint: string | null;
+  readonly historyMonths: number;
+  readonly lastSyncAtUtc: string | null;
+  readonly lastErrorCode: string | null;
+  readonly lastErrorMessage: string | null;
+  readonly createdAtUtc: string;
+  readonly items: readonly BankItemResponse[];
+}
+
+export interface OpenFinanceStatusResponse {
+  /** false: o servidor não tem a configuração do Open Finance; nenhuma escrita funciona. */
+  readonly available: boolean;
+  readonly connections: readonly BankConnectionResponse[];
+}
+
+export interface TestCredentialsResponse {
+  readonly valid: boolean;
+}
+
+export interface CreateBankConnectionRequest {
+  readonly label: string;
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly historyMonths?: number;
+}

@@ -1,0 +1,480 @@
+using System.Globalization;
+using System.Net;
+using CoupleSync.Application.Common.Exceptions;
+using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Infrastructure.Integrations.Pluggy;
+using CoupleSync.TestSupport;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+
+namespace CoupleSync.UnitTests.OpenFinance;
+
+/// <summary>
+/// Issue #24 — the Pluggy client against <see cref="FakePluggyServer"/> (an HttpMessageHandler: no network).
+/// Fixtures in the shape of the Pluggy documentation, all invented.
+/// </summary>
+[Trait("Category", "OpenFinance")]
+public sealed class PluggyHttpClientTests
+{
+    private readonly FakePluggyServer _pluggy = new();
+    private readonly AdjustableClock _clock = new();
+    private readonly MemoryCache _cache;
+
+    public PluggyHttpClientTests()
+    {
+        _cache = new MemoryCache(new MemoryCacheOptions { Clock = _clock });
+    }
+
+    private PluggyHttpClient Client(string baseUrl = FakePluggyServer.BaseUrl) => new(
+        new SingleHandlerFactory(_pluggy),
+        _cache,
+        Options.Create(new OpenFinanceOptions { PluggyBaseUrl = baseUrl }),
+        NullLogger<PluggyHttpClient>.Instance);
+
+    private static PluggyAuth Connection(Guid? id = null)
+        => PluggyAuth.ForConnection(id ?? Guid.NewGuid(), FakePluggyServer.ClientId, FakePluggyServer.ClientSecret);
+
+    private static async Task<string> CodeOfAsync(Func<Task> call)
+        => (await Assert.ThrowsAsync<PluggyException>(call)).Code;
+
+    // ---------------------------------------------------------------- auth
+
+    [Fact]
+    public async Task Authenticate_PostsTheCredentialsToAuth()
+    {
+        await Client().AuthenticateAsync(FakePluggyServer.ClientId, FakePluggyServer.ClientSecret, CancellationToken.None);
+
+        var request = Assert.Single(_pluggy.Requests);
+        Assert.Equal(("POST", "/auth"), (request.Method, request.Path));
+        Assert.Null(request.ApiKey);
+        Assert.Equal(
+            $$"""{"clientId":"{{FakePluggyServer.ClientId}}","clientSecret":"{{FakePluggyServer.ClientSecret}}"}""",
+            request.Body);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, PluggyErrorCodes.InvalidCredentials)]
+    [InlineData(HttpStatusCode.Forbidden, PluggyErrorCodes.InvalidCredentials)]
+    [InlineData(HttpStatusCode.BadRequest, PluggyErrorCodes.InvalidCredentials)]
+    [InlineData(HttpStatusCode.TooManyRequests, PluggyErrorCodes.RateLimited)]
+    [InlineData(HttpStatusCode.InternalServerError, PluggyErrorCodes.Unavailable)]
+    [InlineData(HttpStatusCode.BadGateway, PluggyErrorCodes.Unavailable)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, PluggyErrorCodes.Unavailable)]
+    [InlineData(HttpStatusCode.GatewayTimeout, PluggyErrorCodes.Unavailable)]
+    public async Task Authenticate_TranslatesTheStatusIntoAClosedCode(HttpStatusCode status, string expected)
+    {
+        _pluggy.AuthStatus = status;
+
+        var code = await CodeOfAsync(() => Client().AuthenticateAsync(FakePluggyServer.ClientId, FakePluggyServer.ClientSecret, CancellationToken.None));
+
+        Assert.Equal(expected, code);
+    }
+
+    [Fact]
+    public async Task Authenticate_WithTheWrongSecret_IsInvalidCredentials()
+    {
+        var code = await CodeOfAsync(() => Client().AuthenticateAsync(FakePluggyServer.ClientId, "fake-wrong-secret", CancellationToken.None));
+
+        Assert.Equal(PluggyErrorCodes.InvalidCredentials, code);
+    }
+
+    [Fact]
+    public async Task ANetworkFailure_OrATimeout_IsUnavailable_ButTheCallerGivingUpIsNot()
+    {
+        _pluggy.NetworkDown = true;
+        Assert.Equal(PluggyErrorCodes.Unavailable,
+            await CodeOfAsync(() => Client().AuthenticateAsync(FakePluggyServer.ClientId, FakePluggyServer.ClientSecret, CancellationToken.None)));
+
+        _pluggy.NetworkDown = false;
+        _pluggy.TimesOut = true;
+        Assert.Equal(PluggyErrorCodes.Unavailable,
+            await CodeOfAsync(() => Client().AuthenticateAsync(FakePluggyServer.ClientId, FakePluggyServer.ClientSecret, CancellationToken.None)));
+
+        // The request itself was cancelled (the app closed the connection): that is not Pluggy being down.
+        _pluggy.TimesOut = false;
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => Client().AuthenticateAsync(FakePluggyServer.ClientId, FakePluggyServer.ClientSecret, cancelled.Token));
+    }
+
+    [Theory]
+    [InlineData("""{"apiKey":""}""")]
+    [InlineData("""{"other":"x"}""")]
+    [InlineData("""[1,2]""")]
+    [InlineData("<html>gateway</html>")]
+    [InlineData("")]
+    public async Task Authenticate_A200WithoutAUsableKey_IsUnavailable(string body)
+    {
+        var client = new PluggyHttpClient(
+            new SingleHandlerFactory(new FixedAnswer(HttpStatusCode.OK, body)),
+            _cache,
+            Options.Create(new OpenFinanceOptions { PluggyBaseUrl = FakePluggyServer.BaseUrl }),
+            NullLogger<PluggyHttpClient>.Instance);
+
+        var code = await CodeOfAsync(() => client.AuthenticateAsync(FakePluggyServer.ClientId, FakePluggyServer.ClientSecret, CancellationToken.None));
+
+        Assert.Equal(PluggyErrorCodes.Unavailable, code);
+    }
+
+    // ---------------------------------------------------------------- item and accounts
+
+    [Fact]
+    public async Task GetItem_SendsTheApiKeyHeader_AndReadsTheItem()
+    {
+        var item = await Client().GetItemAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        Assert.Equal(FakePluggyServer.ItemWithAccounts, item.Id);
+        Assert.Equal("Banco Exemplo", item.ConnectorName);
+        Assert.Equal("UPDATED", item.Status);
+        Assert.Equal("SUCCESS", item.ExecutionStatus);
+        Assert.Equal(new DateTime(2026, 10, 6, 9, 30, 15, 123, DateTimeKind.Utc), item.UpdatedAtUtc);
+        Assert.Equal(DateTimeKind.Utc, item.UpdatedAtUtc!.Value.Kind);
+        Assert.Null(item.ErrorMessage);
+
+        var request = _pluggy.Requests.Single(r => r.Method == "GET");
+        Assert.Equal($"/items/{FakePluggyServer.ItemWithAccounts}", request.Path);
+        Assert.Equal("fake-api-key-1", request.ApiKey);
+    }
+
+    [Fact]
+    public async Task GetItem_WithAnError_CarriesTheStatusAndTheMessage()
+    {
+        var item = await Client().GetItemAsync(Connection(), FakePluggyServer.ItemWithLoginError, CancellationToken.None);
+
+        Assert.Equal(PluggyItemStatus.LoginError, item.Status);
+        Assert.Equal("Invalid credentials", item.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task GetItem_ThatPluggyDoesNotKnow_IsItemNotFound()
+    {
+        var code = await CodeOfAsync(() => Client().GetItemAsync(Connection(), FakePluggyServer.UnknownItem, CancellationToken.None));
+
+        Assert.Equal(PluggyErrorCodes.ItemNotFound, code);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, PluggyErrorCodes.ItemNotFound)]
+    [InlineData(HttpStatusCode.Forbidden, PluggyErrorCodes.InvalidCredentials)]
+    [InlineData(HttpStatusCode.TooManyRequests, PluggyErrorCodes.RateLimited)]
+    [InlineData(HttpStatusCode.InternalServerError, PluggyErrorCodes.Unavailable)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, PluggyErrorCodes.Unavailable)]
+    public async Task DataCalls_TranslateTheStatusIntoAClosedCode(HttpStatusCode status, string expected)
+    {
+        _pluggy.DataStatus = status;
+
+        Assert.Equal(expected, await CodeOfAsync(() => Client().GetItemAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None)));
+        Assert.Equal(expected, await CodeOfAsync(() => Client().GetAccountsAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None)));
+    }
+
+    [Fact]
+    public async Task TheItemId_IsEscapedIntoTheAddress()
+    {
+        // The API validates the id before it gets here; the client still never lets it change the route.
+        await CodeOfAsync(() => Client().GetItemAsync(Connection(), "../auth?x=1", CancellationToken.None));
+
+        var request = _pluggy.Requests.Single(r => r.Method == "GET");
+        Assert.StartsWith("/items/", request.Path, StringComparison.Ordinal);
+        Assert.DoesNotContain("/auth", request.Path, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, request.Query);
+    }
+
+    [Fact]
+    public async Task GetAccounts_ReadsBankAndCreditAccounts()
+    {
+        var accounts = await Client().GetAccountsAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        Assert.Equal(2, accounts.Count);
+        var checking = accounts[0];
+        Assert.Equal(FakePluggyServer.CheckingAccountId, checking.Id);
+        Assert.Equal(("BANK", "CHECKING_ACCOUNT"), (checking.Type, checking.Subtype));
+        Assert.Equal("Conta Corrente", checking.Name);
+        Assert.Equal("Conta Exemplo Plus", checking.MarketingName);
+        Assert.Equal(FakePluggyServer.CheckingAccountNumber, checking.Number);
+        Assert.Equal(1234.56m, checking.Balance);
+        Assert.Equal("BRL", checking.CurrencyCode);
+        Assert.Null(checking.CreditData);
+
+        var card = accounts[1];
+        Assert.Equal(("CREDIT", "CREDIT_CARD"), (card.Type, card.Subtype));
+        Assert.Equal(987.65m, card.Balance);
+        Assert.NotNull(card.CreditData);
+        Assert.Equal("PLATINUM", card.CreditData!.Level);
+        Assert.Equal("MASTERCARD", card.CreditData.Brand);
+        Assert.Equal(new DateOnly(2026, 10, 20), card.CreditData.BalanceCloseDate);
+        Assert.Equal(new DateOnly(2026, 10, 27), card.CreditData.BalanceDueDate);
+        Assert.Equal(4012.35m, card.CreditData.AvailableCreditLimit);
+        Assert.Equal(5000m, card.CreditData.CreditLimit);
+        Assert.Equal(148.15m, card.CreditData.MinimumPayment);
+
+        var request = _pluggy.Requests.Single(r => r.Method == "GET");
+        Assert.Equal(("/accounts", $"?itemId={FakePluggyServer.ItemWithAccounts}"), (request.Path, request.Query));
+    }
+
+    [Fact]
+    public async Task GetAccounts_OfAnItemWithoutAccounts_IsAnEmptyList()
+    {
+        var accounts = await Client().GetAccountsAsync(Connection(), FakePluggyServer.EmptyItem, CancellationToken.None);
+
+        Assert.Empty(accounts);
+    }
+
+    [Theory]
+    [InlineData("pt-BR")] // comma as the decimal separator, dd/MM/yyyy
+    [InlineData("de-DE")]
+    [InlineData("en-US")]
+    [InlineData("")]      // invariant, as the production image once ran
+    public async Task NumbersAndDates_AreReadTheSameInEveryCulture(string culture)
+    {
+        var saved = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = culture.Length == 0 ? CultureInfo.InvariantCulture : CultureInfo.GetCultureInfo(culture);
+        try
+        {
+            var accounts = await Client().GetAccountsAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+            var item = await Client().GetItemAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+            Assert.Equal(1234.56m, accounts[0].Balance);
+            Assert.Equal(4012.35m, accounts[1].CreditData!.AvailableCreditLimit);
+            Assert.Equal(new DateOnly(2026, 10, 20), accounts[1].CreditData!.BalanceCloseDate);
+            Assert.Equal(new DateTime(2026, 10, 6, 9, 30, 15, 123, DateTimeKind.Utc), item.UpdatedAtUtc);
+
+            // A number that arrives as text is the case a culture can get wrong ("1234.56" is 123456 in pt-BR).
+            _pluggy.AccountsJson = """{"results":[{"id":"b1b2c3d4-0000-4000-8000-0000000000f1","type":"BANK","name":"Conta","balance":"1234.56"}]}""";
+            var asText = await Client().GetAccountsAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+            Assert.Equal(1234.56m, asText[0].Balance);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = saved;
+        }
+    }
+
+    [Fact]
+    public async Task GetAccounts_ToleratesWhatPluggyMayLeaveOutOrSendDifferently()
+    {
+        _pluggy.AccountsJson = """
+            {
+              "results": [
+                { "id": "b1b2c3d4-0000-4000-8000-0000000000f1", "type": "BANK", "name": "Conta", "balance": "1234.56" },
+                { "id": "b1b2c3d4-0000-4000-8000-0000000000f2", "type": "CREDIT", "subtype": "CREDIT_CARD", "name": "Cartão",
+                  "number": null, "balance": null, "currencyCode": null,
+                  "creditData": { "brand": null, "balanceCloseDate": "2026-11-05", "balanceDueDate": "not a date", "creditLimit": 1e3 } },
+                { "type": "BANK", "name": "Sem id" },
+                "not an object"
+              ]
+            }
+            """;
+
+        var accounts = await Client().GetAccountsAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        Assert.Equal(2, accounts.Count); // the entry without an id and the stray text are skipped
+        Assert.Equal(1234.56m, accounts[0].Balance); // a number written as text, with a dot
+        Assert.Null(accounts[0].Subtype);
+        Assert.Null(accounts[0].CurrencyCode);
+        Assert.Equal(0m, accounts[1].Balance);
+        Assert.Null(accounts[1].Number);
+        Assert.Equal(new DateOnly(2026, 11, 5), accounts[1].CreditData!.BalanceCloseDate);
+        Assert.Null(accounts[1].CreditData!.BalanceDueDate);
+        Assert.Equal(1000m, accounts[1].CreditData!.CreditLimit);
+        Assert.Null(accounts[1].CreditData!.MinimumPayment);
+    }
+
+    [Theory]
+    [InlineData("""{"total":0}""")]
+    [InlineData("""{"results":"none"}""")]
+    [InlineData("""[]""")]
+    [InlineData("not json")]
+    public async Task GetAccounts_AnAnswerThatIsNotAListOfAccounts_IsUnavailable_NotAnEmptyItem(string body)
+    {
+        _pluggy.AccountsJson = body;
+
+        var code = await CodeOfAsync(() => Client().GetAccountsAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None));
+
+        Assert.Equal(PluggyErrorCodes.Unavailable, code);
+    }
+
+    // ---------------------------------------------------------------- the API key of a connection
+
+    [Fact]
+    public async Task TheApiKeyOfAConnection_IsReusedBetweenCalls_AndBetweenClients()
+    {
+        var auth = Connection();
+
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        await Client().GetAccountsAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        await Client().GetItemAsync(auth, FakePluggyServer.OtherItemWithAccounts, CancellationToken.None);
+
+        Assert.Equal(1, _pluggy.AuthCalls);
+        Assert.All(_pluggy.Requests.Where(r => r.Method == "GET"), r => Assert.Equal("fake-api-key-1", r.ApiKey));
+    }
+
+    [Fact]
+    public async Task EachConnection_HasItsOwnApiKey()
+    {
+        await Client().GetItemAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        await Client().GetItemAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        Assert.Equal(2, _pluggy.AuthCalls);
+        Assert.Equal(new[] { "fake-api-key-1", "fake-api-key-2" }, _pluggy.Requests.Where(r => r.Method == "GET").Select(r => r.ApiKey));
+    }
+
+    [Fact]
+    public async Task TheApiKey_IsKeptFor110Minutes()
+    {
+        var auth = Connection();
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        _clock.UtcNow += TimeSpan.FromMinutes(109);
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        Assert.Equal(1, _pluggy.AuthCalls);
+
+        // Past 110 minutes (Pluggy's own key lasts 120) the next call authenticates again.
+        _clock.UtcNow += TimeSpan.FromMinutes(2);
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        Assert.Equal(2, _pluggy.AuthCalls);
+    }
+
+    [Fact]
+    public void TheNamedHttpClient_HasA30SecondTimeout()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(30), PluggyHttpClient.RequestTimeout);
+        Assert.Equal("Pluggy", PluggyHttpClient.HttpClientName);
+    }
+
+    [Fact]
+    public async Task A401OnADataCall_DropsTheKey_AuthenticatesAgain_AndRepeatsTheCallOnce()
+    {
+        var auth = Connection();
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        _pluggy.ExpireIssuedKeys(); // Pluggy no longer accepts fake-api-key-1
+
+        var item = await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        Assert.Equal("Banco Exemplo", item.ConnectorName);
+        Assert.Equal(2, _pluggy.AuthCalls);
+        Assert.Equal(
+            new[] { "fake-api-key-1", "fake-api-key-1", "fake-api-key-2" },
+            _pluggy.Requests.Where(r => r.Method == "GET").Select(r => r.ApiKey));
+
+        // The new key is the one kept from now on.
+        await Client().GetAccountsAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        Assert.Equal(2, _pluggy.AuthCalls);
+    }
+
+    [Fact]
+    public async Task A401Twice_IsInvalidCredentials_AndTheCallIsNotRepeatedForever()
+    {
+        var always401 = new AlwaysUnauthorizedData();
+        var client = new PluggyHttpClient(
+            new SingleHandlerFactory(always401),
+            _cache,
+            Options.Create(new OpenFinanceOptions { PluggyBaseUrl = FakePluggyServer.BaseUrl }),
+            NullLogger<PluggyHttpClient>.Instance);
+
+        var code = await CodeOfAsync(() => client.GetItemAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None));
+
+        Assert.Equal(PluggyErrorCodes.InvalidCredentials, code);
+        Assert.Equal(2, always401.AuthCalls);
+        Assert.Equal(2, always401.DataCalls);
+    }
+
+    [Fact]
+    public async Task ForgetConnection_DropsTheKey_SoNewCredentialsNeverUseTheOldKey()
+    {
+        var connectionId = Guid.NewGuid();
+        var client = Client();
+        await client.GetItemAsync(Connection(connectionId), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        client.ForgetConnection(connectionId);
+        await client.GetItemAsync(Connection(connectionId), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        Assert.Equal(2, _pluggy.AuthCalls);
+        Assert.Equal("fake-api-key-2", _pluggy.Requests.Last().ApiKey);
+    }
+
+    [Fact]
+    public async Task CredentialsWithoutAConnection_AreNotCached()
+    {
+        var auth = PluggyAuth.Of(FakePluggyServer.ClientId, FakePluggyServer.ClientSecret);
+
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        Assert.Equal(2, _pluggy.AuthCalls);
+    }
+
+    [Fact]
+    public async Task TheBaseAddress_ComesFromTheOptions_WithOrWithoutATrailingSlash()
+    {
+        await Client(FakePluggyServer.BaseUrl + "/").GetItemAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+
+        Assert.Equal(new[] { "/auth", $"/items/{FakePluggyServer.ItemWithAccounts}" }, _pluggy.Requests.Select(r => r.Path));
+        Assert.Equal("https://api.pluggy.ai", new OpenFinanceOptions().PluggyBaseUrl);
+    }
+
+    [Fact]
+    public void PluggyAuth_NeverPrintsTheCredentials()
+    {
+        var text = Connection().ToString() + PluggyAuth.Of(FakePluggyServer.ClientId, FakePluggyServer.ClientSecret);
+
+        Assert.DoesNotContain(FakePluggyServer.ClientSecret, text, StringComparison.Ordinal);
+        Assert.DoesNotContain(FakePluggyServer.ClientId, text, StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------- support
+
+    private sealed class AdjustableClock : Microsoft.Extensions.Internal.ISystemClock
+    {
+        public DateTimeOffset UtcNow { get; set; } = new(2026, 10, 7, 12, 0, 0, TimeSpan.Zero);
+    }
+
+    private sealed class SingleHandlerFactory : IHttpClientFactory
+    {
+        private readonly HttpMessageHandler _handler;
+
+        public SingleHandlerFactory(HttpMessageHandler handler) => _handler = handler;
+
+        public HttpClient CreateClient(string name)
+        {
+            Assert.Equal(PluggyHttpClient.HttpClientName, name);
+            return new HttpClient(_handler, disposeHandler: false);
+        }
+    }
+
+    private sealed class FixedAnswer : HttpMessageHandler
+    {
+        private readonly HttpStatusCode _status;
+        private readonly string _body;
+
+        public FixedAnswer(HttpStatusCode status, string body)
+        {
+            _status = status;
+            _body = body;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(_status) { Content = new StringContent(_body) });
+    }
+
+    /// <summary>Hands out keys and then refuses every one of them.</summary>
+    private sealed class AlwaysUnauthorizedData : HttpMessageHandler
+    {
+        public int AuthCalls { get; private set; }
+
+        public int DataCalls { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.AbsolutePath == "/auth")
+            {
+                AuthCalls++;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"apiKey":"fake-api-key-refused"}""") });
+            }
+
+            DataCalls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") });
+        }
+    }
+}
