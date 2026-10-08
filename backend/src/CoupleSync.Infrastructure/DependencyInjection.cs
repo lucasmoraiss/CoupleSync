@@ -9,7 +9,6 @@ using CoupleSync.Infrastructure.Integrations.Email;
 using CoupleSync.Infrastructure.Integrations.Fcm;
 using CoupleSync.Infrastructure.Integrations.Gemini;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser;
-using CoupleSync.Infrastructure.Integrations.LocalPdfParser.Worker;
 using CoupleSync.Infrastructure.Integrations.LocalPdfParser.Parsers;
 using CoupleSync.Infrastructure.Integrations.Pluggy;
 using CoupleSync.Infrastructure.Integrations.Storage;
@@ -67,7 +66,7 @@ public static class DependencyInjection
 
         services.AddScoped<IStorageAdapter, LocalFileStorageAdapter>();
 
-        services.AddScoped<IPdfTextExtractor, ChildProcessPdfTextExtractor>();
+        services.AddScoped<IPdfTextExtractor, Integrations.LocalPdfParser.Worker.ChildProcessPdfTextExtractor>();
         services.AddScoped<BankDetector>();
 
         // Bank statement parsers — registered as IEnumerable<IBankStatementParser> via multiple scoped registrations
