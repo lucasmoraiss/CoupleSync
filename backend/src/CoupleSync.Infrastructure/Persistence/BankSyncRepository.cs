@@ -165,7 +165,7 @@ public sealed class BankSyncRepository : IBankSyncRepository
 
         return rows
             .Select(t => new ExistingTransactionFacts(
-                t.Id, t.Amount, t.Currency, BankReconciliationRules.LocalDayOf(t.EventTimestampUtc), t.Source, t.Bank))
+                t.Id, t.Amount, t.Currency, BankReconciliationRules.LocalDayOf(t.EventTimestampUtc, t.Source), t.Source, t.Bank))
             .ToList();
     }
 

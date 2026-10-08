@@ -136,19 +136,23 @@ public static class BankReconciliationRules
     public static bool IsKnownBank(string? transactionBank) => KnownBankKey(transactionBank) is not null;
 
     /// <summary>
-    /// False only when the bank of the transaction is known and is not the bank of the connection. A transaction
-    /// typed by hand or imported from a statement names no bank the app knows: the bank is then not looked at.
+    /// False only when both sides name a bank the app knows and the two are not the same bank. A transaction typed
+    /// by hand or imported from a statement names no bank the app knows; and the name of a connection may say nothing
+    /// about the bank (a connection made through "Meu Pluggy" may be named after it, or have no name at all). With
+    /// either side unknown there is nothing to compare: the bank is not looked at, and the suspicion stays.
     /// </summary>
     public static bool IsSameBankOrUnknown(string? transactionBank, string? connectorName)
     {
         if (KnownBankKey(transactionBank) is not { } key) return true;
         var connector = Words(connectorName);
-        return KnownBanks[key].Any(spelling => ContainsInOrder(connector, spelling));
+        if (Names(connector, key)) return true;
+        return !KnownBanks.Keys.Any(other => Names(connector, other));
     }
 
     /// <summary>
     /// A bank transaction (money that left) that looks like a transaction the app already has: the same value, on the
-    /// same day in Brazil or one day apart, not itself come from the bank and, when its bank is known, of the same bank.
+    /// same day in Brazil or one day apart, not itself come from the bank and not of another bank
+    /// (<see cref="IsSameBankOrUnknown"/>).
     /// </summary>
     public static bool IsSuspectedDuplicate(MoneyMovement bankLine, string? connectorName, ExistingTransactionFacts existing)
         => bankLine.Direction == MoneyDirection.Out
@@ -171,14 +175,39 @@ public static class BankReconciliationRules
             .ThenBy(candidate => candidate.Id)
             .FirstOrDefault();
 
-    /// <summary>The calendar day in Brazil of an instant stored in UTC (how every transaction of the app is dated).</summary>
-    public static DateOnly LocalDayOf(DateTime utc) => DateOnly.FromDateTime(BrazilTime.ToLocal(utc));
+    /// <summary>
+    /// The calendar day of a transaction of the app. What a person types and what the notification capture sends is
+    /// an instant, stored in UTC: its day is the day in Brazil (21:00 in Brasília is midnight UTC, and still that
+    /// day). The statement import stores the date written on the statement with no time, as midnight UTC: that is
+    /// the day as written, not 21:00 of the day before in Brasília (the same reading
+    /// <see cref="BankTransaction.LocalDateOf"/> gives a line of the bank). An imported line someone edited later
+    /// carries the instant typed, and is read as one.
+    /// </summary>
+    public static DateOnly LocalDayOf(DateTime utc, TransactionSource source)
+        => source == TransactionSource.OcrImport && utc.TimeOfDay == TimeSpan.Zero
+            ? DateOnly.FromDateTime(utc)
+            : DateOnly.FromDateTime(BrazilTime.ToLocal(utc));
+
+    /// <summary>
+    /// The instants (UTC, the end left out) between which a transaction of the app can be a duplicate of a bank line
+    /// of <paramref name="firstDay"/> to <paramref name="lastDay"/>. It starts at midnight UTC of the earliest day
+    /// that counts, where a date stored with no time lies (three hours before that day begins in Brazil), and ends
+    /// with the latest day that counts in Brazil. It may bring a few transactions too many, never too few: the
+    /// rules look at the day of each one.
+    /// </summary>
+    public static (DateTime FromUtc, DateTime ToUtcExclusive) DuplicateSearchWindowUtc(DateOnly firstDay, DateOnly lastDay)
+        => (DateTime.SpecifyKind(firstDay.AddDays(-DuplicateDayTolerance).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc),
+            BrazilTime.ToUtc(lastDay.AddDays(DuplicateDayTolerance + 1).ToDateTime(TimeOnly.MinValue)));
 
     private static string? KnownBankKey(string? transactionBank)
     {
         var words = Words(transactionBank);
         return words.Count == 1 && KnownBanks.ContainsKey(words[0]) ? words[0] : null;
     }
+
+    /// <summary>True when the words of the name of a connection spell the bank of <paramref name="key"/>.</summary>
+    private static bool Names(IReadOnlyList<string> connectorWords, string key)
+        => KnownBanks[key].Any(spelling => ContainsInOrder(connectorWords, spelling));
 
     private static bool ContainsInOrder(IReadOnlyList<string> words, string[] spelling)
     {

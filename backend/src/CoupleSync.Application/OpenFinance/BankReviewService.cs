@@ -448,6 +448,6 @@ public sealed class BankReviewService
                     match.Merchant,
                     match.Amount,
                     match.Currency,
-                    BankReconciliationRules.LocalDayOf(match.EventTimestampUtc)));
+                    BankReconciliationRules.LocalDayOf(match.EventTimestampUtc, match.Source)));
     }
 }

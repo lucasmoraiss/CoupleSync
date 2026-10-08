@@ -1,6 +1,5 @@
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
-using CoupleSync.Domain.ValueObjects;
 
 namespace CoupleSync.Application.OpenFinance;
 
@@ -93,11 +92,12 @@ public sealed class BankPreclassificationService
                     .ToList()
                 : [];
 
+        var (fromUtc, toUtcExclusive) = BankReconciliationRules.DuplicateSearchWindowUtc(firstDay, lastDay);
         var existing = open.Any(l => l.Row.IsExpense)
             ? (await _sync.GetDuplicateCandidatesForJobAsync(
                 coupleId,
-                BrazilTime.ToUtc(firstDay.AddDays(-BankReconciliationRules.DuplicateDayTolerance).ToDateTime(TimeOnly.MinValue)),
-                BrazilTime.ToUtc(lastDay.AddDays(BankReconciliationRules.DuplicateDayTolerance + 1).ToDateTime(TimeOnly.MinValue)),
+                fromUtc,
+                toUtcExclusive,
                 leaving.Where(l => l.MatchedTransactionId is not null).Select(l => l.Id).ToList(),
                 ct)).ToList()
             : [];

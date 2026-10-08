@@ -208,7 +208,7 @@ public sealed class OpenFinanceReconciliationTests
         await factory.ExecuteAsync($"UPDATE transactions SET source = 3, bank = 'Banco Exemplo' WHERE id = '{Sql(fromTheBank)}'");
         await factory.ExecuteAsync($"UPDATE transactions SET source = 2, bank = 'NUBANK' WHERE id = '{Sql(otherBank)}'");
         await factory.ExecuteAsync($"UPDATE transactions SET source = 2, bank = 'ITAU' WHERE id = '{Sql(sameBank)}'");
-        await factory.ExecuteAsync($"UPDATE transactions SET source = 1, bank = 'OCR' WHERE id = '{Sql(imported)}'");
+        await factory.ExecuteAsync($"UPDATE transactions SET source = 1, bank = 'OCR Import' WHERE id = '{Sql(imported)}'");
         // The connection of this test is of a bank the app knows by name.
         factory.Pluggy.ConnectorNameOverride[FakePluggyServer.ItemWithAccounts] = "Itaú";
         Bank(factory, Checking,
@@ -229,6 +229,89 @@ public sealed class OpenFinanceReconciliationTests
         Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-usd-line"));
         Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-credit"));
         Assert.Equal(("Pending", null, Sql(imported)), await StateAsync(factory, "t26-imported"));
+    }
+
+    /// <summary>A purchase as the notification capture of the app stores it: through its own route, with the bank it names.</summary>
+    private static async Task<Guid> NotificationAsync(OpenFinanceApiFactory factory, Member member, string bank, decimal amount, DateTime whenUtc)
+    {
+        var sent = await member.Client.PostAsJsonAsync("/api/v1/integrations/events", new
+        {
+            bank,
+            amount,
+            currency = "BRL",
+            eventTimestamp = whenUtc,
+            description = "Compra aprovada",
+            merchant = "Padaria Exemplo",
+            rawNotificationText = "Compra aprovada na Padaria Exemplo",
+        });
+        Assert.True(sent.IsSuccessStatusCode, await sent.Content.ReadAsStringAsync());
+        var row = Assert.Single(await factory.RowsAsync("SELECT id, source, bank FROM transactions"));
+        Assert.Equal((2L, bank), (Convert.ToInt64(row["source"], System.Globalization.CultureInfo.InvariantCulture), (string)row["bank"]!));
+        return Guid.Parse((string)row["id"]!);
+    }
+
+    [Theory]
+    // Every connection made through "Meu Pluggy" may carry that name, or none: it says nothing about the bank.
+    [InlineData("MeuPluggy", true)]
+    [InlineData("", true)]
+    [InlineData("Banco Exemplo", true)]
+    // The same bank, as the connection spells it.
+    [InlineData("Nubank", true)]
+    [InlineData("Nu Pagamentos S.A.", true)]
+    // Another bank the app knows: the purchase of the notification was not made in this account.
+    [InlineData("Itaú", false)]
+    public async Task APurchaseCapturedFromANubankNotification_IsSuspected_UnlessTheConnectionIsOfAnotherBankTheAppKnows(string connector, bool suspected)
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var captured = await NotificationAsync(factory, ana, "NUBANK", 25.00m, Noon());
+        factory.Pluggy.ConnectorNameOverride[FakePluggyServer.ItemWithAccounts] = connector;
+        Bank(factory, Checking, Debit("t26-notified", Noon(1), 25.00m));
+
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, suspected ? Sql(captured) : null), await StateAsync(factory, "t26-notified"));
+    }
+
+    [Fact]
+    public async Task AStatementLineImportedWithNoTime_IsComparedByTheDayWritten_NotByTheEveningBeforeInBrasilia()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        // As the statement import stores a line: source OcrImport, bank "OCR Import", the date at midnight UTC.
+        async Task<Guid> ImportedAsync(decimal amount, int daysAfterTheBase)
+        {
+            var id = await ManualAsync(ana, amount, Today.AddDays(-10 + daysAfterTheBase), "Linha do extrato");
+            await factory.ExecuteAsync($"UPDATE transactions SET source = 1, bank = 'OCR Import' WHERE id = '{Sql(id)}'");
+            return id;
+        }
+
+        var dayBefore = await ImportedAsync(61.00m, -1);
+        var sameDay = await ImportedAsync(62.00m, 0);
+        var dayAfter = await ImportedAsync(63.00m, 1);
+        await ImportedAsync(64.00m, -2);
+        await ImportedAsync(65.00m, 2);
+        Bank(factory, Checking,
+            Debit("t26-statement-day-before", Noon(), 61.00m),
+            Debit("t26-statement-same-day", Noon(), 62.00m),
+            Debit("t26-statement-day-after", Noon(), 63.00m),
+            Debit("t26-statement-two-before", Noon(), 64.00m),
+            Debit("t26-statement-two-after", Noon(), 65.00m));
+
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, Sql(dayBefore)), await StateAsync(factory, "t26-statement-day-before"));
+        Assert.Equal(("Pending", null, Sql(sameDay)), await StateAsync(factory, "t26-statement-same-day"));
+        Assert.Equal(("Pending", null, Sql(dayAfter)), await StateAsync(factory, "t26-statement-day-after"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-statement-two-before"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-statement-two-after"));
+
+        // The review shows the day of the statement as written.
+        var line = await LineIdAsync(factory, "t26-statement-day-before");
+        var shown = Find((await ReviewAsync(ana, Noon())).GetProperty("expenses"), line)!.Value;
+        Assert.Equal(
+            Today.AddDays(-11).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            shown.GetProperty("match").GetProperty("day").GetString());
     }
 
     [Fact]
@@ -717,7 +800,7 @@ public sealed class OpenFinanceReconciliationTests
     {
         await using var factory = NewFactory();
         var (ana, connection) = await AnaAsync(factory);
-        // 45 days apart: never in the same month.
+        // 35 days apart: never in the same month.
         var older = Noon(-35);
         Bank(factory, Checking,
             new FakeTransaction("t26-bill-now", Noon(), -900.00m) { Description = "Pagamento de fatura", DescriptionRaw = "PAGAMENTO DE FATURA" },
@@ -1124,6 +1207,8 @@ public sealed class OpenFinanceReconciliationTests
     [InlineData("""{"reconcile":[{"id":null}]}""")]
     [InlineData("""{"asNew":[null]}""")]
     [InlineData("""{"asNew":["isto-nao-e-um-id"]}""")]
+    [InlineData("""{"expenses":[null]}""")]
+    [InlineData("""{"expenses":[{"id":null}]}""")]
     public async Task Confirm_WithAnInvalidItemInReconcileOrAsNew_Answers4xxInTheStandardFormat_NeverA500(string json)
     {
         await using var factory = NewFactory();

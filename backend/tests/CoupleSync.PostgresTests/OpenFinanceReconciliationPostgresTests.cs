@@ -252,6 +252,67 @@ public sealed class OpenFinanceReconciliationPostgresTests
         Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-coffee-1"));
     }
 
+    [PostgresFact]
+    public async Task AStatementLineImportedWithNoTime_StoredAtMidnightUtc_IsFoundAndComparedByTheDayWritten()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyPluggy();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana Exemplo Souza");
+        var connectionId = await ConnectWithBankAsync(ana);
+        // As the statement import stores a line: source OcrImport, bank "OCR Import", the date at midnight UTC (timestamptz).
+        async Task<Guid> ImportedAsync(decimal amount, int daysAfterTheBase)
+        {
+            var id = await ManualAsync(ana, amount, Today.AddDays(-10 + daysAfterTheBase), "Linha do extrato");
+            await database.ExecuteAsync("UPDATE transactions SET source = 1, bank = 'OCR Import' WHERE id = @id", ("id", id));
+            Assert.Equal(
+                Today.AddDays(-10 + daysAfterTheBase),
+                (await database.ScalarAsync<DateTime>("SELECT event_timestamp_utc FROM transactions WHERE id = @id", ("id", id))).ToUniversalTime());
+            return id;
+        }
+
+        var dayBefore = await ImportedAsync(61.00m, -1);
+        var sameDay = await ImportedAsync(62.00m, 0);
+        var dayAfter = await ImportedAsync(63.00m, 1);
+        await ImportedAsync(64.00m, -2);
+        await ImportedAsync(65.00m, 2);
+        // An instant, not a date: 22:00 in Brasília of the day before the line, stored as 01:00Z of the day of the line.
+        var lateEvening = await ManualAsync(ana, 66.00m, Today.AddDays(-10).AddHours(1), "Jantar");
+        // Typed by hand as 21:00 in Brasília, two days before the line: stored as 00:00Z of the day before the line.
+        // It is an instant too (the app never sends a date without a time): still two days apart.
+        await ManualAsync(ana, 67.00m, Today.AddDays(-11), "Lanche das 21h");
+        pluggy.Transactions[Checking] =
+        [
+            Debit("t26-statement-day-before", Noon(), 61.00m),
+            Debit("t26-statement-same-day", Noon(), 62.00m),
+            Debit("t26-statement-day-after", Noon(), 63.00m),
+            Debit("t26-statement-two-before", Noon(), 64.00m),
+            Debit("t26-statement-two-after", Noon(), 65.00m),
+            Debit("t26-late-evening", Noon(), 66.00m),
+            Debit("t26-typed-at-21h", Noon(), 67.00m),
+        ];
+
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+
+        Assert.Equal(("Pending", null, dayBefore), await StateAsync(database, "t26-statement-day-before"));
+        Assert.Equal(("Pending", null, sameDay), await StateAsync(database, "t26-statement-same-day"));
+        Assert.Equal(("Pending", null, dayAfter), await StateAsync(database, "t26-statement-day-after"));
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-statement-two-before"));
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-statement-two-after"));
+        Assert.Equal(("Pending", null, lateEvening), await StateAsync(database, "t26-late-evening"));
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-typed-at-21h"));
+
+        // The review shows the day of the statement as written.
+        var line = await LineAsync(database, "t26-statement-day-before");
+        var month = CoupleSync.Domain.ValueObjects.BrazilTime.MonthOf(Noon());
+        var review = await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review?month={month}");
+        var shown = review.GetProperty("expenses").EnumerateArray().Single(l => l.GetProperty("id").GetGuid() == line);
+        Assert.Equal(
+            Today.AddDays(-11).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            shown.GetProperty("match").GetProperty("day").GetString());
+    }
+
     // ---------------------------------------------------------------- transfers, bill payments and the decision of the person
 
     [PostgresFact]
@@ -339,7 +400,7 @@ public sealed class OpenFinanceReconciliationPostgresTests
         await using var host = WithOpenFinanceSync(factory, pluggy);
         var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana Exemplo Souza");
         var connection = await ConnectWithBankAsync(ana);
-        // 45 days apart: never in the same month.
+        // 35 days apart: never in the same month.
         var older = Noon(-35);
         pluggy.Transactions[Checking] =
         [

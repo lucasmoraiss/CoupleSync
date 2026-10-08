@@ -73,7 +73,7 @@ public interface IBankSyncRepository
     /// [<paramref name="fromUtc"/>, <paramref name="toUtcExclusive"/>) and that no line of the mirror points to yet
     /// (neither as its transaction nor as a suspected duplicate). The lines <paramref name="leavingLineIds"/> do not
     /// count: the run is taking them out of the mirror in this very save, and what they pointed to is free again.
-    /// Their day is the day in Brazil.
+    /// Their day is the one <see cref="BankReconciliationRules.LocalDayOf"/> gives.
     /// </summary>
     Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(
         Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> leavingLineIds, CancellationToken ct);

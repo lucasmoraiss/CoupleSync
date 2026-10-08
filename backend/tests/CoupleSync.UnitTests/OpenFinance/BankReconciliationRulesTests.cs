@@ -210,22 +210,32 @@ public sealed class BankReconciliationRulesTests
 
     [Theory]
     [InlineData("NUBANK", "Nubank", true)]
+    [InlineData("NUBANK", "Nu Pagamentos S.A.", true)]
     [InlineData("NUBANK", "Itaú", false)]
+    [InlineData("NUBANK", "Banco do Brasil", false)]
     [InlineData("ITAU", "Itaú", true)]
     [InlineData("ITAU", "Itaú Cartões", true)]
+    [InlineData("ITAU", "Nubank", false)]
     [InlineData("INTER", "Banco Inter", true)]
-    [InlineData("INTER", "Banco Internacional Exemplo", false)]
     [InlineData("C6", "C6 Bank", true)]
     [InlineData("BB", "Banco do Brasil", true)]
     [InlineData("BB", "Bradesco", false)]
     [InlineData("CAIXA", "Caixa Econômica Federal", true)]
-    [InlineData("SANTANDER", null, false)]
+    // The name of the connection is not one of the banks the app knows (every connection made through "Meu Pluggy"
+    // may be named after it, not after the bank): nothing to compare with, the suspicion stays.
+    [InlineData("NUBANK", "MeuPluggy", true)]
+    [InlineData("NUBANK", "Meu Pluggy", true)]
+    [InlineData("NUBANK", "Banco Exemplo", true)]
+    [InlineData("INTER", "Banco Internacional Exemplo", true)]
+    [InlineData("SANTANDER", null, true)]
+    [InlineData("SANTANDER", "", true)]
+    [InlineData("SANTANDER", "   ", true)]
     [InlineData("MANUAL", "Nubank", true)]   // not a bank the app knows: the bank is not looked at
     [InlineData("OCR", "Nubank", true)]
     [InlineData("OCR Import", "Itaú", true)]
     [InlineData(null, "Nubank", true)]
     [InlineData("", "Nubank", true)]
-    public void WhenTheBankOfTheTransactionIsKnown_ItMustBeTheBankOfTheConnection(string? transactionBank, string? connector, bool expected)
+    public void TheBankDiscardsTheSuspicion_OnlyWhenBothAreBanksTheAppKnows_AndTheyAreNotTheSame(string? transactionBank, string? connector, bool expected)
     {
         Assert.Equal(expected, BankReconciliationRules.IsSameBankOrUnknown(transactionBank, connector));
         Assert.Equal(
@@ -262,8 +272,70 @@ public sealed class BankReconciliationRulesTests
     public void TheDayOfATransactionOfTheApp_IsTheDayInBrazil()
     {
         // 22:00 of the 3rd in Brasília is already the 4th in UTC.
-        Assert.Equal(new DateOnly(2026, 10, 3), BankReconciliationRules.LocalDayOf(new DateTime(2026, 10, 4, 1, 0, 0, DateTimeKind.Utc)));
-        Assert.Equal(new DateOnly(2026, 10, 4), BankReconciliationRules.LocalDayOf(new DateTime(2026, 10, 4, 3, 0, 0, DateTimeKind.Utc)));
+        foreach (var source in new[] { TransactionSource.Manual, TransactionSource.Notification, TransactionSource.OcrImport })
+        {
+            Assert.Equal(new DateOnly(2026, 10, 3), BankReconciliationRules.LocalDayOf(new DateTime(2026, 10, 4, 1, 0, 0, DateTimeKind.Utc), source));
+            Assert.Equal(new DateOnly(2026, 10, 4), BankReconciliationRules.LocalDayOf(new DateTime(2026, 10, 4, 3, 0, 0, DateTimeKind.Utc), source));
+        }
+    }
+
+    [Fact]
+    public void TheDayOfAnImportedStatementLine_StoredAsMidnightUtc_IsTheDayAsWritten_NotTheEveningBeforeInBrasilia()
+    {
+        // The statement import stores the date of the statement with no time: "2026-10-03" becomes 2026-10-03T00:00:00Z.
+        var written = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal(new DateOnly(2026, 10, 3), BankReconciliationRules.LocalDayOf(written, TransactionSource.OcrImport));
+        Assert.Equal(new DateOnly(2026, 10, 3), BankReconciliationRules.LocalDayOf(DateTime.SpecifyKind(written, DateTimeKind.Unspecified), TransactionSource.OcrImport));
+        // One tick past midnight is an instant, not a date without a time.
+        Assert.Equal(new DateOnly(2026, 10, 2), BankReconciliationRules.LocalDayOf(written.AddTicks(1), TransactionSource.OcrImport));
+    }
+
+    [Theory]
+    [InlineData(TransactionSource.Manual)]
+    [InlineData(TransactionSource.Notification)]
+    public void WhatThePersonTypedOrTheNotificationCaptured_IsAlwaysAnInstant_21hInBrasiliaIsNotTheNextDay(TransactionSource source)
+    {
+        // The app sends 21:00 of the 2nd in Brasília as 2026-10-03T00:00:00.000Z: it is still the 2nd.
+        Assert.Equal(
+            new DateOnly(2026, 10, 2),
+            BankReconciliationRules.LocalDayOf(new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc), source));
+    }
+
+    [Theory]
+    [InlineData(3, true)]  // the statement says the 3rd, the bank the 4th: one day apart
+    [InlineData(4, true)]  // the same day
+    [InlineData(5, true)]  // the day after
+    [InlineData(2, false)] // two days before
+    [InlineData(6, false)] // two days after
+    public void AStatementLineImportedWithNoTime_IsComparedByTheDayWritten(int dayOfTheStatement, bool expected)
+    {
+        var bankLine = Out(25.00m, day: new DateOnly(2026, 10, 4));
+        var imported = new ExistingTransactionFacts(
+            Guid.NewGuid(), 25.00m, "BRL",
+            BankReconciliationRules.LocalDayOf(new DateTime(2026, 10, dayOfTheStatement, 0, 0, 0, DateTimeKind.Utc), TransactionSource.OcrImport),
+            TransactionSource.OcrImport, "OCR Import");
+
+        Assert.Equal(expected, BankReconciliationRules.IsSuspectedDuplicate(bankLine, "Banco Exemplo", imported));
+    }
+
+    [Theory]
+    [InlineData(3, 4)]
+    [InlineData(3, 3)]
+    [InlineData(31, 31)]
+    public void TheSearchForCandidates_StartsAtMidnightUtcOfTheDayBeforeTheFirstLine_AndEndsWithTheDayAfterTheLastInBrazil(int firstDay, int lastDay)
+    {
+        var first = new DateOnly(2026, 10, firstDay);
+        var last = new DateOnly(2026, 10, lastDay);
+
+        var (fromUtc, toUtcExclusive) = BankReconciliationRules.DuplicateSearchWindowUtc(first, last);
+
+        // A statement line of the day before is stored at 00:00Z of that day: three hours before that day starts in Brazil.
+        Assert.Equal(DateTime.SpecifyKind(first.AddDays(-1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc), fromUtc);
+        Assert.Equal(DateTimeKind.Utc, fromUtc.Kind);
+        // 23:59 of the day after in Brasília is 02:59Z of the day after that.
+        Assert.Equal(DateTime.SpecifyKind(last.AddDays(2).ToDateTime(new TimeOnly(3, 0)), DateTimeKind.Utc), toUtcExclusive);
+        Assert.Equal(DateTimeKind.Utc, toUtcExclusive.Kind);
     }
 
     // ---------------------------------------------------------------- the mirror row
