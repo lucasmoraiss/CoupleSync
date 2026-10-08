@@ -40,6 +40,11 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 
+// The API executable is also the PDF reading worker: started by ChildProcessPdfTextExtractor with this first argument
+// it reads one PDF from the standard input, answers on the standard output and ends, without building the web host.
+if (args.Length > 0 && args[0] == CoupleSync.Infrastructure.Integrations.LocalPdfParser.Worker.PdfWorkerHost.Command)
+    return CoupleSync.Infrastructure.Integrations.LocalPdfParser.Worker.PdfWorkerHost.RunProcess(args);
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
@@ -181,5 +186,6 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 });
 
 app.Run();
+return 0;
 
 public partial class Program;

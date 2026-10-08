@@ -65,7 +65,7 @@ public sealed class PdfPigTextExtractorTests
     /// Builds a minimal valid single-page PDF with the given text in the content stream.
     /// Uses Latin-1 so that string.Length == byte count (required for /Length accuracy).
     /// </summary>
-    private static MemoryStream BuildMinimalTextPdf(string textLine)
+    internal static MemoryStream BuildMinimalTextPdf(string textLine)
     {
         var sb = new StringBuilder();
         var offsets = new List<int>();
