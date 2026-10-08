@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   activeGroupAfterLeaving,
   activeGroupOf,
@@ -8,8 +10,10 @@ import {
   groupCountText,
   groupRoleText,
   groupChangeNotice,
+  leaveConfirmationText,
   leaveFollowUpText,
   mainAreaGate,
+  removeMemberConfirmationText,
   shouldShowGroupPill,
 } from '../groups';
 import type { MyGroupResponse, MyGroupsResponse } from '@/types/api';
@@ -159,5 +163,44 @@ describe('mainAreaGate (as telas com dados do grupo só existem com um grupo ati
 
   it('com sessão e grupo ativo mostra o app', () => {
     expect(mainAreaGate({ hydrated: true, accessToken: 'a', coupleId: 'g' })).toBe('app');
+  });
+});
+
+describe('confirmações de sair do grupo e de remover um membro: o Open Finance da pessoa naquele grupo é apagado (issue #31)', () => {
+  const openFinanceOfWhoLeaves = 'A sua conexão bancária (Open Finance) neste grupo, se houver, é apagada com os bancos e as contas dela.';
+
+  it('sair, sendo membro comum, avisa que a conexão bancária da pessoa naquele grupo é apagada', () => {
+    expect(leaveConfirmationText({ onlyMember: false, owner: false })).toBe(
+      `Você deixa de ver os dados do grupo. As transações que você lançou continuam no grupo. ${openFinanceOfWhoLeaves}`,
+    );
+  });
+
+  it('sair, sendo quem administra, avisa também que a administração passa adiante', () => {
+    expect(leaveConfirmationText({ onlyMember: false, owner: true })).toBe(
+      `Você deixa de ver os dados do grupo. A administração passa ao membro mais antigo. As transações que você lançou continuam no grupo. ${openFinanceOfWhoLeaves}`,
+    );
+  });
+
+  it('o último membro não lê que nada é apagado: as transações ficam, a conexão bancária dele é apagada', () => {
+    const text = leaveConfirmationText({ onlyMember: true, owner: true });
+    expect(text).toBe(
+      `Você é o último membro. Ao sair, ninguém mais consegue acessar este grupo e o código de convite deixa de valer. As transações do grupo não são apagadas. ${openFinanceOfWhoLeaves}`,
+    );
+    expect(text).not.toContain('Os dados não são apagados');
+    expect(leaveConfirmationText({ onlyMember: true, owner: false })).toBe(text);
+  });
+
+  it('remover um membro avisa que a conexão bancária dessa pessoa naquele grupo é apagada', () => {
+    expect(removeMemberConfirmationText('Bruno')).toBe(
+      'Bruno perde o acesso ao grupo agora. As transações que essa pessoa lançou continuam no grupo. A conexão bancária (Open Finance) dessa pessoa neste grupo, se houver, é apagada com os bancos e as contas dela.',
+    );
+  });
+
+  it('a tela do grupo mostra esses textos nas duas confirmações, e nenhum outro', () => {
+    const screen = fs.readFileSync(path.resolve(__dirname, '../../../../app/(main)/settings/group.tsx'), 'utf8');
+    expect(screen).toMatch(/const message = leaveConfirmationText\(\{ onlyMember, owner \}\);/);
+    expect(screen).toMatch(/'Remover membro',\s*removeMemberConfirmationText\(member\.name\),/);
+    expect(screen).not.toContain('Os dados não são apagados');
+    expect(screen).not.toContain('continuam no grupo');
   });
 });
