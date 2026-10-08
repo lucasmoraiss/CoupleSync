@@ -973,7 +973,9 @@ public sealed class OpenFinanceIntegrationTests
         var ana = await factory.RegisterAsync("Ana");
         var connectionId = await ConnectAsync(ana);
         Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
-        factory.BeforeNextSave = () => factory.ExecuteAsync(
+        // The other request stores its credentials while Pluggy is answering this one (the save itself now runs in the
+        // transaction that reads the membership again, where a second SQLite connection cannot write).
+        factory.Pluggy.BeforeAnswer = _ => factory.ExecuteAsync(
             "UPDATE bank_connections SET client_id_encrypted = 'other-ciphertext', client_secret_encrypted = 'other-ciphertext', status = 'Active', label = 'A outra'");
 
         var response = await ana.Client.PostAsJsonAsync($"{Base}/connections", NewConnection("Esta"));
@@ -1167,6 +1169,105 @@ public sealed class OpenFinanceIntegrationTests
         answerNow.SetResult();
 
         await AssertErrorAsync(await verifying, HttpStatusCode.Conflict, "BANK_CONNECTION_CHANGED", ChangedWhileVerifyingMessage);
+        await AssertNothingStoredAsync(factory);
+    }
+
+    [Theory]
+    [InlineData(false, false)] // the person leaves; a first connection
+    [InlineData(true, false)] // the owner removes the person; a first connection
+    [InlineData(false, true)] // the person leaves; connecting again a connection that was disconnected
+    [InlineData(true, true)] // the owner removes the person; connecting again a connection that was disconnected
+    public async Task ConnectingWhileThePersonLeavesOrIsRemoved_IsRefusedWith403_AndNoConnectionStaysInTheGroup(bool removedByTheOwner, bool connectingAgain)
+    {
+        await using var factory = new OpenFinanceApiFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var bruno = await factory.RegisterAsync("Bruno", ana.JoinCode);
+        if (connectingAgain)
+        {
+            var old = await ConnectAsync(bruno, "Bancos do Bruno");
+            await AddItemAsync(bruno, old, FakePluggyServer.ItemWithAccounts);
+            Assert.Equal(HttpStatusCode.NoContent, (await bruno.Client.DeleteAsync($"{Base}/connections/{old}")).StatusCode);
+        }
+
+        // Pluggy holds its answer about the credentials until the test lets it go.
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answerNow = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Pluggy.BeforeAnswer = async request =>
+        {
+            if (request.Path != "/auth") return;
+            asked.TrySetResult();
+            await answerNow.Task;
+        };
+
+        var connecting = bruno.Client.PostAsJsonAsync($"{Base}/connections", NewConnection("Bancos do Bruno"));
+        await asked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var exit = removedByTheOwner
+            ? await ana.Client.DeleteAsync($"/api/v1/couples/members/{bruno.UserId}")
+            : await bruno.Client.PostAsJsonAsync("/api/v1/couples/leave", new { });
+        Assert.True(exit.IsSuccessStatusCode, await exit.Content.ReadAsStringAsync());
+        await AssertNothingStoredAsync(factory);
+        answerNow.SetResult();
+
+        // The same answer every Open Finance route gives to who is no longer in the group, and nothing was stored.
+        await AssertErrorAsync(await connecting, HttpStatusCode.Forbidden, "COUPLE_REQUIRED", "Você não faz mais parte deste grupo.");
+        await AssertNothingStoredAsync(factory);
+        Assert.Equal(0, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/status")).GetProperty("connections").GetArrayLength());
+    }
+
+    [Theory]
+    [InlineData(false)] // the person leaves
+    [InlineData(true)] // the owner removes the person
+    public async Task LeavingOrBeingRemoved_WithTheConnectionAlreadyDisconnected_DeletesTheConnectionItsItemsAndAccounts(bool removedByTheOwner)
+    {
+        await using var factory = new OpenFinanceApiFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var bruno = await factory.RegisterAsync("Bruno", ana.JoinCode);
+        var connectionId = await ConnectAsync(bruno, "Bancos do Bruno");
+        await AddItemAsync(bruno, connectionId, FakePluggyServer.ItemWithAccounts);
+        Assert.Equal(HttpStatusCode.NoContent, (await bruno.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
+        // Disconnected: no credentials, and the item and its accounts still there for the group.
+        var stored = Assert.Single(await factory.RowsAsync("SELECT status, client_id_encrypted, client_secret_encrypted FROM bank_connections"));
+        Assert.Equal("Disconnected", stored["status"]);
+        Assert.Null(stored["client_id_encrypted"]);
+        Assert.Null(stored["client_secret_encrypted"]);
+        Assert.Single(await factory.RowsAsync("SELECT id FROM bank_items"));
+        Assert.Equal(2, (await factory.RowsAsync("SELECT id FROM bank_accounts")).Count);
+
+        var exit = removedByTheOwner
+            ? await ana.Client.DeleteAsync($"/api/v1/couples/members/{bruno.UserId}")
+            : await bruno.Client.PostAsJsonAsync("/api/v1/couples/leave", new { });
+
+        Assert.True(exit.IsSuccessStatusCode, await exit.Content.ReadAsStringAsync());
+        Assert.Single(await factory.RowsAsync("SELECT user_id FROM couple_members"));
+        await AssertNothingStoredAsync(factory);
+        Assert.Equal(0, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/status")).GetProperty("connections").GetArrayLength());
+    }
+
+    [Theory]
+    [InlineData(false)] // the person leaves
+    [InlineData(true)] // the owner removes the person
+    public async Task TurningAnAccountOnOrOff_WhenTheExitDeletedItMeanwhile_Answers404_NotAServerError(bool removedByTheOwner)
+    {
+        await using var factory = new OpenFinanceApiFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var bruno = await factory.RegisterAsync("Bruno", ana.JoinCode);
+        var connectionId = await ConnectAsync(bruno, "Bancos do Bruno");
+        var added = await AddItemAsync(bruno, connectionId, FakePluggyServer.ItemWithAccounts);
+        var accountId = added.GetProperty("accounts")[0].GetProperty("id").GetGuid();
+        // The request has read the account and is about to save when the exit goes through.
+        factory.BeforeNextSave = async () =>
+        {
+            var exit = removedByTheOwner
+                ? await ana.Client.DeleteAsync($"/api/v1/couples/members/{bruno.UserId}")
+                : await bruno.Client.PostAsJsonAsync("/api/v1/couples/leave", new { });
+            Assert.True(exit.IsSuccessStatusCode, await exit.Content.ReadAsStringAsync());
+        };
+
+        var response = await bruno.Client.PatchAsJsonAsync($"{Base}/accounts/{accountId}", new { syncEnabled = false });
+
+        await AssertErrorAsync(response, HttpStatusCode.NotFound, "BANK_ACCOUNT_NOT_FOUND", "Conta bancária não encontrada.");
+        Assert.Null(factory.BeforeNextSave); // the exit did happen in the middle
         await AssertNothingStoredAsync(factory);
     }
 

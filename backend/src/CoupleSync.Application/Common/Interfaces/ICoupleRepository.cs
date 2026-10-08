@@ -45,7 +45,8 @@ public interface ICoupleRepository
     /// <summary>
     /// Starts one change of group membership for the user (create, join, leave, removal, switch, code renewal):
     /// opens a transaction and, on PostgreSQL, locks the user's row, so the changes of one user's memberships
-    /// run one at a time. Read the state to decide on only AFTER this (and after
+    /// run one at a time. Storing a bank connection of the user takes it too, so it never lands in a group they are
+    /// leaving at that moment. Read the state to decide on only AFTER this (and after
     /// <see cref="IMembershipChange.LockCoupleAsync"/> when a group is involved). Commit, then dispose.
     /// </summary>
     Task<IMembershipChange> BeginMembershipChangeAsync(Guid userId, CancellationToken cancellationToken);

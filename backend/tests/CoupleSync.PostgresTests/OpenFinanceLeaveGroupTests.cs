@@ -281,7 +281,195 @@ public sealed class OpenFinanceLeaveGroupTests
         Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM bank_accounts"));
     }
 
+    // ---------------------------------------------------------------- connecting in the middle of the exit
+
+    [PostgresTheory]
+    [InlineData(false)] // the person leaves
+    [InlineData(true)] // the owner removes the person
+    public async Task ConnectingWhileThePersonLeavesOrIsRemoved_IsRefusedWith403_AndNoConnectionStaysInTheGroup(bool removedByTheOwner)
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = OpenFinanceTests.WithOpenFinance(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var bruno = await OpenFinanceTests.RegisterAsync(factory, host, "Bruno", ana.JoinCode);
+
+        // Pluggy holds its answer about the credentials until the test lets it go.
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answerNow = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        pluggy.BeforeAnswer = async request =>
+        {
+            if (request.Path != "/auth") return;
+            asked.TrySetResult();
+            await answerNow.Task;
+        };
+
+        var connecting = bruno.Client.PostAsJsonAsync($"{Base}/connections", OpenFinanceTests.NewConnection("Bancos do Bruno"));
+        await asked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await ExitAsync(ana, bruno, removedByTheOwner);
+        await AssertNothingStoredAsync(database);
+        answerNow.SetResult();
+
+        await AssertRefusedAsNoLongerAMemberAsync(await connecting);
+        await AssertNothingStoredAsync(database);
+    }
+
+    [PostgresTheory]
+    [InlineData(false)] // the person leaves
+    [InlineData(true)] // the owner removes the person
+    public async Task ConnectingWhileTheExitHasNotCommittedYet_WaitsForIt_AndIsThenRefused(bool removedByTheOwner)
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = OpenFinanceTests.WithOpenFinance(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var bruno = await OpenFinanceTests.RegisterAsync(factory, host, "Bruno", ana.JoinCode);
+
+        // The exit is in the middle of its transaction (it only goes on once a trigger of the test lets it): the
+        // membership is still there for every other session, and the row of the person is locked.
+        await database.ExecuteAsync(
+            """
+            CREATE FUNCTION hold_the_exit() RETURNS trigger AS $$ BEGIN PERFORM pg_advisory_xact_lock(31); RETURN OLD; END; $$ LANGUAGE plpgsql;
+            CREATE TRIGGER hold_the_exit BEFORE DELETE ON couple_members FOR EACH ROW EXECUTE FUNCTION hold_the_exit();
+            """);
+        await using var holder = await database.OpenAsync();
+        await ExecuteOnAsync(holder, "SELECT pg_advisory_lock(31)");
+
+        var exiting = removedByTheOwner
+            ? ana.Client.DeleteAsync($"/api/v1/couples/members/{bruno.UserId}")
+            : bruno.Client.PostAsJsonAsync("/api/v1/couples/leave", new { });
+        await WaitUntilRequestsWaitForALockAsync(database, 1, exiting);
+        Assert.False(exiting.IsCompleted);
+
+        var connecting = bruno.Client.PostAsJsonAsync($"{Base}/connections", OpenFinanceTests.NewConnection("Bancos do Bruno"));
+        await WaitUntilRequestsWaitForALockAsync(database, 2, connecting);
+        Assert.False(connecting.IsCompleted, "the connection was stored without waiting for the exit");
+        await AssertNothingStoredAsync(database);
+        await ExecuteOnAsync(holder, "SELECT pg_advisory_unlock(31)");
+
+        var exit = await exiting;
+        Assert.True(exit.IsSuccessStatusCode, await exit.Content.ReadAsStringAsync());
+        await AssertRefusedAsNoLongerAMemberAsync(await connecting);
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM couple_members"));
+        await AssertNothingStoredAsync(database);
+    }
+
+    [PostgresTheory]
+    [InlineData(false)] // the person leaves
+    [InlineData(true)] // the owner removes the person
+    public async Task LeavingOrBeingRemovedWhileTheConnectionIsBeingStored_WaitsForIt_AndDeletesIt(bool removedByTheOwner)
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = OpenFinanceTests.WithOpenFinance(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var bruno = await OpenFinanceTests.RegisterAsync(factory, host, "Bruno", ana.JoinCode);
+
+        // The connection is in the middle of being stored (the insert only goes on once the test lets it).
+        await database.ExecuteAsync(
+            """
+            CREATE FUNCTION hold_the_insert() RETURNS trigger AS $$ BEGIN PERFORM pg_advisory_xact_lock(31); RETURN NEW; END; $$ LANGUAGE plpgsql;
+            CREATE TRIGGER hold_the_insert BEFORE INSERT ON bank_connections FOR EACH ROW EXECUTE FUNCTION hold_the_insert();
+            """);
+        await using var holder = await database.OpenAsync();
+        await ExecuteOnAsync(holder, "SELECT pg_advisory_lock(31)");
+
+        var connecting = bruno.Client.PostAsJsonAsync($"{Base}/connections", OpenFinanceTests.NewConnection("Bancos do Bruno"));
+        await WaitUntilRequestsWaitForALockAsync(database, 1, connecting);
+        Assert.False(connecting.IsCompleted);
+
+        var exiting = removedByTheOwner
+            ? ana.Client.DeleteAsync($"/api/v1/couples/members/{bruno.UserId}")
+            : bruno.Client.PostAsJsonAsync("/api/v1/couples/leave", new { });
+        await WaitUntilRequestsWaitForALockAsync(database, 2, exiting);
+        Assert.False(exiting.IsCompleted, "the exit went through without waiting for the connection being stored");
+        await ExecuteOnAsync(holder, "SELECT pg_advisory_unlock(31)");
+
+        // The connection was stored first (the person was still a member), and the exit that waited deleted it.
+        var connected = await connecting;
+        Assert.True(HttpStatusCode.Created == connected.StatusCode, await connected.Content.ReadAsStringAsync());
+        var exit = await exiting;
+        Assert.True(exit.IsSuccessStatusCode, await exit.Content.ReadAsStringAsync());
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM couple_members"));
+        await AssertNothingStoredAsync(database);
+    }
+
+    // ---------------------------------------------------------------- a connection already disconnected
+
+    [PostgresTheory]
+    [InlineData(false)] // the person leaves
+    [InlineData(true)] // the owner removes the person
+    public async Task LeavingOrBeingRemoved_WithTheConnectionAlreadyDisconnected_DeletesTheConnectionItsItemsAndAccounts(bool removedByTheOwner)
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = OpenFinanceTests.WithOpenFinance(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var bruno = await OpenFinanceTests.RegisterAsync(factory, host, "Bruno", ana.JoinCode);
+        var created = await bruno.Client.PostAsJsonAsync($"{Base}/connections", OpenFinanceTests.NewConnection("Bancos do Bruno"));
+        Assert.True(HttpStatusCode.Created == created.StatusCode, await created.Content.ReadAsStringAsync());
+        var connectionId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK,
+            (await bruno.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await bruno.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
+        // Disconnected: no credentials, and the item and its accounts still there for the group.
+        Assert.Equal(
+            new object?[] { "Disconnected", null, null },
+            Assert.Single(await database.RowsAsync("SELECT status, client_id_encrypted, client_secret_encrypted FROM bank_connections")));
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM bank_items"));
+        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM bank_accounts"));
+
+        await ExitAsync(ana, bruno, removedByTheOwner);
+
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM couple_members"));
+        await AssertNothingStoredAsync(database);
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private static async Task ExitAsync(TestUser owner, TestUser member, bool removedByTheOwner)
+    {
+        var exit = removedByTheOwner
+            ? await owner.Client.DeleteAsync($"/api/v1/couples/members/{member.UserId}")
+            : await member.Client.PostAsJsonAsync("/api/v1/couples/leave", new { });
+        Assert.True(exit.IsSuccessStatusCode, await exit.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>The answer every Open Finance route gives to who is no longer in the group.</summary>
+    private static async Task AssertRefusedAsNoLongerAMemberAsync(HttpResponseMessage response)
+    {
+        var raw = await response.Content.ReadAsStringAsync();
+        Assert.True(HttpStatusCode.Forbidden == response.StatusCode, raw);
+        var error = JsonSerializer.Deserialize<JsonElement>(raw);
+        Assert.Equal("COUPLE_REQUIRED", error.GetProperty("code").GetString());
+        Assert.Equal("Você não faz mais parte deste grupo.", error.GetProperty("message").GetString());
+    }
+
+    private static async Task ExecuteOnAsync(Npgsql.NpgsqlConnection connection, string sql)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Returns once <paramref name="count"/> sessions of this database wait for a lock, or as soon as
+    /// <paramref name="request"/> ends (it was expected to wait: the caller asserts on that).
+    /// </summary>
+    private static async Task WaitUntilRequestsWaitForALockAsync(TestDatabase database, int count, Task request)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (!request.IsCompleted && await database.ScalarAsync<long>(
+                   "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'") < count)
+        {
+            Assert.True(DateTime.UtcNow < deadline, $"Fewer than {count} requests waited for a lock within 30 seconds.");
+            await Task.Delay(50);
+        }
+    }
 
     private static async Task AssertNothingStoredAsync(TestDatabase database)
     {
