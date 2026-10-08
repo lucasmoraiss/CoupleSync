@@ -54,7 +54,11 @@ public static class PromptText
             sb.Append(ch);
         }
 
-        return sb.Length <= maxLength ? sb.ToString() : sb.ToString(0, maxLength).TrimEnd();
+        if (sb.Length <= maxLength) return sb.ToString();
+
+        // Half of a surrogate pair (an emoji) is not valid text: the cut goes before the pair.
+        var length = maxLength > 0 && char.IsHighSurrogate(sb[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return sb.ToString(0, length).TrimEnd();
     }
 
     /// <summary>Estimated tokens: characters ÷ 3.5, rounded up.</summary>
