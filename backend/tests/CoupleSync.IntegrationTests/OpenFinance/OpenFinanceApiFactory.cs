@@ -275,9 +275,13 @@ internal sealed class RecordingClassifier : ICategoryClassifier
     /// <summary>When set, every call fails with this.</summary>
     public Exception? Failure { get; set; }
 
+    /// <summary>Runs at every call, after it is recorded: what happens while the AI takes its time.</summary>
+    public Action? OnAsked { get; set; }
+
     public Task<string?> SuggestCategoryAsync(string description, IReadOnlyList<string> availableCategories, CancellationToken ct)
     {
         _asked.Enqueue(description);
+        OnAsked?.Invoke();
         return Failure is null ? Task.FromResult(Answer) : Task.FromException<string?>(Failure);
     }
 }

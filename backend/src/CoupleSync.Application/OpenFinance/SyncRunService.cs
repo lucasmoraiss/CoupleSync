@@ -13,7 +13,11 @@ namespace CoupleSync.Application.OpenFinance;
 public sealed class SyncRunService
 {
     public const string TooSoonCode = "SYNC_TOO_SOON";
+    public const string AlreadyRunningCode = "SYNC_ALREADY_RUNNING";
     public const string RunNotFoundCode = "SYNC_RUN_NOT_FOUND";
+
+    public const string AlreadyRunningMessage =
+        "Já há uma sincronização em andamento para esta conexão. Aguarde ela terminar.";
 
     /// <summary>One run per connection in this interval, whoever asked and however it ended.</summary>
     public static readonly TimeSpan MinInterval = TimeSpan.FromMinutes(10);
@@ -73,6 +77,9 @@ public sealed class SyncRunService
 
         var now = _clock.UtcNow;
         var latest = await _sync.GetLatestRunAsync(connection.Id, coupleId, ct);
+        // One still waiting or running (whenever it was asked for): there is no hour to promise, only to wait for it.
+        if (latest is { IsOpen: true })
+            throw AlreadyRunning();
         if (latest is not null && now - latest.CreatedAtUtc < MinInterval)
             throw TooSoon(latest.CreatedAtUtc + MinInterval);
 
@@ -95,7 +102,7 @@ public sealed class SyncRunService
         {
             // Another request (or the scheduler) enqueued one at this very moment: the database keeps a single
             // run waiting or running per connection.
-            throw TooSoon(now + MinInterval);
+            throw AlreadyRunning();
         }
         catch (ForeignKeyViolationException)
         {
@@ -157,6 +164,8 @@ public sealed class SyncRunService
 
         return enqueued;
     }
+
+    private static AppException AlreadyRunning() => new ConflictException(AlreadyRunningCode, AlreadyRunningMessage);
 
     private static AppException TooSoon(DateTime nextAtUtc)
     {

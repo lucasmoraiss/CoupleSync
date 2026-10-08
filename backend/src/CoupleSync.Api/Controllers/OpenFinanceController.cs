@@ -125,8 +125,9 @@ public sealed class OpenFinanceController : ControllerBase
     /// <c>appOpen=true</c> marks the silent request the app makes when it is opened (it never forces).
     /// <c>aiCategorizationConsent=true</c> says who connected accepted the AI disclosure: only then may a description
     /// the category table does not know go to the AI classifier. <c>historyMonths</c> (3, 6 or 12), when given,
-    /// becomes the period of the connection: how far back an account never read before goes. One run per
-    /// connection every 10 minutes (409 SYNC_TOO_SOON, with <c>errors.nextSyncAtUtc</c>).
+    /// becomes the period of the connection: how far back an account never read before goes. While a run of the
+    /// connection is waiting or running: 409 SYNC_ALREADY_RUNNING. Otherwise one run per connection every 10 minutes
+    /// (409 SYNC_TOO_SOON, with <c>errors.nextSyncAtUtc</c>).
     /// </summary>
     [HttpPost("connections/{id:guid}/sync")]
     [EnableRateLimiting(RateLimitPolicies.OpenFinanceSync)]

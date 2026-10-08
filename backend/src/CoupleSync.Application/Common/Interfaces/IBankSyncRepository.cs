@@ -23,8 +23,11 @@ public interface IBankSyncRepository
     /// <summary>For the job: the ids of the runs waiting, oldest first, any group.</summary>
     Task<IReadOnlyList<Guid>> GetPendingRunIdsForJobAsync(int max, CancellationToken ct);
 
-    /// <summary>For the job: every run left in <c>Running</c>, any group.</summary>
-    Task<IReadOnlyList<SyncRun>> GetRunningRunsForJobAsync(CancellationToken ct);
+    /// <summary>
+    /// For the job: the runs in <c>Running</c>, any group. With <paramref name="startedBeforeUtc"/>, only the ones
+    /// that started (or, without a start, were created) before that instant.
+    /// </summary>
+    Task<IReadOnlyList<SyncRun>> GetRunningRunsForJobAsync(DateTime? startedBeforeUtc, CancellationToken ct);
 
     /// <summary>For the scheduler: every connection that can be synchronised (active or in error), any group.</summary>
     Task<IReadOnlyList<BankConnection>> GetConnectionsToScheduleAsync(CancellationToken ct);
@@ -39,7 +42,17 @@ public interface IBankSyncRepository
     /// <summary>Read from the store now: the connection exists, is not disconnected and still holds this encrypted secret.</summary>
     Task<bool> ConnectionStillHasCredentialsAsync(Guid connectionId, string encryptedSecret, CancellationToken ct);
 
-    Task<bool> AccountHasTransactionsAsync(Guid bankAccountId, CancellationToken ct);
+    /// <summary>The day (in Brazil) of the most recent transaction the mirror has of the account; null when it has none.</summary>
+    Task<DateOnly?> GetLastTransactionDayAsync(Guid bankAccountId, CancellationToken ct);
+
+    /// <summary>
+    /// Tracked: the rows of the account the bank had not settled and nobody reviewed yet, whose instant is in
+    /// [<paramref name="fromUtc"/>, <paramref name="toUtcExclusive"/>).
+    /// </summary>
+    Task<IReadOnlyList<BankTransaction>> GetUnsettledWaitingAsync(Guid bankAccountId, DateTime fromUtc, DateTime toUtcExclusive, CancellationToken ct);
+
+    /// <summary>Marks mirror rows to be deleted by the next save.</summary>
+    void RemoveTransactions(IEnumerable<BankTransaction> transactions);
 
     /// <summary>The mirror rows with these Pluggy ids, in any group (the id is unique in the whole database).</summary>
     Task<IReadOnlyList<BankTransaction>> FindByPluggyIdsAsync(IReadOnlyCollection<string> pluggyTransactionIds, CancellationToken ct);

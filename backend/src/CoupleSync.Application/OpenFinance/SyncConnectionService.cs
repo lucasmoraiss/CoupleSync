@@ -18,9 +18,12 @@ public sealed class SyncConnectionService
     public const string InterruptedCode = "SYNC_INTERRUPTED";
     public const string OwnerNotInGroupCode = "SYNC_OWNER_NOT_IN_GROUP";
     public const string NoBankCode = "SYNC_NO_BANK";
+    public const string TimedOutCode = "SYNC_TIMED_OUT";
 
     public const string InterruptedMessage =
         "A sincronização foi interrompida porque o servidor reiniciou. Sincronize de novo.";
+    public const string TimedOutMessage =
+        "A sincronização demorou demais e foi encerrada. Sincronize de novo.";
     public const string FailedMessage = "Não foi possível sincronizar agora. Tente de novo em alguns minutos.";
     public const string OwnerNotInGroupMessage =
         "Quem conectou estes bancos não faz mais parte do grupo. Nada foi sincronizado.";
@@ -38,6 +41,15 @@ public sealed class SyncConnectionService
 
     /// <summary>Descriptions sent to the AI classifier in one run, at most (the rest stays with the table).</summary>
     public const int MaxAiSuggestionsPerRun = 30;
+
+    /// <summary>
+    /// A run still <c>Running</c> this long after it started is nobody's any more (its process died, or could not
+    /// record the verdict): every pass of the job fails it, so the connection is never blocked by it for longer.
+    /// </summary>
+    public static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(10);
+
+    /// <summary>How long the verdict "interrupted" may take to be written while the server is stopping.</summary>
+    private static readonly TimeSpan ShutdownGrace = TimeSpan.FromSeconds(5);
 
     private const int LookupChunk = 400;
 
@@ -75,17 +87,28 @@ public sealed class SyncConnectionService
     }
 
     /// <summary>
-    /// Fails every run left in <c>Running</c>: the process that was executing it is gone (the API sleeps and restarts
-    /// on the free tier), so nothing would ever finish it.
+    /// At start: fails every run left in <c>Running</c>. The process that was executing it is gone (the API sleeps
+    /// and restarts on the free tier), so nothing would ever finish it.
     /// </summary>
-    public async Task<int> RecoverStuckRunsAsync(CancellationToken ct)
+    public Task<int> RecoverStuckRunsAsync(CancellationToken ct)
+        => FailRunningRunsAsync(startedBeforeUtc: null, InterruptedCode, InterruptedMessage, ct);
+
+    /// <summary>
+    /// At every pass of the job: fails the runs <c>Running</c> for longer than <see cref="RunTimeout"/>. The start
+    /// alone is not enough: in a deploy the new process starts (and recovers) before the old one is told to stop,
+    /// and a verdict may fail to be written when the database is unreachable for a moment.
+    /// </summary>
+    public Task<int> RecoverTimedOutRunsAsync(CancellationToken ct)
+        => FailRunningRunsAsync(_clock.UtcNow - RunTimeout, TimedOutCode, TimedOutMessage, ct);
+
+    private async Task<int> FailRunningRunsAsync(DateTime? startedBeforeUtc, string code, string message, CancellationToken ct)
     {
-        var stuck = await _sync.GetRunningRunsForJobAsync(ct);
+        var stuck = await _sync.GetRunningRunsForJobAsync(startedBeforeUtc, ct);
         if (stuck.Count == 0) return 0;
 
         var now = _clock.UtcNow;
         foreach (var run in stuck)
-            run.MarkFailed(InterruptedCode, InterruptedMessage, now);
+            run.MarkFailed(code, message, now);
 
         try
         {
@@ -93,7 +116,8 @@ public sealed class SyncConnectionService
         }
         catch (ConcurrencyConflictException)
         {
-            // A run was deleted at this very moment (the person left the group): the next start finds the rest.
+            // A run got its verdict or was deleted at this very moment (the person left the group): the next pass
+            // finds the rest.
             _sync.DiscardChanges();
             return 0;
         }
@@ -128,7 +152,20 @@ public sealed class SyncConnectionService
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            throw; // the server is stopping: the next start fails this run as interrupted
+            // The server is stopping. Another process may already be up (a deploy) and will not look at this run at
+            // its start any more: the verdict is written now, in a few seconds of grace. If even that fails, the
+            // pass of any process fails the run after RunTimeout.
+            try
+            {
+                using var grace = new CancellationTokenSource(ShutdownGrace);
+                await FailAsync(run.Id, InterruptedCode, InterruptedMessage, markConnection: false, grace.Token);
+            }
+            catch (Exception)
+            {
+                // Nothing else to do while stopping.
+            }
+
+            throw;
         }
         catch (SyncStoppedException stop)
         {
@@ -227,10 +264,12 @@ public sealed class SyncConnectionService
             foreach (var account in accounts.Where(a => a.SyncEnabled))
             {
                 ct.ThrowIfCancellationRequested();
-                // An account never read before gets the whole history the person chose, also when it was added later.
-                var from = await _sync.AccountHasTransactionsAsync(account.Id, ct) ? window.From : window.HistoryFrom;
+                // By account, not by connection: the connection may have synchronised many times while this bank
+                // could not be read (login error at the bank, another bank of the same connection going on alone).
+                var from = window.FromFor(await _sync.GetLastTransactionDayAsync(account.Id, ct));
                 var transactions = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
                 await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
+                await RemoveVanishedAsync(account, transactions, from, window.To, ct);
                 await SaveAsync(connection, ct);
             }
 
@@ -250,9 +289,11 @@ public sealed class SyncConnectionService
         {
             await _pluggy.RequestItemUpdateAsync(auth, item.PluggyItemId, ct);
         }
-        catch (PluggyException ex) when (ex.Code != PluggyErrorCodes.InvalidCredentials)
+        catch (PluggyException)
         {
-            // Pluggy would not start a new reading now (limit, item busy): what it already has is read below.
+            // Pluggy would not start a new reading now (limit, item busy, or it does not allow this for the item at
+            // all): what it already has is read below. No refusal of this request says anything about the stored
+            // credentials: if they are bad, the reading right after says so.
         }
     }
 
@@ -322,6 +363,36 @@ public sealed class SyncConnectionService
         }
 
         run.AddCounts(added, updated);
+    }
+
+    /// <summary>
+    /// What the bank had not settled and no longer lists is gone at the bank (a pre-authorisation that fell, a
+    /// pending purchase that got another id when it was settled): the line leaves the mirror, so that it does not
+    /// wait for a review that can never confirm it. Only lines still pending at the bank AND still waiting for the
+    /// review, on days this reading covered whole; a line someone confirmed or discarded is never touched.
+    /// </summary>
+    private async Task RemoveVanishedAsync(
+        BankAccount account, IReadOnlyList<PluggyTransaction> transactions, DateOnly from, DateOnly to, CancellationToken ct)
+    {
+        // The first day asked is left out: Pluggy cuts the days in UTC, and a transaction of that day could be
+        // missing from the answer only because of where the day begins.
+        var fromUtc = DateTime.SpecifyKind(from.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+        var toUtc = DateTime.SpecifyKind(to.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+        if (fromUtc >= toUtc) return;
+
+        var candidates = await _sync.GetUnsettledWaitingAsync(account.Id, fromUtc, toUtc, ct);
+        if (candidates.Count == 0) return;
+
+        var listed = transactions
+            .Where(t => !string.IsNullOrWhiteSpace(t.Id))
+            .Select(t => t.Id.Trim())
+            .ToHashSet(StringComparer.Ordinal);
+        var vanished = candidates
+            .Where(row => row.Status == BankTransactionStatus.Pending
+                          && row.ReviewState == BankTransactionReviewState.Pending
+                          && !listed.Contains(row.PluggyTransactionId))
+            .ToList();
+        if (vanished.Count > 0) _sync.RemoveTransactions(vanished);
     }
 
     /// <summary>
@@ -471,5 +542,19 @@ public sealed record SyncWindow(DateOnly From, DateOnly HistoryFrom, DateOnly To
             ? DateOnly.FromDateTime(BrazilTime.ToLocal(last)).AddDays(-SyncConnectionService.OverlapDays)
             : historyFrom;
         return new SyncWindow(from, historyFrom, DateOnly.FromDateTime(nowUtc));
+    }
+
+    /// <summary>
+    /// The first day to ask for one account, given the day (in Brazil) of the last transaction the mirror has of it.
+    /// None: the account was never read (also a bank added later), so the whole history the person chose. Otherwise
+    /// the earlier of the window of the connection and that day minus the overlap, never further back than the
+    /// history: an account that went unread for weeks while the connection kept synchronising leaves no gap.
+    /// </summary>
+    public DateOnly FromFor(DateOnly? lastDayOfAccount)
+    {
+        if (lastDayOfAccount is not { } last) return HistoryFrom;
+        var fromAccount = last.AddDays(-SyncConnectionService.OverlapDays);
+        if (fromAccount < HistoryFrom) fromAccount = HistoryFrom;
+        return fromAccount < From ? fromAccount : From;
     }
 }

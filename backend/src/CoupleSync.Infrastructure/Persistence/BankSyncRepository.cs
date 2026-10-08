@@ -50,11 +50,13 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .Take(max)
             .ToListAsync(ct);
 
-    public async Task<IReadOnlyList<SyncRun>> GetRunningRunsForJobAsync(CancellationToken ct)
-        => await _dbContext.SyncRuns
-            .IgnoreQueryFilters()
-            .Where(r => r.Status == SyncRunStatus.Running)
-            .ToListAsync(ct);
+    public async Task<IReadOnlyList<SyncRun>> GetRunningRunsForJobAsync(DateTime? startedBeforeUtc, CancellationToken ct)
+    {
+        var running = _dbContext.SyncRuns.IgnoreQueryFilters().Where(r => r.Status == SyncRunStatus.Running);
+        if (startedBeforeUtc is { } before)
+            running = running.Where(r => (r.StartedAtUtc ?? r.CreatedAtUtc) < before);
+        return await running.ToListAsync(ct);
+    }
 
     public async Task<IReadOnlyList<BankConnection>> GetConnectionsToScheduleAsync(CancellationToken ct)
         => await _dbContext.BankConnections
@@ -85,8 +87,31 @@ public sealed class BankSyncRepository : IBankSyncRepository
                            && c.Status != BankConnectionStatus.Disconnected
                            && c.ClientSecretEncrypted == encryptedSecret, ct);
 
-    public Task<bool> AccountHasTransactionsAsync(Guid bankAccountId, CancellationToken ct)
-        => _dbContext.BankTransactions.IgnoreQueryFilters().AnyAsync(t => t.BankAccountId == bankAccountId, ct);
+    public async Task<DateOnly?> GetLastTransactionDayAsync(Guid bankAccountId, CancellationToken ct)
+    {
+        var days = await _dbContext.BankTransactions
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(t => t.BankAccountId == bankAccountId)
+            .OrderByDescending(t => t.LocalDate)
+            .Select(t => t.LocalDate)
+            .Take(1)
+            .ToListAsync(ct);
+        return days.Count == 0 ? null : days[0];
+    }
+
+    public async Task<IReadOnlyList<BankTransaction>> GetUnsettledWaitingAsync(Guid bankAccountId, DateTime fromUtc, DateTime toUtcExclusive, CancellationToken ct)
+        => await _dbContext.BankTransactions
+            .IgnoreQueryFilters()
+            .Where(t => t.BankAccountId == bankAccountId
+                        && t.Status == BankTransactionStatus.Pending
+                        && t.ReviewState == BankTransactionReviewState.Pending
+                        && t.Date >= fromUtc
+                        && t.Date < toUtcExclusive)
+            .ToListAsync(ct);
+
+    public void RemoveTransactions(IEnumerable<BankTransaction> transactions)
+        => _dbContext.BankTransactions.RemoveRange(transactions);
 
     public async Task<IReadOnlyList<BankTransaction>> FindByPluggyIdsAsync(IReadOnlyCollection<string> pluggyTransactionIds, CancellationToken ct)
         => await _dbContext.BankTransactions

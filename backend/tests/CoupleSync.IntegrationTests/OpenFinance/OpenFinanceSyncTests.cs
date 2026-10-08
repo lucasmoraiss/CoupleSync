@@ -2,7 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using CoupleSync.Domain.ValueObjects;
+using CoupleSync.Infrastructure.BackgroundJobs;
 using CoupleSync.TestSupport;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using static CoupleSync.IntegrationTests.OpenFinance.OpenFinanceSyncKit;
 
 namespace CoupleSync.IntegrationTests.OpenFinance;
@@ -203,11 +206,137 @@ public sealed class OpenFinanceSyncTests
         await SyncAsync(factory, ana, connectionId);
 
         var today = BrazilDay(factory.Clock.UtcNow);
-        // The account never read before: the 6 months. The ones already read: from the last synchronisation minus 7 days.
+        // The account never read before: the 6 months. The ones already read: 7 days before the earlier of the last
+        // synchronisation (today) and their own last transaction (2 days ago).
         Assert.Equal(Text(today.AddMonths(-6)), Assert.Single(factory.Pluggy.WindowsAsked(FakePluggyServer.OtherCheckingAccountId)).From);
-        Assert.Equal(Text(today.AddDays(-7)), factory.Pluggy.WindowsAsked(FakePluggyServer.CheckingAccountId)[1].From);
+        Assert.Equal(
+            Text(BrazilDay(DateTime.UtcNow.Date.AddDays(-2).AddHours(15)).AddDays(-7)),
+            factory.Pluggy.WindowsAsked(FakePluggyServer.CheckingAccountId)[1].From);
         Assert.Equal(6, (await MirrorAsync(factory)).Count);
         Assert.Equal("ALIMENTACAO", (await MirrorRowAsync(factory, FakePluggyServer.OtherAccountTransactionId))["suggested_category"]);
+    }
+
+    [Fact]
+    public async Task ABankThatCouldNotBeReadForWeeks_WhileTheConnectionKeptSynchronising_IsAskedFromItsOwnLastTransaction_NoGap()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana, historyMonths: 3);
+        await AddItemAsync(ana, connectionId, FakePluggyServer.OtherItemWithAccounts);
+        var today = DateTime.UtcNow.Date;
+        // What the other bank had when it was last read, 30 days ago.
+        factory.Pluggy.Transactions[FakePluggyServer.OtherCheckingAccountId] =
+        [
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-0000000000f1", today.AddDays(-30).AddHours(15), -12m) { Description = "Padaria Modelo" },
+        ];
+        await SyncAsync(factory, ana, connectionId);
+
+        // Since then the other bank asks for a new login, and the connection goes on synchronising with the first bank.
+        factory.Pluggy.ItemStatusOverride[FakePluggyServer.OtherItemWithAccounts] = "LOGIN_ERROR";
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        Assert.Single(factory.Pluggy.WindowsAsked(FakePluggyServer.OtherCheckingAccountId));
+
+        // The person logs in again; meanwhile the bank had a purchase 20 days ago, older than "last synchronisation - 7".
+        factory.Pluggy.ItemStatusOverride.Remove(FakePluggyServer.OtherItemWithAccounts);
+        factory.Pluggy.Transactions[FakePluggyServer.OtherCheckingAccountId].Add(
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-0000000000f2", today.AddDays(-20).AddHours(15), -33m) { Description = "Mercado Modelo" });
+
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+
+        // The account that was not being read: from its own last transaction minus 7 days.
+        var lastDay = BrazilDay(today.AddDays(-30).AddHours(15));
+        Assert.Equal(Text(lastDay.AddDays(-7)), factory.Pluggy.WindowsAsked(FakePluggyServer.OtherCheckingAccountId)[1].From);
+        Assert.Equal("Pending", (await MirrorRowAsync(factory, "c1b2c3d4-0000-4000-8000-0000000000f2"))["review_state"]);
+        // The account that was being read all along: 7 days before its last transaction (2 days ago), which is
+        // earlier than 7 days before the last synchronisation (today) and so is the one asked.
+        var checking = factory.Pluggy.WindowsAsked(FakePluggyServer.CheckingAccountId);
+        Assert.Equal(Text(BrazilDay(today.AddDays(-2).AddHours(15)).AddDays(-7)), checking[^1].From);
+    }
+
+    [Fact]
+    public async Task AnAccountWhoseLastTransactionIsOlderThanTheHistory_IsNeverAskedFurtherBackThanTheHistory()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana, historyMonths: 3);
+        var today = DateTime.UtcNow.Date;
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId] = [];
+        factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId] =
+        [
+            new FakeTransaction("c1b2c3d4-0000-4000-8000-0000000000f3", today.AddDays(-80).AddHours(15), -12m) { Description = "Padaria Modelo" },
+        ];
+        await SyncAsync(factory, ana, connectionId);
+        // A month goes by: the only line of the account is now older than the 3 months.
+        factory.Clock.Advance(TimeSpan.FromDays(30));
+
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+
+        var second = factory.Pluggy.WindowsAsked(FakePluggyServer.CheckingAccountId)[1];
+        Assert.Equal(Text(BrazilDay(factory.Clock.UtcNow).AddMonths(-3)), second.From);
+    }
+
+    // ---------------------------------------------------------------- what vanished at the bank
+
+    [Fact]
+    public async Task ALineStillPendingAtTheBank_ThatPluggyNoLongerLists_LeavesTheMirror_AndTheReviewCounter()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        await SyncAsync(factory, ana, connectionId);
+        Assert.Equal("Pending", (await MirrorRowAsync(factory, FakePluggyServer.CardPendingTransactionId))["status"]);
+        Assert.Equal(4, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review")).GetProperty("pendingAllMonths").GetInt32());
+
+        // The pre-authorisation fell at the bank: Pluggy stops listing it.
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId].RemoveAll(t => t.Id == FakePluggyServer.CardPendingTransactionId);
+        var run = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal("Done", run["status"]);
+        var ids = (await MirrorAsync(factory)).Select(r => (string)r["pluggy_transaction_id"]!).ToList();
+        Assert.DoesNotContain(FakePluggyServer.CardPendingTransactionId, ids);
+        // Everything else is where it was: settled lines are never taken out, listed or not.
+        Assert.Equal(4, ids.Count);
+        Assert.Equal(3, (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/review")).GetProperty("pendingAllMonths").GetInt32());
+    }
+
+    [Fact]
+    public async Task WhatVanishedAtTheBank_IsKept_WhenItWasSettled_WhenSomeoneReviewedIt_AndWhenTheReadingDidNotCoverItsDay()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana, historyMonths: 3);
+        var today = DateTime.UtcNow.Date;
+        const string discardedPending = "c1b2c3d4-0000-4000-8000-0000000000d1";
+        const string oldPending = "c1b2c3d4-0000-4000-8000-0000000000d2";
+        const string firstDayPending = "c1b2c3d4-0000-4000-8000-0000000000d3";
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId].AddRange(
+        [
+            new FakeTransaction(discardedPending, today.AddDays(-1).AddHours(13), 20m) { Description = "Posto Exemplo", Status = "PENDING" },
+            new FakeTransaction(oldPending, today.AddDays(-40).AddHours(13), 21m) { Description = "Hotel Exemplo", Status = "PENDING" },
+        ]);
+        await SyncAsync(factory, ana, connectionId);
+        // The person discarded one of the pending lines.
+        var discardedId = Guid.Parse((string)(await MirrorRowAsync(factory, discardedPending))["id"]!);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new { discard = new[] { discardedId } })).StatusCode);
+        // A pending line right on the first day the next reading asks for (the last transaction of the account is of
+        // yesterday, so the reading starts 7 days before it; Pluggy cuts that day in UTC).
+        var firstDayAsked = BrazilDay(today.AddDays(-1).AddHours(20)).AddDays(-7);
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId].Add(
+            new FakeTransaction(firstDayPending, firstDayAsked.ToDateTime(new TimeOnly(1, 0), DateTimeKind.Utc), 22m) { Description = "Bar Exemplo", Status = "PENDING" });
+        await SyncAsync(factory, ana, connectionId);
+        Assert.Equal(8, (await MirrorAsync(factory)).Count);
+
+        // Pluggy stops listing everything of the card.
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId].Clear();
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+
+        var left = (await MirrorAsync(factory)).ToDictionary(r => (string)r["pluggy_transaction_id"]!);
+        Assert.Contains(FakePluggyServer.CardPurchaseTransactionId, left.Keys); // settled
+        Assert.Equal("Discarded", left[discardedPending]["review_state"]); // someone reviewed it
+        Assert.Contains(oldPending, left.Keys); // 40 days ago: the reading (last transaction - 7 days) did not go that far
+        Assert.Contains(firstDayPending, left.Keys); // the first day asked is not taken as covered
+        Assert.DoesNotContain(FakePluggyServer.CardPendingTransactionId, left.Keys); // the only one that goes
+        Assert.Equal(7, left.Count);
     }
 
     [Fact]
@@ -381,6 +510,32 @@ public sealed class OpenFinanceSyncTests
         Assert.Equal(2, factory.Pluggy.Count("PATCH", $"/items/{FakePluggyServer.ItemWithAccounts}"));
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task NoRefusalOfTheNewReading_FailsTheRun_NorMarksTheConnection(HttpStatusCode refusal)
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        // Pluggy does not let this item be read again on request (it may be so for every item of Meu Pluggy).
+        factory.Pluggy.ItemUpdateStatus = refusal;
+
+        var run = await SyncAsync(factory, ana, connectionId, force: true);
+
+        Assert.Equal("Done", run["status"]);
+        Assert.Null(run["error_code"]);
+        Assert.Equal(5L, run["transactions_new"]);
+        Assert.True(factory.Pluggy.Count("PATCH", $"/items/{FakePluggyServer.ItemWithAccounts}") >= 1);
+        var connection = Assert.Single(await factory.RowsAsync("SELECT status, last_error_code, last_error_message, last_sync_at_utc FROM bank_connections"));
+        Assert.Equal("Active", connection["status"]);
+        Assert.Null(connection["last_error_code"]);
+        Assert.Null(connection["last_error_message"]);
+        Assert.NotNull(connection["last_sync_at_utc"]);
+    }
+
     // ---------------------------------------------------------------- category: the table, then the AI only with consent
 
     [Fact]
@@ -447,6 +602,31 @@ public sealed class OpenFinanceSyncTests
 
         Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId, aiConsent: true))["status"]);
         Assert.Equal("OUTROS", (await MirrorRowAsync(factory, "c1b2c3d4-0000-4000-8000-0000000000b1"))["suggested_category"]);
+    }
+
+    [Fact]
+    public async Task TheAi_HasFifteenSecondsPerRun_WhatIsLeftAfterThatStaysWithTheTable()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var day = DateTime.UtcNow.Date.AddDays(-1);
+        factory.Pluggy.Transactions[FakePluggyServer.CreditCardAccountId] = [];
+        factory.Pluggy.Transactions[FakePluggyServer.CheckingAccountId] = Enumerable.Range(1, 5)
+            .Select(i => new FakeTransaction($"c1b2c3d4-0000-4000-8000-{i:D12}", day.AddMinutes(i), -i) { Description = $"Compra {i}" })
+            .ToList();
+        factory.Classifier.Answer = "Lazer";
+        // The AI is slow: each answer takes 6 seconds (of the clock of the API).
+        factory.Classifier.OnAsked = () => factory.Clock.Advance(TimeSpan.FromSeconds(6));
+
+        var run = await SyncAsync(factory, ana, connectionId, aiConsent: true);
+
+        Assert.Equal("Done", run["status"]);
+        Assert.Equal(5L, run["transactions_new"]);
+        // Asked at 0 s, 6 s and 12 s; at 18 s the 15 seconds are over and nothing else is sent.
+        Assert.Equal(new[] { "Compra 1", "Compra 2", "Compra 3" }, factory.Classifier.Asked);
+        var suggested = (await MirrorAsync(factory)).Select(r => (string)r["suggested_category"]!).ToList();
+        Assert.Equal(new[] { "LAZER", "LAZER", "LAZER", "OUTROS", "OUTROS" }, suggested);
     }
 
     // ---------------------------------------------------------------- the run never writes a connection that changed
@@ -654,6 +834,82 @@ public sealed class OpenFinanceSyncTests
         Assert.Empty(await MirrorAsync(factory));
         // And a new run can be enqueued and is executed.
         Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+    }
+
+    [Fact]
+    public async Task ARunRunningForMoreThan10Minutes_IsFailedByThePassOfTheJob_WithoutAnyRestart_AndTheConnectionIsFreeAgain()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        // Left running by a process that is gone AFTER this one started (a deploy): the start of this one never saw it.
+        var stuck = await EnqueueAsync(factory, ana, connectionId, status: "Running");
+        await factory.ExecuteAsync("UPDATE sync_runs SET started_at_utc = @at WHERE id = @id", ("@at", factory.Clock.UtcNow), ("@id", stuck));
+
+        // Young: it may be running in another process. It is left alone, and it holds the connection.
+        factory.Clock.Advance(TimeSpan.FromMinutes(9));
+        await Task.Delay(300);
+        Assert.Equal("Running", Assert.Single(await factory.RowsAsync("SELECT status FROM sync_runs"))["status"]);
+        await AssertErrorAsync(
+            await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null), HttpStatusCode.Conflict, "SYNC_ALREADY_RUNNING");
+
+        factory.Clock.Advance(TimeSpan.FromMinutes(1.5));
+
+        var run = await WaitForRunAsync(factory, stuck);
+        Assert.Equal("Failed", run["status"]);
+        Assert.Equal("SYNC_TIMED_OUT", run["error_code"]);
+        Assert.Equal("A sincronização demorou demais e foi encerrada. Sincronize de novo.", run["error_message"]);
+        Assert.NotNull(run["finished_at_utc"]);
+        // Nothing holds the connection any more: the person asks again and it runs.
+        var again = await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null);
+        Assert.True(HttpStatusCode.Accepted == again.StatusCode, await again.Content.ReadAsStringAsync());
+        Assert.Equal("Done", (await WaitForRunAsync(factory, (await JsonAsync(again)).GetProperty("id").GetGuid()))["status"]);
+    }
+
+    [Fact]
+    public async Task ARunWithoutAStartRecorded_CountsFromWhenItWasCreated()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var stuck = await EnqueueAsync(factory, ana, connectionId, status: "Running");
+
+        factory.Clock.Advance(TimeSpan.FromMinutes(10.5));
+
+        Assert.Equal("SYNC_TIMED_OUT", (await WaitForRunAsync(factory, stuck))["error_code"]);
+    }
+
+    [Fact]
+    public async Task WhenTheServerIsToldToStop_InTheMiddleOfARun_TheRunIsFailedAsInterrupted_RightThen()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var reading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Pluggy.BeforeAnswer = async request =>
+        {
+            if (request.Path != "/transactions") return;
+            reading.TrySetResult();
+            await release.Task;
+        };
+        var runId = await EnqueueAsync(factory, ana, connectionId);
+        await reading.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal("Running", Assert.Single(await factory.RowsAsync("SELECT status FROM sync_runs"))["status"]);
+
+        // The host stops this job (what a deploy does to the old process), while Pluggy is still answering.
+        var job = factory.Services.GetServices<IHostedService>().OfType<OpenFinanceSyncJob>().Single();
+        var stopping = job.StopAsync(CancellationToken.None);
+        release.SetResult();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var run = Assert.Single(await factory.RowsAsync($"SELECT * FROM sync_runs WHERE id = '{runId.ToString().ToUpperInvariant()}'"));
+        Assert.Equal("Failed", run["status"]);
+        Assert.Equal("SYNC_INTERRUPTED", run["error_code"]);
+        Assert.Equal("A sincronização foi interrompida porque o servidor reiniciou. Sincronize de novo.", run["error_message"]);
+        var connection = Assert.Single(await factory.RowsAsync("SELECT status, last_sync_at_utc FROM bank_connections"));
+        Assert.Equal("Active", connection["status"]);
+        Assert.Null(connection["last_sync_at_utc"]);
     }
 
     [Fact]

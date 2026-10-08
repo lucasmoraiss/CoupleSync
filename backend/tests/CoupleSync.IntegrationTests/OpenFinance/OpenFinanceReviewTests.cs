@@ -196,6 +196,32 @@ public sealed class OpenFinanceReviewTests
     }
 
     [Fact]
+    public async Task ASync_WhileAnotherOfTheConnectionIsWaitingOrRunning_Answers409AlreadyRunning_WithoutPromisingAnHour()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        // Pluggy takes its time: the first run is still running when the second is asked for.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Pluggy.BeforeAnswer = request => request.Path == "/transactions" ? release.Task : Task.CompletedTask;
+        var first = await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null);
+        Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
+        var firstId = (await JsonAsync(first)).GetProperty("id").GetGuid();
+
+        var second = await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync?force=true", null);
+
+        var error = await AssertErrorAsync(
+            second, HttpStatusCode.Conflict, "SYNC_ALREADY_RUNNING", "Já há uma sincronização em andamento para esta conexão. Aguarde ela terminar.");
+        Assert.DoesNotContain("nextSyncAtUtc", error.GetRawText(), StringComparison.Ordinal);
+        Assert.Single(await factory.RowsAsync("SELECT id FROM sync_runs"));
+
+        // Once it ended, what holds the next one is the interval, with its hour.
+        release.SetResult();
+        Assert.Equal("Done", (await WaitForRunAsync(factory, firstId))["status"]);
+        await AssertErrorAsync(await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null), HttpStatusCode.Conflict, "SYNC_TOO_SOON");
+    }
+
+    [Fact]
     public async Task TheTenMinutes_CountFromAnyRun_AlsoAFailedOneAndOneOfTheScheduler()
     {
         await using var factory = NewFactory();

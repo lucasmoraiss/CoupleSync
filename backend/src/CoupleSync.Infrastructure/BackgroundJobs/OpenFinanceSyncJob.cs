@@ -10,8 +10,9 @@ namespace CoupleSync.Infrastructure.BackgroundJobs;
 /// <summary>
 /// The worker of the Open Finance synchronisation queue (<c>sync_runs</c>), in the pattern of
 /// <see cref="OcrBackgroundJob"/>: the queue is the table, so nothing is lost when the API sleeps and wakes up
-/// (free tier). On start it fails the runs a previous process left running; then it looks at the queue every few
-/// seconds and executes the waiting runs one after the other (one worker: a connection never has two runs at once).
+/// (free tier). On start it fails the runs a previous process left running; then, every few seconds, it fails the
+/// runs that have been running for too long (whatever process left them) and executes the waiting runs one after
+/// the other (one worker: a connection never has two runs at once).
 /// </summary>
 public sealed class OpenFinanceSyncJob : BackgroundService
 {
@@ -54,6 +55,20 @@ public sealed class OpenFinanceSyncJob : BackgroundService
         {
             try
             {
+                await RecoverTimedOutRunsAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                // The queue is still looked at: a run waiting is not held back by this.
+                _logger.LogError("Could not fail Open Finance runs running for too long ({ExceptionType}).", ex.GetType().Name);
+            }
+
+            try
+            {
                 await ProcessPendingRunsAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -85,6 +100,16 @@ public sealed class OpenFinanceSyncJob : BackgroundService
         var recovered = await scope.ServiceProvider.GetRequiredService<SyncConnectionService>().RecoverStuckRunsAsync(ct);
         if (recovered > 0)
             _logger.LogWarning("{Count} Open Finance run(s) stuck in Running were marked as failed.", recovered);
+        return recovered;
+    }
+
+    /// <summary>Fails the runs in Running for longer than the time limit, whoever left them. Public so it can be tested.</summary>
+    public async Task<int> RecoverTimedOutRunsAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var recovered = await scope.ServiceProvider.GetRequiredService<SyncConnectionService>().RecoverTimedOutRunsAsync(ct);
+        if (recovered > 0)
+            _logger.LogWarning("{Count} Open Finance run(s) running for too long were marked as failed.", recovered);
         return recovered;
     }
 

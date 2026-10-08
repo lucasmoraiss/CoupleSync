@@ -357,7 +357,7 @@ public sealed class OpenFinanceSyncPostgresTests
         Assert.Single(answers, a => a.StatusCode == HttpStatusCode.Accepted);
         Assert.All(answers.Where(a => a.StatusCode != HttpStatusCode.Accepted), a => Assert.Equal(HttpStatusCode.Conflict, a.StatusCode));
         foreach (var refused in answers.Where(a => a.StatusCode == HttpStatusCode.Conflict))
-            Assert.Equal("SYNC_TOO_SOON", (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+            Assert.Equal("SYNC_ALREADY_RUNNING", (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM sync_runs"));
         var accepted = await answers.Single(a => a.StatusCode == HttpStatusCode.Accepted).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("Done", (await WaitAsync(ana, accepted.GetProperty("id").GetGuid())).GetProperty("status").GetString());
@@ -496,6 +496,97 @@ public sealed class OpenFinanceSyncPostgresTests
         Assert.Equal("SYNC_INTERRUPTED", row[1]);
         Assert.Equal("A sincronização foi interrompida porque o servidor reiniciou. Sincronize de novo.", row[2]);
         Assert.Equal(true, row[3]);
+    }
+
+    [PostgresFact]
+    public async Task ARunRunningForMoreThan10Minutes_IsFailedByThePassOfTheJob_AndAYoungOneIsLeftAlone()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var ana = await factory.RegisterAsync("Ana");
+        var bia = await factory.RegisterAsync("Bia");
+        var caio = await factory.RegisterAsync("Caio");
+        var (anaConnection, _) = await SeedBankAsync(database, ana, "a");
+        var (biaConnection, _) = await SeedBankAsync(database, bia, "b");
+        var (caioConnection, _) = await SeedBankAsync(database, caio, "c");
+        var davi = await factory.RegisterAsync("Davi");
+        var (daviConnection, _) = await SeedBankAsync(database, davi, "d");
+        var seenAtStart = await InsertRunAsync(database, davi, daviConnection, "Running");
+        await using var host = WithOpenFinanceSync(factory, new FakePluggyServer());
+        using var client = host.CreateClient(); // starts the host, and with it the job
+        // The start of the job is over once the run that was already there got its verdict.
+        var started = DateTime.UtcNow.AddSeconds(30);
+        while (await database.ScalarAsync<string>("SELECT status FROM sync_runs WHERE id = @id", ("id", seenAtStart)) == "Running")
+        {
+            Assert.True(DateTime.UtcNow < started, "The job did not start in 30 s.");
+            await Task.Delay(50);
+        }
+
+        // Left running by other processes AFTER this one started: its start never saw them.
+        var old = await InsertRunAsync(database, ana, anaConnection, "Running");
+        var oldWithoutStart = await InsertRunAsync(database, bia, biaConnection, "Running");
+        var young = await InsertRunAsync(database, caio, caioConnection, "Running");
+        await database.ExecuteAsync("UPDATE sync_runs SET started_at_utc = now() - interval '11 minutes' WHERE id = @id", ("id", old));
+        await database.ExecuteAsync("UPDATE sync_runs SET created_at_utc = now() - interval '11 minutes' WHERE id = @id", ("id", oldWithoutStart));
+        await database.ExecuteAsync("UPDATE sync_runs SET started_at_utc = now() - interval '9 minutes' WHERE id = @id", ("id", young));
+
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (await database.ScalarAsync<long>("SELECT count(*) FROM sync_runs WHERE status = 'Running'") > 1)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The runs running for too long were not failed in 30 s.");
+            await Task.Delay(50);
+        }
+
+        foreach (var id in new[] { old, oldWithoutStart })
+        {
+            var row = Assert.Single(await database.RowsAsync($"SELECT status, error_code, error_message, finished_at_utc IS NOT NULL FROM sync_runs WHERE id = '{id}'"));
+            Assert.Equal("Failed", row[0]);
+            Assert.Equal("SYNC_TIMED_OUT", row[1]);
+            Assert.Equal("A sincronização demorou demais e foi encerrada. Sincronize de novo.", row[2]);
+            Assert.Equal(true, row[3]);
+        }
+
+        await Task.Delay(300); // a few more passes
+        Assert.Equal("Running", await database.ScalarAsync<string>("SELECT status FROM sync_runs WHERE id = @id", ("id", young)));
+    }
+
+    [PostgresFact]
+    public async Task ALinePendingAtTheBankThatPluggyNoLongerLists_LeavesTheMirror_AndEachAccountIsAskedFromItsOwnLastTransaction()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+        // Someone discarded the restaurant; the pending purchase of the card falls at the bank.
+        await database.ExecuteAsync(
+            "UPDATE bank_transactions SET review_state = 'Discarded' WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.RestaurantTransactionId));
+        pluggy.Transactions[FakePluggyServer.CreditCardAccountId].RemoveAll(t => t.Id == FakePluggyServer.CardPendingTransactionId);
+        pluggy.Transactions[FakePluggyServer.CheckingAccountId].RemoveAll(t => t.Id == FakePluggyServer.RestaurantTransactionId);
+        var lastDayOfCard = DateOnly.ParseExact(
+            await database.ScalarAsync<string>(
+                """
+                SELECT to_char(max(t.local_date), 'YYYY-MM-DD') FROM bank_transactions t JOIN bank_accounts a ON a.id = t.bank_account_id
+                WHERE a.pluggy_account_id = @account
+                """,
+                ("account", FakePluggyServer.CreditCardAccountId)),
+            "yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        // The next run (straight in the queue: the route would say it is too soon).
+        var second = await InsertRunAsync(database, ana, connectionId, "Pending");
+        Assert.Equal("Done", (await WaitAsync(ana, second)).GetProperty("status").GetString());
+
+        var left = (await database.RowsAsync("SELECT pluggy_transaction_id, review_state FROM bank_transactions"))
+            .ToDictionary(r => (string)r[0]!, r => (string)r[1]!);
+        Assert.DoesNotContain(FakePluggyServer.CardPendingTransactionId, left.Keys);
+        // Settled and no longer listed: kept, as someone left it.
+        Assert.Equal("Discarded", left[FakePluggyServer.RestaurantTransactionId]);
+        Assert.Equal(4, left.Count);
+        Assert.Equal(Text(lastDayOfCard.AddDays(-7)), pluggy.WindowsAsked(FakePluggyServer.CreditCardAccountId)[1].From);
     }
 
     // ---------------------------------------------------------------- support

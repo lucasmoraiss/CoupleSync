@@ -218,6 +218,25 @@ public sealed class OpenFinanceSyncDomainTests
         Assert.Equal(new DateOnly(2026, 10, 7), window.To);
     }
 
+    [Theory]
+    // Never read: the whole history, whatever the connection did before.
+    [InlineData(null, "2026-07-07")]
+    // Read all along (last transaction after the window of the connection): the window of the connection.
+    [InlineData("2026-10-06", "2026-09-26")]
+    [InlineData("2026-10-03", "2026-09-26")]
+    // Unread for weeks while the connection kept synchronising: its own last transaction minus 7 days.
+    [InlineData("2026-09-10", "2026-09-03")]
+    // Its last transaction is older than the history: never further back than the history.
+    [InlineData("2026-07-09", "2026-07-07")]
+    [InlineData("2026-05-01", "2026-07-07")]
+    public void EachAccount_IsAskedFromTheEarlierOfTheWindowAndItsOwnLastTransactionMinus7Days_WithinTheHistory(string? lastDayOfAccount, string expectedFrom)
+    {
+        var window = SyncWindow.For(Connection(3, lastSync: new DateTime(2026, 10, 3, 14, 0, 0, DateTimeKind.Utc)), Now);
+        DateOnly? last = lastDayOfAccount is null ? null : DateOnly.ParseExact(lastDayOfAccount, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        Assert.Equal(expectedFrom, window.FromFor(last).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
     [Fact]
     public void TheDaysAreTheOnesOfBrazil_AndTheLastDayIsTodayInUtc()
     {
