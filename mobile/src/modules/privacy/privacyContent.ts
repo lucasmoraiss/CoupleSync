@@ -88,8 +88,8 @@ export const AI_ANALYSIS_TITLE = 'Análise com IA';
  * os aceites de captura e de Open Finance.
  */
 export const AI_ANALYSIS_POINTS: readonly string[] = [
-  'O que vai: resumos calculados das finanças do grupo (totais por categoria, lojas, assinaturas, parcelas, valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente.',
-  'O que nunca vai: nomes, e-mails e CPF de vocês; nomes de quem recebeu ou enviou transferências (vão só como "transferência"); títulos das metas; nomes das rendas; números de conta ou cartão. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.',
+  'O que vai: resumos calculados das finanças do grupo (totais por categoria, lojas, assinaturas, parcelas, valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente, como foram escritas.',
+  'O que nunca vai: nomes, e-mails e CPF de vocês; nomes de quem recebeu ou enviou transferências (vão só como "transferência"). O que o app não envia por conta própria: nomes das metas, nomes das rendas e números de conta ou cartão. O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.',
   'Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.',
   'Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e revisores humanos podem lê-lo."',
   'Quem ativa liga a análise para o grupo inteiro; o outro membro é avisado no app e pode desligar a qualquer hora em Configurações; desligar não apaga o histórico, que pode ser apagado à parte.',

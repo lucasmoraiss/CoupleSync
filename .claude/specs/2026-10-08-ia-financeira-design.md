@@ -507,7 +507,7 @@ categorização, pergunta e histórico do Assistente):
 | Transferência a pessoa (Pix, TED, DOC, transferência) | Só o tipo | A transação vira o rótulo fixo `transferencia_pessoa` (entra nos totais, nunca com o texto) quando: (a) há marcador (`pix`, `ted`, `doc`, `transferencia`, `transf`, `enviado`, `recebido`, `para `) em `Merchant` **ou** em `Description` — a descrição é lida só no servidor e nunca sai, mas é nela que notificação e extrato costumam trazer "Pix enviado"/"TED" enquanto o estabelecimento traz só o nome do destinatário; ou (b) o `Merchant` é formado só por palavras da lista de nomes próprios comuns (`CommonPersonNames`, lista estática em código) e iniciais de uma letra ("MARIA S SILVA" conta como nome) |
 | `Transaction.Description`, `Bank`, origem, ids | Não | — |
 | Categoria, valor, data, cadência, marcas | Sim | Como calculados |
-| Meta (`Goal.Title`, `Description`) | Não | `g1`, `g2` com alvo, atual, % e mês do prazo; a resposta usa `{{g1}}` e a API troca pelo título ao responder |
+| Meta (`Goal.Title`, `Description`) | Não por conta do app | `g1`, `g2` com alvo, atual, % e mês do prazo; a resposta usa `{{g1}}` e a API troca pelo título, entre aspas, ao responder. Regra completa abaixo ("Títulos de meta") |
 | Renda (`IncomeSource.Name`) | Não | Tipo (3.5), valor, pessoa |
 | Pergunta e histórico do Assistente (texto digitado) | Sim, filtrado | Remoção abaixo |
 | Linhas de extrato para categorizar | Só o estabelecimento filtrado | — |
@@ -517,6 +517,27 @@ Remoção em todo texto livre que sai (estabelecimento, pergunta, histórico): n
 grupo (lidos do cadastro, comparados sem acento) → `{{A}}`/`{{B}}`; CPF, CNPJ, telefone, e-mail, chave Pix
 aleatória (UUID) e sequências de 6+ dígitos → `[removido]`. Se depois disso o estabelecimento não tiver
 nenhuma palavra útil, vira `outros`.
+
+**Títulos de meta** (revisão 2 da fase 2). O app não envia título de meta por conta própria; o que a pessoa
+escreve é dela e vai como escreveu:
+
+- Nos fatos, a meta vai só como marcador (`{{g1}}`…), nunca com o título.
+- A pergunta digitada **não é reescrita**: a palavra que também é título de uma meta ("carro", "viagem") fica
+  como foi digitada — trocá-la por marcador mudava a pergunta ("quanto gastamos com carro?" virava uma pergunta
+  sobre a meta). Só o filtro de texto livre acima se aplica. O mesmo vale para as mensagens da pessoa no histórico.
+- Quando a pergunta cita o título de uma meta **ativa** (comparação sem acento nem caixa, por palavra inteira,
+  título mais longo primeiro), a API acrescenta à mensagem da pergunta uma linha por título citado:
+  `Nota do app: na pergunta, carro também é o nome da meta {{g1}}.` A linha repete só palavras da pergunta como ela
+  é enviada (nada do título sai além do que a pessoa escreveu) e serve para o modelo saber de qual meta se fala
+  quando há várias. Pergunta e linhas cabem juntas nos 600 tokens da pergunta (2.100 caracteres); linha que não
+  cabe não vai.
+- No histórico, nas mensagens do modelo, volta a ser marcador só o que o próprio sistema repôs: a forma exata
+  que a API emite, **com as aspas** (`"Carro"`), dos títulos conhecidos do grupo — ativas viram o marcador,
+  arquivadas e concluídas viram "uma meta". O resto entre aspas e a mesma palavra sem aspas ficam.
+- Resíduo declarado: o título antigo de uma meta renomeada ou apagada no meio de uma conversa, mostrado entre
+  aspas numa resposta anterior, volta no histórico enquanto a conversa estiver aberta.
+- Na resposta, o marcador é lido em qualquer grafia com chaves; sem chaves (`g1`, `[g1]`) só quando é exatamente o
+  marcador de uma meta enviada naquele pedido. Sobra de chave reprova a resposta.
 
 Teste obrigatório: pacote gerado a partir de fixtures com nomes de membros, beneficiários de Pix, títulos de
 meta e nomes de renda conhecidos **não contém nenhum deles** nem CPF/telefone/e-mail. Verdade residual que vai
@@ -899,11 +920,13 @@ Decisão em aberto 7 sobre manter ou apagar o histórico ao desligar.
 "Análise com IA", em destaque e separada (LGPD art. 33, VIII — fatos-externos 4.2), com exatamente isto:
 
 - O que vai: resumos calculados das finanças do grupo (totais por categoria, lojas, assinaturas, parcelas,
-  valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente.
+  valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente, como
+  foram escritas.
 - O que nunca vai: nomes, e-mails e CPF de vocês; nomes de quem recebeu ou enviou transferências (vão só como
-  "transferência"); títulos das metas; nomes das rendas; números de conta ou cartão. Nomes de vocês, CPF,
-  telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como
-  aparecem no extrato.
+  "transferência"). O que o app não envia por conta própria: nomes das metas, nomes das rendas e números de conta
+  ou cartão. O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta, ele vai
+  junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio.
+  Nomes de lojas vão como aparecem no extrato.
 - Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.
 - Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e
   revisores humanos podem lê-lo."
