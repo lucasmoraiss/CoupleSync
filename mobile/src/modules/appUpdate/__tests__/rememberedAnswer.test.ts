@@ -83,12 +83,38 @@ describe('o que decide a abertura do app (regra pura)', () => {
     expect(blocksApp(update)).toBe(false);
   });
 
-  it('a resposta nova do servidor vale mais que a lembrança: destrava quando a mínima foi corrigida', () => {
+  it('a resposta nova do servidor vale mais que a lembrança: destrava quando a mínima foi corrigida ou removida', () => {
     const memory = loaded(answer('1.2.0', '1.1.0'));
 
-    expect(blocksApp(resolveUpdate({ installed: '1.0.0', live: answer('1.2.0', null), memory }))).toBe(false);
-    expect(blocksApp(resolveUpdate({ installed: '1.0.0', live: answer(null, null), memory }))).toBe(false);
-    expect(blocksApp(resolveUpdate({ installed: '1.0.0', live: {}, memory }))).toBe(false);
+    // O servidor sabe a última e não há mais mínima (variável removida): destrava, e fica o aviso.
+    const removed = resolveUpdate({ installed: '1.0.0', live: answer('1.2.0', null), memory });
+    expect(blocksApp(removed)).toBe(false);
+    expect(removed.decision).toBe('aviso');
+    // Mínima baixada para a versão instalada: destrava.
+    expect(blocksApp(resolveUpdate({ installed: '1.0.0', live: answer('1.2.0', '1.0.0'), memory }))).toBe(false);
+  });
+
+  // A API acordou mas o GitHub falhou (limite de 60/h no IP compartilhado): ela responde "não sei a última".
+  // Isso não é uma decisão: o aparelho bloqueado continua bloqueado e o aviso continua, pela lembrança.
+  it.each([
+    ['última null', answer(null, null)],
+    ['última null com mínima', answer(null, '1.1.0')],
+    ['objeto vazio', {}],
+    ['última que não é versão', answer('nova', null)],
+    ['corpo que não é resposta', '<html>erro</html>'],
+    ['null', null],
+  ])('resposta sem a última versão (%s) não decide: vale a lembrança', (_name, live) => {
+    const blockedBefore = loaded(answer('1.2.0', '1.1.0'));
+    expect(blocksApp(resolveUpdate({ installed: '1.0.0', live, memory: blockedBefore }))).toBe(true);
+
+    const noticeBefore = resolveUpdate({ installed: '1.0.0', live, memory: loaded(answer('1.1.0', null)) });
+    expect(noticeBefore.decision).toBe('aviso');
+    expect(noticeBefore.latestVersion).toBe('1.1.0');
+  });
+
+  it('resposta sem a última versão e sem lembrança: nada aparece, e o layout ainda espera a lembrança ser lida', () => {
+    expect(resolveUpdate({ installed: '1.0.0', live: answer(null, null), memory: loaded(null) }).decision).toBe('nenhum');
+    expect(resolveUpdate({ installed: '1.0.0', live: answer(null, null), memory: NOT_LOADED }).waitingForMemory).toBe(true);
   });
 
   it('a resposta nova também bloqueia quem a lembrança dizia liberado (descoberto com o app aberto)', () => {
@@ -111,8 +137,12 @@ describe('o que é guardado', () => {
     expect(JSON.parse(text!)).toEqual({ latestVersion: '1.2.0', minimumVersion: '1.1.0' });
   });
 
-  it('campos desconhecidos viram null; o que não é uma resposta não é guardado', () => {
-    expect(JSON.parse(serializeAnswer({ latestVersion: 'nova', minimumVersion: 42 })!)).toEqual({ latestVersion: null, minimumVersion: null });
+  it('mínima desconhecida vira null; resposta sem a última versão ("não sei") não é guardada', () => {
+    expect(JSON.parse(serializeAnswer({ latestVersion: '1.2.0', minimumVersion: 42 })!)).toEqual({ latestVersion: '1.2.0', minimumVersion: null });
+    expect(serializeAnswer({ latestVersion: null, minimumVersion: null })).toBeNull();
+    expect(serializeAnswer({ latestVersion: null, minimumVersion: '1.1.0' })).toBeNull();
+    expect(serializeAnswer({ latestVersion: 'nova', minimumVersion: 42 })).toBeNull();
+    expect(serializeAnswer({})).toBeNull();
     expect(serializeAnswer(undefined)).toBeNull();
     expect(serializeAnswer(null)).toBeNull();
     expect(serializeAnswer('<html>erro</html>')).toBeNull();
@@ -172,6 +202,29 @@ describe('a lembrança no aparelho', () => {
     await store().remember('<html>erro</html>');
 
     expect(store().answer).toEqual({ latestVersion: '1.2.0', minimumVersion: '1.1.0' });
+  });
+
+  it('"não sei a última" não sobrescreve a lembrança: a abertura seguinte ainda abre no bloqueio', async () => {
+    await store().load();
+    await store().remember({ latestVersion: '1.2.0', minimumVersion: '1.1.0' });
+    await store().remember({ latestVersion: null, minimumVersion: null, downloadUrl: 'x' });
+    await store().remember({ latestVersion: null, minimumVersion: '1.1.0' });
+
+    expect(SecureStore.setItemAsync).toHaveBeenCalledTimes(1);
+    store().resetForTests(); // o app foi fechado e aberto
+    await store().load();
+    expect(blocksApp(resolveUpdate({ installed: '1.0.0', live: undefined, memory: store() }))).toBe(true);
+  });
+
+  it('a resposta que sabe a última e não tem mais mínima substitui a lembrança: a abertura seguinte abre normal', async () => {
+    await store().load();
+    await store().remember({ latestVersion: '1.2.0', minimumVersion: '1.1.0' });
+    await store().remember({ latestVersion: '1.2.0', minimumVersion: null });
+
+    store().resetForTests();
+    await store().load();
+    expect(store().answer).toEqual({ latestVersion: '1.2.0', minimumVersion: null });
+    expect(blocksApp(resolveUpdate({ installed: '1.0.0', live: undefined, memory: store() }))).toBe(false);
   });
 
   it('armazenamento que falha ao ler: abre normal (sem lembrança)', async () => {

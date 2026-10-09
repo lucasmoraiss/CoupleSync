@@ -116,9 +116,18 @@ function isRecord(data: unknown): data is Record<string, unknown> {
   return data !== null && typeof data === 'object' && !Array.isArray(data);
 }
 
-/** O texto a guardar para uma resposta do servidor, ou null se aquilo não é uma resposta (nada é guardado). */
+/**
+ * O servidor disse qual é a última versão? Sem isso a resposta é um "não sei" (a API acordou mas a consulta dela
+ * ao GitHub falhou): não decide nada e não é guardada, e continua valendo a lembrança do aparelho. Uma resposta
+ * que SABE a última e vem sem mínima é uma decisão ("não há mais mínima"): substitui a lembrança e destrava.
+ */
+export function knowsLatestVersion(serverData: unknown): boolean {
+  return parseVersion(field(serverData, 'latestVersion')) !== null;
+}
+
+/** O texto a guardar para uma resposta do servidor, ou null se ela não diz a última versão (nada é guardado). */
 export function serializeAnswer(serverData: unknown): string | null {
-  if (!isRecord(serverData)) return null;
+  if (!isRecord(serverData) || !knowsLatestVersion(serverData)) return null;
   const answer: RememberedAnswer = {
     latestVersion: normalized(serverData.latestVersion),
     minimumVersion: normalized(serverData.minimumVersion),
@@ -147,18 +156,19 @@ export interface UpdateMemory {
 export interface ResolvedUpdate extends AppUpdateState {
   /**
    * Ainda não se sabe se este aparelho já foi bloqueado antes: a lembrança não foi lida e o servidor não
-   * respondeu. O layout espera (a leitura é local e rápida) antes de montar as abas. Nunca é espera de rede.
+   * respondeu (ou respondeu sem saber a última versão). O layout espera (a leitura é local e rápida) antes de montar as abas. Nunca é espera de rede.
    */
   readonly waitingForMemory: boolean;
 }
 
 /**
  * O estado que as telas usam. Vale a resposta do servidor desta abertura (`live`; `undefined` = ainda sem
- * resposta); enquanto ela não chega, vale a lembrança do aparelho. A versão instalada é sempre a atual.
+ * resposta) desde que ela diga a última versão; enquanto ela não chega, ou se ela é um "não sei", vale a
+ * lembrança do aparelho. A versão instalada é sempre a atual.
  */
 export function resolveUpdate(input: { installed: string | null | undefined; live: unknown; memory: UpdateMemory }): ResolvedUpdate {
   const { installed, live, memory } = input;
-  const hasLive = live !== undefined;
+  const hasLive = knowsLatestVersion(live);
   const state = appUpdateState(installed, hasLive ? live : memory.loaded ? memory.answer ?? undefined : undefined);
   return { ...state, waitingForMemory: !hasLive && !memory.loaded && state.installedVersion !== null };
 }
