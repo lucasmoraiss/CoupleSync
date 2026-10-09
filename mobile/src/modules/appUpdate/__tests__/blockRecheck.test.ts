@@ -52,7 +52,7 @@ describe('reconsulta com o bloqueio na tela', () => {
     expect(h.recheck).toHaveBeenCalledTimes(4);
   });
 
-  it('o intervalo é de minutos: nem martela o servidor, nem deixa a pessoa esperando muito', () => {
+  it('o intervalo fica entre 30 s e 5 min: nem martela o servidor, nem deixa a pessoa esperando muito', () => {
     expect(BLOCK_RECHECK_INTERVAL_MS).toBeGreaterThanOrEqual(30_000);
     expect(BLOCK_RECHECK_INTERVAL_MS).toBeLessThanOrEqual(5 * 60_000);
   });

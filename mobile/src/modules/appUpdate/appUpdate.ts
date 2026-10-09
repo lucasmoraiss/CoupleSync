@@ -70,6 +70,11 @@ export interface AppUpdateState {
   readonly downloadUrl: string;
 }
 
+function normalized(value: unknown): string | null {
+  const parts = parseVersion(value);
+  return parts ? formatVersion(parts) : null;
+}
+
 function field(data: unknown, name: string): unknown {
   return data !== null && typeof data === 'object' ? (data as Record<string, unknown>)[name] : undefined;
 }
@@ -87,16 +92,14 @@ function downloadUrlOf(data: unknown): string {
  * ausentes, null ou de outro tipo contam como desconhecidos.
  */
 export function appUpdateState(installed: string | null | undefined, serverData: unknown): AppUpdateState {
-  const installedParts = parseVersion(installed);
-  const latestParts = parseVersion(field(serverData, 'latestVersion'));
   return {
     decision: decideUpdate({
       installed,
       latest: field(serverData, 'latestVersion'),
       minimum: field(serverData, 'minimumVersion'),
     }),
-    installedVersion: installedParts ? formatVersion(installedParts) : null,
-    latestVersion: latestParts ? formatVersion(latestParts) : null,
+    installedVersion: normalized(installed),
+    latestVersion: normalized(field(serverData, 'latestVersion')),
     downloadUrl: downloadUrlOf(serverData),
   };
 }
@@ -105,11 +108,6 @@ export function appUpdateState(installed: string | null | undefined, serverData:
 export interface RememberedAnswer {
   readonly latestVersion: string | null;
   readonly minimumVersion: string | null;
-}
-
-function normalized(value: unknown): string | null {
-  const parts = parseVersion(value);
-  return parts ? formatVersion(parts) : null;
 }
 
 function isRecord(data: unknown): data is Record<string, unknown> {
@@ -156,7 +154,8 @@ export interface UpdateMemory {
 export interface ResolvedUpdate extends AppUpdateState {
   /**
    * Ainda não se sabe se este aparelho já foi bloqueado antes: a lembrança não foi lida e o servidor não
-   * respondeu (ou respondeu sem saber a última versão). O layout espera (a leitura é local e rápida) antes de montar as abas. Nunca é espera de rede.
+   * respondeu (ou respondeu sem saber a última versão). O layout espera (a leitura é local e rápida) antes de
+   * montar as abas. Nunca é espera de rede.
    */
   readonly waitingForMemory: boolean;
 }

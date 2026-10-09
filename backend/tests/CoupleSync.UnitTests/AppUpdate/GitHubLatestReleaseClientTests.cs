@@ -197,7 +197,7 @@ public sealed class GitHubLatestReleaseClientTests
     }
 
     [Fact]
-    public async Task TheCallerGivingUp_IsNotRememberedAsAFailure()
+    public async Task TheCallerGivingUpBeforeTheLookup_IsNotRememberedAsAFailure()
     {
         using var client = Client();
         using var cancelled = new CancellationTokenSource();
