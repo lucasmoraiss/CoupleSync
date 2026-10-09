@@ -16,7 +16,8 @@ public sealed record ArrivedBankLine(BankTransaction Row, string? PayerName)
 /// <list type="number">
 /// <item>a transfer between two accounts of the group: both legs are ignored (also when one of them had arrived
 /// before and been ignored as a bill payment);</item>
-/// <item>the payment of a credit card bill: ignored;</item>
+/// <item>the payment of a credit card bill, by its value (the total of a closed bill of a card of the group, due
+/// within ten days: each bill is paid by one debit only) or by its description: ignored;</item>
 /// <item>a credit paid by who holds another account of the group: ignored;</item>
 /// <item>an expense that looks like a transaction the app already has: it stays waiting, pointing to that one.</item>
 /// </list>
@@ -92,6 +93,9 @@ public sealed class BankPreclassificationService
                     .ToList()
                 : [];
 
+        var unpaidBills = await UnpaidBillsForAsync(
+            coupleId, settled.Where(l => BankReconciliationRules.CanPayABill(FactsOf(l.Row), account.Type)).Select(l => l.Row.LocalDate).ToList(), ct);
+
         var (fromUtc, toUtcExclusive) = BankReconciliationRules.DuplicateSearchWindowUtc(firstDay, lastDay);
         var existing = open.Any(l => l.Row.IsExpense)
             ? (await _sync.GetDuplicateCandidatesForJobAsync(
@@ -121,10 +125,16 @@ public sealed class BankPreclassificationService
                 {
                     row.PairAsTransfer(now);
                     otherLeg.PairAsTransfer(now);
+                    // Money that left for another account of the group, of exactly the total of a bill, counts as its
+                    // payment (it is what paying the card looks like): no other debit is ignored for that bill.
+                    unpaidBills.TakeBillPaidBy(facts);
                     continue;
                 }
 
-                if (BankReconciliationRules.IsBillPayment(facts, account.Type, row.DescriptionRaw ?? row.Description))
+                // The bill is taken (paid) whichever of the two halves of the rule says so: one bill, one payment.
+                // There are bills to take only when this account can pay one (a purchase on a card never does).
+                var paysABillByValue = unpaidBills.TakeBillPaidBy(facts);
+                if (paysABillByValue || BankReconciliationRules.IsBillPayment(facts, account.Type, row.DescriptionRaw ?? row.Description))
                 {
                     row.IgnoreAutomatically(BankTransactionAutoReasons.BillPayment, now);
                     continue;
@@ -141,6 +151,81 @@ public sealed class BankPreclassificationService
             if (duplicate is null) continue;
             row.MarkSuspectedDuplicate(duplicate.Id, now);
             existing.Remove(duplicate); // one transaction of the app is suspected by one line only
+        }
+    }
+
+    /// <summary>
+    /// The bills of the cards of the group changed (they have just been read, <paramref name="changedDueDates"/> are
+    /// their due dates): the debits already in the mirror, of any account of the group, that nobody reviewed and
+    /// that pay one of the bills due around those days are ignored as bill payments. This is what recognises the
+    /// payment when the debit arrived before the bill (the checking account is read before the card; the bill closes
+    /// after the first synchronisation). Reads what is stored: call it after the bills were saved. Nothing is saved here.
+    /// </summary>
+    public async Task ApplyBillPaymentsAsync(Guid coupleId, IReadOnlyCollection<DateOnly> changedDueDates, CancellationToken ct)
+    {
+        if (changedDueDates.Count == 0) return;
+
+        var tolerance = BankReconciliationRules.BillPaymentDayTolerance;
+        var firstDue = changedDueDates.Min();
+        var lastDue = changedDueDates.Max();
+        var bills = (await _sync.GetBillFactsForJobAsync(coupleId, firstDue, lastDue, ct)).Where(BankReconciliationRules.IsPayableBill).ToList();
+        if (bills.Count == 0) return;
+
+        var lines = await _sync.GetBillPaymentCandidatesForJobAsync(coupleId, firstDue.AddDays(-tolerance), lastDue.AddDays(tolerance), ct);
+        var unpaidBills = new UnpaidBills(bills, lines.Where(l => l.ReviewState == BankTransactionReviewState.Ignored).Select(FactsOf));
+        var waiting = lines.Where(l => l.OpenToAutomaticRules).ToList();
+        if (waiting.Count == 0) return;
+
+        var accountTypes = await _sync.GetAccountTypesForJobAsync(coupleId, ct);
+        var now = _clock.UtcNow;
+        foreach (var line in waiting)
+        {
+            var facts = FactsOf(line);
+            if (BankReconciliationRules.CanPayABill(facts, accountTypes.GetValueOrDefault(line.BankAccountId)) && unpaidBills.TakeBillPaidBy(facts))
+                line.IgnoreAutomatically(BankTransactionAutoReasons.BillPayment, now);
+        }
+    }
+
+    /// <summary>
+    /// The bills of the group a debit of one of <paramref name="payingDays"/> can still be the payment of: the closed
+    /// ones due around those days, less the ones a line already ignored (a payment recognised before, or the money
+    /// sent to the card) has paid.
+    /// </summary>
+    private async Task<UnpaidBills> UnpaidBillsForAsync(Guid coupleId, IReadOnlyCollection<DateOnly> payingDays, CancellationToken ct)
+    {
+        if (payingDays.Count == 0) return UnpaidBills.None;
+
+        var tolerance = BankReconciliationRules.BillPaymentDayTolerance;
+        var firstDay = payingDays.Min();
+        var lastDay = payingDays.Max();
+        var bills = (await _sync.GetBillFactsForJobAsync(coupleId, firstDay.AddDays(-tolerance), lastDay.AddDays(tolerance), ct))
+            .Where(BankReconciliationRules.IsPayableBill)
+            .ToList();
+        if (bills.Count == 0) return UnpaidBills.None;
+
+        // A line that paid one of those bills is at most the tolerance away from its due date.
+        var before = await _sync.GetBillPaymentCandidatesForJobAsync(coupleId, firstDay.AddDays(-2 * tolerance), lastDay.AddDays(2 * tolerance), ct);
+        return new UnpaidBills(bills, before.Where(l => l.ReviewState == BankTransactionReviewState.Ignored).Select(FactsOf));
+    }
+
+    /// <summary>The bills nobody paid yet, as far as the mirror knows: each one is taken by one debit only.</summary>
+    private sealed class UnpaidBills
+    {
+        public static UnpaidBills None => new([], []);
+
+        private readonly List<CardBillFacts> _bills;
+
+        public UnpaidBills(IEnumerable<CardBillFacts> bills, IEnumerable<MoneyMovement> alreadyPaid)
+        {
+            _bills = bills.ToList();
+            foreach (var payment in alreadyPaid) TakeBillPaidBy(payment);
+        }
+
+        /// <summary>True, taking the bill, when <paramref name="movement"/> is the payment of one still unpaid.</summary>
+        public bool TakeBillPaidBy(MoneyMovement movement)
+        {
+            var bill = BankReconciliationRules.FindBillPaid(movement, _bills);
+            return bill is not null && _bills.Remove(bill);
         }
     }
 }

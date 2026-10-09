@@ -64,6 +64,14 @@ public sealed class ConfirmBankReviewRequestValidator : AbstractValidator<Confir
         RuleFor(x => x.Discard)
             .Must(lines => lines is null || lines.Count <= BankReviewService.MaxLinesPerRequest)
             .WithMessage($"Envie no máximo {BankReviewService.MaxLinesPerRequest} lançamentos por vez.");
+        RuleFor(x => x.Incomes)
+            .Must(lines => lines is null || lines.Count <= BankReviewService.MaxLinesPerRequest)
+            .WithMessage($"Envie no máximo {BankReviewService.MaxLinesPerRequest} lançamentos por vez.");
+        RuleForEach(x => x.Incomes).ChildRules(line =>
+        {
+            line.RuleFor(l => l.Id).NotEmpty();
+            line.RuleFor(l => l.Name).MaximumLength(BankReviewService.MaxIncomeNameLength);
+        });
         RuleForEach(x => x.Expenses).ChildRules(line =>
         {
             line.RuleFor(l => l.Id).NotEmpty();

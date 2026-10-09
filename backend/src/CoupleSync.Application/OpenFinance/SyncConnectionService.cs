@@ -281,6 +281,9 @@ public sealed class SyncConnectionService
                     => _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, leaving, token);
                 await DecideAsync(ct);
                 await SaveAsync(connection, ct, DecideAsync);
+
+                if (BankReconciliationRules.IsCreditCard(account.Type))
+                    await SyncBillsAsync(connection, auth, account, ct);
             }
 
             return true;
@@ -330,6 +333,80 @@ public sealed class SyncConnectionService
         }
 
         return stored;
+    }
+
+    /// <summary>
+    /// The bills of a credit card: mirrored by their Pluggy id (synchronising again never duplicates; total, due date
+    /// and the rest take what Pluggy says now; a bill Pluggy no longer lists stays). Bills are an extra of the
+    /// synchronisation: when Pluggy does not give them (whatever the reason, also a refusal that for any other
+    /// reading would mean bad credentials), the run goes on and says nothing; if the credentials are really bad, the
+    /// next reading of the run says so. When a bill arrived or changed, the debits already in the mirror are looked
+    /// at again for its payment.
+    /// </summary>
+    private async Task SyncBillsAsync(BankConnection connection, PluggyAuth auth, BankAccount account, CancellationToken ct)
+    {
+        IReadOnlyList<PluggyBill> bills;
+        try
+        {
+            bills = await _pluggy.GetBillsAsync(auth, account.PluggyAccountId, ct);
+        }
+        catch (PluggyException ex)
+        {
+            _logger.LogWarning("Open Finance bills of an account could not be read ({Code}); the synchronisation goes on without them.", ex.Code);
+            return;
+        }
+
+        var changedDueDates = await UpsertBillsAsync(connection, account, bills, ct);
+        await SaveAsync(connection, ct);
+        if (changedDueDates.Count == 0) return;
+
+        Task DecideAsync(CancellationToken token) => _preclassification.ApplyBillPaymentsAsync(connection.CoupleId, changedDueDates, token);
+        await DecideAsync(ct);
+        await SaveAsync(connection, ct, DecideAsync);
+    }
+
+    /// <summary>Returns the due dates of the bills that arrived or changed in what the payment of a bill is recognised by.</summary>
+    private async Task<IReadOnlyCollection<DateOnly>> UpsertBillsAsync(
+        BankConnection connection, BankAccount account, IReadOnlyList<PluggyBill> bills, CancellationToken ct)
+    {
+        var incoming = bills
+            .Where(b => !string.IsNullOrWhiteSpace(b.Id) && b.Id.Trim().Length <= CreditCardBill.MaxPluggyIdLength)
+            .DistinctBy(b => b.Id.Trim())
+            .ToList();
+        var now = _clock.UtcNow;
+        var today = DateOnly.FromDateTime(BrazilTime.ToLocal(now));
+        var changed = new HashSet<DateOnly>();
+
+        foreach (var chunk in incoming.Chunk(LookupChunk))
+        {
+            var existing = (await _sync.FindBillsByPluggyIdsAsync(chunk.Select(b => b.Id.Trim()).ToList(), ct))
+                .ToDictionary(b => b.PluggyBillId, StringComparer.Ordinal);
+            var created = new List<CreditCardBill>();
+
+            foreach (var bill in chunk)
+            {
+                var snapshot = new CreditCardBillSnapshot(
+                    bill.DueDate, bill.ClosingDate, bill.TotalAmount, bill.CurrencyCode, bill.MinimumPayment, bill.RawJson);
+                if (existing.TryGetValue(bill.Id.Trim(), out var row))
+                {
+                    // The id is unique in the whole database: a bill of another account is not this account's to change.
+                    if (row.BankAccountId != account.Id) continue;
+                    var dueBefore = row.DueDate;
+                    if (!row.Refresh(snapshot, account.Currency, today, now)) continue;
+                    changed.Add(dueBefore);
+                    changed.Add(row.DueDate);
+                    continue;
+                }
+
+                var stored = CreditCardBill.Create(connection.CoupleId, account.Id, bill.Id, snapshot, account.Currency, today, now);
+                created.Add(stored);
+                changed.Add(stored.DueDate);
+            }
+
+            if (created.Count > 0) await _sync.AddBillsAsync(created, ct);
+        }
+
+        return changed;
     }
 
     /// <summary>

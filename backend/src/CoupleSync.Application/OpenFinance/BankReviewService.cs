@@ -9,8 +9,9 @@ namespace CoupleSync.Application.OpenFinance;
 /// <summary>
 /// The review of what came from the bank: nothing of the mirror becomes a transaction of the app without someone of
 /// the group confirming it here. Anyone of the group reviews; the transaction created belongs to who connected the
-/// account. Only expenses in this phase. A line that looks the same as a transaction the app already has is
-/// answered here too: "it is the same" (reconcile: nothing is created) or "it is another one" (confirmed as new).
+/// account. A line that looks the same as a transaction the app already has is answered here too: "it is the same"
+/// (reconcile: nothing is created) or "it is another one" (confirmed as new). Money that came in (issue #27) waits
+/// here too, apart: someone registers it as an income of its month, or discards it.
 /// </summary>
 public sealed class BankReviewService
 {
@@ -34,6 +35,12 @@ public sealed class BankReviewService
     private const string FallbackBankName = "Open Finance";
     private const int MaxBankNameLength = 64;
 
+    /// <summary>The name of the income of an entry the bank describes in no way.</summary>
+    public const string FallbackIncomeName = "Entrada do banco";
+
+    /// <summary>The longest name an income can have (<see cref="IncomeSource"/>).</summary>
+    public const int MaxIncomeNameLength = 64;
+
     private readonly IBankSyncRepository _sync;
     private readonly ITransactionRepository _transactions;
     private readonly INotificationCaptureRepository _ingests;
@@ -41,6 +48,7 @@ public sealed class BankReviewService
     private readonly IDateTimeProvider _clock;
     private readonly IAlertPolicyService _alertPolicyService;
     private readonly INotificationEventRepository _notificationEvents;
+    private readonly IIncomeSourceRepository _incomes;
     private readonly ILogger<BankReviewService> _logger;
 
     public BankReviewService(
@@ -51,8 +59,10 @@ public sealed class BankReviewService
         IDateTimeProvider clock,
         IAlertPolicyService alertPolicyService,
         INotificationEventRepository notificationEvents,
+        IIncomeSourceRepository incomes,
         ILogger<BankReviewService> logger)
     {
+        _incomes = incomes;
         _sync = sync;
         _transactions = transactions;
         _ingests = ingests;
@@ -82,17 +92,17 @@ public sealed class BankReviewService
         var names = await _sync.GetAccountNamesAsync(coupleId, ct);
         var pending = await _sync.GetPendingExpensesAsync(coupleId, ct);
 
+        var entries = await _sync.GetReviewIncomesAsync(coupleId, from, from.AddMonths(1), ct);
+        var pendingIncomes = await _sync.GetPendingIncomesAsync(coupleId, ct);
+
         var expenses = rows.Where(r => r.ReviewState == BankTransactionReviewState.Pending).ToList();
-        var discarded = rows.Where(r => r.CountsAsDiscarded).ToList();
+        var discarded = rows.Concat(entries).Where(r => r.CountsAsDiscarded).ToList();
+        var incomes = entries.Where(r => r.ReviewState == BankTransactionReviewState.Pending).ToList();
         var matches = await _sync.GetTransactionSummariesAsync(
             expenses.Where(r => r.MatchedTransactionId is not null).Select(r => r.MatchedTransactionId!.Value).ToList(), coupleId, ct);
         var expenseLines = Order(expenses).Select(r => MapLine(r, names, matches)).ToList();
 
-        var byMonth = pending
-            .GroupBy(p => $"{p.Day.Year:D4}-{p.Day.Month:D2}", StringComparer.Ordinal)
-            .OrderByDescending(g => g.Key, StringComparer.Ordinal)
-            .Select(g => new BankReviewMonthDto(g.Key, g.Count()))
-            .ToList();
+        var byMonth = ByMonth(pending);
 
         return new BankReviewDto(
             key,
@@ -105,14 +115,30 @@ public sealed class BankReviewService
             pending.Count(p => BankTransaction.CanBecomeExpense(p.Status, p.Amount, p.Currency)),
             byMonth,
             Order(ignored).Select(r => MapLine(r, names)).ToList(),
-            expenseLines.Count(l => l.Match is not null));
+            expenseLines.Count(l => l.Match is not null),
+            Order(incomes).Select(r => MapLine(r, names)).ToList(),
+            // As with the expenses: what can be registered now. The rest is still listed in its month.
+            pendingIncomes.Count(p => BankTransaction.CanBecomeIncome(p.Status, p.Amount, p.Currency)),
+            ByMonth(pendingIncomes));
     }
+
+    private static List<BankReviewMonthDto> ByMonth(IEnumerable<PendingBankExpense> pending)
+        => pending
+            .GroupBy(p => MonthKey(p.Day), StringComparer.Ordinal)
+            .OrderByDescending(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new BankReviewMonthDto(g.Key, g.Count()))
+            .ToList();
+
+    /// <summary>"yyyy-MM" of a calendar day, whatever the culture of the host.</summary>
+    private static string MonthKey(DateOnly day) => $"{day.Year:D4}-{day.Month:D2}";
 
     /// <summary>
     /// <paramref name="expenses"/> become transactions; <paramref name="asNew"/> too (the answer "it is another one"
     /// to a suspected duplicate, with the suggested category); <paramref name="reconcile"/> are the answer "it is the
     /// same": the line points to the transaction the app already had and nothing is created;
-    /// <paramref name="discard"/> are discarded. All or nothing.
+    /// <paramref name="discard"/> are discarded (expenses and entries alike); <paramref name="incomes"/> are entries
+    /// (money that came in) that become an income of the month of their day in Brazil, shared, not recurring, of who
+    /// connected the account. All or nothing.
     /// </summary>
     public async Task<BankReviewConfirmResult> ConfirmAsync(
         Guid coupleId,
@@ -120,25 +146,29 @@ public sealed class BankReviewService
         IReadOnlyList<Guid>? discard,
         IReadOnlyList<Guid>? reconcile,
         IReadOnlyList<Guid>? asNew,
+        IReadOnlyList<ConfirmIncomeInput>? incomes,
         CancellationToken ct)
     {
         expenses ??= [];
         asNew ??= [];
+        incomes ??= [];
         var reconcileIds = (reconcile ?? []).ToList();
         var discardIds = (discard ?? []).Distinct().ToList();
         var typedIds = expenses.Select(e => e.Id).ToList();
+        var incomeIds = incomes.Select(i => i.Id).ToList();
 
-        if (typedIds.Count == 0 && discardIds.Count == 0 && reconcileIds.Count == 0 && asNew.Count == 0)
+        if (typedIds.Count == 0 && discardIds.Count == 0 && reconcileIds.Count == 0 && asNew.Count == 0 && incomeIds.Count == 0)
             throw new UnprocessableEntityException(InvalidSelectionCode, "Selecione pelo menos um lançamento.");
         if (typedIds.Count > MaxLinesPerRequest || discardIds.Count > MaxLinesPerRequest
-            || reconcileIds.Count > MaxLinesPerRequest || asNew.Count > MaxLinesPerRequest)
+            || reconcileIds.Count > MaxLinesPerRequest || asNew.Count > MaxLinesPerRequest || incomeIds.Count > MaxLinesPerRequest)
         {
             throw new UnprocessableEntityException(InvalidSelectionCode, $"Envie no máximo {MaxLinesPerRequest} lançamentos por vez.");
         }
 
         if (typedIds.Count != typedIds.Distinct().Count()
             || reconcileIds.Count != reconcileIds.Distinct().Count()
-            || asNew.Count != asNew.Distinct().Count())
+            || asNew.Count != asNew.Distinct().Count()
+            || incomeIds.Count != incomeIds.Distinct().Count())
         {
             throw new UnprocessableEntityException(InvalidSelectionCode, "O mesmo lançamento foi enviado mais de uma vez.");
         }
@@ -146,7 +176,9 @@ public sealed class BankReviewService
         if (typedIds.Intersect(discardIds).Any())
             throw new UnprocessableEntityException(InvalidSelectionCode, "Um lançamento não pode ser confirmado e descartado ao mesmo tempo.");
         if (reconcileIds.Intersect(typedIds).Any() || reconcileIds.Intersect(discardIds).Any() || reconcileIds.Intersect(asNew).Any()
-            || asNew.Intersect(typedIds).Any() || asNew.Intersect(discardIds).Any())
+            || asNew.Intersect(typedIds).Any() || asNew.Intersect(discardIds).Any()
+            || incomeIds.Intersect(typedIds).Any() || incomeIds.Intersect(discardIds).Any()
+            || incomeIds.Intersect(reconcileIds).Any() || incomeIds.Intersect(asNew).Any())
         {
             throw new UnprocessableEntityException(InvalidSelectionCode, "Um lançamento só pode ter um destino por vez.");
         }
@@ -155,24 +187,29 @@ public sealed class BankReviewService
         expenses = expenses.Concat(asNew.Select(id => new ConfirmExpenseInput(id, null, null))).ToList();
         var expenseIds = expenses.Select(e => e.Id).ToList();
 
-        var allIds = expenseIds.Concat(discardIds).Concat(reconcileIds).ToList();
+        var allIds = expenseIds.Concat(discardIds).Concat(reconcileIds).Concat(incomeIds).ToList();
         var rows = (await _sync.FindByIdsAsync(allIds, coupleId, ct)).ToDictionary(r => r.Id);
         // A line of another group does not exist for this one.
         if (allIds.Any(id => !rows.ContainsKey(id)))
             throw new NotFoundException(NotFoundCode, "Lançamento do banco não encontrado.");
 
-        if (allIds.Any(id => !rows[id].IsExpense))
+        // Each kind has its own destination; discarding is for both.
+        if (expenseIds.Concat(reconcileIds).Any(id => !rows[id].IsExpense))
             throw new UnprocessableEntityException(InvalidSelectionCode, "Entradas não são confirmadas como despesa.");
+        if (incomeIds.Any(id => rows[id].IsExpense))
+            throw new UnprocessableEntityException(InvalidSelectionCode, "Despesas não são registradas como renda.");
 
-        // What the bank has not settled yet may still change or vanish: it cannot become a transaction.
-        if (expenseIds.Concat(reconcileIds).Any(id => rows[id].Status == BankTransactionStatus.Pending))
+        // What the bank has not settled yet may still change or vanish: it cannot become a transaction nor an income.
+        if (expenseIds.Concat(reconcileIds).Concat(incomeIds).Any(id => rows[id].Status == BankTransactionStatus.Pending))
             throw new UnprocessableEntityException(
                 NotPostedCode,
                 "Este lançamento ainda está pendente no banco. Ele poderá ser confirmado quando o banco o efetivar.");
 
         if (expenseIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Confirmed))
             || discardIds.Any(id => rows[id].ReviewState != BankTransactionReviewState.Pending && !rows[id].CountsAsDiscarded)
-            || reconcileIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Reconciled)))
+            || reconcileIds.Any(id => rows[id].ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Reconciled))
+            // An entry whose income is gone counts as discarded: it is restored before it is registered again.
+            || incomeIds.Any(id => rows[id].ReviewState != BankTransactionReviewState.Pending && !IsRegisteredAsIncome(rows[id])))
         {
             throw new ConflictException(NotPendingCode, "Este lançamento já foi revisado. Atualize a revisão e tente de novo.");
         }
@@ -255,6 +292,9 @@ public sealed class BankReviewService
             created.Add(new BankReviewCreatedDto(row.Id, transaction.Id));
         }
 
+        var (newIncomes, registered, alreadyRegistered) = await RegisterIncomesAsync(coupleId, incomes, rows, skipped, skippedOtherCurrency, now, ct);
+        alreadyConfirmed += alreadyRegistered;
+
         var discarded = new List<Guid>();
         foreach (var id in discardIds)
         {
@@ -273,12 +313,15 @@ public sealed class BankReviewService
                 await _transactions.AddTransactionsRangeAsync(transactions, ct);
             }
 
+            foreach (var income in newIncomes) await _incomes.AddAsync(income, ct);
+
             // One unit of work (the repositories share the context): lines and transactions are stored together or not at all.
             await _sync.SaveChangesAsync(ct);
         }
         catch (DataStoreException ex) when (ex is UniqueViolationException or ConcurrencyConflictException or ForeignKeyViolationException)
         {
-            // Another request confirmed the same line first (the unique fingerprint let one through), someone
+            // Another request confirmed the same line first (the unique fingerprint let one through; for an entry,
+            // the review state of the line or the unique name of the income of the month did), someone
             // reviewed one of the lines after this request read it (the review state is the concurrency token of
             // the line: confirming and discarding the same line at once, one of the two loses here), or the lines
             // went away with the person who left the group. Nothing of this request was stored.
@@ -287,8 +330,107 @@ public sealed class BankReviewService
 
         await RaiseAlertsAsync(coupleId, transactions, ct);
 
-        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed, skipped, skippedOtherCurrency, reconciled);
+        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed, skipped, skippedOtherCurrency, reconciled, registered);
     }
+
+    private static bool IsRegisteredAsIncome(BankTransaction row)
+        => row.ReviewState == BankTransactionReviewState.Confirmed && row.LinkedIncomeSourceId is not null;
+
+    /// <summary>
+    /// Each entry becomes an income of the month of its day in Brazil: shared, not recurring, in reais, of who
+    /// connected the account (whoever confirms). An entry already registered answers as such and creates nothing; one
+    /// without a value or in another currency is skipped (it stays waiting, to be discarded), like an expense. The
+    /// incomes of a person in a month are told apart by name, and two with the same name whatever the case would
+    /// count as one (<see cref="Income.IncomeSchedule"/>): a name already taken gets " (2)", " (3)". The limit of
+    /// incomes of a person in a month holds here too. Nothing is saved here: the caller saves everything together.
+    /// </summary>
+    private async Task<(List<IncomeSource> New, List<BankReviewIncomeDto> Registered, int Already)> RegisterIncomesAsync(
+        Guid coupleId,
+        IReadOnlyList<ConfirmIncomeInput> incomes,
+        IReadOnlyDictionary<Guid, BankTransaction> rows,
+        List<Guid> skipped,
+        List<Guid> skippedOtherCurrency,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var sources = new List<IncomeSource>();
+        var registered = new List<BankReviewIncomeDto>();
+        var already = 0;
+        // What each person already has in each month, as this request fills it: the names (folded) and how many.
+        var taken = new Dictionary<(Guid UserId, string Month), (HashSet<string> Names, int Count)>();
+
+        foreach (var input in incomes)
+        {
+            var row = rows[input.Id];
+            if (row.ReviewState == BankTransactionReviewState.Confirmed)
+            {
+                already++; // registered before (the same request sent twice): never a second income
+                continue;
+            }
+
+            if (row.AbsoluteAmount <= 0)
+            {
+                skipped.Add(row.Id);
+                continue;
+            }
+
+            // Every income counts in sums in reais: money in another currency is never registered as if it were reais.
+            if (!CurrencyRules.IsBrl(row.Currency))
+            {
+                skipped.Add(row.Id);
+                skippedOtherCurrency.Add(row.Id);
+                continue;
+            }
+
+            var month = MonthKey(row.LocalDate);
+            var key = (row.UserId, month);
+            if (!taken.TryGetValue(key, out var existing))
+            {
+                var names = await _incomes.GetNamesByUserAndMonthAsync(row.UserId, coupleId, month, ct);
+                existing = (names.Select(FoldName).ToHashSet(StringComparer.Ordinal), names.Count);
+            }
+
+            if (existing.Count >= Income.IncomeService.MaxSourcesPerUserPerMonth)
+                throw new UnprocessableEntityException(Income.IncomeService.LimitCode, Income.IncomeService.LimitMessage);
+
+            var name = FreeIncomeName(input.Name, row, existing.Names);
+            existing.Names.Add(FoldName(name));
+            taken[key] = (existing.Names, existing.Count + 1);
+
+            var source = IncomeSource.Create(
+                coupleId, row.UserId, month, name, row.AbsoluteAmount, CurrencyRules.Brl, isShared: true, now, isRecurring: false);
+            sources.Add(source);
+            row.ConfirmAsIncome(source.Id, now);
+            registered.Add(new BankReviewIncomeDto(row.Id, source.Id));
+        }
+
+        return (sources, registered, already);
+    }
+
+    /// <summary>The way two names of incomes are the same one (as <see cref="Income.IncomeSchedule"/> reads them).</summary>
+    private static string FoldName(string name) => name.Trim().ToUpperInvariant();
+
+    /// <summary>
+    /// The name informed, or what the bank says of the entry, or a fixed text; within the length of a name, and with
+    /// " (2)", " (3)"... when the person already has an income of that name in the month.
+    /// </summary>
+    private static string FreeIncomeName(string? informed, BankTransaction row, IReadOnlySet<string> takenNames)
+    {
+        var wanted = !string.IsNullOrWhiteSpace(informed)
+            ? informed
+            : new[] { row.Description, row.DescriptionRaw, row.MerchantName }.FirstOrDefault(text => !string.IsNullOrWhiteSpace(text)) ?? FallbackIncomeName;
+        var name = Clip(wanted.Trim(), MaxIncomeNameLength);
+        if (!takenNames.Contains(FoldName(name))) return name;
+
+        for (var number = 2; ; number++)
+        {
+            var suffix = string.Create(System.Globalization.CultureInfo.InvariantCulture, $" ({number})");
+            var candidate = Clip(name, MaxIncomeNameLength - suffix.Length) + suffix;
+            if (!takenNames.Contains(FoldName(candidate))) return candidate;
+        }
+    }
+
+    private static string Clip(string text, int maxLength) => text.Length > maxLength ? text[..maxLength].TrimEnd() : text;
 
     /// <summary>
     /// "It is the same": each line points to the transaction it was suspected of repeating, and that transaction

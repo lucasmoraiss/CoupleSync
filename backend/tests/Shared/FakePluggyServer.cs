@@ -110,6 +110,15 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     /// <summary>GET /transactions answers from here, by account id (replace or change to test other shapes).</summary>
     public Dictionary<string, List<FakeTransaction>> Transactions { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>GET /bills answers from here, by account id (the card of the fixture has none until a test says so).</summary>
+    public Dictionary<string, List<FakeBill>> Bills { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>When set, GET /bills answers this status.</summary>
+    public HttpStatusCode? BillsStatus { get; set; }
+
+    /// <summary>When set, GET /bills answers this body whatever the account (to test shapes the fixture does not build).</summary>
+    public string? BillsBody { get; set; }
+
     /// <summary>The server never gives more than this per page, whatever the page size asked (to test the paging).</summary>
     public int MaxPageSize { get; set; } = 500;
 
@@ -237,6 +246,12 @@ internal sealed class FakePluggyServer : HttpMessageHandler
             return Json(HttpStatusCode.OK, TransactionsPage(HttpUtility.ParseQueryString(request.RequestUri.Query)));
         }
 
+        if (request.Method == HttpMethod.Get && path == "/bills")
+        {
+            if (BillsStatus is { } billsStatus) return Json(billsStatus, """{"code":0,"message":"forced"}""");
+            return Json(HttpStatusCode.OK, BillsBody ?? BillsPage(HttpUtility.ParseQueryString(request.RequestUri.Query)));
+        }
+
         if (request.Method == HttpMethod.Get && path.StartsWith("/items/", StringComparison.Ordinal))
         {
             var itemId = path["/items/".Length..];
@@ -287,6 +302,23 @@ internal sealed class FakePluggyServer : HttpMessageHandler
         var page = int.TryParse(query["page"], NumberStyles.None, CultureInfo.InvariantCulture, out var number) ? number : 1;
         var totalPages = (int)Math.Ceiling(all.Count / (double)pageSize);
         var results = string.Join(",", all.Skip((page - 1) * pageSize).Take(pageSize).Select(t => t.ToJson(query["accountId"]!)));
+        var paging = OmitTotalPages ? string.Empty : $"\"totalPages\": {totalPages.ToString(CultureInfo.InvariantCulture)}, ";
+        return $"{{ \"total\": {all.Count.ToString(CultureInfo.InvariantCulture)}, {paging}\"page\": {page.ToString(CultureInfo.InvariantCulture)}, \"results\": [{results}] }}";
+    }
+
+    /// <summary>What Pluggy does with GET /bills?accountId=&amp;page=&amp;pageSize=: the same paging of the other listings.</summary>
+    private string BillsPage(System.Collections.Specialized.NameValueCollection query)
+    {
+        List<FakeBill> all;
+        lock (_gate)
+        {
+            all = Bills.TryGetValue(query["accountId"] ?? string.Empty, out var stored) ? stored.ToList() : [];
+        }
+
+        var pageSize = Math.Min(int.TryParse(query["pageSize"], NumberStyles.None, CultureInfo.InvariantCulture, out var asked) ? asked : 500, MaxPageSize);
+        var page = int.TryParse(query["page"], NumberStyles.None, CultureInfo.InvariantCulture, out var number) ? number : 1;
+        var totalPages = (int)Math.Ceiling(all.Count / (double)pageSize);
+        var results = string.Join(",", all.Skip((page - 1) * pageSize).Take(pageSize).Select(b => b.ToJson()));
         var paging = OmitTotalPages ? string.Empty : $"\"totalPages\": {totalPages.ToString(CultureInfo.InvariantCulture)}, ";
         return $"{{ \"total\": {all.Count.ToString(CultureInfo.InvariantCulture)}, {paging}\"page\": {page.ToString(CultureInfo.InvariantCulture)}, \"results\": [{results}] }}";
     }
@@ -437,6 +469,39 @@ internal sealed record FakeTransaction(string Id, DateTime Date, decimal Amount)
             ["creditCardMetadata"] = InstallmentNumber is null && BillId is null
                 ? null
                 : new Dictionary<string, object?> { ["installmentNumber"] = InstallmentNumber, ["totalInstallments"] = TotalInstallments, ["billId"] = BillId },
+        };
+        return JsonSerializer.Serialize(fields);
+    }
+}
+
+/// <summary>
+/// One credit card bill as GET /bills lists it (the fields of the Pluggy documentation: <c>dueDate</c>,
+/// <c>billClosingDate</c>, <c>totalAmount</c>, <c>totalAmountCurrencyCode</c>, <c>minimumPaymentAmount</c>,
+/// <c>payments</c>, <c>financeCharges</c>). Every value is invented.
+/// </summary>
+internal sealed record FakeBill(string Id, DateOnly DueDate, decimal TotalAmount)
+{
+    public DateOnly? ClosingDate { get; init; }
+    public string? CurrencyCode { get; init; } = "BRL";
+    public decimal? MinimumPaymentAmount { get; init; }
+
+    /// <summary>The due date exactly as it goes in the JSON, when a test needs a shape other than "yyyy-MM-ddT00:00:00.000Z".</summary>
+    public string? DueDateText { get; init; }
+
+    public string ToJson()
+    {
+        var fields = new Dictionary<string, object?>
+        {
+            ["id"] = Id,
+            ["dueDate"] = DueDateText ?? DueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "T00:00:00.000Z",
+            ["billClosingDate"] = ClosingDate is { } closing ? closing.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "T00:00:00" : null,
+            ["totalAmount"] = TotalAmount,
+            ["totalAmountCurrencyCode"] = CurrencyCode,
+            ["minimumPaymentAmount"] = MinimumPaymentAmount,
+            ["allowsInstallments"] = true,
+            ["providerCode"] = FakePluggyServer.RawOnlyMarker,
+            ["financeCharges"] = new[] { new Dictionary<string, object?> { ["id"] = "e1b2c3d4-0000-4000-8000-000000000001", ["type"] = "IOF", ["amount"] = 1.23m, ["currencyCode"] = "BRL", ["additionalInfo"] = "NA" } },
+            ["payments"] = Array.Empty<object>(),
         };
         return JsonSerializer.Serialize(fields);
     }

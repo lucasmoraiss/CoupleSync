@@ -14,6 +14,17 @@ public sealed class DashboardRepository : IDashboardRepository
         _dbContext = dbContext;
     }
 
+    public async Task<IReadOnlyList<UpcomingBill>?> GetUpcomingBillsAsync(Guid coupleId, DateOnly fromDue, DateOnly toDue, CancellationToken ct)
+    {
+        // The same reading the screen of the accounts uses (one place says which bills belong to the group).
+        var bank = new BankSyncRepository(_dbContext);
+        if (!await bank.HasConnectedConnectionAsync(coupleId, ct)) return null;
+
+        return (await bank.GetBillsOfGroupAsync(coupleId, fromDue, toDue, ct))
+            .Select(b => new UpcomingBill(b.Id, b.BankAccountId, b.CardName, b.BankName, b.UserId, b.UserName, b.DueDate, b.TotalAmount, b.Currency, b.IsClosed))
+            .ToList();
+    }
+
     public async Task<DashboardAggregates> GetAggregatesAsync(
         Guid coupleId,
         DateTime startDate,

@@ -47,7 +47,17 @@ public sealed class DashboardController : ControllerBase
             result.TransactionCount,
             result.PeriodStart,
             result.PeriodEnd,
-            result.GeneratedAtUtc);
+            result.GeneratedAtUtc,
+            result.UpcomingBills is { } upcoming
+                ? new UpcomingBillsResponse(
+                    upcoming.TotalBrl,
+                    upcoming.FromDay,
+                    upcoming.ToDay,
+                    upcoming.Bills
+                        .Select(b => new UpcomingBillResponse(
+                            b.Id, b.AccountId, b.CardName, b.BankName, b.UserId, b.UserName, b.DueDate, b.TotalAmount, b.Currency, b.IsClosed))
+                        .ToList())
+                : null);
 
         return Ok(response);
     }

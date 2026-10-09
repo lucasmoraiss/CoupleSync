@@ -106,6 +106,7 @@ builder.Services.AddScoped<BankPreclassificationService>();
 builder.Services.AddScoped<SyncConnectionService>();
 builder.Services.AddScoped<SyncRunService>();
 builder.Services.AddScoped<BankReviewService>();
+builder.Services.AddScoped<BankAccountsService>();
 builder.Services.AddScoped<ChatContextService>();
 builder.Services.AddScoped<AssistantChatService>();
 builder.Services.AddScoped<CoupleSync.Application.Ai.AiActivationService>();

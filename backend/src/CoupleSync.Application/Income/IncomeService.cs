@@ -14,7 +14,9 @@ public sealed class IncomeService
     private readonly ICoupleRepository _coupleRepository;
     private readonly IDateTimeProvider _dateTimeProvider;
 
-    private const int MaxSourcesPerUserPerMonth = 20;
+    public const int MaxSourcesPerUserPerMonth = 20;
+    public const string LimitCode = "INCOME_SOURCE_LIMIT";
+    public static readonly string LimitMessage = $"Cada pessoa pode ter no máximo {MaxSourcesPerUserPerMonth} fontes de renda por mês.";
 
     public IncomeService(
         IIncomeSourceRepository repository,
@@ -35,9 +37,7 @@ public sealed class IncomeService
     {
         var count = await _repository.CountByUserAndMonthAsync(userId, coupleId, month, ct);
         if (count >= MaxSourcesPerUserPerMonth)
-            throw new UnprocessableEntityException(
-                "INCOME_SOURCE_LIMIT",
-                $"Cada pessoa pode ter no máximo {MaxSourcesPerUserPerMonth} fontes de renda por mês.");
+            throw new UnprocessableEntityException(LimitCode, LimitMessage);
 
         var now = _dateTimeProvider.UtcNow;
         var source = IncomeSource.Create(
@@ -75,7 +75,8 @@ public sealed class IncomeService
         source.Update(input.Name, input.Amount, input.IsShared, input.IsRecurring, now);
         await _repository.SaveChangesAsync(ct);
 
-        return MapToDto(source);
+        var fromBank = await _repository.GetIdsCreatedFromBankAsync(coupleId, [source.Id], ct);
+        return MapToDto(source, fromBank);
     }
 
     public async Task DeleteAsync(
@@ -90,6 +91,9 @@ public sealed class IncomeService
         if (!source.CanBeEditedBy(userId))
             throw new ForbiddenException("INCOME_SOURCE_FORBIDDEN", "Você só pode excluir suas próprias fontes de renda ou as compartilhadas.");
 
+        // An income registered from an entry of the bank (Open Finance): the line goes back to the review as
+        // discarded, without the link, in the same save. It can be restored and registered again.
+        await _repository.ReleaseBankLinesAsync(source.Id, coupleId, _dateTimeProvider.UtcNow, ct);
         await _repository.DeleteAsync(source, ct);
         await _repository.SaveChangesAsync(ct);
     }
@@ -102,6 +106,8 @@ public sealed class IncomeService
     {
         var candidates = await _repository.GetCandidatesForMonthsAsync(coupleId, month, month, ct);
         var sources = IncomeSchedule.EffectiveIn(candidates, month);
+        var fromBank = await _repository.GetIdsCreatedFromBankAsync(coupleId, sources.Select(s => s.Id).ToList(), ct);
+        IncomeSourceDto MapToDto(IncomeSource source) => IncomeService.MapToDto(source, fromBank);
         var couple = await _coupleRepository.FindByIdWithMembersAsync(coupleId, ct);
 
         var currentUserName = couple?.Members.FirstOrDefault(m => m.UserId == userId)?.User.Name ?? "Você";
@@ -182,7 +188,8 @@ public sealed class IncomeService
     private static decimal SumInReais(IEnumerable<IncomeSourceDto> sources)
         => sources.Where(s => CurrencyRules.IsBrl(s.Currency)).Sum(s => s.Amount);
 
-    private static IncomeSourceDto MapToDto(IncomeSource source)
+    private static IncomeSourceDto MapToDto(IncomeSource source, IReadOnlySet<Guid>? fromBank = null)
         => new(source.Id, source.UserId, source.Name, source.Amount, source.Currency,
-               source.IsShared, source.IsRecurring, source.CreatedAtUtc, source.UpdatedAtUtc);
+               source.IsShared, source.IsRecurring, source.CreatedAtUtc, source.UpdatedAtUtc,
+               fromBank?.Contains(source.Id) == true);
 }

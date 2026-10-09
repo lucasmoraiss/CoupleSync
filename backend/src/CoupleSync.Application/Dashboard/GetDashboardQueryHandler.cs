@@ -6,6 +6,9 @@ namespace CoupleSync.Application.Dashboard;
 
 public sealed class GetDashboardQueryHandler
 {
+    /// <summary>How far ahead "bills due" looks: today (in Brazil) and the thirty days after it.</summary>
+    public const int UpcomingBillsDays = 30;
+
     private readonly IDashboardRepository _repository;
     private readonly IDateTimeProvider _dateTimeProvider;
 
@@ -34,7 +37,22 @@ public sealed class GetDashboardQueryHandler
             aggregates.TransactionCount,
             periodStart,
             periodEnd,
-            now);
+            now,
+            await GetUpcomingBillsAsync(query.CoupleId, now, cancellationToken));
+    }
+
+    /// <summary>Not of the period asked: always the next thirty days, counted from the calendar day in Brazil.</summary>
+    private async Task<UpcomingBills?> GetUpcomingBillsAsync(Guid coupleId, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(BrazilTime.ToLocal(nowUtc));
+        var last = today.AddDays(UpcomingBillsDays);
+        var bills = await _repository.GetUpcomingBillsAsync(coupleId, today, last, cancellationToken);
+        if (bills is null) return null;
+
+        var ordered = bills.OrderBy(b => b.DueDate).ThenBy(b => b.CardName, StringComparer.OrdinalIgnoreCase).ThenBy(b => b.Id).ToList();
+        // Only reais, and only what is owed: nothing in another currency is added as if it were reais.
+        var total = ordered.Where(b => CurrencyRules.IsBrl(b.Currency) && b.TotalAmount > 0).Sum(b => b.TotalAmount);
+        return new UpcomingBills(total, today, last, ordered);
     }
 
     // A date without a time zone is a calendar day in Brasília; an instant (Kind Utc) is used as is.
