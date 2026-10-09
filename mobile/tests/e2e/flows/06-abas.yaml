@@ -60,19 +60,12 @@ name: 06 - Abas
 - assertNotVisible: "Tentar novamente"
 - assertNotVisible: "Algo deu errado"
 
-# A lista de Configurações é maior que a tela: o primeiro item aparece ao abrir, os últimos só rolando.
 - tapOn: "Configurações"
 - extendedWaitUntil:
-    visible: "Captura de notificações bancárias"
+    visible: "Sair da conta"
     timeout: 30000
-- scrollUntilVisible:
-    element: "Privacidade"
-    direction: DOWN
-    timeout: 30000
-- scrollUntilVisible:
-    element: "Sair da conta"
-    direction: DOWN
-    timeout: 30000
+- assertVisible: "Captura de notificações bancárias"
+- assertVisible: "Privacidade"
 - assertNotVisible: "Tentar novamente"
 - assertNotVisible: "Algo deu errado"
 
