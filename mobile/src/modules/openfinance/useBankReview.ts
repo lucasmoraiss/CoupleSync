@@ -5,6 +5,7 @@ import { openFinanceApiClient } from '@/services/apiClient';
 import { isNoGroupError } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
 import type { BankReviewResponse } from '@/types/api';
+import { pendingReviewCount } from './review';
 
 export const BANK_REVIEW_KEY = ['openfinance-review'] as const;
 
@@ -22,8 +23,8 @@ export function useBankReview(month: string | null) {
 }
 
 /**
- * Quantas despesas do banco podem ser confirmadas (todos os meses), para o atalho da tela de Transações. Qualquer erro
- * (servidor sem a rota, sem rede) é "nenhuma": o atalho só não aparece.
+ * Quantas linhas do banco podem ser registradas (despesas e entradas, todos os meses), para o atalho da tela de
+ * Transações. Qualquer erro (servidor sem a rota, sem rede) é "nenhuma": o atalho só não aparece.
  */
 export function usePendingBankReviewCount(): { readonly pending: number; readonly refetch: () => void } {
   const signedIn = useSessionStore((state) => !!state.accessToken);
@@ -31,7 +32,7 @@ export function usePendingBankReviewCount(): { readonly pending: number; readonl
     queryKey: [...BANK_REVIEW_KEY, 'pending-count'],
     queryFn: async () => {
       try {
-        return (await openFinanceApiClient.getReview()).data.pendingAllMonths ?? 0;
+        return pendingReviewCount((await openFinanceApiClient.getReview()).data);
       } catch {
         return 0;
       }

@@ -7,6 +7,9 @@
 // (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas, recolhida, com "restaurar"
 // em toda linha: nas saídas e nas entradas.
 //
+// Entradas (salário, Pix recebido): seção própria, fora de "Selecionar tudo". Cada uma vira renda do mês só pela
+// ação "Registrar como renda do mês" (o nome é editável, o valor não) ou é descartada.
+//
 // Aba oculta cujo pai é Transações. A tela é remontada a cada visita (resetOnFocus): seleção, categorias
 // trocadas e avisos de uma visita não ficam para a seguinte, e a lista é a que o servidor tem agora.
 import React, { useEffect, useMemo, useState } from 'react';
@@ -20,6 +23,7 @@ import {
   SectionList,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -38,23 +42,35 @@ import { BANK_REVIEW_KEY, useBankReview } from '@/modules/openfinance/useBankRev
 import {
   ANSWER_OTHER_FAILED_TEXT,
   ANSWER_SAME_FAILED_TEXT,
+  INCOME_NAME_MAX,
+  REGISTER_INCOME_FAILED_TEXT,
+  REGISTER_INCOME_LABEL,
   allSelected,
   answerDuplicateNotice,
   answerDuplicateRequest,
   buildConfirmBatches,
   canAnswerDuplicate,
+  canRegisterIncome,
   confirmInBatches,
   dayLabel,
+  defaultIncomeName,
+  discardedLineText,
   duplicateNoticeText,
   groupByDay,
   hasSuspectedDuplicate,
   ignoredLineText,
+  incomeBlockedReason,
+  incomeLineText,
+  incomeNameError,
+  incomeRequest,
+  incomeResultMessage,
   initialReviewMonth,
   installmentText,
   isSelectable,
   lineAmountText,
   lineTitle,
   matchText,
+  mergePendingByMonth,
   monthTitle,
   pruneSelection,
   restoreLabel,
@@ -73,6 +89,11 @@ function leave() {
   goToParent('openfinance/review');
 }
 
+/** O dia da linha para o leitor de tela ("05/10/2026"). */
+function dayOf(line: BankReviewLineResponse): string {
+  return dayLabel(line.day);
+}
+
 function BankReviewScreen() {
   const queryClient = useQueryClient();
   const categories = useCategories();
@@ -87,19 +108,27 @@ function BankReviewScreen() {
   const [showDiscarded, setShowDiscarded] = useState(false);
   const [showIgnored, setShowIgnored] = useState(false);
   /** O que está em andamento: uma ação por vez. */
-  const [busy, setBusy] = useState<'confirm' | 'discard' | 'restore' | 'answer' | null>(null);
+  const [busy, setBusy] = useState<'confirm' | 'discard' | 'restore' | 'answer' | 'income' | null>(null);
   const [notice, setNotice] = useState<{ readonly text: string; readonly error: boolean } | null>(null);
+  /** A entrada cujo nome de renda está sendo digitado (a folha "Registrar como renda do mês" está aberta). */
+  const [registering, setRegistering] = useState<BankReviewLineResponse | null>(null);
+  const [incomeName, setIncomeName] = useState('');
 
   // A primeira resposta (mês corrente do servidor) diz onde há pendências: a revisão abre no mês mais recente
-  // que tem algo esperando.
+  // que tem algo esperando, despesa ou entrada.
   useEffect(() => {
-    if (month === null && data) setMonth(initialReviewMonth(data.pendingByMonth, data.month));
+    if (month === null && data) {
+      setMonth(initialReviewMonth(mergePendingByMonth(data.pendingByMonth, data.pendingIncomesByMonth), data.month));
+    }
   }, [month, data]);
 
   const expenses = useMemo(() => data?.expenses ?? [], [data]);
   const discarded = data?.discarded ?? [];
   // Servidor anterior à conciliação não manda a lista: não há seção.
   const ignored = data?.ignored ?? [];
+  // Servidor anterior às entradas não manda a lista: não há seção, e a entrada restaurada some daqui como antes.
+  const incomes = data?.incomes ?? [];
+  const listsIncomes = data?.incomes !== undefined;
   const sections = useMemo(
     () => groupByDay(expenses).map((group) => ({ title: group.label, day: group.day, data: [...group.lines] })),
     [expenses],
@@ -131,6 +160,40 @@ function BankReviewScreen() {
     void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     void queryClient.invalidateQueries({ queryKey: ['reports'] });
     void queryClient.invalidateQueries({ queryKey: ['budget'] });
+  };
+
+  const openRegisterIncome = (line: BankReviewLineResponse) => {
+    if (busy || !canRegisterIncome(line)) return;
+    setIncomeName(defaultIncomeName(line));
+    setRegistering(line);
+  };
+
+  /** "Registrar como renda do mês": a entrada vira renda do mês do dia dela, com o nome da folha. */
+  const handleRegisterIncome = async () => {
+    const line = registering;
+    if (busy || !line || incomeNameError(incomeName)) return;
+    const epoch = getSessionEpoch();
+    setBusy('income');
+    setNotice(null);
+    try {
+      const result = (await openFinanceApiClient.confirmReview(incomeRequest(line, incomeName))).data;
+      if (getSessionEpoch() !== epoch) return;
+      setRegistering(null);
+      setNotice({ text: incomeResultMessage(line, result), error: false });
+    } catch (err) {
+      if (getSessionEpoch() !== epoch) return;
+      setRegistering(null);
+      setNotice({ text: getApiErrorMessage(err, REGISTER_INCOME_FAILED_TEXT), error: true });
+    } finally {
+      if (getSessionEpoch() === epoch) {
+        setBusy(null);
+        void queryClient.invalidateQueries({ queryKey: BANK_REVIEW_KEY });
+        // A renda nova muda as Rendas, o orçamento e o fluxo de caixa.
+        void queryClient.invalidateQueries({ queryKey: ['incomes'] });
+        void queryClient.invalidateQueries({ queryKey: ['budget'] });
+        void queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+      }
+    }
   };
 
   const handleConfirm = async () => {
@@ -217,7 +280,7 @@ function BankReviewScreen() {
     try {
       await openFinanceApiClient.restoreReview([line.id]);
       if (getSessionEpoch() !== epoch) return;
-      const restoredText = restoredNoticeText(line);
+      const restoredText = restoredNoticeText(line, listsIncomes);
       if (restoredText) setNotice({ text: restoredText, error: false });
     } catch (err) {
       if (getSessionEpoch() !== epoch) return;
@@ -246,7 +309,8 @@ function BankReviewScreen() {
   }
   if (isLoading || !data || month === null) return <LoadingState />;
 
-  const otherMonths = data.pendingByMonth.filter((m) => m.month !== month && m.pending > 0);
+  const otherMonths = mergePendingByMonth(data.pendingByMonth, data.pendingIncomesByMonth).filter((m) => m.month !== month && m.pending > 0);
+  const nameError = incomeNameError(incomeName);
   const total = selectedTotalBrl(expenses, selected);
   const duplicatesNotice = duplicateNoticeText(suspectedDuplicateCount(expenses));
 
@@ -255,7 +319,7 @@ function BankReviewScreen() {
       {backLink}
       <Text style={styles.title} accessibilityRole="header">Revisão do banco</Text>
       <Text style={styles.subtitle}>
-        O que veio do banco pelo Open Finance espera aqui. Só vira despesa o que você confirmar.
+        O que veio do banco pelo Open Finance espera aqui. Só vira despesa ou renda o que você confirmar.
       </Text>
 
       <View style={styles.monthRow}>
@@ -354,6 +418,60 @@ function BankReviewScreen() {
 
   const footer = (
     <View style={styles.footer}>
+      {incomes.length > 0 ? (
+        <>
+          <Text style={styles.sectionTitle} accessibilityRole="header">Entradas ({incomes.length})</Text>
+          <Text style={styles.muted}>
+            Dinheiro que entrou na conta. Registre como renda do mês o que for renda (salário, um Pix recebido) e descarte o resto.
+          </Text>
+          {incomes.map((line) => {
+            const blocked = incomeBlockedReason(line);
+            const title = lineTitle(line);
+            return (
+              <View key={line.id} style={[styles.line, blocked !== null && styles.lineMuted]}>
+                <View style={styles.lineBody}>
+                  <Text style={blocked === null ? styles.lineTitle : styles.lineTitleMuted} numberOfLines={1}>{title}</Text>
+                  <Text
+                    style={styles.muted}
+                    accessibilityLabel={`${dayOf(line)}, entrada de ${line.currency === 'BRL' ? spokenBRL(line.amount) : lineAmountText(line.amount, line.currency)}`}
+                  >
+                    {incomeLineText(line)}
+                  </Text>
+                  <Text style={styles.muted} numberOfLines={1}>
+                    {[line.bankName, line.accountName].filter((part) => !!part).join(' · ')}
+                  </Text>
+                  {blocked ? <Text style={styles.pendingText}>{blocked}</Text> : null}
+                  <View style={styles.incomeActions}>
+                    {blocked === null ? (
+                      <TouchableOpacity
+                        style={[styles.answerBtn, busy !== null && styles.disabled]}
+                        onPress={() => openRegisterIncome(line)}
+                        disabled={busy !== null}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${REGISTER_INCOME_LABEL}: ${title}`}
+                        accessibilityState={{ disabled: busy !== null }}
+                      >
+                        <Text style={styles.answerText}>{REGISTER_INCOME_LABEL}</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.lineBody} />
+                    )}
+                    <TouchableOpacity
+                      style={styles.smallBtn}
+                      onPress={() => void handleDiscard(line)}
+                      disabled={busy !== null}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Descartar entrada ${title}`}
+                    >
+                      <Text style={styles.smallBtnText}>descartar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            );
+          })}
+        </>
+      ) : null}
       {ignored.length > 0 ? (
         <>
           <TouchableOpacity
@@ -412,14 +530,14 @@ function BankReviewScreen() {
                 <View key={line.id} style={[styles.line, styles.lineMuted]}>
                   <View style={styles.lineBody}>
                     <Text style={styles.lineTitleMuted} numberOfLines={1}>{lineTitle(line)}</Text>
-                    <Text style={styles.muted}>{dayLabel(line.day)} · {lineAmountText(line.amount, line.currency)}</Text>
+                    <Text style={styles.muted}>{discardedLineText(line)}</Text>
                   </View>
                   <TouchableOpacity
                     style={styles.smallBtn}
                     onPress={() => void handleRestore(line)}
                     disabled={busy !== null}
                     accessibilityRole="button"
-                    accessibilityLabel={`Restaurar ${lineTitle(line)}`}
+                    accessibilityLabel={restoreLabel(line)}
                   >
                     <Text style={styles.smallBtnText}>restaurar</Text>
                   </TouchableOpacity>
@@ -562,6 +680,61 @@ function BankReviewScreen() {
         </View>
       ) : null}
 
+      <Modal
+        visible={registering !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => (busy === null ? setRegistering(null) : undefined)}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Fechar"
+          style={styles.overlay}
+          onPress={() => (busy === null ? setRegistering(null) : undefined)}
+        >
+          <Pressable accessible={false} style={styles.sheet} onPress={() => undefined}>
+            <Text style={styles.sectionTitle} accessibilityRole="header">{REGISTER_INCOME_LABEL}</Text>
+            {registering ? (
+              <Text style={styles.muted}>
+                {incomeLineText(registering)} · entra nas rendas de {monthTitle(registering.day.slice(0, 7))}, compartilhada com o grupo. O valor não muda.
+              </Text>
+            ) : null}
+            <Text style={styles.inputLabel}>Nome da renda</Text>
+            <TextInput
+              style={styles.input}
+              value={incomeName}
+              onChangeText={setIncomeName}
+              editable={busy === null}
+              maxLength={INCOME_NAME_MAX}
+              placeholder={registering ? defaultIncomeName(registering) : undefined}
+              placeholderTextColor={colors.placeholder}
+              accessibilityLabel="Nome da renda"
+              returnKeyType="done"
+            />
+            {nameError ? <Text style={styles.errorText} accessibilityRole="alert">{nameError}</Text> : null}
+            <TouchableOpacity
+              style={[styles.primaryBtn, (busy !== null || nameError !== null) && styles.disabled]}
+              onPress={() => void handleRegisterIncome()}
+              disabled={busy !== null || nameError !== null}
+              accessibilityRole="button"
+              accessibilityLabel="Registrar renda"
+              accessibilityState={{ disabled: busy !== null || nameError !== null, busy: busy === 'income' }}
+            >
+              {busy === 'income' ? <ActivityIndicator color={colors.text} /> : <Text style={styles.primaryText}>Registrar renda</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.smallBtn}
+              onPress={() => setRegistering(null)}
+              disabled={busy !== null}
+              accessibilityRole="button"
+              accessibilityLabel="Cancelar"
+            >
+              <Text style={styles.smallBtnText}>cancelar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <Modal visible={pickingFor !== null} transparent animationType="slide" onRequestClose={() => setPickingFor(null)}>
         <Pressable accessibilityRole="button" accessibilityLabel="Fechar" style={styles.overlay} onPress={() => setPickingFor(null)}>
           <Pressable accessible={false} style={styles.sheet} onPress={() => undefined}>
@@ -644,6 +817,7 @@ const styles = StyleSheet.create({
   amountMuted: { fontSize: 15, fontWeight: '700', color: colors.textMuted },
   pendingText: { fontSize: 12, color: colors.warning, lineHeight: 17 },
   lineActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  incomeActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 4 },
   smallBtn: { minHeight: 44, minWidth: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
   smallBtnText: { color: colors.textSubtle, fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
   collapse: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 },
@@ -657,4 +831,6 @@ const styles = StyleSheet.create({
   sheetItem: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 10 },
   sheetItemOn: { backgroundColor: colors.background },
   sheetItemText: { fontSize: 16, color: colors.text },
+  inputLabel: { fontSize: 13, color: colors.textMuted, marginTop: 8 },
+  input: { minHeight: 48, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, color: colors.text, fontSize: 16, paddingHorizontal: 12 },
 });
