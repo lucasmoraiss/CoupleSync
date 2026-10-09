@@ -67,6 +67,15 @@ describe('nada mais decide a IA na geração do pacote nem pelo aceite guardado 
     expect(offenders.map((file) => path.relative(REPO_DIR, file))).toEqual([]);
   });
 
+  // Issue #60, item 13: o interruptor de emergência é posto no painel do Render. Um valor versionado no arquivo
+  // ("false") poderia desfazer o "true" de uma emergência numa sincronização; o arquivo só explica.
+  it('render.yaml não declara o interruptor de emergência da IA; só explica onde ele é ligado', () => {
+    const blueprint = fs.readFileSync(path.join(REPO_DIR, 'render.yaml'), 'utf8');
+    const declared = blueprint.split(/\r?\n/).filter((line) => !line.trim().startsWith('#') && line.includes('Ai__Disabled'));
+    expect(declared).toEqual([]);
+    expect(blueprint).toMatch(/# Interruptor de emergência: a variável Ai__Disabled=true, posta no PAINEL do Render/);
+  });
+
   it('o Assistente e o envio de extrato não consultam o aceite local (aiChat): quem decide é GET /ai/status', () => {
     for (const file of [
       'src/modules/chat/api/chatApi.ts',

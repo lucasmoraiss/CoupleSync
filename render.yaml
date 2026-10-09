@@ -48,9 +48,11 @@ services:
         value: /app/uploads
 
       # IA: fica disponível quando GEMINI_API_KEY tem valor; cada grupo ainda precisa ativar no app (o aceite fica no
-      # servidor). Interruptor de emergência: "true" aqui desliga toda a IA na hora, sem publicar o app de novo.
-      - key: Ai__Disabled
-        value: "false"
+      # servidor).
+      # Interruptor de emergência: a variável Ai__Disabled=true, posta no PAINEL do Render (Environment do serviço
+      # couplesync-api), desliga toda a IA na hora, sem publicar o app de novo; sem a variável, ou com "false", a IA
+      # segue ligada. Ela não é declarada aqui de propósito: o serviço não é sincronizado por este arquivo, e um
+      # valor versionado poderia desfazer o "true" de uma emergência se um dia passasse a ser.
       - key: GEMINI_API_KEY
         sync: false
       # Chave de um segundo provedor de IA (compatível com OpenAI; Groq é a primeira escolha). Fica sem valor até
