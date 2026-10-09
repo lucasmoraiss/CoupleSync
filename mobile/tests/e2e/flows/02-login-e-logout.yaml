@@ -12,9 +12,14 @@ env:
       EMAIL: ${output.email}
 
 # Sair: aba Configurações, "Sair da conta", e o botão "Sair" do diálogo (o título do diálogo também é "Sair").
+# A lista de Configurações é maior que a tela: espera o primeiro item e rola até o último.
 - tapOn: "Configurações"
 - extendedWaitUntil:
-    visible: "Sair da conta"
+    visible: "Captura de notificações bancárias"
+    timeout: 30000
+- scrollUntilVisible:
+    element: "Sair da conta"
+    direction: DOWN
     timeout: 30000
 - tapOn: "Sair da conta"
 - extendedWaitUntil:
