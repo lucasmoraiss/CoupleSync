@@ -54,6 +54,10 @@ import type {
   OpenFinanceStatusResponse,
   AiStatusResponse,
   AiUsageResponse,
+  RecurringChargesResponse,
+  RecurringItemResponse,
+  RecurringListResponse,
+  RecurringOverride,
   BankConnectionResponse,
   BankItemResponse,
   BankAccountResponse,
@@ -522,4 +526,19 @@ export const aiApiClient = {
 
   getUsage: (days = 30): Promise<AxiosResponse<AiUsageResponse>> =>
     axiosInstance.get<AiUsageResponse>(`/api/v1/ai/usage?days=${days}`),
+};
+
+// Assinaturas e recorrências (sem IA: vale para qualquer grupo).
+export const recurringApiClient = {
+  /** A lista; o servidor recalcula antes quando o último cálculo é antigo ou entrou transação depois dele. */
+  get: (): Promise<AxiosResponse<RecurringListResponse>> =>
+    axiosInstance.get<RecurringListResponse>('/api/v1/ai/recurring'),
+
+  /** As cobranças de um item. 404 RECURRENCE_NOT_FOUND. */
+  getTransactions: (id: string): Promise<AxiosResponse<RecurringChargesResponse>> =>
+    axiosInstance.get<RecurringChargesResponse>(`/api/v1/ai/recurring/${id}/transactions`),
+
+  /** A correção da pessoa (`null` desfaz). 400 INVALID_OVERRIDE; 404 RECURRENCE_NOT_FOUND. */
+  setOverride: (id: string, override: RecurringOverride | null): Promise<AxiosResponse<RecurringItemResponse>> =>
+    axiosInstance.patch<RecurringItemResponse>(`/api/v1/ai/recurring/${id}`, { override }),
 };

@@ -30,6 +30,17 @@ import { AI_STATUS_NOTICE_TEXT, aiStatusNotice, isAssistantVisible, shouldShowAc
 import { openWelcomeIfDue } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
 import { isCaptureConsentAhead } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
+import { useOnRefocus } from '@/navigation/resetOnFocus';
+import {
+  RECURRING_CARD_EMPTY_LABEL,
+  RECURRING_CARD_EMPTY_TEXT,
+  RECURRING_CARD_ERROR_LABEL,
+  RECURRING_CARD_ERROR_TEXT,
+  isRecurringEmpty,
+  recurringCardLabel,
+  recurringCardText,
+} from '@/modules/recurring/recurring';
+import { useRecurring } from '@/modules/recurring/useRecurring';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -143,11 +154,20 @@ export default function DashboardScreen() {
   // simplesmente não mostrar nada dela.
   const aiNotice = aiStatusNotice(aiStatus, ai.loadFailed, ai.retrying);
 
+  // Assinaturas e recorrências (sem IA, vale para qualquer grupo): o cartão está sempre no Painel — com o total,
+  // com o vazio que explica o que vai aparecer, carregando, ou em erro com "tentar de novo". O Painel fica montado
+  // entre visitas, então pergunta de novo a cada volta.
+  const recurring = useRecurring();
+  useOnRefocus(() => void recurring.refetch({ cancelRefetch: false }));
+
   const [refreshing, setRefreshing] = React.useState(false);
   const handleRefresh = async () => {
     setRefreshing(true);
+    // As recorrências são pedidas junto e esperadas no fim (em erro o cartão mostra o próprio estado).
+    const recurringRefresh = recurring.refetch();
     // Puxar para atualizar também consulta o status da IA (não só os números do Painel).
     await Promise.all([refetch(), ai.refresh()]);
+    await recurringRefresh;
     setRefreshing(false);
   };
 
@@ -225,6 +245,38 @@ export default function DashboardScreen() {
                 <Text style={styles.aiCardAction}>Verificar agora</Text>
               </TouchableOpacity>
             )}
+          </View>
+        )}
+
+        {/* Assinaturas e recorrências: quanto o grupo paga por mês no que se repete. Nunca some em silêncio. */}
+        {recurring.data ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.aiCard}
+            onPress={() => router.push('/(main)/recurring' as any)}
+            accessibilityLabel={isRecurringEmpty(recurring.data) ? RECURRING_CARD_EMPTY_LABEL : recurringCardLabel(recurring.data)}
+          >
+            <Ionicons name="repeat-outline" size={20} color={colors.primaryLight} />
+            <Text style={styles.aiCardText}>
+              {isRecurringEmpty(recurring.data) ? RECURRING_CARD_EMPTY_TEXT : recurringCardText(recurring.data)}
+            </Text>
+            <Text style={styles.aiCardAction}>Ver</Text>
+          </TouchableOpacity>
+        ) : recurring.isError ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.aiCard}
+            onPress={() => void recurring.refetch()}
+            accessibilityLabel={RECURRING_CARD_ERROR_LABEL}
+          >
+            <Ionicons name="alert-circle-outline" size={20} color={colors.warning} />
+            <Text style={styles.aiCardText}>{RECURRING_CARD_ERROR_TEXT}</Text>
+            <Text style={styles.aiCardAction}>Tentar de novo</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.aiCard} accessible accessibilityLabel="Carregando as recorrências">
+            <Ionicons name="repeat-outline" size={20} color={colors.textMuted} />
+            <Text style={styles.aiCardText}>Carregando as recorrências…</Text>
           </View>
         )}
 

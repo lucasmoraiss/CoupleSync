@@ -67,6 +67,10 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<AiUserPreference> AiUserPreferences => Set<AiUserPreference>();
 
+    public DbSet<RecurringStream> RecurringStreams => Set<RecurringStream>();
+
+    public DbSet<RecurringStreamItem> RecurringStreamItems => Set<RecurringStreamItem>();
+
     // BudgetAllocation is NOT exposed as a top-level DbSet.
     // All allocation access must go through BudgetPlan.Allocations navigation
     // to ensure couple-level data isolation via ICoupleScoped query filter on BudgetPlan.
@@ -847,6 +851,90 @@ public sealed class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RecurringStream>(entity =>
+        {
+            // What the group pays again and again, as the detector found it. One row per (group, merchant_key, kind,
+            // cadence), recalculated in place: the id and what the person said about it stay.
+            entity.ToTable("recurring_streams");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.MerchantKey).HasColumnName("merchant_key").HasMaxLength(RecurringStream.MaxMerchantKeyLength).IsRequired();
+            entity.Property(x => x.DisplayName).HasColumnName("display_name").HasMaxLength(RecurringStream.MaxDisplayNameLength).IsRequired();
+            // "merchant" or "description": a name read from a description never goes to an AI provider.
+            entity.Property(x => x.NameSource).HasColumnName("name_source").HasMaxLength(RecurringStream.MaxNameSourceLength).IsRequired();
+            entity.Property(x => x.Kind).HasColumnName("kind").HasMaxLength(16).IsRequired();
+            entity.Property(x => x.VariableAmount).HasColumnName("variable_amount").IsRequired();
+            entity.Property(x => x.Cadence).HasColumnName("cadence").HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Category).HasColumnName("category").HasMaxLength(64).IsRequired();
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.MedianAmount).HasColumnName("median_amount").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.LastAmount).HasColumnName("last_amount").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.PreviousAmount).HasColumnName("previous_amount").HasPrecision(18, 2);
+            entity.Property(x => x.AnnualCost).HasColumnName("annual_cost").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.Occurrences).HasColumnName("occurrences").IsRequired();
+            entity.Property(x => x.MissedCount).HasColumnName("missed_count").IsRequired();
+            entity.Property(x => x.FirstSeenLocal).HasColumnName("first_seen_local").IsRequired();
+            entity.Property(x => x.LastSeenLocal).HasColumnName("last_seen_local").IsRequired();
+            entity.Property(x => x.NextExpectedLocal).HasColumnName("next_expected_local");
+            entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(24).IsRequired();
+            entity.Property(x => x.Flags).HasColumnName("flags").HasMaxLength(128).IsRequired();
+            entity.Property(x => x.Confidence).HasColumnName("confidence").HasMaxLength(16).IsRequired();
+            entity.Property(x => x.InstallmentNumber).HasColumnName("installment_number");
+            entity.Property(x => x.InstallmentTotal).HasColumnName("installment_total");
+            entity.Property(x => x.RemainingAmount).HasColumnName("remaining_amount").HasPrecision(18, 2);
+            entity.Property(x => x.EndMonth).HasColumnName("end_month").HasMaxLength(7);
+            entity.Property(x => x.UserOverride).HasColumnName("user_override").HasMaxLength(16);
+            entity.Property(x => x.OverrideByUserId).HasColumnName("override_by_user_id");
+            entity.Property(x => x.OverrideAtUtc).HasColumnName("override_at_utc");
+            entity.Property(x => x.DetectedAtUtc).HasColumnName("detected_at_utc").IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+            entity.Ignore(x => x.FlagList);
+            entity.Ignore(x => x.EffectiveKind);
+            entity.Ignore(x => x.IsHidden);
+
+            entity.HasIndex(x => new { x.CoupleId, x.MerchantKey, x.Kind, x.Cadence }).IsUnique();
+            entity.HasIndex(x => new { x.CoupleId, x.Status });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.Items)
+                .WithOne()
+                .HasForeignKey(x => x.StreamId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.Navigation(x => x.Items).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+
+        modelBuilder.Entity<RecurringStreamItem>(entity =>
+        {
+            // One charge of a stream. It goes away with the stream and with the transaction: deleting a transaction
+            // is never held back by a recurrence.
+            entity.ToTable("recurring_stream_items");
+            entity.HasKey(x => x.Id);
+            // The id is given by the code: an item added to a stream that is already stored is a new row, not a change.
+            entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.StreamId).HasColumnName("stream_id").IsRequired();
+            entity.Property(x => x.TransactionId).HasColumnName("transaction_id").IsRequired();
+
+            entity.HasIndex(x => new { x.StreamId, x.TransactionId }).IsUnique();
+            entity.HasIndex(x => x.TransactionId);
+            entity.HasIndex(x => x.CoupleId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Transaction>()
+                .WithMany()
+                .HasForeignKey(x => x.TransactionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         ApplyCoupleQueryFilters(modelBuilder);

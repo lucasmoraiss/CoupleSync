@@ -96,6 +96,7 @@ public sealed class TransactionsController : ControllerBase
     public async Task<ActionResult<TransactionResponse>> PatchCategory(
         Guid id,
         [FromBody] PatchTransactionCategoryRequest request,
+        [FromServices] CoupleSync.Application.AiFacts.RecurrenceRunLog recurrenceRuns,
         CancellationToken cancellationToken)
     {
         var coupleId = GetAuthenticatedCoupleId();
@@ -103,6 +104,8 @@ public sealed class TransactionsController : ControllerBase
         var result = await _updateCategoryHandler.HandleAsync(
             new UpdateTransactionCategoryCommand(id, coupleId, request.Category),
             cancellationToken);
+        // "Assinaturas e recorrências" is calculated again in its next request (an edit leaves no other trace).
+        recurrenceRuns.TransactionEdited(coupleId);
 
         var currentUserId = GetAuthenticatedUserId();
         var authorName = result.UserId == currentUserId ? GetAuthenticatedUserName() : "Desconhecido";
@@ -124,6 +127,7 @@ public sealed class TransactionsController : ControllerBase
     public async Task<ActionResult<TransactionResponse>> Patch(
         Guid id,
         [FromBody] PatchTransactionRequest request,
+        [FromServices] CoupleSync.Application.AiFacts.RecurrenceRunLog recurrenceRuns,
         CancellationToken cancellationToken)
     {
         var coupleId = GetAuthenticatedCoupleId();
@@ -135,6 +139,8 @@ public sealed class TransactionsController : ControllerBase
         var transaction = await _updateHandler.HandleAsync(
             new UpdateTransactionCommand(id, coupleId, request.Amount, request.Description, eventTs, request.Category, request.Merchant),
             cancellationToken);
+        // "Assinaturas e recorrências" is calculated again in its next request (an edit leaves no other trace).
+        recurrenceRuns.TransactionEdited(coupleId);
 
         var authorName = transaction.UserId == GetAuthenticatedUserId() ? GetAuthenticatedUserName() : "Desconhecido";
 

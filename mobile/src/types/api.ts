@@ -641,3 +641,67 @@ export interface ConfirmBankReviewResponse {
 export interface RestoreBankReviewResponse {
   readonly restored: readonly string[];
 }
+
+// ─── Assinaturas e recorrências (GET /api/v1/ai/recurring) ────────────────────
+export type RecurringKind = 'Subscription' | 'FixedBill' | 'Installment' | 'Habit';
+/** `Irregular`: pequeno gasto frequente (4 ou mais compras em 30 dias), sem intervalo fixo. */
+export type RecurringCadence = 'Weekly' | 'Monthly' | 'Yearly' | 'Irregular';
+export type RecurringStatus = 'Active' | 'SuspectedDormant' | 'Stopped';
+export type RecurringFlag = 'Forgotten' | 'PriceIncrease' | 'New' | 'ChargedAfterCancel';
+export type RecurringOverride = 'NotRecurring' | 'Cancelled' | 'Subscription' | 'FixedBill';
+
+export interface RecurringItemResponse {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: RecurringKind;
+  readonly variableAmount: boolean;
+  readonly cadence: RecurringCadence;
+  /** O valor típico de hoje (a mediana das 3 últimas cobranças quando o valor varia). */
+  readonly amount: number;
+  readonly lastAmount: number;
+  readonly previousAmount?: number | null;
+  readonly annualCost: number;
+  readonly occurrences: number;
+  readonly missedCount?: number;
+  /** Datas no calendário de Brasília, "AAAA-MM-DD". */
+  readonly firstSeen: string;
+  readonly lastSeen: string;
+  readonly nextExpected?: string | null;
+  readonly status: RecurringStatus;
+  readonly flags: readonly RecurringFlag[];
+  /** `Low`: parcela provável (uma marca "n/N" só). */
+  readonly confidence?: 'High' | 'Medium' | 'Low';
+  readonly category: string;
+  readonly person?: { readonly userId: string; readonly name: string } | null;
+  readonly installment?: {
+    readonly number: number;
+    readonly total: number;
+    readonly remainingAmount: number;
+    /** "AAAA-MM" da última parcela. */
+    readonly endMonth: string;
+  } | null;
+  readonly override?: RecurringOverride | null;
+}
+
+export interface RecurringListResponse {
+  readonly monthlyTotal: number;
+  readonly annualTotal: number;
+  readonly detectedAtUtc: string;
+  readonly subscriptions: readonly RecurringItemResponse[];
+  readonly fixedBills: readonly RecurringItemResponse[];
+  readonly installments: readonly RecurringItemResponse[];
+  readonly habits: readonly RecurringItemResponse[];
+  readonly hidden: readonly RecurringItemResponse[];
+  readonly installmentsByMonth?: readonly { readonly month: string; readonly amount: number }[];
+}
+
+export interface RecurringChargeResponse {
+  readonly transactionId: string;
+  readonly date: string;
+  readonly amount: number;
+  readonly merchant: string;
+}
+
+export interface RecurringChargesResponse {
+  readonly transactions: readonly RecurringChargeResponse[];
+}

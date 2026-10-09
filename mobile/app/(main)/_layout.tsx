@@ -118,6 +118,7 @@ export default function MainLayout() {
       <Tabs.Screen name="settings/openfinance/index" options={{ href: null }} />
       <Tabs.Screen name="settings/openfinance/wizard" options={{ href: null }} />
       <Tabs.Screen name="openfinance/review" options={{ href: null }} />
+      <Tabs.Screen name="recurring/index" options={{ href: null }} />
       <Tabs.Screen name="ocr-upload" options={{ href: null }} />
       <Tabs.Screen name="ocr-review" options={{ href: null }} />
       <Tabs.Screen name="transactions/new" options={{ href: null }} />

@@ -153,6 +153,12 @@ public static class DependencyInjection
         services.AddScoped<IAiUsageRepository, AiUsageRepository>();
         services.AddScoped<IAiPeopleReader, AiPeopleReader>();
         services.AddScoped<ILlmGateway, LlmGateway>();
+
+        // Recurrences (no AI): the streams of each group and when each group was last calculated in this process.
+        services.Configure<CoupleSync.Application.AiFacts.RecurrenceOptions>(
+            configuration.GetSection(CoupleSync.Application.AiFacts.RecurrenceOptions.SectionName));
+        services.AddSingleton<CoupleSync.Application.AiFacts.RecurrenceRunLog>();
+        services.AddScoped<CoupleSync.Application.AiFacts.IRecurringStreamRepository, RecurringStreamRepository>();
     }
 
     private static readonly TimeSpan LlmHttpTimeout = TimeSpan.FromSeconds(90);
