@@ -93,6 +93,8 @@ public sealed class AppVersionEndpointTests
     [InlineData("", null)]
     [InlineData("a mais nova", null)]
     [InlineData("1.1", null)]
+    // Above the latest published version (1.1.0): it would lock everybody out, so it is ignored.
+    [InlineData("11.0.0", null)]
     public async Task TheMinimumVersion_ComesFromTheEnvironmentVariable_InvalidOrAbsentIsNull(string configured, string? expected)
     {
         await using var factory = new AppVersionApiFactory(new Dictionary<string, string?> { ["APP_MINIMUM_VERSION"] = configured });
@@ -104,6 +106,35 @@ public sealed class AppVersionEndpointTests
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(expected, payload.GetProperty("minimumVersion").GetString());
         Assert.Equal("1.1.0", payload.GetProperty("latestVersion").GetString());
+    }
+
+    [Fact]
+    public async Task WithGitHubDown_TheMinimumVersionIsNotAnswered_NobodyIsBlockedWithoutAKnownLatestVersion()
+    {
+        await using var factory = new AppVersionApiFactory(new Dictionary<string, string?> { ["APP_MINIMUM_VERSION"] = "1.1.0" });
+        factory.GitHub.NetworkDown = true;
+        using var client = factory.CreateClient();
+
+        var payload = await client.GetFromJsonAsync<JsonElement>(Route);
+
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("latestVersion").ValueKind);
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("minimumVersion").ValueKind);
+    }
+
+    [Theory]
+    [InlineData("github.test:443/repos/example/app/releases/latest")]
+    [InlineData("ftp://github.test/repos/example/app/releases/latest")]
+    public async Task ALookupAddressThatIsNotHttp_Answers200WithNull_Never500(string address)
+    {
+        await using var factory = new AppVersionApiFactory(new Dictionary<string, string?> { ["AppUpdate:LatestReleaseUrl"] = address });
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(Route);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("latestVersion").ValueKind);
+        Assert.Equal(0, factory.GitHub.Calls);
     }
 
     // ---------------------------------------------------------------- B2

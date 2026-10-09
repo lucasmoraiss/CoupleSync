@@ -27,6 +27,12 @@ internal sealed class FakeGitHubReleases : HttpMessageHandler
     /// <summary>Every request times out (what HttpClient raises when its Timeout elapses).</summary>
     public bool TimesOut { get; set; }
 
+    /// <summary>
+    /// When set, every request is recorded and then waits here (GitHub being slow) until the test completes it;
+    /// the wait ends early if the caller gives up.
+    /// </summary>
+    public TaskCompletionSource? Hold { get; set; }
+
     public IReadOnlyList<RecordedGitHubRequest> Requests
     {
         get { lock (_gate) return _requests.ToList(); }
@@ -37,7 +43,7 @@ internal sealed class FakeGitHubReleases : HttpMessageHandler
         get { lock (_gate) return _requests.Count; }
     }
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         lock (_gate)
         {
@@ -51,11 +57,13 @@ internal sealed class FakeGitHubReleases : HttpMessageHandler
         if (!string.Equals(request.RequestUri!.ToString(), LatestReleaseUrl, StringComparison.Ordinal))
             throw new InvalidOperationException($"The fake GitHub was called with another address: {request.RequestUri}.");
 
+        if (Hold is { } hold) await hold.Task.WaitAsync(cancellationToken);
+
         if (NetworkDown) throw new HttpRequestException("Connection refused (fake).");
         if (TimesOut) throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout (fake).", new TimeoutException());
 
         var body = Body ?? "{\"url\":\"https://github.test/releases/1\",\"tag_name\":\"" + TagName + "\",\"draft\":false,\"prerelease\":false}";
-        return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
+        return new HttpResponseMessage(Status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
     }
 }
 

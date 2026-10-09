@@ -12,8 +12,29 @@ public static class AppVersionNumber
         RegexOptions.CultureInvariant | RegexOptions.Singleline,
         TimeSpan.FromMilliseconds(100));
 
+    /// <summary>-1, 0 or 1 by number (<c>1.10.0</c> is above <c>1.9.0</c>); null when either is not a version.</summary>
+    public static int? Compare(string? left, string? right)
+    {
+        var a = Parts(left);
+        var b = Parts(right);
+        if (a is null || b is null) return null;
+
+        for (var i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
+        }
+
+        return 0;
+    }
+
     /// <summary><c>v1.1.0</c>, <c>1.1.0-pit</c> → <c>1.1.0</c>; anything that is not a version → null.</summary>
     public static string? Normalize(string? text)
+    {
+        var parts = Parts(text);
+        return parts is null ? null : string.Join('.', parts.Select(part => part.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    private static int[]? Parts(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
 
@@ -29,8 +50,8 @@ public static class AppVersionNumber
 
         if (!match.Success) return null;
 
-        return string.Join('.', Enumerable.Range(1, 3).Select(group =>
-            int.Parse(match.Groups[group].Value, NumberStyles.None, CultureInfo.InvariantCulture)
-                .ToString(CultureInfo.InvariantCulture)));
+        return Enumerable.Range(1, 3)
+            .Select(group => int.Parse(match.Groups[group].Value, NumberStyles.None, CultureInfo.InvariantCulture))
+            .ToArray();
     }
 }

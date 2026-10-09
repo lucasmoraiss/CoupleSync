@@ -127,11 +127,73 @@ public sealed class GitHubLatestReleaseClientTests
     [InlineData("   ")]
     [InlineData(null)]
     [InlineData("isto não é um endereço")]
+    // Absolute addresses that HttpClient refuses to send (it would throw NotSupportedException): not http(s).
+    [InlineData("github.test:443/repos/example/app/releases/latest")]
+    [InlineData("ftp://github.test/repos/example/app/releases/latest")]
+    [InlineData("file:///repos/example/app/releases/latest")]
+    [InlineData("/repos/example/app/releases/latest")]
     public async Task WithoutAValidAddress_ThereIsNoLookup(string? address)
     {
         Assert.Null(await Client(address).GetLatestTagAsync(CancellationToken.None));
 
         Assert.Equal(0, _gitHub.Calls);
+    }
+
+    [Fact]
+    public async Task AFailureAfterAGoodAnswer_KeepsTheLastGoodTag_AndStillAsksAgainAfterAFewMinutes()
+    {
+        using var client = Client();
+        Assert.Equal("v1.1.0", await client.GetLatestTagAsync(CancellationToken.None));
+
+        // The hour is over and GitHub now refuses (the 60/h limit is shared by address): the app keeps its notice.
+        _clock.UtcNow += TimeSpan.FromMinutes(61);
+        _gitHub.Status = HttpStatusCode.Forbidden;
+        Assert.Equal("v1.1.0", await client.GetLatestTagAsync(CancellationToken.None));
+        Assert.Equal(2, _gitHub.Calls);
+
+        // The failure is remembered for a few minutes like any other...
+        _clock.UtcNow += TimeSpan.FromMinutes(4);
+        Assert.Equal("v1.1.0", await client.GetLatestTagAsync(CancellationToken.None));
+        Assert.Equal(2, _gitHub.Calls);
+
+        // ...and then GitHub is asked again; a new good answer replaces the kept one.
+        _clock.UtcNow += TimeSpan.FromMinutes(2);
+        _gitHub.Status = HttpStatusCode.OK;
+        _gitHub.TagName = "v1.2.0";
+        Assert.Equal("v1.2.0", await client.GetLatestTagAsync(CancellationToken.None));
+        Assert.Equal(3, _gitHub.Calls);
+    }
+
+    [Fact]
+    public async Task TheLastGoodTag_IsNotKeptForever_AfterADayOfFailuresItIsUnknown()
+    {
+        using var client = Client();
+        Assert.Equal("v1.1.0", await client.GetLatestTagAsync(CancellationToken.None));
+        _gitHub.NetworkDown = true;
+
+        _clock.UtcNow += TimeSpan.FromHours(23);
+        Assert.Equal("v1.1.0", await client.GetLatestTagAsync(CancellationToken.None));
+
+        _clock.UtcNow += TimeSpan.FromHours(2);
+        Assert.Null(await client.GetLatestTagAsync(CancellationToken.None));
+        Assert.Equal(TimeSpan.FromHours(24), GitHubLatestReleaseClient.LastGoodLifetime);
+    }
+
+    [Fact]
+    public async Task TheCallerGivingUpInTheMiddleOfTheLookup_IsNotRememberedAsAFailure()
+    {
+        using var client = Client();
+        _gitHub.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var givingUp = new CancellationTokenSource();
+
+        var lookup = client.GetLatestTagAsync(givingUp.Token);
+        await WaitUntilAsync(() => _gitHub.Calls == 1);
+        await givingUp.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lookup);
+
+        _gitHub.Hold = null;
+        Assert.Equal("v1.1.0", await client.GetLatestTagAsync(CancellationToken.None));
+        Assert.Equal(2, _gitHub.Calls);
     }
 
     [Fact]
@@ -150,8 +212,18 @@ public sealed class GitHubLatestReleaseClientTests
     public async Task RequestsThatArriveTogether_ShareOneLookup()
     {
         using var client = Client();
+        // GitHub holds the first answer: without "one lookup at a time" every one of the 20 would be calling it by now.
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _gitHub.Hold = hold;
 
-        var tags = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => Task.Run(() => client.GetLatestTagAsync(CancellationToken.None))));
+        var lookups = Enumerable.Range(0, 20).Select(_ => Task.Run(() => client.GetLatestTagAsync(CancellationToken.None))).ToArray();
+        await WaitUntilAsync(() => _gitHub.Calls >= 1);
+        await Task.Delay(300);
+        Assert.Equal(1, _gitHub.Calls);
+        Assert.All(lookups, lookup => Assert.False(lookup.IsCompleted));
+
+        hold.SetResult();
+        var tags = await Task.WhenAll(lookups);
 
         Assert.All(tags, tag => Assert.Equal("v1.1.0", tag));
         Assert.Equal(1, _gitHub.Calls);
@@ -171,12 +243,21 @@ public sealed class GitHubLatestReleaseClientTests
     [InlineData("v1.1.0", "", "1.1.0", null)]
     [InlineData("v1.2.0", "1.1.0", "1.2.0", "1.1.0")]
     [InlineData("v1.0.0-pit", "v1.0.0", "1.0.0", "1.0.0")]
-    [InlineData(null, "1.1.0", null, "1.1.0")]
     [InlineData("nightly", "qualquer", null, null)]
+    // A minimum above the latest published APK would lock everybody out with no APK to unlock them: ignored.
+    [InlineData("v1.1.0", "11.0.0", "1.1.0", null)]
+    [InlineData("v1.1.0", "1.1.1", "1.1.0", null)]
+    [InlineData("v1.10.0", "1.9.0", "1.10.0", "1.9.0")]
+    // Without knowing the latest there is no telling whether such an APK exists: no minimum either.
+    [InlineData(null, "1.1.0", null, null)]
+    [InlineData("nightly", "1.1.0", null, null)]
     public async Task TheService_NormalizesBothVersions_AndAlwaysGivesTheFixedDownloadLink(
         string? latestTag, string minimum, string? expectedLatest, string? expectedMinimum)
     {
-        var service = new AppVersionService(new FixedSource(latestTag), Options.Create(new AppUpdateOptions { MinimumVersion = minimum }));
+        var service = new AppVersionService(
+            new FixedSource(latestTag),
+            Options.Create(new AppUpdateOptions { MinimumVersion = minimum }),
+            NullLogger<AppVersionService>.Instance);
 
         var info = await service.GetAsync(CancellationToken.None);
 
@@ -185,7 +266,61 @@ public sealed class GitHubLatestReleaseClientTests
         Assert.Equal("https://github.com/lucasmoraiss/CoupleSync/releases/latest/download/couplesync.apk", info.DownloadUrl);
     }
 
+    [Fact]
+    public async Task AMinimumAboveTheLatest_IsLoggedAsAnInvalidConfiguration()
+    {
+        var logger = new RecordingLogger<AppVersionService>();
+        var service = new AppVersionService(new FixedSource("v1.1.0"), Options.Create(new AppUpdateOptions { MinimumVersion = "11.0.0" }), logger);
+
+        await service.GetAsync(CancellationToken.None);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Warning, entry.Level);
+        Assert.Contains("APP_MINIMUM_VERSION", entry.Message);
+        Assert.Contains("11.0.0", entry.Message);
+    }
+
+    [Theory]
+    [InlineData("1.0.0", "1.1.0", -1)]
+    [InlineData("v1.1.0", "1.1.0-pit", 0)]
+    [InlineData("1.10.0", "1.9.0", 1)]
+    [InlineData("2.0.0", "1.99.99", 1)]
+    public void Versions_AreComparedByNumber(string left, string right, int expected)
+    {
+        Assert.Equal(expected, AppVersionNumber.Compare(left, right));
+    }
+
+    [Theory]
+    [InlineData(null, "1.0.0")]
+    [InlineData("1.0.0", "a mais nova")]
+    public void AnUnknownVersion_ComparesAsUnknown(string? left, string? right)
+    {
+        Assert.Null(AppVersionNumber.Compare(left, right));
+    }
+
     // ---------------------------------------------------------------- support
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The condition did not become true in 10 seconds.");
+            await Task.Delay(10);
+        }
+    }
+
+    private sealed class RecordingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((logLevel, formatter(state, exception)));
+    }
 
     private sealed class FixedSource : ILatestAppReleaseSource
     {

@@ -10,8 +10,9 @@ namespace CoupleSync.Infrastructure.Integrations.GitHub;
 /// <summary>
 /// Reads the latest release of the app from the GitHub API (public repository: no token is sent). The answer is kept
 /// in memory for an hour; a failure (GitHub down, slow, rate limited, unexpected body) is kept for a few minutes, so
-/// that the API neither hammers GitHub nor makes every app wait for the timeout. Nothing here ever throws to the
-/// caller except its own cancellation.
+/// that the API neither hammers GitHub nor makes every app wait for the timeout. While the lookup keeps failing the
+/// last good tag goes on being the answer (for a day at most), so that the notice in the app does not come and go
+/// with GitHub's limit of requests per address. Nothing here ever throws to the caller except its own cancellation.
 /// </summary>
 public sealed class GitHubLatestReleaseClient : ILatestAppReleaseSource, IDisposable
 {
@@ -21,11 +22,14 @@ public sealed class GitHubLatestReleaseClient : ILatestAppReleaseSource, IDispos
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
     public static readonly TimeSpan SuccessLifetime = TimeSpan.FromHours(1);
     public static readonly TimeSpan FailureLifetime = TimeSpan.FromMinutes(5);
+    /// <summary>How long the last good tag still answers while every new lookup fails.</summary>
+    public static readonly TimeSpan LastGoodLifetime = TimeSpan.FromHours(24);
 
     /// <summary>The answer of GitHub for one release is a few kilobytes; anything much larger is not read.</summary>
     public const int MaxResponseBytes = 1024 * 1024;
 
     private const string CacheKey = "app-update:latest-release-tag";
+    private const string LastGoodCacheKey = "app-update:latest-release-tag:last-good";
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IMemoryCache _cache;
@@ -56,8 +60,17 @@ public sealed class GitHubLatestReleaseClient : ILatestAppReleaseSource, IDispos
             if (_cache.TryGetValue(CacheKey, out cached) && cached is not null) return cached.Tag;
 
             var tag = await FetchAsync(ct);
-            _cache.Set(CacheKey, new CachedTag(tag), tag is null ? FailureLifetime : SuccessLifetime);
-            return tag;
+            if (tag is not null)
+            {
+                _cache.Set(CacheKey, new CachedTag(tag), SuccessLifetime);
+                _cache.Set(LastGoodCacheKey, new CachedTag(tag), LastGoodLifetime);
+                return tag;
+            }
+
+            // Failed: for a few minutes the answer is the last good tag, if there is one that is not too old.
+            var lastGood = _cache.TryGetValue(LastGoodCacheKey, out CachedTag? kept) ? kept?.Tag : null;
+            _cache.Set(CacheKey, new CachedTag(lastGood), FailureLifetime);
+            return lastGood;
         }
         finally
         {
@@ -71,7 +84,9 @@ public sealed class GitHubLatestReleaseClient : ILatestAppReleaseSource, IDispos
     {
         var address = _options.LatestReleaseUrl?.Trim();
         if (string.IsNullOrEmpty(address)) return null;
-        if (!Uri.TryCreate(address, UriKind.Absolute, out var uri))
+        // Only http(s): HttpClient throws NotSupportedException for any other absolute address ("host:443/...", ftp, file).
+        if (!Uri.TryCreate(address, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
         {
             _logger.LogWarning("App update: the address of the latest release is not a valid URL; no latest version.");
             return null;
@@ -109,7 +124,7 @@ public sealed class GitHubLatestReleaseClient : ILatestAppReleaseSource, IDispos
             _logger.LogWarning("App update: the latest release lookup timed out; no latest version for now.");
             return null;
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidOperationException or NotSupportedException)
         {
             _logger.LogWarning("App update: the latest release lookup failed ({Reason}); no latest version for now.", ex.GetType().Name);
             return null;
