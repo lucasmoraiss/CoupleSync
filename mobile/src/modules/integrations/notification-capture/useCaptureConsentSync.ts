@@ -27,7 +27,8 @@ export const CAPTURE_CONSENT_ROUTE = '/(main)/settings/capture-consent';
 /** Espera antes de tentar ler de novo o consentimento quando o armazenamento seguro falhou. */
 const CONSENT_RELOAD_DELAY_MS = 5_000;
 
-export function useCaptureConsentSync(): void {
+/** `canPrompt` falso: a tela de consentimento não pode abrir agora (ex.: bloqueio por versão mínima); a pergunta espera. */
+export function useCaptureConsentSync(canPrompt = true): void {
   const sessionUserId = useSessionStore((s) => s.userId);
   const loadConsent = useConsentStore((s) => s.load);
   const consentUserId = useConsentStore((s) => s.userId);
@@ -83,14 +84,14 @@ export function useCaptureConsentSync(): void {
   );
 
   useEffect(() => {
-    if (!decision.prompt) return;
+    if (!decision.prompt || !canPrompt) return;
     // Marcado já, antes de gravar e de navegar: a pergunta da análise com IA não abre por cima desta tela.
     noteCapturePromptOpening(sessionUserId);
     void useConsentStore.getState().markCapturePromptShown().then((recorded) => {
       if (recorded) router.push(CAPTURE_CONSENT_ROUTE as any);
       else clearCapturePromptOpening();
     });
-  }, [decision.prompt, sessionUserId]);
+  }, [decision.prompt, canPrompt, sessionUserId]);
 }
 
 /**

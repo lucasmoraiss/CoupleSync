@@ -1,5 +1,12 @@
 // AC-011: Shared API response types matching backend contracts
 
+/** GET /api/v1/app/version (anônima). Versões em `X.Y.Z`, ou null quando o servidor não sabe / não há mínima. */
+export interface AppVersionResponse {
+  readonly latestVersion: string | null;
+  readonly minimumVersion: string | null;
+  readonly downloadUrl: string;
+}
+
 export interface AuthUserResponse {
   readonly id: string;
   readonly email: string;

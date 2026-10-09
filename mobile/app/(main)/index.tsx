@@ -24,6 +24,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
+import { AppUpdateBanner } from '@/components/AppUpdateBanner';
 import { GroupSwitcher } from '@/components/GroupSwitcher';
 import { spokenBRL } from '@/utils/a11y';
 import { AI_STATUS_NOTICE_TEXT, aiStatusNotice, isAssistantVisible, shouldShowActivationCard } from '@/modules/ai/aiStatus';
@@ -195,6 +196,8 @@ export default function DashboardScreen() {
         <GroupSwitcher />
 
         <EmailVerificationBanner />
+
+        <AppUpdateBanner />
 
         {/* Enquanto o grupo não ativou a análise com IA (os números do Painel continuam iguais). */}
         {shouldShowActivationCard(aiStatus) && (
