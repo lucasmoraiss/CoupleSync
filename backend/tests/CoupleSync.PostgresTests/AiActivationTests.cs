@@ -122,7 +122,7 @@ public sealed class AiActivationTests
         await using var host = WithTheFakeProvider(factory);
         var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
 
-        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
         var id = await database.ScalarAsync<Guid>("SELECT id FROM ai_consents");
         var firstDate = await database.ScalarAsync<DateTime>("SELECT accepted_at_utc FROM ai_consents");
 
@@ -136,7 +136,7 @@ public sealed class AiActivationTests
         Assert.False((await ana.Client.GetFromJsonAsync<JsonElement>(Status)).GetProperty("enabled").GetBoolean());
 
         await Task.Delay(20);
-        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
 
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents"));
         Assert.Equal(id, await database.ScalarAsync<Guid>("SELECT id FROM ai_consents"));
@@ -153,7 +153,7 @@ public sealed class AiActivationTests
         await using var host = WithTheFakeProvider(factory);
         var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
 
-        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })));
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })));
 
         Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents"));
@@ -179,9 +179,9 @@ public sealed class AiActivationTests
         var group = ana.CoupleId!.Value;
 
         // Bruno switched it on; Ana only answered "not now"; another group (Carla) switched its own on.
-        Assert.Equal(HttpStatusCode.OK, (await bruno.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await bruno.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await ana.Client.PatchAsJsonAsync("/api/v1/ai/preferences", new { OnboardingAnswered = true })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await carla.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await carla.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
         var before = await ana.Client.GetFromJsonAsync<JsonElement>(Status);
         Assert.True(before.GetProperty("enabled").GetBoolean());
         Assert.Equal("Bruno", Assert.Single(before.GetProperty("acceptedBy").EnumerateArray()).GetProperty("name").GetString());
@@ -221,8 +221,8 @@ public sealed class AiActivationTests
         await using var host = WithTheFakeProvider(factory);
         var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
         var carla = await OpenFinanceTests.RegisterAsync(factory, host, "Carla");
-        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await carla.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await carla.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
 
         // One real call each through the chain (the fake provider), then rows of other days written straight in.
         Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto gastamos?" })).StatusCode);

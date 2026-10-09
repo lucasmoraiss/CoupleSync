@@ -278,19 +278,20 @@ public sealed class LlmGatewayTests : IDisposable
     [Fact]
     public async Task ALinkOfAProviderOutsideTheConsentedList_IsIgnoredWithAWarning_AndTheChainGoesOn()
     {
-        var groq = new ScriptedProvider("groq", "openai/gpt-oss-120b");
+        // A provider somebody configured (name, address, key, link) that the text in force does not name.
+        var mistral = new ScriptedProvider("mistral", "mistral-small");
         var gemini = new ScriptedProvider(Gemini, Flash);
-        _kit.Chain(AiChains.Assistant, groq, gemini);
+        _kit.Chain(AiChains.Assistant, mistral, gemini);
 
         var result = await _kit.AskAsync(_couple);
 
         Assert.Equal(LlmGatewayOutcome.Ok, result.Outcome);
         Assert.Equal(Gemini, result.Provider);
-        Assert.Equal(0, groq.Calls);
+        Assert.Equal(0, mistral.Calls);
         var warning = Assert.Single(_kit.Log.Entries, e => e.Level == LogLevel.Warning);
-        Assert.Contains("groq", warning.Message);
-        Assert.DoesNotContain(_kit.Rows(), r => r.Provider == "groq");
-        Assert.Equal(["gemini"], AiConsentCoverage.Providers);
+        Assert.Contains("mistral", warning.Message);
+        Assert.DoesNotContain(_kit.Rows(), r => r.Provider == "mistral");
+        Assert.Equal(["gemini", "groq"], AiConsentCoverage.Providers);
     }
 
     [Fact]

@@ -10,8 +10,11 @@ namespace CoupleSync.Domain.Entities;
 /// </summary>
 public sealed class AiConsent : ICoupleScoped
 {
-    /// <summary>The version of the AI text in force. A relevant change of the text raises it: every group goes back to "off".</summary>
-    public const int CurrentVersion = 1;
+    /// <summary>
+    /// The version of the AI text in force. A relevant change of the text raises it: every group goes back to "off".
+    /// 1: only Google (Gemini). 2: Google (Gemini) and Groq, the second provider.
+    /// </summary>
+    public const int CurrentVersion = 2;
 
     private AiConsent()
     {

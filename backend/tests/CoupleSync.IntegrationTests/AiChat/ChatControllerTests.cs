@@ -562,7 +562,7 @@ public sealed class ChatControllerTests
 
         // The group switches the AI on (ignored where the AI is not available: those tests expect exactly that).
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginAuth!.AccessToken);
-        await client.PostAsJsonAsync("/api/v1/ai/consent", new { Version = 1 });
+        await client.PostAsJsonAsync("/api/v1/ai/consent", new { Version = 2 });
         client.DefaultRequestHeaders.Authorization = null;
         return loginAuth.AccessToken;
     }
@@ -764,7 +764,7 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
         login.EnsureSuccessStatusCode();
         var loggedIn = await login.Content.ReadFromJsonAsync<JsonElement>();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loggedIn.GetProperty("accessToken").GetString());
-        if (acceptAi) await client.PostAsJsonAsync("/api/v1/ai/consent", new { Version = 1 });
+        if (acceptAi) await client.PostAsJsonAsync("/api/v1/ai/consent", new { Version = 2 });
         return client;
     }
 

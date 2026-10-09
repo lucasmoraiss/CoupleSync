@@ -94,9 +94,19 @@ public sealed class AiActivationService
     public const int MinUsageDays = 1;
     public const int MaxUsageDays = 90;
 
-    /// <summary>Where the data goes under the current consent text (design 7.3): only Google, in the United States.</summary>
-    private static readonly IReadOnlyList<AiProviderInfo> ConsentProviders =
-        [new AiProviderInfo("Google (Gemini)", "Estados Unidos", TrainsOnData: true)];
+    /// <summary>Google is always named, as it has been since version 1 of the text (design 7.3).</summary>
+    private static readonly AiProviderInfo Google = new("Google (Gemini)", "Estados Unidos", TrainsOnData: true);
+
+    /// <summary>
+    /// The other providers the consent text covers, as the person is told about them. Groq LLC is in the United
+    /// States and its terms forbid it to train on what is sent (Groq Services Agreement, 4.2, read on 2026-10-08).
+    /// A provider is only named while it really receives data: see <see cref="ProvidersInUse"/>.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, AiProviderInfo> OtherProviders =
+        new Dictionary<string, AiProviderInfo>(StringComparer.OrdinalIgnoreCase)
+        {
+            [AiOptions.GroqProviderName] = new("Groq", "Estados Unidos", TrainsOnData: false),
+        };
 
     private readonly IAiActivationRepository _repository;
     private readonly IAiUsageRepository _usage;
@@ -139,26 +149,60 @@ public sealed class AiActivationService
             AiConsent.CurrentVersion,
             acceptedBy,
             mine is null ? null : new AiMyAcceptance(mine.AcceptedAtUtc),
-            OnboardingPending: available && IsOnboardingPending(preference, mine, acceptedBy),
+            OnboardingPending: available && IsOnboardingPending(preference, mine, acceptedBy, await HasOldAcceptanceAsync(coupleId, userId, ct)),
             WeeklyEmailEnabled: preference?.WeeklyEmailEnabled ?? false,
             EmailVerified: await _repository.IsEmailVerifiedAsync(userId, ct),
             EmailConfigured: _emailSender.IsConfigured,
-            ConsentProviders,
+            ProvidersInUse(),
             // Only the Assistant exists in this phase; the others arrive with their own phases.
             new AiFeatureFlags(Assistant: available, Insights: false, Education: false, WeeklyEmail: false),
             new AiBudgetStatus(groupDay.Calls, _options.GroupDailyCalls, ResetsAtLocal(today)));
     }
 
     /// <summary>
-    /// The welcome screen is due when the person never answered it, or when someone else switched the AI on after
-    /// their last answer: the other member is told inside the app and can switch it off (design 7.4, decision 10).
+    /// Where the data goes NOW: Google, and each other covered provider that a chain can really reach — it has a
+    /// key and a link in some chain. Without the key of Groq the list is the one of version 1, only Google.
     /// </summary>
-    private static bool IsOnboardingPending(AiUserPreference? preference, AiAcceptance? mine, IReadOnlyList<AiAcceptance> acceptedBy)
+    private IReadOnlyList<AiProviderInfo> ProvidersInUse()
+    {
+        var providers = new List<AiProviderInfo> { Google };
+        if (_options.UseFakeProvider) return providers;
+
+        var links = AiChains.All.SelectMany(chain => _options.Chains.GetValueOrDefault(chain) ?? []).ToList();
+        foreach (var name in AiConsentCoverage.Providers)
+        {
+            if (!OtherProviders.TryGetValue(name, out var info)) continue;
+            var reachable = links.Any(link =>
+                string.Equals(link.Provider, name, StringComparison.OrdinalIgnoreCase)
+                && _catalog.Find(link.Provider, link.Model) is not null);
+            if (reachable) providers.Add(info);
+        }
+
+        return providers;
+    }
+
+    /// <summary>
+    /// The welcome screen is due when the person never answered it, when someone else switched the AI on after
+    /// their last answer — the other member is told inside the app and can switch it off (design 7.4, decision 10) —
+    /// or when the person had accepted an earlier version of the text: the text changed, so the question comes
+    /// back to who had said yes (design 7.1). An acceptance of an earlier version never counts as "switched on".
+    /// </summary>
+    private static bool IsOnboardingPending(AiUserPreference? preference, AiAcceptance? mine, IReadOnlyList<AiAcceptance> acceptedBy, bool hasOldAcceptance)
     {
         if (mine is not null) return false;
+        if (hasOldAcceptance) return true;
         if (preference?.OnboardingAnsweredAtUtc is not { } answeredAt) return true;
         return acceptedBy.Any(a => a.AcceptedAtUtc > answeredAt);
     }
+
+    /// <summary>The person's acceptances of this group that are not revoked and are of a version that is no longer in force.</summary>
+    private async Task<IReadOnlyList<AiConsent>> OldAcceptancesAsync(Guid coupleId, Guid userId, CancellationToken ct)
+        => (await _repository.GetActiveConsentsAsync(coupleId, ct))
+            .Where(c => c.UserId == userId && c.Version != AiConsent.CurrentVersion)
+            .ToList();
+
+    private async Task<bool> HasOldAcceptanceAsync(Guid coupleId, Guid userId, CancellationToken ct)
+        => (await OldAcceptancesAsync(coupleId, userId, ct)).Count > 0;
 
     public async Task<AiStatus> AcceptAsync(Guid coupleId, Guid userId, int version, CancellationToken ct)
     {
@@ -219,7 +263,14 @@ public sealed class AiActivationService
             var now = _clock.UtcNow;
             var preference = await PreferenceOfAsync(coupleId, userId, now, ct);
             if (weeklyEmail is { } enabled) preference.SetWeeklyEmail(enabled, now);
-            if (onboardingAnswered == true) preference.AnswerOnboarding(now);
+            if (onboardingAnswered == true)
+            {
+                preference.AnswerOnboarding(now);
+                // "Not now" to a new version of the text: the acceptance of the earlier one is over, by the person's
+                // own answer, and the question does not come back.
+                foreach (var old in await OldAcceptancesAsync(coupleId, userId, ct)) old.Revoke(now, userId);
+            }
+
             await SaveIgnoringTheSameAnswerTwiceAsync(ct);
         }
 
