@@ -352,27 +352,7 @@ describe('tela de boas-vindas: sair sozinha para o Painel', () => {
     expect(saving.leave).not.toHaveBeenCalled();
   });
 
-  it('a tela usa essa regra com o foco dela mesma', () => {
-    const source = fs.readFileSync(path.resolve(__dirname, '../../../../app/(main)/ai/welcome.tsx'), 'utf8');
-    expect(source).toMatch(/const \{ status, loadFailed, isFocused \} = useAiStatus\(\);/);
-    expect(source).toMatch(/leaveWelcomeIfDue\(leave, busy !== null, \{ isFocused, leave: \(\) => goToParent\('ai\/welcome'\) \}\);/);
-    // O efeito antigo, que navegava sem conferir o foco, não existe mais.
-    expect(source).not.toMatch(/if \(leave && busy === null\) goToParent/);
-  });
-
-  // Revisão 1, M3: `isFocused()` só é verdade na montagem porque o efeito de foco de useAiStatus() é declarado
-  // ANTES do efeito de saída (os efeitos rodam na ordem em que são declarados), e a tela só volta a ser montada
-  // em foco porque é descartada a cada visita. Trocar a ordem deixaria a tela presa sem nada a perguntar.
-  it('o status (que marca o foco) é ligado antes do efeito de saída, e a tela é remontada a cada visita', () => {
-    const source = fs.readFileSync(path.resolve(__dirname, '../../../../app/(main)/ai/welcome.tsx'), 'utf8');
-    const hook = source.indexOf('useAiStatus();');
-    const firstEffect = source.indexOf('useEffect(');
-    const leaveEffect = source.indexOf('leaveWelcomeIfDue(leave');
-    expect(hook).toBeGreaterThan(-1);
-    expect(leaveEffect).toBeGreaterThan(-1);
-    // Antes de qualquer efeito da tela, não só do de saída.
-    expect(hook).toBeLessThan(firstEffect);
-    expect(firstEffect).toBeLessThan(leaveEffect);
-    expect(source).toContain('export default resetOnFocus(AiWelcomeScreen);');
-  });
+  // A ligação com o foco de verdade (a tela montada já em foco, a escondida, a ordem dos efeitos do expo-router)
+  // está em welcomeLeave.test.ts. A premissa que estava aqui — "isFocused() de useAiStatus já é verdade na
+  // montagem" — era falsa (revisão final 1, I1).
 });
