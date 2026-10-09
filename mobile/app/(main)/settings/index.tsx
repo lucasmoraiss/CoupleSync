@@ -11,6 +11,9 @@ import { useNotificationPermission } from '@/modules/integrations/notification-c
 import { useEmailUnverified } from '@/components/EmailVerificationBanner';
 import { useMyGroups } from '@/modules/couple/useMyGroups';
 import { captureDestinationText } from '@/modules/couple/groups';
+import { APP_UPDATE_TEXT, settingsVersionRow } from '@/modules/appUpdate/appUpdate';
+import { openApkDownload } from '@/modules/appUpdate/openDownload';
+import { useAppUpdate } from '@/modules/appUpdate/useAppUpdate';
 
 export default function SettingsScreen() {
   const capture = useConsentStore((state) => state.record.capture);
@@ -20,6 +23,9 @@ export default function SettingsScreen() {
   const permission = useNotificationPermission();
   const captureStatus = describeCaptureStatus(capture, permission);
   const emailUnverified = useEmailUnverified();
+  // Versão do APK instalado e, havendo versão nova, o atalho para baixar. Aqui não há "Agora não".
+  const update = useAppUpdate();
+  const versionRow = settingsVersionRow(update);
 
   // Ligar sem aceite anterior abre a tela de consentimento; com aceite anterior religa na hora e, se faltar a
   // permissão do Android, leva até ela. Desligar vale na hora: o uploader para de enviar assim que o estado muda.
@@ -167,6 +173,23 @@ export default function SettingsScreen() {
             <Text style={[styles.menuArrow, { color: colors.error }]}>›</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Fora do cartão e depois dele: a lista acima não muda de tamanho nem de ordem. */}
+        {versionRow.versionText ? (
+          <View style={styles.versionRow}>
+            <Text style={styles.versionText}>{versionRow.versionText}</Text>
+            {versionRow.showUpdate ? (
+              <TouchableOpacity
+                style={styles.versionAction}
+                onPress={() => openApkDownload(update.downloadUrl, (message) => Alert.alert('Atualizar o app', message))}
+                accessibilityRole="button"
+                accessibilityLabel="Atualizar o app: baixar a versão nova"
+              >
+                <Text style={styles.versionActionText}>{APP_UPDATE_TEXT.updateApp}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -184,4 +207,8 @@ const styles = StyleSheet.create({
   menuDesc: { fontSize: 13, color: colors.textMuted, marginTop: 3 },
   menuArrow: { fontSize: 22, color: colors.textDisabled },
   divider: { height: 1, backgroundColor: colors.border, marginHorizontal: 20 },
+  versionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginTop: 12, minHeight: 44 },
+  versionText: { fontSize: 13, color: colors.textMuted },
+  versionAction: { minHeight: 44, justifyContent: 'center', paddingLeft: 12 },
+  versionActionText: { fontSize: 14, color: colors.primaryLight, fontWeight: '600' },
 });
