@@ -254,7 +254,10 @@ public sealed class RecurrenceService
     private async Task RecalculateAsync(Guid coupleId, DateTime nowUtc, CancellationToken ct)
     {
         var today = Today();
-        var since = BrazilTime.ToUtc(today.AddMonths(-_options.HistoryMonths).ToDateTime(TimeOnly.MinValue));
+        // 13 months for everything, and up to 26 so that a yearly stream is found with both its charges. The ceiling
+        // of rows is the same: when a group reaches it, what is left out is the oldest.
+        var months = Math.Max(_options.HistoryMonths, _options.YearlyHistoryMonths);
+        var since = BrazilTime.ToUtc(today.AddMonths(-months).ToDateTime(TimeOnly.MinValue));
         var rows = await _repository.ReadProjectionAsync(coupleId, since, _options.ProjectionRowCap, ct);
         var result = RecurrenceDetector.Detect(rows, today, _options);
 
@@ -263,6 +266,9 @@ public sealed class RecurrenceService
         var taken = existing.Select(e => (e.MerchantKey, e.Cadence)).ToHashSet();
         // Which stream each charge belongs to after this calculation.
         var ownerOfCharge = new Dictionary<Guid, Guid>();
+        // What each stored stream had before it, and where the series found for it ends.
+        var chargesBefore = existing.ToDictionary(e => e.Id, e => e.Items.Select(i => i.TransactionId).ToHashSet());
+        var endOfSeries = new Dictionary<Guid, DateOnly>();
 
         foreach (var group in result.Streams.GroupBy(d => (d.MerchantKey, d.Cadence)))
         {
@@ -295,14 +301,15 @@ public sealed class RecurrenceService
                 }
 
                 match.SetTransactions(detected.TransactionIds);
+                endOfSeries[match.Id] = detected.Facts.LastSeenLocal;
                 foreach (var transactionId in detected.TransactionIds) ownerOfCharge[transactionId] = match.Id;
             }
         }
 
         foreach (var gone in unmatched)
         {
-            // A yearly stream is two charges a year apart, and the detector reads 13 months: a month after the
-            // renewal the first charge is out of what is read and the stream cannot be found again. While its last
+            // A yearly stream is two charges a year apart. When its first charge is not read any more (a group at
+            // the ceiling of rows, where the oldest are left out) the stream cannot be found again: while its last
             // charge is still there and the next one is not late, the row stays as it is.
             if (IsYearlyStillDue(gone, result, today))
             {
@@ -321,12 +328,27 @@ public sealed class RecurrenceService
             var tolerance = stream.VariableAmount ? _options.VariableBillTolerance : _options.AmountTolerance;
             // A charge of another stream of the same establishment (the plan of the other person, of the same
             // amount) is not this one being charged again.
-            var chargedAgain = result.ChargesByKey.TryGetValue(BaseKey(stream.MerchantKey), out var charges)
-                               && charges.Any(c => c.TimestampUtc > stream.OverrideAtUtc!.Value
-                                                   && c.Amount >= stream.MedianAmount * (1 - tolerance)
-                                                   && c.Amount <= stream.MedianAmount * (1 + tolerance)
-                                                   && (!ownerOfCharge.TryGetValue(c.TransactionId, out var owner) || owner == stream.Id));
+            var similar = result.ChargesByKey.TryGetValue(BaseKey(stream.MerchantKey), out var charges)
+                ? charges
+                    .Where(c => c.Amount >= stream.MedianAmount * (1 - tolerance) && c.Amount <= stream.MedianAmount * (1 + tolerance))
+                    .ToList()
+                : [];
+            var chargedAgain = similar.Any(c => c.TimestampUtc > stream.OverrideAtUtc!.Value
+                                                && (!ownerOfCharge.TryGetValue(c.TransactionId, out var owner) || owner == stream.Id));
             stream.SetChargedAfterCancel(chargedAgain);
+
+            // A charge that came back too late to continue the series (after two missed ones) is in no series. It is
+            // shown with the stream all the same: among its charges, and as the date of its last charge. Once
+            // there, it stays while the transaction exists — also after the person says "cancelled" again.
+            var before = chargesBefore.GetValueOrDefault(stream.Id);
+            var end = endOfSeries.GetValueOrDefault(stream.Id, DateOnly.MinValue);
+            var cameBack = similar
+                .Where(c => !ownerOfCharge.ContainsKey(c.TransactionId)
+                            && c.LocalDate > end
+                            && (c.TimestampUtc > stream.OverrideAtUtc!.Value || before?.Contains(c.TransactionId) == true))
+                .Select(c => (c.TransactionId, c.LocalDate, c.TimestampUtc, c.Amount))
+                .ToList();
+            stream.AddChargesAfterCancel(cameBack);
         }
 
         await _repository.SaveChangesAsync(ct);

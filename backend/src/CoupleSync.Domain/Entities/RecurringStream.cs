@@ -299,6 +299,24 @@ public sealed class RecurringStream : ICoupleScoped
             _items.Add(RecurringStreamItem.Create(CoupleId, Id, id));
     }
 
+    /// <summary>
+    /// Charges that came after the person cancelled and are in no series (they came back too late to continue it):
+    /// they become charges of the stream, and the last of them is its last charge. Giving the same ones again
+    /// changes nothing.
+    /// </summary>
+    public void AddChargesAfterCancel(IReadOnlyCollection<(Guid TransactionId, DateOnly LocalDate, DateTime TimestampUtc, decimal Amount)> charges)
+    {
+        if (charges.Count == 0) return;
+        var present = _items.Select(i => i.TransactionId).ToHashSet();
+        foreach (var charge in charges.Where(c => present.Add(c.TransactionId)))
+            _items.Add(RecurringStreamItem.Create(CoupleId, Id, charge.TransactionId));
+
+        var last = charges.OrderBy(c => c.TimestampUtc).ThenBy(c => c.TransactionId).Last();
+        if (last.LocalDate <= LastSeenLocal) return;
+        LastSeenLocal = last.LocalDate;
+        LastAmount = last.Amount;
+    }
+
     /// <summary>Cut to the size of the column without splitting a surrogate pair (half an emoji is not valid text for the database).</summary>
     private static string Truncate(string text, int maxLength)
     {

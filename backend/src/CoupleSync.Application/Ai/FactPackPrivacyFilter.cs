@@ -77,14 +77,33 @@ public static partial class FactPackPrivacyFilter
         return result;
     }
 
+    /// <summary>Words that say the number next to them is a document or a contact, folded. Locked by a test.</summary>
+    public static IReadOnlyList<string> DocumentOrContactWords { get; } =
+    [
+        "cpf", "cnpj", "rg", "doc", "documento", "tel", "telefone", "fone", "cel", "celular", "whatsapp", "whats",
+        "zap", "contato", "fax", "pix", "chave",
+    ];
+
+    private static readonly HashSet<string> DocumentOrContactWordSet = DocumentOrContactWords.ToHashSet(StringComparer.Ordinal);
+
     /// <summary>
-    /// True when the text carries what identifies a person or an account: an e-mail, a random Pix key, a document
-    /// (CPF, CNPJ) or a phone — the same patterns <see cref="FilterFreeText"/> removes, without the catch-all for
-    /// long numbers.
+    /// True when a line of a statement (or a note) carries what identifies a person or an account: an e-mail, a
+    /// random Pix key, or a number that is a document or a phone. A number of 9 to 14 digits is one of those when
+    /// (a) it is written with the punctuation or the spaces of a CPF, a CNPJ or a phone, or (b) it has the check
+    /// digits of a CPF (11 digits) or of a CNPJ (14 digits), or (c) a word of
+    /// <see cref="DocumentOrContactWords"/> is in the text. A bare number that is none of those (a client code, a
+    /// contract) is not: <see cref="RemoveLongNumbers"/> takes it out of what is shown.
+    /// <see cref="FilterFreeText"/>, which decides what goes to a provider, does not use this: there every such
+    /// number is removed.
     /// </summary>
     public static bool HasDocumentOrContact(string? text)
-        => !string.IsNullOrEmpty(text)
-           && (Email().IsMatch(text) || Uuid().IsMatch(text) || ContactPatterns.Replace(text, Removed) != text);
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        if (Email().IsMatch(text) || Uuid().IsMatch(text)) return true;
+        if (ContactPatterns.HasFormatted(text) || ContactPatterns.HasValidRawDocument(text)) return true;
+        return ContactPatterns.HasAny(text)
+               && Word().Matches(text).Any(word => DocumentOrContactWordSet.Contains(PromptText.Fold(word.Value)));
+    }
 
     /// <summary>The text without its runs of 6 or more digits (the catch-all of <see cref="FilterFreeText"/>), each one replaced by a space.</summary>
     public static string RemoveLongNumbers(string text) => LongDigits().Replace(text, " ");
