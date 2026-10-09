@@ -257,6 +257,7 @@ public sealed class GitHubLatestReleaseClientTests
         var service = new AppVersionService(
             new FixedSource(latestTag),
             Options.Create(new AppUpdateOptions { MinimumVersion = minimum }),
+            new InvalidMinimumVersionNotice(),
             NullLogger<AppVersionService>.Instance);
 
         var info = await service.GetAsync(CancellationToken.None);
@@ -270,7 +271,8 @@ public sealed class GitHubLatestReleaseClientTests
     public async Task AMinimumAboveTheLatest_IsLoggedAsAnInvalidConfiguration()
     {
         var logger = new RecordingLogger<AppVersionService>();
-        var service = new AppVersionService(new FixedSource("v1.1.0"), Options.Create(new AppUpdateOptions { MinimumVersion = "11.0.0" }), logger);
+        var service = new AppVersionService(
+            new FixedSource("v1.1.0"), Options.Create(new AppUpdateOptions { MinimumVersion = "11.0.0" }), new InvalidMinimumVersionNotice(), logger);
 
         await service.GetAsync(CancellationToken.None);
 
@@ -278,6 +280,52 @@ public sealed class GitHubLatestReleaseClientTests
         Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Warning, entry.Level);
         Assert.Contains("APP_MINIMUM_VERSION", entry.Message);
         Assert.Contains("11.0.0", entry.Message);
+    }
+
+    [Fact]
+    public async Task TheInvalidMinimum_IsLoggedOncePerState_NotOnEveryRequest()
+    {
+        // The route is asked up to 30 times a minute per address, by a new service each time (it is scoped).
+        var logger = new RecordingLogger<AppVersionService>();
+        var notice = new InvalidMinimumVersionNotice();
+        var source = new FixedSource("v1.1.0");
+        AppVersionService Service(string minimum) =>
+            new(source, Options.Create(new AppUpdateOptions { MinimumVersion = minimum }), notice, logger);
+
+        for (var request = 0; request < 30; request++) await Service("11.0.0").GetAsync(CancellationToken.None);
+        Assert.Single(logger.Entries);
+
+        // Another latest version with the minimum still above it: a new state, said once more.
+        source.Tag = "v1.2.0";
+        for (var request = 0; request < 30; request++) await Service("11.0.0").GetAsync(CancellationToken.None);
+        Assert.Equal(2, logger.Entries.Count);
+        Assert.Contains("1.2.0", logger.Entries[1].Message);
+
+        // Valid again (the latest caught up), and nothing is logged; invalid again later, and it is said again.
+        source.Tag = "v11.0.0";
+        Assert.Equal("11.0.0", (await Service("11.0.0").GetAsync(CancellationToken.None)).MinimumVersion);
+        Assert.Equal(2, logger.Entries.Count);
+        source.Tag = "v1.2.0";
+        await Service("11.0.0").GetAsync(CancellationToken.None);
+        await Service("11.0.0").GetAsync(CancellationToken.None);
+        Assert.Equal(3, logger.Entries.Count);
+    }
+
+    [Fact]
+    public async Task TheLatestBeingUnknownForAWhile_DoesNotMakeTheSameInvalidMinimumBeLoggedAgain()
+    {
+        var logger = new RecordingLogger<AppVersionService>();
+        var notice = new InvalidMinimumVersionNotice();
+        var source = new FixedSource("v1.1.0");
+        AppVersionService Service() => new(source, Options.Create(new AppUpdateOptions { MinimumVersion = "11.0.0" }), notice, logger);
+
+        await Service().GetAsync(CancellationToken.None);
+        source.Tag = null;
+        Assert.Null((await Service().GetAsync(CancellationToken.None)).MinimumVersion);
+        source.Tag = "v1.1.0";
+        await Service().GetAsync(CancellationToken.None);
+
+        Assert.Single(logger.Entries);
     }
 
     [Theory]
@@ -324,11 +372,11 @@ public sealed class GitHubLatestReleaseClientTests
 
     private sealed class FixedSource : ILatestAppReleaseSource
     {
-        private readonly string? _tag;
+        public FixedSource(string? tag) => Tag = tag;
 
-        public FixedSource(string? tag) => _tag = tag;
+        public string? Tag { get; set; }
 
-        public Task<string?> GetLatestTagAsync(CancellationToken ct) => Task.FromResult(_tag);
+        public Task<string?> GetLatestTagAsync(CancellationToken ct) => Task.FromResult(Tag);
     }
 
     private sealed class AdjustableClock : Microsoft.Extensions.Internal.ISystemClock

@@ -182,6 +182,7 @@ public static class DependencyInjection
             c.MaxResponseContentBufferSize = GitHubLatestReleaseClient.MaxResponseBytes;
         });
         services.AddSingleton<ILatestAppReleaseSource, GitHubLatestReleaseClient>();
+        services.AddSingleton<CoupleSync.Application.AppUpdate.InvalidMinimumVersionNotice>();
     }
 
     /// <summary>
