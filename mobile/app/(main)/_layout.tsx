@@ -58,18 +58,26 @@ export default function MainLayout() {
     }
   }, [gate]);
 
+  // Ordem dos portões: sessão e grupo ativo primeiro (os dois saem desta área na hora, sem montar aba), depois a
+  // versão mínima. O bloqueio só existe com a resposta do servidor em mãos; posto antes deles, só valeria quando a
+  // resposta chegasse antes do redirecionamento. Com ele na tela, as abas não são montadas (e com elas as
+  // perguntas da IA e do Open Finance, que moram no Painel) e o que este layout dispara sozinho fica parado.
+  const blocked = gate === 'app' && blocksApp(update);
+  const appOpen = gate === 'app' && !blocked;
+
   // Captura de notificações só com o aceite do usuário (consentimento por usuário; ver useCaptureConsentSync).
-  useCaptureConsentSync();
+  // Sob o bloqueio a tela de consentimento não tem onde abrir: a pergunta (que só é feita uma vez) fica para depois.
+  useCaptureConsentSync(!blocked);
 
   // Open Finance: ao abrir o app, pede em silêncio a sincronização da minha conexão se a última tem mais de 6 horas.
-  useAutoSyncOnOpen(gate === 'app');
+  useAutoSyncOnOpen(appOpen);
 
   // AC-007: Register FCM device token once authenticated
   useEffect(() => {
-    if (gate === 'app') {
+    if (appOpen) {
       registerPushToken();
     }
-  }, [gate]);
+  }, [appOpen]);
 
   if (gate !== 'app') {
     return (
@@ -81,7 +89,7 @@ export default function MainLayout() {
 
   // Versão instalada abaixo da mínima aceita: a tela de bloqueio entra no lugar das abas. Nenhuma aba é montada,
   // então nenhuma consulta de dados do grupo sai enquanto o bloqueio vale.
-  if (blocksApp(update)) {
+  if (blocked) {
     return <AppUpdateRequiredScreen update={update} />;
   }
 

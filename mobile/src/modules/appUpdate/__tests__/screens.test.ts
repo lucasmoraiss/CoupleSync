@@ -101,7 +101,8 @@ describe('bloqueio por versão mínima (B7)', () => {
   it('o layout das abas devolve a tela de bloqueio ANTES de montar qualquer aba', () => {
     const block = layout.indexOf('<AppUpdateRequiredScreen');
     const tabs = layout.indexOf('<Tabs');
-    expect(layout).toMatch(/if \(blocksApp\(update\)\) \{\s*return <AppUpdateRequiredScreen update=\{update\} \/>;/);
+    expect(layout).toMatch(/const blocked = gate === 'app' && blocksApp\(update\);/);
+    expect(layout).toMatch(/if \(blocked\) \{\s*return <AppUpdateRequiredScreen update=\{update\} \/>;/);
     expect(block).toBeGreaterThan(-1);
     expect(block).toBeLessThan(tabs);
   });
@@ -113,6 +114,28 @@ describe('bloqueio por versão mínima (B7)', () => {
     expect(blockScreen).toMatch(/await logout\(\);/);
     expect(blockScreen).not.toContain('notNow');
     expect(blockScreen).not.toContain('dismiss');
+  });
+
+  it('os portões de sessão e de grupo vêm antes do bloqueio e continuam redirecionando', () => {
+    const gateReturn = layout.indexOf("if (gate !== 'app') {");
+    expect(gateReturn).toBeGreaterThan(-1);
+    expect(gateReturn).toBeLessThan(layout.indexOf('if (blocked) {'));
+    expect(layout).toMatch(/if \(gate === 'login'\) \{\s*router\.replace\('\/login' as any\);\s*\} else if \(gate === 'group-setup'\) \{/);
+  });
+
+  it('sob o bloqueio o layout não dispara nada do grupo: sincronização do Open Finance, token de push, pergunta da captura', () => {
+    expect(layout).toMatch(/const appOpen = gate === 'app' && !blocked;/);
+    expect(layout).toMatch(/useAutoSyncOnOpen\(appOpen\);/);
+    expect(layout).toMatch(/if \(appOpen\) \{\s*registerPushToken\(\);/);
+    expect(layout).not.toMatch(/gate === 'app'\) \{\s*registerPushToken/);
+    expect(layout).toMatch(/useCaptureConsentSync\(!blocked\);/);
+    const capture = read('src/modules/integrations/notification-capture/useCaptureConsentSync.ts');
+    expect(capture).toMatch(/if \(!decision\.prompt \|\| !canPrompt\) return;/);
+  });
+
+  it('o aviso do Painel ocupa uma linha só (não empurra os números do mês para fora da primeira tela)', () => {
+    expect(banner).toMatch(/banner: \{[^}]*flexDirection: 'row'/);
+    expect(painel.indexOf('<AppUpdateBanner />')).toBeGreaterThan(painel.indexOf('<EmailVerificationBanner />'));
   });
 
   it('a tela de bloqueio não faz nenhuma consulta (nem do grupo, nem outra)', () => {
