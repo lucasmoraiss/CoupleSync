@@ -19,7 +19,9 @@ public sealed record ArrivedBankLine(BankTransaction Row, string? PayerName)
 /// <item>the payment of a credit card bill, by its value (the total of a closed bill of a card of the group, due
 /// within ten days: each bill is paid by one debit only) or by its description: ignored;</item>
 /// <item>a credit paid by who holds another account of the group: ignored;</item>
-/// <item>an expense that looks like a transaction the app already has: it stays waiting, pointing to that one.</item>
+/// <item>an expense that looks like a transaction the app already has: it stays waiting, pointing to that one
+/// (<see cref="BankReconciliationRules.AssignSuspectedDuplicates"/>: a line judged again keeps the transaction it
+/// pointed to, the same day wins over the day next to it, one transaction is of one line only).</item>
 /// </list>
 /// Only lines <see cref="BankTransaction.OpenToAutomaticRules"/>, in reais and with a value. What is ignored was
 /// settled at the bank: a line the bank may still change or drop is never ignored. A purchase on a credit card is
@@ -50,7 +52,9 @@ public sealed class BankPreclassificationService
     /// <paramref name="connectorName"/>), looking at the whole group <paramref name="coupleId"/>.
     /// <paramref name="leaving"/> are the lines of the account this same reading takes out of the mirror (the bank no
     /// longer lists them): the transaction one of them was suspected of repeating is free for the line that replaces
-    /// it (a pending purchase the bank settled under another id).
+    /// it (a pending purchase the bank settled under another id). A line of <paramref name="lines"/> judged before (a
+    /// pending purchase settled under the same id) keeps the transaction it points to while that one is still there
+    /// and still looks like it; otherwise the suspicion is cleared and the line is judged as a new one.
     /// </summary>
     public async Task ApplyAsync(
         Guid coupleId,
@@ -96,61 +100,63 @@ public sealed class BankPreclassificationService
         var unpaidBills = await UnpaidBillsForAsync(
             coupleId, settled.Where(l => BankReconciliationRules.CanPayABill(FactsOf(l.Row), account.Type)).Select(l => l.Row.LocalDate).ToList(), ct);
 
+        // What a line that is leaving holds is free again; what a line judged here holds is its own to keep, and is
+        // among the candidates only for that.
         var (fromUtc, toUtcExclusive) = BankReconciliationRules.DuplicateSearchWindowUtc(firstDay, lastDay);
         var existing = open.Any(l => l.Row.IsExpense)
-            ? (await _sync.GetDuplicateCandidatesForJobAsync(
+            ? await _sync.GetDuplicateCandidatesForJobAsync(
                 coupleId,
                 fromUtc,
                 toUtcExclusive,
-                leaving.Where(l => l.MatchedTransactionId is not null).Select(l => l.Id).ToList(),
-                ct)).ToList()
+                leaving.Concat(open.Select(l => l.Row)).Where(l => l.MatchedTransactionId is not null).Select(l => l.Id).ToList(),
+                ct)
             : [];
 
         var now = _clock.UtcNow;
-        foreach (var line in open)
+        // What the bank has not settled may still change or vanish: it is never ignored, only (below) suspected.
+        foreach (var line in settled)
         {
             var row = line.Row;
             var facts = FactsOf(row);
 
-            // What the bank has not settled may still change or vanish: it is never ignored, only (below) suspected.
-            if (row.Status == BankTransactionStatus.Posted)
+            // A leg already paired is no longer one to pair: each leg pairs with one other only. The other leg may
+            // have arrived first and been ignored as a bill payment (the accounts of a bank are read one after
+            // the other): the pair is a transfer all the same, whatever the order of arrival.
+            var otherLeg = BankReconciliationRules.CanBeTransferLeg(facts, account.Type)
+                ? BankReconciliationRules.FindTransferCounterpart(facts, otherLegs.Where(c => c.CanBePairedAsTransfer), FactsOf)
+                : null;
+            if (otherLeg is not null)
             {
-                // A leg already paired is no longer one to pair: each leg pairs with one other only. The other leg may
-                // have arrived first and been ignored as a bill payment (the accounts of a bank are read one after
-                // the other): the pair is a transfer all the same, whatever the order of arrival.
-                var otherLeg = BankReconciliationRules.CanBeTransferLeg(facts, account.Type)
-                    ? BankReconciliationRules.FindTransferCounterpart(facts, otherLegs.Where(c => c.CanBePairedAsTransfer), FactsOf)
-                    : null;
-                if (otherLeg is not null)
-                {
-                    row.PairAsTransfer(now);
-                    otherLeg.PairAsTransfer(now);
-                    // Money that left for another account of the group, of exactly the total of a bill, counts as its
-                    // payment (it is what paying the card looks like): no other debit is ignored for that bill.
-                    unpaidBills.TakeBillPaidBy(facts);
-                    continue;
-                }
-
-                // The bill is taken (paid) whichever of the two halves of the rule says so: one bill, one payment.
-                // There are bills to take only when this account can pay one (a purchase on a card never does).
-                var paysABillByValue = unpaidBills.TakeBillPaidBy(facts);
-                if (paysABillByValue || BankReconciliationRules.IsBillPayment(facts, account.Type, row.DescriptionRaw ?? row.Description))
-                {
-                    row.IgnoreAutomatically(BankTransactionAutoReasons.BillPayment, now);
-                    continue;
-                }
-
-                if (BankReconciliationRules.IsCreditFromGroupHolder(facts, line.PayerName, holdersOfOtherAccounts))
-                {
-                    row.IgnoreAutomatically(BankTransactionAutoReasons.Transfer, now);
-                    continue;
-                }
+                row.PairAsTransfer(now);
+                otherLeg.PairAsTransfer(now);
+                // Money that left for another account of the group, of exactly the total of a bill, counts as its
+                // payment (it is what paying the card looks like): no other debit is ignored for that bill.
+                unpaidBills.TakeBillPaidBy(facts);
+                continue;
             }
 
-            var duplicate = BankReconciliationRules.PickSuspectedDuplicate(facts, connectorName, existing);
-            if (duplicate is null) continue;
-            row.MarkSuspectedDuplicate(duplicate.Id, now);
-            existing.Remove(duplicate); // one transaction of the app is suspected by one line only
+            // The bill is taken (paid) whichever of the two halves of the rule says so: one bill, one payment.
+            // There are bills to take only when this account can pay one (a purchase on a card never does).
+            var paysABillByValue = unpaidBills.TakeBillPaidBy(facts);
+            if (paysABillByValue || BankReconciliationRules.IsBillPayment(facts, account.Type, row.DescriptionRaw ?? row.Description))
+            {
+                row.IgnoreAutomatically(BankTransactionAutoReasons.BillPayment, now);
+                continue;
+            }
+
+            if (BankReconciliationRules.IsCreditFromGroupHolder(facts, line.PayerName, holdersOfOtherAccounts))
+                row.IgnoreAutomatically(BankTransactionAutoReasons.Transfer, now);
+        }
+
+        // What was not ignored, all at once: which transaction of the app each line looks like.
+        var waiting = open.Where(l => l.Row.OpenToAutomaticRules).ToList();
+        var suspects = BankReconciliationRules.AssignSuspectedDuplicates(
+            waiting.Select(l => new SuspicionQuestion(FactsOf(l.Row), l.Row.MatchedTransactionId)).ToList(), connectorName, existing);
+        for (var i = 0; i < waiting.Count; i++)
+        {
+            var row = waiting[i].Row;
+            if (suspects[i] is not { } suspect) row.ClearSuspectedDuplicate(now);
+            else if (row.MatchedTransactionId != suspect.Id) row.MarkSuspectedDuplicate(suspect.Id, now);
         }
     }
 

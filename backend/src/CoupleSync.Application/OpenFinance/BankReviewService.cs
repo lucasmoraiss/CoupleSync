@@ -91,6 +91,7 @@ public sealed class BankReviewService
         var ignored = await _sync.GetIgnoredAsync(coupleId, from, from.AddMonths(1), ct);
         var names = await _sync.GetAccountNamesAsync(coupleId, ct);
         var pending = await _sync.GetPendingExpensesAsync(coupleId, ct);
+        var ignoredDays = await _sync.GetIgnoredDaysAsync(coupleId, ct);
 
         var entries = await _sync.GetReviewIncomesAsync(coupleId, from, from.AddMonths(1), ct);
         var pendingIncomes = await _sync.GetPendingIncomesAsync(coupleId, ct);
@@ -103,6 +104,11 @@ public sealed class BankReviewService
         var expenseLines = Order(expenses).Select(r => MapLine(r, names, matches)).ToList();
 
         var byMonth = ByMonth(pending);
+        var ignoredByMonth = ignoredDays
+            .GroupBy(MonthKey, StringComparer.Ordinal)
+            .OrderByDescending(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new BankReviewIgnoredMonthDto(g.Key, g.Count()))
+            .ToList();
 
         return new BankReviewDto(
             key,
@@ -116,6 +122,8 @@ public sealed class BankReviewService
             byMonth,
             Order(ignored).Select(r => MapLine(r, names)).ToList(),
             expenseLines.Count(l => l.Match is not null),
+            ignoredDays.Count,
+            ignoredByMonth,
             Order(incomes).Select(r => MapLine(r, names)).ToList(),
             // As with the expenses: what can be registered now. The rest is still listed in its month.
             pendingIncomes.Count(p => BankTransaction.CanBecomeIncome(p.Status, p.Amount, p.Currency)),

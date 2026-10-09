@@ -98,10 +98,15 @@ public sealed record BankReviewMatchDto(
 
 public sealed record BankReviewMonthDto(string Month, int Pending);
 
+/// <summary>How many lines of a month ("yyyy-MM") are automatically ignored.</summary>
+public sealed record BankReviewIgnoredMonthDto(string Month, int Ignored);
+
 /// <summary>
 /// <c>Ignored</c>: the lines of the month ignored automatically (transfers between accounts of the group, bill
 /// payments), money that left and money that came in. <c>SuspectedDuplicates</c>: how many of <c>Expenses</c> look
-/// the same as a transaction the app already has. <c>Incomes</c>: the entries (money that came in) of the month
+/// the same as a transaction the app already has. <c>IgnoredAllMonths</c> and <c>IgnoredByMonth</c> (the latest
+/// month first): the automatically ignored lines of the group in every month, so that the app can lead to them also
+/// when nothing waits for the review. <c>Incomes</c>: the entries (money that came in) of the month
 /// waiting; <c>PendingIncomesAllMonths</c> and <c>PendingIncomesByMonth</c> are to them what <c>PendingAllMonths</c>
 /// and <c>PendingByMonth</c> are to the expenses. <c>Discarded</c> has the discarded lines of both kinds.
 /// </summary>
@@ -114,6 +119,8 @@ public sealed record BankReviewDto(
     IReadOnlyList<BankReviewMonthDto> PendingByMonth,
     IReadOnlyList<BankReviewLineDto> Ignored,
     int SuspectedDuplicates,
+    int IgnoredAllMonths,
+    IReadOnlyList<BankReviewIgnoredMonthDto> IgnoredByMonth,
     IReadOnlyList<BankReviewLineDto> Incomes,
     int PendingIncomesAllMonths,
     IReadOnlyList<BankReviewMonthDto> PendingIncomesByMonth);

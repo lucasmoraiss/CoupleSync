@@ -46,6 +46,7 @@ import {
   REGISTER_INCOME_FAILED_TEXT,
   REGISTER_INCOME_LABEL,
   allSelected,
+  answerableDuplicateCount,
   answerDuplicateNotice,
   answerDuplicateRequest,
   buildConfirmBatches,
@@ -78,7 +79,6 @@ import {
   selectAllIds,
   selectedTotalBrl,
   shiftMonth,
-  suspectedDuplicateCount,
   toggleSelected,
   unselectableReason,
   type DuplicateAnswer,
@@ -118,7 +118,9 @@ function BankReviewScreen() {
   // que tem algo esperando, despesa ou entrada.
   useEffect(() => {
     if (month === null && data) {
-      setMonth(initialReviewMonth(mergePendingByMonth(data.pendingByMonth, data.pendingIncomesByMonth), data.month));
+      setMonth(
+        initialReviewMonth(mergePendingByMonth(data.pendingByMonth, data.pendingIncomesByMonth), data.month, data.ignoredByMonth),
+      );
     }
   }, [month, data]);
 
@@ -312,7 +314,7 @@ function BankReviewScreen() {
   const otherMonths = mergePendingByMonth(data.pendingByMonth, data.pendingIncomesByMonth).filter((m) => m.month !== month && m.pending > 0);
   const nameError = incomeNameError(incomeName);
   const total = selectedTotalBrl(expenses, selected);
-  const duplicatesNotice = duplicateNoticeText(suspectedDuplicateCount(expenses));
+  const duplicatesNotice = duplicateNoticeText(answerableDuplicateCount(expenses));
 
   const header = (
     <View style={styles.header}>

@@ -24,6 +24,12 @@ public sealed record MoneyMovement(decimal Amount, string? Currency, DateOnly Lo
 public sealed record ExistingTransactionFacts(Guid Id, decimal Amount, string? Currency, DateOnly LocalDay, TransactionSource Source, string? Bank);
 
 /// <summary>
+/// A bank line asking which transaction of the app it looks like. <paramref name="CurrentSuspectId"/> is the one it
+/// already points to, when it was judged before (a purchase that was pending at the bank and has now been settled).
+/// </summary>
+public sealed record SuspicionQuestion(MoneyMovement Line, Guid? CurrentSuspectId = null);
+
+/// <summary>
 /// A bill of a credit card of the group, as far as the rules look at it. <paramref name="IsClosed"/> says the total
 /// no longer changes (see <see cref="CreditCardBill.IsClosedOn"/>).
 /// </summary>
@@ -216,6 +222,55 @@ public static class BankReconciliationRules
             .OrderBy(candidate => Math.Abs(candidate.LocalDay.DayNumber - bankLine.LocalDay.DayNumber))
             .ThenBy(candidate => candidate.Id)
             .FirstOrDefault();
+
+    /// <summary>
+    /// Which transaction each of <paramref name="lines"/> looks like, answered for all of them at once (the answers
+    /// come in the order of the lines; null: none). One transaction is the answer of one line only. In this order:
+    /// <list type="number">
+    /// <item>a line that already points to a transaction keeps it, while that transaction is still among
+    /// <paramref name="candidates"/> and still looks like it (<see cref="IsSuspectedDuplicate"/>): the suspicion
+    /// never moves to another transaction when the line is judged again;</item>
+    /// <item>then every line takes a transaction of its own day in Brazil;</item>
+    /// <item>and only the lines still without one take a transaction of the day before or after. Two purchases of
+    /// the same value on following days are two purchases: each line looks like the one of its day, never like the
+    /// one next to it.</item>
+    /// </list>
+    /// Within a step the lines are served in the order given, and ties go to the smallest id (the same data always
+    /// gives the same answer).
+    /// </summary>
+    public static IReadOnlyList<ExistingTransactionFacts?> AssignSuspectedDuplicates(
+        IReadOnlyList<SuspicionQuestion> lines, string? connectorName, IEnumerable<ExistingTransactionFacts> candidates)
+    {
+        var free = candidates.ToList();
+        var answers = new ExistingTransactionFacts?[lines.Count];
+
+        void Take(int index, ExistingTransactionFacts? transaction)
+        {
+            if (transaction is null) return;
+            answers[index] = transaction;
+            free.Remove(transaction);
+        }
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (lines[i].CurrentSuspectId is not { } current) continue;
+            Take(i, free.FirstOrDefault(c => c.Id == current && IsSuspectedDuplicate(lines[i].Line, connectorName, c)));
+        }
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (answers[i] is not null) continue;
+            var day = lines[i].Line.LocalDay;
+            Take(i, PickSuspectedDuplicate(lines[i].Line, connectorName, free.Where(c => c.LocalDay == day)));
+        }
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (answers[i] is null) Take(i, PickSuspectedDuplicate(lines[i].Line, connectorName, free));
+        }
+
+        return answers;
+    }
 
     /// <summary>
     /// The calendar day of a transaction of the app. What a person types and what the notification capture sends is

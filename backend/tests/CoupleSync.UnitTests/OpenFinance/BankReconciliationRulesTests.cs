@@ -268,6 +268,129 @@ public sealed class BankReconciliationRulesTests
         Assert.Null(BankReconciliationRules.PickSuspectedDuplicate(Out(25.00m), "Banco Exemplo", []));
     }
 
+    // ---------------------------------------------------------------- rule 4, over several lines at once
+
+    private static Guid Id(int n) => Guid.Parse($"00000000-0000-0000-0000-{n:D12}");
+
+    private static Guid?[] Assigned(IReadOnlyList<SuspicionQuestion> lines, params ExistingTransactionFacts[] candidates)
+        => BankReconciliationRules.AssignSuspectedDuplicates(lines, "Banco Exemplo", candidates).Select(t => t?.Id).ToArray();
+
+    [Fact]
+    public void TwoPurchasesOfTheSameValueOnFollowingDays_EachLineLooksLikeThePurchaseOfItsOwnDay_WhateverTheOrder()
+    {
+        var first = Existing(30.00m, Day, id: Id(2));
+        var second = Existing(30.00m, Day.AddDays(1), id: Id(1)); // the smaller id is the one of the later day
+        var lineOfFirst = new SuspicionQuestion(Out(30.00m, Day));
+        var lineOfSecond = new SuspicionQuestion(Out(30.00m, Day.AddDays(1)));
+
+        Assert.Equal(new Guid?[] { first.Id, second.Id }, Assigned([lineOfFirst, lineOfSecond], first, second));
+        Assert.Equal(new Guid?[] { first.Id, second.Id }, Assigned([lineOfFirst, lineOfSecond], second, first));
+        Assert.Equal(new Guid?[] { second.Id, first.Id }, Assigned([lineOfSecond, lineOfFirst], first, second));
+    }
+
+    [Fact]
+    public void TheSameDayWinsOverTheDayNextToIt_AlsoWhenTheLineOfTheOtherDayComesFirst()
+    {
+        // One purchase in the app, of the 4th. The line of the 3rd comes first, but the purchase is of the line of the 4th.
+        var existing = Existing(30.00m, Day.AddDays(1));
+        var dayBefore = new SuspicionQuestion(Out(30.00m, Day));
+        var sameDay = new SuspicionQuestion(Out(30.00m, Day.AddDays(1)));
+
+        Assert.Equal(new Guid?[] { null, existing.Id }, Assigned([dayBefore, sameDay], existing));
+        Assert.Equal(new Guid?[] { existing.Id, null }, Assigned([sameDay, dayBefore], existing));
+    }
+
+    [Fact]
+    public void TheDayNextToIt_CountsOnlyWhenNoCandidateIsOfTheSameDay()
+    {
+        var dayAfter = Existing(30.00m, Day.AddDays(1), id: Id(1));
+        var sameDay = Existing(30.00m, Day, id: Id(9));
+        var twoDaysAfter = Existing(30.00m, Day.AddDays(2), id: Id(3));
+        var line = new SuspicionQuestion(Out(30.00m, Day));
+
+        Assert.Equal(new Guid?[] { sameDay.Id }, Assigned([line], dayAfter, sameDay));
+        Assert.Equal(new Guid?[] { dayAfter.Id }, Assigned([line], dayAfter, twoDaysAfter));
+        Assert.Equal(new Guid?[] { null }, Assigned([line], twoDaysAfter));
+    }
+
+    [Fact]
+    public void ALineThatAlreadySuspectsATransaction_KeepsIt_WhileThatTransactionIsStillThereAndStillLooksLikeIt()
+    {
+        var kept = Existing(30.00m, Day, id: Id(9));
+        var other = Existing(30.00m, Day.AddDays(1), id: Id(1));
+        // The line was settled a day later than the purchase: the other transaction is now of its day, and it keeps its own.
+        var settled = new SuspicionQuestion(Out(30.00m, Day.AddDays(1)), kept.Id);
+        var arriving = new SuspicionQuestion(Out(30.00m, Day.AddDays(1)));
+
+        Assert.Equal(new Guid?[] { kept.Id, other.Id }, Assigned([settled, arriving], kept, other));
+        // Also when the line that arrives comes first: what a line holds is not offered to another.
+        Assert.Equal(new Guid?[] { other.Id, kept.Id }, Assigned([arriving, settled], kept, other));
+        Assert.Equal(new Guid?[] { null, kept.Id }, Assigned([arriving, settled], kept));
+    }
+
+    [Fact]
+    public void ALineWhoseSuspectIsGoneOrNoLongerLooksLikeIt_IsJudgedAgainAsIfItHadNone()
+    {
+        var other = Existing(30.00m, Day, id: Id(1));
+        var gone = new SuspicionQuestion(Out(30.00m, Day), Id(7));
+        Assert.Equal(new Guid?[] { other.Id }, Assigned([gone], other));
+        Assert.Equal(new Guid?[] { null }, Assigned([gone]));
+
+        // Still there, but two days apart now, of another value, or in another currency.
+        foreach (var stale in new[]
+                 {
+                     Existing(30.00m, Day.AddDays(2), id: Id(7)), Existing(31.00m, Day, id: Id(7)), Existing(30.00m, Day, currency: "USD", id: Id(7)),
+                 })
+        {
+            Assert.Equal(new Guid?[] { other.Id }, Assigned([gone], stale, other));
+            Assert.Equal(new Guid?[] { null }, Assigned([gone], stale));
+        }
+    }
+
+    [Fact]
+    public void OneTransaction_IsTheSuspectOfOneLineOnly_AndTwoOfTheSameDayGoToTwoDifferentLines()
+    {
+        var one = Existing(9.00m, Day, id: Id(1));
+        var two = Existing(9.00m, Day, id: Id(2));
+        var first = new SuspicionQuestion(Out(9.00m, Day));
+        var second = new SuspicionQuestion(Out(9.00m, Day));
+        var third = new SuspicionQuestion(Out(9.00m, Day));
+
+        Assert.Equal(new Guid?[] { one.Id, null }, Assigned([first, second], one));
+        Assert.Equal(new Guid?[] { one.Id, two.Id, null }, Assigned([first, second, third], two, one));
+        // Two lines that (by a mistake of the store) held the same transaction: only the first keeps it.
+        Assert.Equal(new Guid?[] { one.Id, two.Id }, Assigned([first with { CurrentSuspectId = one.Id }, second with { CurrentSuspectId = one.Id }], one, two));
+        Assert.Equal(new Guid?[] { one.Id, null }, Assigned([first with { CurrentSuspectId = one.Id }, second with { CurrentSuspectId = one.Id }], one));
+    }
+
+    [Fact]
+    public void MoneyThatCameIn_AValueThatIsNotReais_AndNoLineAtAll_SuspectNothing()
+    {
+        var existing = Existing(30.00m, Day);
+
+        Assert.Equal(new Guid?[] { null, null }, Assigned([new SuspicionQuestion(In(30.00m)), new SuspicionQuestion(Out(30.00m, currency: "USD"))], existing));
+        Assert.Empty(Assigned([], existing));
+    }
+
+    [Fact]
+    public void ClearingTheSuspicion_LeavesTheLineWaitingAsAnOrdinaryExpense_AndNeverTouchesALineAlreadyDecided()
+    {
+        var row = NewRow();
+        row.MarkSuspectedDuplicate(Guid.NewGuid(), Now);
+        Assert.True(row.ClearSuspectedDuplicate(Now.AddMinutes(1)));
+        Assert.Equal((BankTransactionReviewState.Pending, null, Now.AddMinutes(1)), (row.ReviewState, row.MatchedTransactionId, row.UpdatedAtUtc));
+        Assert.True(row.OpenToAutomaticRules);
+        // Nothing to clear.
+        Assert.False(row.ClearSuspectedDuplicate(Now.AddMinutes(2)));
+        Assert.Equal(Now.AddMinutes(1), row.UpdatedAtUtc);
+
+        var reconciled = NewRow();
+        var existing = Guid.NewGuid();
+        reconciled.Reconcile(existing, Now);
+        Assert.False(reconciled.ClearSuspectedDuplicate(Now.AddMinutes(1)));
+        Assert.Equal((BankTransactionReviewState.Reconciled, existing, Now), (reconciled.ReviewState, reconciled.LinkedTransactionId, reconciled.UpdatedAtUtc));
+    }
+
     [Fact]
     public void TheDayOfATransactionOfTheApp_IsTheDayInBrazil()
     {

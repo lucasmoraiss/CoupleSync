@@ -8,6 +8,7 @@ import {
   confirmResultMessage,
   dayLabel,
   groupByDay,
+  hasReviewAccess,
   initialReviewMonth,
   installmentText,
   isSelectable,
@@ -406,6 +407,22 @@ describe('mês da revisão', () => {
     expect(initialReviewMonth([{ month: '2026-09', pending: 0 }], '2026-10')).toBe('2026-10');
   });
 
+  it('sem nada esperando, abre no mês mais recente que tem ignoradas; com algo esperando, as ignoradas não mudam o mês', () => {
+    const ignored = [
+      { month: '2026-09', ignored: 2 },
+      { month: '2026-07', ignored: 1 },
+    ];
+    expect(initialReviewMonth([], '2026-10', ignored)).toBe('2026-09');
+    expect(initialReviewMonth(undefined, '2026-10', ignored)).toBe('2026-09');
+    expect(initialReviewMonth([{ month: '2026-08', pending: 0 }], '2026-10', ignored)).toBe('2026-09');
+    expect(initialReviewMonth([{ month: '2026-08', pending: 4 }], '2026-10', ignored)).toBe('2026-08');
+    // Mês sem nenhuma ignorada não conta; servidor que não manda a lista: o mês corrente, como antes.
+    expect(initialReviewMonth([], '2026-10', [{ month: '2026-09', ignored: 0 }])).toBe('2026-10');
+    expect(initialReviewMonth([], '2026-10', [])).toBe('2026-10');
+    expect(initialReviewMonth([], '2026-10', undefined)).toBe('2026-10');
+    expect(initialReviewMonth([], '2026-10', null)).toBe('2026-10');
+  });
+
   it('anda um mês para trás e para frente, virando o ano', () => {
     expect(shiftMonth('2026-10', -1)).toBe('2026-09');
     expect(shiftMonth('2026-01', -1)).toBe('2025-12');
@@ -426,6 +443,34 @@ describe('textos', () => {
     expect(reviewShortcutLabel(-2)).toBeNull();
     expect(reviewShortcutLabel(1)).toBe('1 do banco para revisar');
     expect(reviewShortcutLabel(37)).toBe('37 do banco para revisar');
+  });
+
+  it('sem nada esperando e com ignoradas a conferir, o atalho existe com o texto delas (revisão 7, achado 2)', () => {
+    expect(reviewShortcutLabel(0, 1)).toBe('1 ignorada do banco para conferir');
+    expect(reviewShortcutLabel(0, 2)).toBe('2 ignoradas do banco para conferir');
+    expect(reviewShortcutLabel(undefined, 14)).toBe('14 ignoradas do banco para conferir');
+  });
+
+  it('com algo esperando, o texto do atalho é o de sempre, haja ou não ignoradas', () => {
+    expect(reviewShortcutLabel(1, 5)).toBe('1 do banco para revisar');
+    expect(reviewShortcutLabel(37, 0)).toBe('37 do banco para revisar');
+  });
+
+  it('sem pendentes e sem ignoradas (ou servidor que ainda não conta as ignoradas), o atalho não aparece', () => {
+    expect(reviewShortcutLabel(0, 0)).toBeNull();
+    expect(reviewShortcutLabel(0, undefined)).toBeNull();
+    expect(reviewShortcutLabel(0, null)).toBeNull();
+    expect(reviewShortcutLabel(0, -3)).toBeNull();
+    expect(reviewShortcutLabel(undefined, undefined)).toBeNull();
+  });
+
+  it('o acesso fixo à revisão na tela do Open Finance existe quando o grupo tem alguma conexão', () => {
+    expect(hasReviewAccess({ connections: [{ id: 'c-1' }] })).toBe(true);
+    expect(hasReviewAccess({ connections: [{ id: 'c-1' }, { id: 'c-2' }] })).toBe(true);
+    expect(hasReviewAccess({ connections: [] })).toBe(false);
+    expect(hasReviewAccess({})).toBe(false);
+    expect(hasReviewAccess(null)).toBe(false);
+    expect(hasReviewAccess(undefined)).toBe(false);
   });
 
   it('o fim do wizard diz quantas transações esperam a revisão', () => {

@@ -211,6 +211,8 @@ public sealed class OpenFinanceController : ControllerBase
             review.PendingByMonth.Select(m => new BankReviewMonthResponse(m.Month, m.Pending)).ToList(),
             review.Ignored.Select(Map).ToList(),
             review.SuspectedDuplicates,
+            review.IgnoredAllMonths,
+            review.IgnoredByMonth.Select(m => new BankReviewIgnoredMonthResponse(m.Month, m.Ignored)).ToList(),
             review.Incomes.Select(Map).ToList(),
             review.PendingIncomesAllMonths,
             review.PendingIncomesByMonth.Select(m => new BankReviewMonthResponse(m.Month, m.Pending)).ToList()));

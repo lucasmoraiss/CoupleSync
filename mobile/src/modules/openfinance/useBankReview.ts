@@ -22,24 +22,34 @@ export function useBankReview(month: string | null) {
   });
 }
 
+interface ReviewCounts {
+  readonly pending: number;
+  readonly ignored: number;
+}
+
+const NO_COUNTS: ReviewCounts = { pending: 0, ignored: 0 };
+
 /**
- * Quantas linhas do banco podem ser registradas (despesas e entradas, todos os meses), para o atalho da tela de
- * Transações. Qualquer erro (servidor sem a rota, sem rede) é "nenhuma": o atalho só não aparece.
+ * Para o atalho da tela de Transações: quantas linhas do banco podem ser registradas (despesas e entradas) e
+ * quantas estão ignoradas automaticamente (todos os meses). Qualquer erro (servidor sem a rota, sem rede) é
+ * "nenhuma": o atalho só não aparece. Servidor que ainda não conta as ignoradas: zero.
  */
-export function usePendingBankReviewCount(): { readonly pending: number; readonly refetch: () => void } {
+export function usePendingBankReviewCount(): ReviewCounts & { readonly refetch: () => void } {
   const signedIn = useSessionStore((state) => !!state.accessToken);
-  const query = useQuery<number>({
-    queryKey: [...BANK_REVIEW_KEY, 'pending-count'],
+  const query = useQuery<ReviewCounts>({
+    queryKey: [...BANK_REVIEW_KEY, 'shortcut-counts'],
     queryFn: async () => {
       try {
-        return pendingReviewCount((await openFinanceApiClient.getReview()).data);
+        const review = (await openFinanceApiClient.getReview()).data;
+        return { pending: pendingReviewCount(review), ignored: review.ignoredAllMonths ?? 0 };
       } catch {
-        return 0;
+        return NO_COUNTS;
       }
     },
     enabled: signedIn,
     staleTime: 0,
     retry: false,
   });
-  return { pending: query.data ?? 0, refetch: () => void query.refetch({ cancelRefetch: false }) };
+  const counts = query.data ?? NO_COUNTS;
+  return { pending: counts.pending, ignored: counts.ignored, refetch: () => void query.refetch({ cancelRefetch: false }) };
 }

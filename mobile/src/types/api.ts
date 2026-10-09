@@ -660,6 +660,12 @@ export interface BankReviewMonthResponse {
   readonly pending: number;
 }
 
+export interface BankReviewIgnoredMonthResponse {
+  /** "AAAA-MM" */
+  readonly month: string;
+  readonly ignored: number;
+}
+
 export interface BankReviewResponse {
   readonly month: string;
   readonly expenses: readonly BankReviewLineResponse[];
@@ -680,6 +686,10 @@ export interface BankReviewResponse {
   readonly pendingIncomesAllMonths?: number;
   /** Por mês, as entradas que esperam na revisão (também as que só podem ser descartadas). */
   readonly pendingIncomesByMonth?: readonly BankReviewMonthResponse[];
+  /** Quantas linhas estão ignoradas automaticamente, em todos os meses. Ausente em servidor anterior. */
+  readonly ignoredAllMonths?: number;
+  /** Por mês, quantas linhas estão ignoradas automaticamente (o mais recente primeiro). Ausente em servidor anterior. */
+  readonly ignoredByMonth?: readonly BankReviewIgnoredMonthResponse[];
 }
 
 export interface ConfirmBankReviewRequest {

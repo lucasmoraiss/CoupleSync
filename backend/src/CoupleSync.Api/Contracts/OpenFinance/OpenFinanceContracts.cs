@@ -117,13 +117,17 @@ public sealed record BankReviewMatchResponse(
 
 public sealed record BankReviewMonthResponse(string Month, int Pending);
 
+public sealed record BankReviewIgnoredMonthResponse(string Month, int Ignored);
+
 /// <summary>
 /// The review of a month (of Brazil). <c>PendingTotalBrl</c> adds only the expenses in reais.
 /// <c>PendingAllMonths</c> counts, in every month, the expenses that can be confirmed (settled at the bank, with a
 /// value, in reais). <c>PendingByMonth</c> counts everything that waits in each month, also what can only be discarded.
+/// <c>IgnoredAllMonths</c> counts, in every month, the lines ignored automatically, and <c>IgnoredByMonth</c> says
+/// in which months they are (the latest first): the way to them when nothing waits for the review.
 /// New with the entries (issue #27), all additive: <c>Incomes</c> are the entries (money that came in, <c>Type</c>
 /// <c>Credit</c>) of the month waiting; <c>PendingIncomesAllMonths</c> and <c>PendingIncomesByMonth</c> count them
-/// the way the two fields above count the expenses (which they never enter). <c>Discarded</c> lists the discarded
+/// the way <c>PendingAllMonths</c> and <c>PendingByMonth</c> count the expenses (which they never enter). <c>Discarded</c> lists the discarded
 /// lines of both kinds, told apart by <c>Type</c>.
 /// </summary>
 public sealed record BankReviewResponse(
@@ -135,6 +139,8 @@ public sealed record BankReviewResponse(
     IReadOnlyList<BankReviewMonthResponse> PendingByMonth,
     IReadOnlyList<BankReviewLineResponse> Ignored,
     int SuspectedDuplicates,
+    int IgnoredAllMonths,
+    IReadOnlyList<BankReviewIgnoredMonthResponse> IgnoredByMonth,
     IReadOnlyList<BankReviewLineResponse> Incomes,
     int PendingIncomesAllMonths,
     IReadOnlyList<BankReviewMonthResponse> PendingIncomesByMonth);

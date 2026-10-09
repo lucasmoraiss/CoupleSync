@@ -381,6 +381,19 @@ public sealed class BankTransaction : ICoupleScoped
     }
 
     /// <summary>
+    /// The line no longer looks like the transaction it pointed to (the bank settled it with another value or on
+    /// another day): it waits as an ordinary expense. Does nothing, and says so, when there is no suspicion to clear
+    /// or the line is not <see cref="OpenToAutomaticRules"/>.
+    /// </summary>
+    public bool ClearSuspectedDuplicate(DateTime nowUtc)
+    {
+        if (!OpenToAutomaticRules || MatchedTransactionId is null) return false;
+        MatchedTransactionId = null;
+        UpdatedAtUtc = nowUtc;
+        return true;
+    }
+
+    /// <summary>
     /// The instant to give the transaction created from this row: the one Pluggy gave, unless that instant falls on
     /// another day in Brazil than <see cref="LocalDate"/> (a date sent without a time), when it is noon of the local day.
     /// </summary>

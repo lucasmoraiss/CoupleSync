@@ -146,9 +146,9 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .ToList();
 
     public async Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(
-        Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> leavingLineIds, CancellationToken ct)
+        Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> exceptLineIds, CancellationToken ct)
     {
-        var leaving = leavingLineIds.ToList();
+        var except = exceptLineIds.ToList();
         // The value is compared in memory (the rules do it): SQLite keeps decimals as text.
         var rows = await _dbContext.Transactions
             .IgnoreQueryFilters()
@@ -159,7 +159,7 @@ public sealed class BankSyncRepository : IBankSyncRepository
                         && t.EventTimestampUtc >= fromUtc
                         && t.EventTimestampUtc < toUtcExclusive
                         && !_dbContext.BankTransactions.Any(b =>
-                            (b.LinkedTransactionId == t.Id || b.MatchedTransactionId == t.Id) && !leaving.Contains(b.Id)))
+                            (b.LinkedTransactionId == t.Id || b.MatchedTransactionId == t.Id) && !except.Contains(b.Id)))
             .Select(t => new { t.Id, t.Amount, t.Currency, t.EventTimestampUtc, t.Source, t.Bank })
             .ToListAsync(ct);
 
@@ -399,6 +399,13 @@ public sealed class BankSyncRepository : IBankSyncRepository
                         && t.ReviewState == BankTransactionReviewState.Ignored
                         && t.LocalDate >= from
                         && t.LocalDate < toExclusive)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<DateOnly>> GetIgnoredDaysAsync(Guid coupleId, CancellationToken ct)
+        => await _dbContext.BankTransactions
+            .AsNoTracking()
+            .Where(t => t.CoupleId == coupleId && t.ReviewState == BankTransactionReviewState.Ignored)
+            .Select(t => t.LocalDate)
             .ToListAsync(ct);
 
     public async Task<IReadOnlyDictionary<Guid, MatchedTransactionSummary>> GetTransactionSummariesAsync(

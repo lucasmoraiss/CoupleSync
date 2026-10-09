@@ -282,10 +282,10 @@ export default function TransactionsScreen() {
   const notifPermission = useNotificationPermission();
   const captureConsent = useConsentStore((state) => state.record.capture);
   const captureBanner = captureBannerText(captureConsent, notifPermission);
-  // Open Finance: quantas despesas do banco esperam a revisão. O atalho só aparece quando há alguma; a contagem
-  // é refeita a cada volta à tela (a aba fica montada).
+  // Open Finance: quantas despesas do banco esperam a revisão e quantas linhas foram ignoradas sozinhas. O atalho
+  // só aparece quando há alguma das duas; as contagens são refeitas a cada volta à tela (a aba fica montada).
   const bankReview = usePendingBankReviewCount();
-  const bankReviewShortcut = reviewShortcutLabel(bankReview.pending);
+  const bankReviewShortcut = reviewShortcutLabel(bankReview.pending, bankReview.ignored);
   useOnRefocus(() => bankReview.refetch());
 
   const {
@@ -445,7 +445,7 @@ export default function TransactionsScreen() {
         </View>
       </View>
 
-      {/* Open Finance: atalho para a revisão do banco, só quando há algo esperando */}
+      {/* Open Finance: atalho para a revisão do banco, só quando há algo esperando ou ignoradas a conferir */}
       {bankReviewShortcut !== null && (
         <TouchableOpacity
           style={styles.bankReviewShortcut}

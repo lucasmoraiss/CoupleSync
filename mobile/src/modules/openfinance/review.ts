@@ -15,6 +15,7 @@
 import { getApiErrorMessage } from '@/services/apiError';
 import { monthLabelFromIso } from '@/utils/format';
 import type {
+  BankReviewIgnoredMonthResponse,
   BankReviewLineResponse,
   BankReviewMatchResponse,
   BankReviewMonthResponse,
@@ -181,7 +182,16 @@ export function suspectedDuplicateCount(lines: readonly BankReviewLineResponse[]
   return lines.filter(hasSuspectedDuplicate).length;
 }
 
-/** Aviso do topo da revisão. null: nenhuma possível duplicada, sem aviso. */
+/**
+ * Quantas possíveis duplicadas já podem ser respondidas ("É a mesma" / "É outra" habilitados). É o número do aviso
+ * do topo: a que ainda está pendente no banco aparece na lista com os botões desabilitados e não precisa de
+ * ninguém por enquanto.
+ */
+export function answerableDuplicateCount(lines: readonly BankReviewLineResponse[]): number {
+  return lines.filter(canAnswerDuplicate).length;
+}
+
+/** Aviso do topo da revisão. null: nenhuma possível duplicada a responder, sem aviso. */
 export function duplicateNoticeText(count: number): string | null {
   if (!(count > 0)) return null;
   return count === 1 ? '1 possível duplicada precisa de você' : `${count} possíveis duplicadas precisam de você`;
@@ -442,14 +452,20 @@ export function installmentText(line: Pick<BankReviewLineResponse, 'installmentN
 
 // ---------------------------------------------------------------- mês
 
-/** O mês em que a revisão abre: o mais recente que tem algo esperando; sem nada esperando, o mês corrente. */
+/**
+ * O mês em que a revisão abre: o mais recente que tem algo esperando; sem nada esperando, o mais recente que tem
+ * linhas ignoradas (é para elas que o atalho leva quando nada espera); sem nenhum dos dois, o mês corrente.
+ */
 export function initialReviewMonth(
   pendingByMonth: readonly BankReviewMonthResponse[] | null | undefined,
   currentMonth: string,
+  ignoredByMonth?: readonly BankReviewIgnoredMonthResponse[] | null,
 ): string {
+  const latestOf = (months: readonly string[]) => months.reduce((latest, month) => (month > latest ? month : latest));
   const waiting = (pendingByMonth ?? []).filter((m) => m.pending > 0).map((m) => m.month);
-  if (waiting.length === 0) return currentMonth;
-  return waiting.reduce((latest, month) => (month > latest ? month : latest));
+  if (waiting.length > 0) return latestOf(waiting);
+  const ignored = (ignoredByMonth ?? []).filter((m) => m.ignored > 0).map((m) => m.month);
+  return ignored.length > 0 ? latestOf(ignored) : currentMonth;
 }
 
 /** "2026-01" e -1 → "2025-12". */
@@ -466,9 +482,25 @@ export function monthTitle(month: string): string {
 
 // ---------------------------------------------------------------- textos
 
-/** Atalho da tela de Transações. null: nada esperando, o atalho não aparece. */
-export function reviewShortcutLabel(pending: number | null | undefined): string | null {
-  return typeof pending === 'number' && pending > 0 ? `${pending} do banco para revisar` : null;
+/**
+ * Atalho da tela de Transações. Com algo esperando, o texto de sempre. Sem nada esperando e com linhas que o
+ * servidor ignorou sozinho (transferência entre contas do grupo, pagamento de fatura), o atalho leva até elas: é
+ * na revisão que se confere e se restaura o que foi ignorado por engano. null: nada dos dois, o atalho não aparece.
+ */
+export function reviewShortcutLabel(pending: number | null | undefined, ignored?: number | null): string | null {
+  if (typeof pending === 'number' && pending > 0) return `${pending} do banco para revisar`;
+  if (typeof ignored === 'number' && ignored > 0) {
+    return ignored === 1 ? '1 ignorada do banco para conferir' : `${ignored} ignoradas do banco para conferir`;
+  }
+  return null;
+}
+
+/**
+ * A tela do Open Finance mostra o acesso fixo "Revisão do banco" quando o grupo tem alguma conexão (também a
+ * desconectada: o que ela trouxe continua na revisão). Não depende de haver pendência.
+ */
+export function hasReviewAccess(status: { readonly connections?: readonly unknown[] | null } | null | undefined): boolean {
+  return (status?.connections?.length ?? 0) > 0;
 }
 
 /** Botão do fim do wizard. */
