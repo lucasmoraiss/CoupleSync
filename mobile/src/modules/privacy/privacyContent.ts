@@ -80,29 +80,96 @@ export const CAPTURE_CONSENT_SECTIONS: readonly TextSection[] = [
 
 export const AI_ANALYSIS_TITLE = 'Análise com IA';
 
+/** Um destino dos dados da análise com IA, como GET /api/v1/ai/status o descreve (`providers`). */
+export interface AiDestination {
+  readonly name: string;
+  readonly country: string;
+  readonly trainsOnData: boolean;
+}
+
+const GOOGLE_NAME = 'Google (Gemini)';
+const GROQ_NAME = 'Groq';
+
+/**
+ * Todos os destinos que o texto desta versão do aceite cobre (os mesmos de AiConsentCoverage, no servidor). É o
+ * que se mostra quando ainda não se sabe o que o servidor tem ligado: na dúvida, o texto diz o máximo que pode
+ * acontecer, nunca menos.
+ */
+export const AI_KNOWN_DESTINATIONS: readonly AiDestination[] = [
+  { name: GOOGLE_NAME, country: 'Estados Unidos', trainsOnData: true },
+  { name: GROQ_NAME, country: 'Estados Unidos', trainsOnData: false },
+];
+
+// O que cada destino faz com o conteúdo, conferido na política de cada um (Groq: Services Agreement 4.2 e "Your
+// Data in GroqCloud", lidos em 08/10/2026). Mudou a política: muda a frase e sobe a versão do aceite.
+const FRANK_BY_NAME: Readonly<Record<string, string>> = {
+  [GOOGLE_NAME]: 'No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e revisores humanos podem lê-lo.',
+  [GROQ_NAME]:
+    'O Groq declara, nos termos de uso dele, que não usa o conteúdo enviado para treinar modelos; ele pode guardar pedidos e respostas por até 30 dias para investigar abuso ou falhas.',
+};
+
+function frankAbout(destination: AiDestination): string {
+  const known = FRANK_BY_NAME[destination.name];
+  if (known) return known;
+  // Destino que este app ainda não conhece pelo nome: vale o que o servidor informa.
+  return destination.trainsOnData
+    ? `${destination.name} pode usar o conteúdo enviado para melhorar os produtos dele.`
+    : `${destination.name} declara que não usa o conteúdo enviado para treinar modelos.`;
+}
+
+function joinWithE(items: readonly string[]): string {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} e ${items[items.length - 1]}`;
+}
+
+function inCountry(country: string): string {
+  return country === 'Estados Unidos' ? 'nos Estados Unidos' : `em ${country}`;
+}
+
+function destinationsOrAll(destinations: readonly AiDestination[] | null | undefined): readonly AiDestination[] {
+  return destinations && destinations.length > 0 ? destinations : AI_KNOWN_DESTINATIONS;
+}
+
+/** "Google (Gemini), nos Estados Unidos" / "Google (Gemini) e Groq, nos Estados Unidos". */
+function whereTo(destinations: readonly AiDestination[], withArticle: boolean): string {
+  const name = (d: AiDestination, index: number) => (withArticle ? `${index === 0 ? 'o' : 'para o'} ${d.name}` : d.name);
+  const countries = Array.from(new Set(destinations.map((d) => d.country)));
+  if (countries.length === 1) return `${joinWithE(destinations.map(name))}, ${inCountry(countries[0])}`;
+  return joinWithE(destinations.map((d, index) => `${name(d, index)} (${inCountry(d.country)})`));
+}
+
 /**
  * O texto do aceite da análise com IA: exatamente estes sete pontos, nesta ordem. É o que a pessoa lê antes de
  * ativar para o grupo (tela de boas-vindas, Configurações > Inteligência artificial) e a seção em destaque da tela
  * Privacidade. O aceite tem versão própria no servidor (AI_CONSENT_VERSION em modules/ai/aiStatus.ts): mudar um
  * destes pontos de forma relevante pede versão nova lá e aqui — nunca o CONSENT_VERSION do aparelho, que apagaria
  * os aceites de captura e de Open Finance.
+ *
+ * "Para onde" e "Com franqueza" citam os destinos que o servidor diz ter ligados (`aiDestinations` em
+ * modules/ai/aiStatus.ts). Sem essa lista, citam todos os que esta versão do aceite cobre.
  */
-export const AI_ANALYSIS_POINTS: readonly string[] = [
-  'O que vai: resumos calculados das finanças do grupo (totais por categoria, lojas, assinaturas, parcelas, valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente, como foram escritas.',
-  'O que nunca vai: nomes, e-mails e CPF de vocês. O que o app não envia por conta própria: nomes das metas, nomes das rendas, números de conta ou cartão e nomes de quem recebeu ou enviou transferências (elas vão só como "transferência"). O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta ou de quem recebeu uma transferência, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.',
-  'Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.',
-  'Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e revisores humanos podem lê-lo."',
-  'Quem ativa liga a análise para o grupo inteiro; o outro membro é avisado no app e pode desligar a qualquer hora em Configurações; desligar não apaga o histórico, que pode ser apagado à parte.',
-  'O resumo semanal por e-mail é opcional, por pessoa, enviado pela Brevo (o serviço de e-mail que o app já usa).',
-  'Os cálculos (assinaturas, parcelas, previsão) são feitos no próprio servidor do app e funcionam sem a IA.',
-];
+export function aiAnalysisPoints(destinations?: readonly AiDestination[] | null): readonly string[] {
+  const list = destinationsOrAll(destinations);
+  return [
+    'O que vai: resumos calculados das finanças do grupo (totais por categoria, lojas, assinaturas, parcelas, valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente, como foram escritas.',
+    'O que nunca vai: nomes, e-mails e CPF de vocês. O que o app não envia por conta própria: nomes das metas, nomes das rendas, números de conta ou cartão e nomes de quem recebeu ou enviou transferências (elas vão só como "transferência"). O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta ou de quem recebeu uma transferência, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.',
+    `Para onde: ${whereTo(list, false)} — transferência internacional de dados.`,
+    `Com franqueza: "${list.map(frankAbout).join(' ')}"`,
+    'Quem ativa liga a análise para o grupo inteiro; o outro membro é avisado no app e pode desligar a qualquer hora em Configurações; desligar não apaga o histórico, que pode ser apagado à parte.',
+    'O resumo semanal por e-mail é opcional, por pessoa, enviado pela Brevo (o serviço de e-mail que o app já usa).',
+    'Os cálculos (assinaturas, parcelas, previsão) são feitos no próprio servidor do app e funcionam sem a IA.',
+  ];
+}
 
 /** A seção "Análise com IA" da tela Privacidade (em destaque, separada do texto geral). */
-export const AI_ANALYSIS_SECTIONS: readonly TextSection[] = [{ title: AI_ANALYSIS_TITLE, paragraphs: AI_ANALYSIS_POINTS }];
+export function aiAnalysisSections(destinations?: readonly AiDestination[] | null): readonly TextSection[] {
+  return [{ title: AI_ANALYSIS_TITLE, paragraphs: aiAnalysisPoints(destinations) }];
+}
 
 /** Uma linha do que vai e para onde, na tela de boas-vindas (o texto inteiro abre em "Ler tudo"). */
-export const AI_ANALYSIS_SUMMARY =
-  'Vão para o Google (Gemini), nos Estados Unidos, resumos das finanças do grupo e as suas perguntas — nunca nomes, e-mails ou CPF de vocês.';
+export function aiAnalysisSummary(destinations?: readonly AiDestination[] | null): string {
+  return `Vão para ${whereTo(destinationsOrAll(destinations), true)}, resumos das finanças do grupo e as suas perguntas — nunca nomes, e-mails ou CPF de vocês.`;
+}
 
 /** No texto geral, a IA só é citada assim: os detalhes e o aceite ficam na seção própria. */
 export const AI_OWN_CONSENT_NOTE = 'A análise com IA tem aceite próprio; veja Configurações > Inteligência artificial.';
@@ -158,7 +225,7 @@ export const PRIVACY_TITLE = 'Privacidade';
 
 /**
  * As seções do texto geral da tela Privacidade. A análise com IA não é descrita aqui: tem a seção própria
- * (AI_ANALYSIS_SECTIONS) e o aceite próprio, no servidor.
+ * (aiAnalysisSections) e o aceite próprio, no servidor.
  */
 export function privacySections(): readonly TextSection[] {
   return [

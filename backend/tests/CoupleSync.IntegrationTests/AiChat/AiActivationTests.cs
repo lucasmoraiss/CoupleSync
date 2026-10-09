@@ -39,14 +39,14 @@ public sealed class AiActivationTests
         Assert.Equal(0, before.GetProperty("acceptedBy").GetArrayLength());
 
         var askedAt = DateTime.UtcNow.AddSeconds(-5);
-        var accepted = await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 });
+        var accepted = await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 });
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
 
         foreach (var member in new[] { ana, bruno })
         {
             var status = await StatusOf(member.Client);
             Assert.True(status.GetProperty("enabled").GetBoolean());
-            Assert.Equal(1, status.GetProperty("consentVersion").GetInt32());
+            Assert.Equal(2, status.GetProperty("consentVersion").GetInt32());
             var by = Assert.Single(status.GetProperty("acceptedBy").EnumerateArray());
             Assert.Equal(ana.UserId, by.GetProperty("userId").GetGuid());
             Assert.Equal("Ana Exemplo", by.GetProperty("name").GetString());
@@ -91,7 +91,7 @@ public sealed class AiActivationTests
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
         var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
-        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
         Assert.True((await StatusOf(bruno.Client)).GetProperty("enabled").GetBoolean());
 
         factory.Execute($"UPDATE users SET is_active = 0 WHERE upper(id) = '{ana.UserId.ToString().ToUpperInvariant()}'");
@@ -106,7 +106,8 @@ public sealed class AiActivationTests
 
     [Theory]
     [InlineData(0)]
-    [InlineData(2)]
+    [InlineData(1)]
+    [InlineData(3)]
     public async Task AcceptingAVersionThatIsNotTheCurrentOne_Is409AiConsentVersionOutdated_AndNothingIsStored(int version)
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
@@ -133,7 +134,7 @@ public sealed class AiActivationTests
         // Nothing to ask while there is no AI: the welcome screen does not come up.
         Assert.False(status.GetProperty("onboardingPending").GetBoolean());
 
-        var response = await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 });
+        var response = await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 });
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal("AI_UNAVAILABLE", (await ErrorOf(response)).Code);
     }
@@ -149,7 +150,7 @@ public sealed class AiActivationTests
 
         Assert.True(status.GetProperty("available").GetBoolean());
         Assert.True(status.GetProperty("onboardingPending").GetBoolean());
-        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
     }
 
     // ---------------------------------------------------------------- switching off
@@ -631,7 +632,7 @@ public sealed class AiActivationTests
     }
 
     private static async Task AcceptAsync(HttpClient client)
-        => Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        => Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
 
     private static Task<HttpResponseMessage> PatchAsync(HttpClient client, object body)
         => client.PatchAsync(Preferences, JsonContent.Create(body));
@@ -639,7 +640,7 @@ public sealed class AiActivationTests
     private static Task<HttpResponseMessage> SendAsync(HttpClient client, string method, string path)
     {
         var request = new HttpRequestMessage(new HttpMethod(method), path);
-        if (method is "POST" or "PATCH") request.Content = JsonContent.Create(new { Version = 1 });
+        if (method is "POST" or "PATCH") request.Content = JsonContent.Create(new { Version = 2 });
         return client.SendAsync(request);
     }
 

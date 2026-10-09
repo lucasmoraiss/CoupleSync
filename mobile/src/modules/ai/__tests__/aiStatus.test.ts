@@ -4,6 +4,7 @@ import {
   AI_STATUS_NOTICE_TEXT,
   AI_STATUS_RETRY_DELAYS_MS,
   activationSummary,
+  aiDestinations,
   aiSettingsActions,
   aiStatusNotice,
   parseStoredAiStatus,
@@ -29,7 +30,7 @@ function status(overrides: Partial<AiStatusResponse> = {}): AiStatusResponse {
   return {
     available: true,
     enabled: false,
-    consentVersion: 1,
+    consentVersion: 2,
     acceptedBy: [],
     myAcceptance: null,
     onboardingPending: true,
@@ -51,8 +52,25 @@ function apiError(statusCode: number, code: string, message = 'mensagem do servi
 }
 
 describe('versão do aceite de IA', () => {
-  it('é a 1, a mesma do servidor', () => {
-    expect(AI_CONSENT_VERSION).toBe(1);
+  it('é a 2 (o texto que cita o Groq), a mesma do servidor', () => {
+    expect(AI_CONSENT_VERSION).toBe(2);
+  });
+});
+
+describe('destinos que o texto da análise com IA cita', () => {
+  const google = { name: 'Google (Gemini)', country: 'Estados Unidos', trainsOnData: true };
+  const groq = { name: 'Groq', country: 'Estados Unidos', trainsOnData: false };
+
+  it('são os que o servidor diz ter ligados: só o Google, ou o Google e o Groq', () => {
+    expect(aiDestinations(status({ providers: [google] }))).toEqual([google]);
+    expect(aiDestinations(status({ providers: [google, groq] }))).toEqual([google, groq]);
+  });
+
+  it('sem status, com lista vazia ou com um status guardado da versão anterior do texto, não se sabe: null (o texto cita todos)', () => {
+    expect(aiDestinations(null)).toBeNull();
+    expect(aiDestinations(status({ providers: [] }))).toBeNull();
+    // Guardado no aparelho antes da atualização: listava só o Google, e o servidor pode ter o Groq ligado agora.
+    expect(aiDestinations(status({ consentVersion: 1, providers: [google] }))).toBeNull();
   });
 });
 

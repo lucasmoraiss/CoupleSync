@@ -23,9 +23,9 @@ import type { Message } from '../hooks/useChat';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 import { ErrorState } from '@/components/ErrorState';
 import { goToParent } from '@/navigation/resetOnFocus';
-import { assistantGate } from '@/modules/ai/aiStatus';
+import { aiDestinations, assistantGate } from '@/modules/ai/aiStatus';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
-import { AI_ANALYSIS_SUMMARY } from '@/modules/privacy/privacyContent';
+import { aiAnalysisSummary } from '@/modules/privacy/privacyContent';
 
 // Sugestões da tela vazia: um toque envia a pergunta.
 const SUGGESTED_QUESTIONS: readonly string[] = [
@@ -124,7 +124,7 @@ export default function ChatScreen() {
     return (
       <AssistantNotice
         title="A análise com IA está desligada para este grupo"
-        text={`O Assistente responde às suas perguntas sobre gastos, orçamento e metas do grupo. ${AI_ANALYSIS_SUMMARY} Uma pessoa ativa e vale para o grupo inteiro; qualquer um desliga quando quiser.`}
+        text={`O Assistente responde às suas perguntas sobre gastos, orçamento e metas do grupo. ${aiAnalysisSummary(aiDestinations(status))} Uma pessoa ativa e vale para o grupo inteiro; qualquer um desliga quando quiser.`}
         actionLabel="Ativar"
         actionAccessibilityLabel="Ativar a análise com IA: ver o que é enviado e decidir"
         onAction={() => router.push('/(main)/ai/welcome' as any)}

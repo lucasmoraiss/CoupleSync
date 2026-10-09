@@ -98,7 +98,7 @@ e links; e, no desenho do Open Finance, trocar o texto das linhas 6 e 7 da tabel
 | Provedor | Qualidade dos modelos gratuitos | Cota gratuita | JSON schema | PDF / imagem | Treina com os dados no gratuito | Cartão |
 | --- | --- | --- | --- | --- | --- | --- |
 | Google Gemini (AI Studio) | A página de preços lista 2.5 Pro, 2.5 Flash, 2.5 Flash-Lite e 3.5/3.6/3.7/3.8 Flash como gratuitos [externo, oficial]; **com a chave real do dono só modelos Flash e Flash-Lite respondem** (medição abaixo) | Sem tabela pública; terceiros citam 5–15 RPM, ~250k TPM, 100–1.500 RPD **por modelo** [externo, terceiro] — não medido (2.5) | Sim (`responseSchema`, subconjunto) [oficial] | PDF nativo até 50 MB / 1.000 páginas, 258 tokens por página; imagem sim [oficial] | **Sim**; revisores humanos podem ler; termos pedem não enviar dado pessoal; Brasil fora da exceção [oficial] | Não |
-| Groq (**sem chave hoje**) | Boa: `openai/gpt-oss-120b`, `gpt-oss-20b`, `qwen/qwen3.8-27b` (visão) [oficial] | **30 RPM, 1.000 RPD, 8k TPM, 200k TPD por modelo**, por organização [oficial] | Sim, `json_schema` strict (sem streaming/tools junto) [oficial] | Imagem até 3 por chamada, 20 MB; **PDF não** [oficial] | **Não** [oficial] | Não [terceiro] |
+| Groq (**chave criada em 08/10/2026; ligado como reserva, 2.2**) | Boa: `openai/gpt-oss-120b`, `gpt-oss-20b`, `qwen/qwen3.8-27b` (visão) [oficial] | **30 RPM, 1.000 RPD, 8k TPM, 200k TPD por modelo**, por organização [oficial] | Sim, `json_schema` strict (sem streaming/tools junto) [oficial] | Imagem até 3 por chamada, 20 MB; **PDF não** [oficial] | **Não** [oficial] | Não [terceiro] |
 | Mistral (Experiment) | Boa: Large 4, Medium 3.5, Small 4 [oficial] | 1 req/s, 500k tokens/min, 1 bilhão tokens/mês por modelo [terceiro; página oficial deu 404] | Sim [terceiro] | Visão sim; OCR é pago [terceiro] | Sim por padrão, com opt-out [terceiro] | Não; pede telefone [terceiro] |
 | OpenRouter `:free` | Varia; lista muda sem aviso | 20 RPM; **50 req/dia** sem compra [oficial] | Depende do modelo | Depende | Depende do provedor | Não |
 | Cerebras | Boa (gpt-oss-120b) | 5 RPM, 1M tokens/dia [oficial] | Sim | Não | Não | **Exige cartão** [oficial] |
@@ -119,6 +119,15 @@ em `https://generativelanguage.googleapis.com/v1beta` (`fatos-chave-real.md`):
 Duas consequências. **Nenhum modelo "Pro" do Gemini é utilizável de graça com esta chave**: a cadeia do Gemini só
 tem modelos Flash e Flash-Lite. **Não há chave do Groq**: o dono não conseguiu criar conta nem entrar em
 console.groq.com em 08/10/2026 (erro genérico no cadastro e no login). O desenho funciona sem ela (2.2).
+
+**Atualização (08/10/2026, mais tarde):** o dono conseguiu criar a chave do Groq e a gravou no Render
+(`GROQ_API_KEY`). O Groq foi ligado como reserva (2.2, "Groq ligado"). Política de dados conferida na fonte
+oficial em 08/10/2026: o *Groq Services Agreement* (console.groq.com/docs/legal/services-agreement, "Last
+Modified: June 22, 2026"), cláusula 4.2, proíbe o Groq de usar entradas e saídas para treinar ou ajustar modelos,
+sem exceção para o uso gratuito; "Your Data in GroqCloud" (console.groq.com/docs/your-data) diz que por padrão os
+pedidos de inferência não são guardados e que, para investigar abuso ou falhas, registros podem ficar até 30
+dias, em buckets do Google Cloud nos Estados Unidos. Contratante para clientes fora da Europa e da Arábia
+Saudita: Groq LLC, Mountain View, Califórnia.
 
 ### 2.2 Cadeia só com Gemini Flash e escolha por tarefa
 
@@ -173,6 +182,30 @@ o texto pesa; rapidez e cota primeiro onde há volume.
   aceite vigente fica em código, junto da versão do aceite (`AiConsent.CurrentVersion`, 7.1; hoje só `gemini`),
   e o gateway ignora, com aviso em log, todo elo de provedor fora dela (2.4, regra 4). Chave e elo configurados
   antes da hora não enviam nada.
+- **Groq ligado (decisão 15, resolvida em 08/10/2026).** O que vale agora, e que substitui o parágrafo "Quando o
+  Groq for ligado" acima:
+  - **Configuração em código.** A entrada do Groq (`groq`, `https://api.groq.com/openai/v1`, chave em
+    `GROQ_API_KEY`), o elo nas cadeias e os limites são padrões no código (`AiConfiguration`, `AiOptions`). O
+    serviço do Render não é sincronizado pelo `render.yaml`: a única coisa que o painel tem é o segredo
+    `GROQ_API_KEY`. **Sem valor nele nada muda**: o elo do Groq não resolve para provedor nenhum, a cadeia é a
+    do Gemini e o texto cita só o Google.
+  - **Posição: reserva, depois dos elos do Gemini, em todas as cadeias**, com o modelo `openai/gpt-oss-120b`
+    (modelo de produção do Groq com `json_schema` estrito; limites publicados por modelo: 30 pedidos e 8.000
+    tokens por minuto, 1.000 pedidos e 200.000 tokens por dia). Quem usa o app hoje recebe a mesma resposta do
+    mesmo modelo; o Groq só responde quando nenhum elo do Gemini pôde (cota, modelo retirado, Google fora do
+    ar) — é o fallback entre provedores que faltava. **Modelo e posição são provisórios**: foram escolhidos pela
+    documentação pública, porque a conferência com a chave real ainda não foi feita (pendente). Promover o Groq a
+    primeiro na categorização ou no Assistente só depois dela, e de comparar a qualidade em português. O modelo
+    fica num único lugar (`AiOptions.GroqReserveModel`).
+  - **Limite de 8.000 tokens por minuto**: um pedido cuja estimativa passe de 90% disso (7.200) não cabe na
+    janela e o elo do Groq é pulado para ele — vale para os pedidos maiores do Assistente e dos resumos.
+  - **Aceite**: a versão do texto de IA subiu para 2 e a lista coberta (`AiConsentCoverage`) passou a ser
+    `gemini` e `groq` (7.1, 7.3).
+  - **Regra operacional**: acrescentar ou trocar provedor exige subir a versão do aceite **no mesmo deploy** em
+    que o provedor passa a valer; retirar a chave não exige nada. A chave do Groq já estava gravada no Render
+    (inerte) antes deste deploy, então o Groq nasce ligado junto com a versão 2 e ninguém aceita a versão 2 sem
+    vê-lo na lista. O servidor não guarda quais provedores cada aceite viu: se uma chave for acrescentada depois,
+    sem versão nova, quem aceitou antes passaria a ter dados enviados a um destino que não leu.
 - Descartados: Hugging Face, GitHub Models, Anthropic e OpenAI (sem gratuito utilizável, 2.1).
 - Atenção: o modelo padrão de hoje, `gemini-2.0-flash` (`GeminiOptions.cs:6`) [código], **não aparece** na
   lista gratuita verificada [externo] e não foi testado com a chave real; `GEMINI_MODEL` não está definido no
@@ -217,7 +250,7 @@ public interface ILlmGateway   // a cadeia; é isto que os serviços usam
 | Classe | Atende | Observação |
 | --- | --- | --- |
 | `GeminiLlmProvider` | Gemini | Evolução do `GeminiChatAdapter` atual: mesma chave `x-goog-api-key` (`GeminiChatAdapter.cs:50`), `generateContent` com `responseMimeType=application/json` + `responseSchema`; lê `usageMetadata` para tokens. Hoje o adaptador lê só `candidates[0].parts[0].text` (`:69-70`) [código]. |
-| `OpenAiCompatibleLlmProvider` | Qualquer API no formato `chat/completions` (Groq como primeira escolha; OpenRouter, Mistral). **Entregue na fase 1 e desligado** | `response_format = { type: "json_schema", json_schema: { strict: true, schema } }`; lê `usage.prompt_tokens/completion_tokens`. Sem chave não entra em cadeia nenhuma (2.4, regra 4). Liga só por configuração: `Ai__OpenAiCompatible__0__Name=groq`, `__BaseUrl=…`, `__ApiKeyVariable=GROQ_API_KEY`, a chave com valor no Render e o elo nas cadeias (2.2). Testado contra servidor HTTP falso, porque não há chave para teste real. URL base e formato exatos a confirmar na documentação do provedor na hora de ligar. |
+| `OpenAiCompatibleLlmProvider` | Qualquer API no formato `chat/completions` (Groq como primeira escolha; OpenRouter, Mistral). **Entregue na fase 1 e desligado** | `response_format = { type: "json_schema", json_schema: { strict: true, schema } }`; lê `usage.prompt_tokens/completion_tokens`. Sem chave não entra em cadeia nenhuma (2.4, regra 4). Liga só por configuração: `Ai__OpenAiCompatible__0__Name=groq`, `__BaseUrl=…`, `__ApiKeyVariable=GROQ_API_KEY`, a chave com valor no Render e o elo nas cadeias (2.2). Testado contra servidor HTTP falso, porque não há chave para teste real. URL base e formato exatos a confirmar na documentação do provedor na hora de ligar. **Desde 08/10/2026 o Groq é uma entrada embutida no código** (2.2, "Groq ligado"): basta a chave; uma entrada de configuração chamada `groq` substitui a embutida. |
 | `FakeLlmProvider` | Testes de integração e "App E2E" | Ligado por `Ai__UseFakeProvider=true`; quando ligado, é o único elo de todas as cadeias e **conta como provedor disponível** (`available=true` em `/ai/status`), para que a tela de boas-vindas e o Assistente apareçam no fluxo Maestro. **Monta a resposta a partir do pedido**, no esquema pedido: texto fixo em português sem números próprios; quando o pedido traz um pacote de fatos, copia para o texto 1–2 números existentes no pacote (ex.: `spend.total`) e põe em `refs` os primeiros ids do pacote; no Assistente sem pacote (fases 1–3), responde sem números. Teste de unidade: a saída do falso passa nos três validadores. Guarda de subida: a API **recusa iniciar** com o falso ligado se (a) alguma chave real de provedor tiver valor (`GEMINI_API_KEY`, que já tem valor em produção, ou a chave de qualquer provedor compatível configurado, como `GROQ_API_KEY`), ou (b) a variável `RENDER` existir no ambiente (o Render a define nos serviços; conferir na documentação do Render no início da fase 1, a confirmar). Não depende de `ASPNETCORE_ENVIRONMENT`, porque o App E2E sobe a imagem com `Production` (`scripts/app-e2e-api.sh`) [código]; o script do E2E passa a enviar `--env Ai__UseFakeProvider=true`. **Comportamento esperado no Render**: se alguém ligar a variável por engano, a nova versão falha na subida, o deploy aparece como falho, o Render mantém a versão anterior no ar e o `/health` continua mostrando o commit anterior — a esteira trata como deploy não confirmado. Nunca chega a responder a usuários reais. |
 
 - Esquema JSON num subconjunto comum (objeto, array, string com `enum`, number, integer, boolean; todos os
@@ -900,8 +933,13 @@ vai ao Google") e esquema igual ao dos leitores locais.
   revogado, de quem ainda é membro** (conferido em `couple_members`).
 - O outro membro vê "Ativada por {nome} em {data}" (decisão 3). Qualquer membro pode **desligar para o grupo**
   (revoga todos os aceites) ou retirar só o próprio aceite (decisão em aberto 10 sobre avisar por e-mail).
-- Versão do texto no servidor: `AiConsent.CurrentVersion = 1`. Mudança relevante → versão nova → grupo volta a
-  "desligada" até alguém aceitar de novo.
+- Versão do texto no servidor: `AiConsent.CurrentVersion = 2` (1: só o Google; 2: Google e Groq, desde
+  08/10/2026). Mudança relevante → versão nova → grupo volta a "desligada" até alguém aceitar de novo. **Aceite
+  de versão anterior não conta para nada**: nenhuma chamada a provedor nenhum, e ninguém aparece como "ativou".
+  Quem tinha aceitado a versão anterior **volta a ser perguntado** (`onboardingPending`), vendo o texto novo; o
+  outro membro não é perguntado nem avisado até alguém aceitar a versão nova. "Agora não" encerra o aceite antigo
+  da pessoa (fica revogado, não apagado) e a pergunta não volta. O app instalado sem a atualização ainda envia a
+  versão antiga: o servidor recusa com 409 `AI_CONSENT_VERSION_OUTDATED` ("Atualize o app…").
 - O aceite local antigo (`aiChat.acceptedAt`) **não é migrado** (o texto mudou); a tela de boas-vindas (7.3)
   pergunta de novo.
 
@@ -929,17 +967,23 @@ Decisão em aberto 7 sobre manter ou apagar o histórico ao desligar.
   "transferência"). O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta ou
   de quem recebeu uma transferência, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados
   numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.
-- Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.
+- Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados. Com o Groq ligado:
+  "Google (Gemini) e Groq, nos Estados Unidos".
 - Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e
-  revisores humanos podem lê-lo."
+  revisores humanos podem lê-lo." Com o Groq ligado, acrescenta: "O Groq declara, nos termos de uso dele, que não
+  usa o conteúdo enviado para treinar modelos; ele pode guardar pedidos e respostas por até 30 dias para
+  investigar abuso ou falhas." (fonte em 2.1)
 - Quem ativa liga a análise para o grupo inteiro; o outro membro é avisado no app e pode desligar a qualquer
   hora em Configurações; desligar não apaga o histórico, que pode ser apagado à parte.
 - O resumo semanal por e-mail é opcional, por pessoa, enviado pela Brevo (o serviço de e-mail que o app já usa).
 - Os cálculos (assinaturas, parcelas, previsão) são feitos no próprio servidor do app e funcionam sem a IA.
 
-Hoje o único destino é o Google. Se um segundo provedor for ligado (2.2, decisão em aberto 15), o texto passa a
-citá-lo (nome, país e se treina com o conteúdo) e a versão do aceite de IA sobe (7.1): o grupo aceita de novo
-antes de qualquer envio a ele.
+**Versão 2 do texto (08/10/2026): os destinos vêm do servidor.** `GET /ai/status` lista em `providers` o Google
+(sempre) e o Groq só enquanto ele recebe dados de fato — tem chave e um elo em alguma cadeia. O app monta "Para
+onde" e "Com franqueza" com essa lista (`aiAnalysisPoints`, `aiDestinations`). Quando o app não sabe o que o
+servidor tem ligado (sem status, ou com um status guardado de antes da versão 2), o texto cita **todos** os
+destinos que o aceite cobre: na dúvida, diz o máximo que pode acontecer. Outro provedor novo, ou mudança na
+política de um destes: texto novo e versão nova do aceite (regra operacional em 2.2).
 
 **`CONSENT_VERSION` do app não sobe.** Em `consent.ts`, um registro com versão diferente de `CONSENT_VERSION` é
 lido como vazio (`data.version !== CONSENT_VERSION` → `EMPTY_CONSENT`) [código]: subir para 2 apagaria, no
@@ -1331,10 +1375,10 @@ A fase que depende de cada decisão usa o padrão se o dono não responder antes
 
 | # | Pergunta | Padrão recomendado | Fase |
 | --- | --- | --- | --- |
-| 1 | Exemplos de investimento: além do Tesouro e de CDB/LCI/LCA sem emissor, citar fundos de índice da lista fixa (ex.: BOVA11, IVVB11) só para explicar o que a classe é? Ações individuais e cripto também? | Sim para a lista fixa de fundos de índice amplos (5.4); **não** para ações individuais, FIIs, BDRs e cripto — ficam mais perto de "análise de valor mobiliário específico" (Res. CVM 20 §1º). Alternativa mais conservadora: só Tesouro. | 9 |
-| 2 | Ordem dos modelos no Assistente | `gemini-flash-latest` primeiro, `gemini-flash-lite-latest` de reserva; o `gemini-3-flash-preview` fica só para os resumos e o guia. Rever quando a cota for conhecida (aprendida pelo 429 ou lida no AI Studio) ou quando o segundo provedor for ligado. Trocar é só configuração. | 1 |
-| 3 | Mistral como segundo provedor | Não por agora (pede telefone; números de terceiros; treino ligado por padrão, com opt-out); só se o dono não conseguir conta no Groq e preferir a Mistral. A abstração já atende. | 1 |
-| 4 | Onde fica o Assistente (a barra já tem 7 abas) | Botão fixo no cabeçalho do Painel e dentro da seção Insights; a aba "Chat IA" some. Alternativa: "Assistente" no lugar da aba Relatórios, com Relatórios virando link no Painel. | 2 |
+| 1 | Exemplos de investimento: além do Tesouro e de CDB/LCI/LCA sem emissor, citar fundos de índice da lista fixa (ex.: BOVA11, IVVB11) só para explicar o que a classe é? Ações individuais e cripto também? | Sim para a lista fixa de fundos de índice amplos (5.4); **não** para ações individuais, FIIs, BDRs e cripto — ficam mais perto de "análise de valor mobiliário específico" (Res. CVM 20 §1º). Alternativa mais conservadora: só Tesouro. **Resposta do dono (08/10/2026): pode incluir ações individuais e cripto especificamente nos exemplos** — a fase 9 aplica. | 9 |
+| 2 | Ordem dos modelos no Assistente | `gemini-flash-latest` primeiro, `gemini-flash-lite-latest` de reserva; o `gemini-3-flash-preview` fica só para os resumos e o guia. Rever quando a cota for conhecida (aprendida pelo 429 ou lida no AI Studio) ou quando o segundo provedor for ligado. Trocar é só configuração. **Respondida (08/10/2026)** com a criação da chave do Groq: os elos do Gemini ficam como estão e o Groq entra como reserva (2.2, "Groq ligado"); a ordem é revista depois da conferência com a chave real. | 1 |
+| 3 | Mistral como segundo provedor | Não por agora (pede telefone; números de terceiros; treino ligado por padrão, com opt-out); só se o dono não conseguir conta no Groq e preferir a Mistral. A abstração já atende. **Resposta do dono (08/10/2026): Mistral fica para depois.** | 1 |
+| 4 | Onde fica o Assistente (a barra já tem 7 abas) | Botão fixo no cabeçalho do Painel e dentro da seção Insights; a aba "Chat IA" some. Alternativa: "Assistente" no lugar da aba Relatórios, com Relatórios virando link no Painel. **Resposta do dono (08/10/2026): onde for melhor para a experiência** — já entregue na fase 2 (botão). | 2 |
 | 5 | Percentuais da alocação de exemplo (pós-fixado / inflação / prefixado / renda variável) | Conservador 70/20/10/0; Moderado 45/25/10/20; Arrojado 25/20/10/45 — conteúdo editorial do app, sem fonte externa. | 9 |
 | 6 | Quanto de IA por grupo por dia | 25 chamadas e 60.000 tokens por dia de Brasília, para o grupo inteiro, só uso interativo; resumos semanal e mensal fora dessa conta. | 1 |
 | 7 | Ao desligar a IA: guardar ou apagar o histórico? Por quanto tempo guardar os dados enviados? | Guardar o histórico (é do grupo, no servidor do app) com o botão "Apagar histórico de IA"; `facts_json` por 13 meses. | 5b |
@@ -1345,7 +1389,10 @@ A fase que depende de cada decisão usa o padrão se o dono não responder antes
 | 12 | O insight diário chama a IA? | Sim, uma chamada curta só quando há fato novo e o grupo ativou; senão resumo automático. Alternativa mais barata: só resumo automático. | 7 |
 | 13 | Quem pode desligar a IA do grupo | Qualquer membro (protege quem não aceitou; quem quer liga de novo). | 2 |
 | 14 | Fechar a #29 como absorvida e atualizar o desenho do Open Finance | **Feito** em 08/10/2026: issues #37–#48 abertas, #29 fechada como absorvida, desenho do Open Finance apontando para cá. | — |
-| 15 | Segundo provedor de IA: hoje o fallback é só entre modelos do Gemini (mesmo provedor, cotas separadas) e não há chave do Groq | **Entregar a fase 1 sem ele; ligar quando a chave existir.** Groq como primeira escolha; alternativas e limites em 2.2. Ligar pede a chave no Render, o elo nas cadeias e o provedor no texto de privacidade, com versão nova do aceite de IA (7.3). | 1 |
+| 15 | Segundo provedor de IA: hoje o fallback é só entre modelos do Gemini (mesmo provedor, cotas separadas) e não há chave do Groq | **Entregar a fase 1 sem ele; ligar quando a chave existir.** Groq como primeira escolha; alternativas e limites em 2.2. Ligar pede a chave no Render, o elo nas cadeias e o provedor no texto de privacidade, com versão nova do aceite de IA (7.3). **Resolvida (08/10/2026): Groq ligado como reserva, com a versão 2 do aceite** (2.2, "Groq ligado"; 7.1; 7.3). Pendente: conferência com a chave real (modelos, limites e formato do 429), que decide se o Groq sobe de posição. | 1 |
+
+**Respostas do dono em 08/10/2026**: 1, 2, 3, 4 e 15 estão anotadas nas linhas acima; **5 a 14: de acordo com o
+padrão recomendado**.
 
 Resolvidas no texto (técnicas): categorização em lote vai ao `gemini-flash-latest` e, quando o Groq for ligado,
 primeiro a ele (2.2); transferências a pessoas vão

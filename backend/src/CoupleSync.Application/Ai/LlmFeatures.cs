@@ -42,11 +42,14 @@ public static class LlmFeatures
 /// <summary>
 /// The providers the current AI consent text covers. It stays in code, next to the consent version: a provider
 /// configured before the text names it (and before the group accepts again) receives nothing — the gateway ignores
-/// its links. Today only Google (Gemini).
+/// its links. Version 2 of the text: Google (Gemini) and Groq.
+/// Adding or changing a provider here goes together with a new <c>AiConsent.CurrentVersion</c>, in the same deploy
+/// in which the provider starts to count: nobody may have accepted a text that did not name it. Taking a key away
+/// needs nothing.
 /// </summary>
 public static class AiConsentCoverage
 {
-    public static readonly IReadOnlyList<string> Providers = [AiOptions.GeminiProviderName];
+    public static readonly IReadOnlyList<string> Providers = [AiOptions.GeminiProviderName, AiOptions.GroqProviderName];
 
     public static bool Covers(string provider) => Providers.Contains(provider, StringComparer.OrdinalIgnoreCase);
 }

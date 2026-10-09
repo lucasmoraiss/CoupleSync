@@ -122,12 +122,12 @@ public sealed class AiActivationTests
         await using var host = WithTheFakeProvider(factory);
         var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
 
-        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
         var id = await database.ScalarAsync<Guid>("SELECT id FROM ai_consents");
         var firstDate = await database.ScalarAsync<DateTime>("SELECT accepted_at_utc FROM ai_consents");
 
         var duplicate = await Assert.ThrowsAsync<PostgresException>(() => database.ExecuteAsync(
-            "INSERT INTO ai_consents (id, couple_id, user_id, version, accepted_at_utc) VALUES (@id, @couple, @user, 1, now())",
+            "INSERT INTO ai_consents (id, couple_id, user_id, version, accepted_at_utc) VALUES (@id, @couple, @user, 2, now())",
             ("id", Guid.NewGuid()), ("couple", ana.CoupleId!.Value), ("user", ana.UserId)));
         Assert.Equal(PostgresErrorCodes.UniqueViolation, duplicate.SqlState);
 
@@ -136,13 +136,48 @@ public sealed class AiActivationTests
         Assert.False((await ana.Client.GetFromJsonAsync<JsonElement>(Status)).GetProperty("enabled").GetBoolean());
 
         await Task.Delay(20);
-        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
 
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents"));
         Assert.Equal(id, await database.ScalarAsync<Guid>("SELECT id FROM ai_consents"));
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents WHERE revoked_at_utc IS NULL AND revoked_by_user_id IS NULL"));
         Assert.True(await database.ScalarAsync<DateTime>("SELECT accepted_at_utc FROM ai_consents") > firstDate);
         Assert.True((await ana.Client.GetFromJsonAsync<JsonElement>(Status)).GetProperty("enabled").GetBoolean());
+    }
+
+    /// <summary>
+    /// Version 2 of the text (Groq as the second provider): a row of version 1, as production has them, switches
+    /// nothing on. The person is asked again, nothing is sent meanwhile, and the new acceptance is a row of its own.
+    /// </summary>
+    [PostgresFact]
+    public async Task ARowOfVersion1_SwitchesNothingOn_ThePersonIsAskedAgain_AndTheNewAcceptanceIsARowOfVersion2()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        await using var host = WithTheFakeProvider(factory);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PatchAsJsonAsync("/api/v1/ai/preferences", new { OnboardingAnswered = true })).StatusCode);
+        await database.ExecuteAsync(
+            "INSERT INTO ai_consents (id, couple_id, user_id, version, accepted_at_utc) VALUES (@id, @couple, @user, 1, now() - interval '2 hours')",
+            ("id", Guid.NewGuid()), ("couple", ana.CoupleId!.Value), ("user", ana.UserId));
+
+        var status = await ana.Client.GetFromJsonAsync<JsonElement>(Status);
+        Assert.Equal(2, status.GetProperty("consentVersion").GetInt32());
+        Assert.False(status.GetProperty("enabled").GetBoolean());
+        Assert.True(status.GetProperty("onboardingPending").GetBoolean());
+        Assert.Equal(HttpStatusCode.Forbidden, (await ana.Client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto gastamos?" })).StatusCode);
+        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM ai_usage"));
+        Assert.Equal(HttpStatusCode.Conflict, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
+
+        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents"));
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents WHERE version = 2 AND revoked_at_utc IS NULL"));
+        status = await ana.Client.GetFromJsonAsync<JsonElement>(Status);
+        Assert.True(status.GetProperty("enabled").GetBoolean());
+        Assert.False(status.GetProperty("onboardingPending").GetBoolean());
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto gastamos?" })).StatusCode);
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_usage"));
     }
 
     [PostgresFact]
@@ -153,7 +188,7 @@ public sealed class AiActivationTests
         await using var host = WithTheFakeProvider(factory);
         var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
 
-        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })));
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })));
 
         Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents"));
@@ -179,9 +214,9 @@ public sealed class AiActivationTests
         var group = ana.CoupleId!.Value;
 
         // Bruno switched it on; Ana only answered "not now"; another group (Carla) switched its own on.
-        Assert.Equal(HttpStatusCode.OK, (await bruno.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await bruno.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await ana.Client.PatchAsJsonAsync("/api/v1/ai/preferences", new { OnboardingAnswered = true })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await carla.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await carla.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
         var before = await ana.Client.GetFromJsonAsync<JsonElement>(Status);
         Assert.True(before.GetProperty("enabled").GetBoolean());
         Assert.Equal("Bruno", Assert.Single(before.GetProperty("acceptedBy").EnumerateArray()).GetProperty("name").GetString());
@@ -221,8 +256,8 @@ public sealed class AiActivationTests
         await using var host = WithTheFakeProvider(factory);
         var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
         var carla = await OpenFinanceTests.RegisterAsync(factory, host, "Carla");
-        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await carla.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await carla.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
 
         // One real call each through the chain (the fake provider), then rows of other days written straight in.
         Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto gastamos?" })).StatusCode);

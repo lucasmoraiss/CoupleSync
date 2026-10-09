@@ -40,6 +40,13 @@ public static class AiConfiguration
 {
     public const string GeminiKeyVariable = "GEMINI_API_KEY";
 
+    /// <summary>
+    /// Groq is configured in code, not in the panel of the host: the Render service is not synchronised from
+    /// render.yaml, so the only thing production adds is this secret. Without a value in it Groq does not exist.
+    /// </summary>
+    public const string GroqKeyVariable = "GROQ_API_KEY";
+    public const string GroqBaseUrl = "https://api.groq.com/openai/v1";
+
     public static void Apply(AiOptions options, IConfiguration configuration)
     {
         var section = configuration.GetSection(AiOptions.SectionName);
@@ -101,9 +108,13 @@ public static class AiConfiguration
         return string.Empty;
     }
 
-    /// <summary>The configured OpenAI-compatible providers (those with a name), without their keys.</summary>
+    /// <summary>
+    /// The OpenAI-compatible providers, without their keys: Groq (built in) and the ones of the configuration (those
+    /// with a name). A configured entry named "groq" replaces the built-in one.
+    /// </summary>
     public static List<OpenAiCompatibleEntry> CompatibleProviders(IConfiguration configuration)
-        => configuration.GetSection($"{AiOptions.SectionName}:OpenAiCompatible").GetChildren()
+    {
+        var configured = configuration.GetSection($"{AiOptions.SectionName}:OpenAiCompatible").GetChildren()
             .Select(entry => new OpenAiCompatibleEntry
             {
                 Name = (entry[nameof(OpenAiCompatibleEntry.Name)] ?? string.Empty).Trim(),
@@ -112,6 +123,19 @@ public static class AiConfiguration
             })
             .Where(entry => entry.Name.Length > 0)
             .ToList();
+
+        if (!configured.Any(entry => string.Equals(entry.Name, AiOptions.GroqProviderName, StringComparison.OrdinalIgnoreCase)))
+        {
+            configured.Insert(0, new OpenAiCompatibleEntry
+            {
+                Name = AiOptions.GroqProviderName,
+                BaseUrl = GroqBaseUrl,
+                ApiKeyVariable = GroqKeyVariable,
+            });
+        }
+
+        return configured;
+    }
 
     private static LlmLink? ParseLink(string? value)
     {

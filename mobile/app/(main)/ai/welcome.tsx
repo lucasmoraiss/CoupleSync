@@ -12,8 +12,8 @@ import { getApiErrorMessage } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
-import { AI_ANALYSIS_POINTS, AI_ANALYSIS_SUMMARY } from '@/modules/privacy/privacyContent';
-import { welcomeView } from '@/modules/ai/aiStatus';
+import { aiAnalysisPoints, aiAnalysisSummary } from '@/modules/privacy/privacyContent';
+import { aiDestinations, welcomeView } from '@/modules/ai/aiStatus';
 import { useAiStatusStore } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
 
@@ -73,6 +73,8 @@ function AiWelcomeScreen() {
   }
 
   const activatedByOther = view.kind === 'activated-by-other';
+  // Para onde os dados vão: o que o servidor tem ligado agora (o texto que a pessoa aceita).
+  const destinations = aiDestinations(status);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -99,7 +101,7 @@ function AiWelcomeScreen() {
           ))}
         </View>
 
-        <Text style={styles.summary}>{AI_ANALYSIS_SUMMARY}</Text>
+        <Text style={styles.summary}>{aiAnalysisSummary(destinations)}</Text>
         <TouchableOpacity
           style={styles.readAll}
           onPress={() => setShowAll((shown) => !shown)}
@@ -111,7 +113,7 @@ function AiWelcomeScreen() {
         </TouchableOpacity>
         {showAll && (
           <View style={styles.allBox}>
-            {AI_ANALYSIS_POINTS.map((point) => (
+            {aiAnalysisPoints(destinations).map((point) => (
               <Text key={point} style={styles.allText}>{point}</Text>
             ))}
           </View>
