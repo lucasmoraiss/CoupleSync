@@ -56,6 +56,8 @@ start() {
   # to start with it where a real provider key or the RENDER variable exists.
   # The whole emulator reaches the API from one address, and every flow signs up, signs in and signs out:
   # the production limits (5 per minute per address) would reject the tests, so they are raised here only.
+  # App update: no lookup of the latest release on GitHub (empty address). What the flows see must not depend on
+  # which version is published at the time, so the "new version" notice never shows in them.
   echo "== starting the API container ($API) on $BASE"
   docker run --detach --name "$API" --network "$NETWORK" --publish "127.0.0.1:$PORT:8080" \
     --env "DATABASE_URL=Host=$DB;Port=5432;Database=couplesync_e2e;Username=postgres;Password=$db_password" \
@@ -64,6 +66,7 @@ start() {
     --env RateLimiting__Auth__PermitLimit=1000 \
     --env RateLimiting__CoupleJoin__PermitLimit=1000 \
     --env Ai__UseFakeProvider=true \
+    --env AppUpdate__LatestReleaseUrl= \
     "$image" >/dev/null
 
   echo "== waiting for $BASE/health/live and /health/ready"
