@@ -277,6 +277,33 @@ public sealed class OpenFinanceIncomeReviewTests
     }
 
     [Fact]
+    public async Task TheIncomesOfARequest_AreStoredInTheOrderOfTheirNames_WhateverTheOrderAsked_AndTheAnswerKeepsTheOrderAsked()
+    {
+        // The ids follow what makes an income unique (person, month, name), and the incomes are stored in the order
+        // of the ids: two requests registering the same entries at once then store them in the same order, and one
+        // waits for the other instead of the database ending both in a deadlock (seen on PostgreSQL).
+        await using var factory = NewFactory();
+        var asked = new[] { "Foxtrot", "Delta", "Echo", "Bravo", "Alfa", "Charlie" };
+        var (ana, _) = await SyncedAsync(factory, asked.Select((name, i) => Credit($"t27-order-{i}", Noon().AddMinutes(i), 10.00m + i, name)).ToArray());
+        var lines = new List<Guid>();
+        for (var i = 0; i < asked.Length; i++) lines.Add(await LineIdAsync(factory, $"t27-order-{i}"));
+
+        var answer = await OkAsync(ConfirmAsync(ana, new { incomes = lines.Select(id => new { id }).ToArray() }));
+
+        Assert.Equal(
+            new[] { "Alfa", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot" },
+            (await factory.RowsAsync("SELECT name FROM income_sources ORDER BY id")).Select(r => (string)r["name"]!));
+        Assert.Equal(lines, answer.GetProperty("incomes").EnumerateArray().Select(i => i.GetProperty("id").GetGuid()));
+        // Each line points to the income of its own name and value.
+        for (var i = 0; i < asked.Length; i++)
+        {
+            var income = Assert.Single(await factory.RowsAsync(
+                $"SELECT s.name, s.amount FROM income_sources s JOIN bank_transactions b ON b.linked_income_source_id = s.id WHERE b.pluggy_transaction_id = 't27-order-{i}'"));
+            Assert.Equal((asked[i], 10.00m + i), ((string)income["name"]!, Money(income["amount"])));
+        }
+    }
+
+    [Fact]
     public async Task ConfirmingTheSameEntryTwice_CreatesOneIncomeOnly()
     {
         await using var factory = NewFactory();

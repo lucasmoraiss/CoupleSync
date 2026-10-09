@@ -58,7 +58,8 @@ public sealed partial class IncomeSource : ICoupleScoped
         string currency,
         bool isShared,
         DateTime createdAtUtc,
-        bool isRecurring = true)
+        bool isRecurring = true,
+        Guid? id = null)
     {
         if (string.IsNullOrWhiteSpace(month) || month.Length != 7 || !MonthFormatRegex().IsMatch(month))
             throw new ArgumentException("O mês deve estar no formato AAAA-MM.", nameof(month));
@@ -75,7 +76,7 @@ public sealed partial class IncomeSource : ICoupleScoped
         if (createdAtUtc.Kind == DateTimeKind.Unspecified)
             createdAtUtc = DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc);
 
-        return new IncomeSource(Guid.NewGuid(), coupleId, userId, month, name.Trim(), amount, currency, isShared, isRecurring, createdAtUtc);
+        return new IncomeSource(id ?? Guid.NewGuid(), coupleId, userId, month, name.Trim(), amount, currency, isShared, isRecurring, createdAtUtc);
     }
 
     public void Update(string? name, decimal? amount, bool? isShared, bool? isRecurring, DateTime nowUtc)

@@ -361,8 +361,7 @@ public sealed class BankReviewService
         DateTime now,
         CancellationToken ct)
     {
-        var sources = new List<IncomeSource>();
-        var registered = new List<BankReviewIncomeDto>();
+        var accepted = new List<(BankTransaction Row, string Month, string Name)>();
         var already = 0;
         // What each person already has in each month, as this request fills it: the names (folded) and how many.
         var taken = new Dictionary<(Guid UserId, string Month), (HashSet<string> Names, int Count)>();
@@ -370,7 +369,7 @@ public sealed class BankReviewService
         foreach (var input in incomes)
         {
             var row = rows[input.Id];
-            if (row.ReviewState == BankTransactionReviewState.Confirmed)
+            if (row.ReviewState == BankTransactionReviewState.Confirmed || accepted.Any(a => a.Row.Id == row.Id))
             {
                 already++; // registered before (the same request sent twice): never a second income
                 continue;
@@ -405,13 +404,32 @@ public sealed class BankReviewService
             existing.Names.Add(FoldName(name));
             taken[key] = (existing.Names, existing.Count + 1);
 
-            var source = IncomeSource.Create(
-                coupleId, row.UserId, month, name, row.AbsoluteAmount, CurrencyRules.Brl, isShared: true, now, isRecurring: false);
-            sources.Add(source);
-            row.ConfirmAsIncome(source.Id, now);
-            registered.Add(new BankReviewIncomeDto(row.Id, source.Id));
+            accepted.Add((row, month, name.Trim()));
         }
 
+        // The incomes are stored in the order of their ids, whatever the order they are handed over in. So the ids
+        // follow what makes an income unique (person, month, name): every request that registers the same incomes
+        // stores them in the same order, and two of them at once wait in line for each other (the second one is
+        // then refused by the unique name) instead of each holding what the other needs, which the database would
+        // end as a deadlock.
+        var ids = accepted.Select(_ => Guid.NewGuid()).Order().ToList();
+        var inStoringOrder = accepted
+            .OrderBy(a => a.Row.UserId)
+            .ThenBy(a => a.Month, StringComparer.Ordinal)
+            .ThenBy(a => a.Name, StringComparer.Ordinal)
+            .ToList();
+        var sources = new List<IncomeSource>();
+        for (var i = 0; i < inStoringOrder.Count; i++)
+        {
+            var (row, month, name) = inStoringOrder[i];
+            var source = IncomeSource.Create(
+                coupleId, row.UserId, month, name, row.AbsoluteAmount, CurrencyRules.Brl, isShared: true, now, isRecurring: false, id: ids[i]);
+            sources.Add(source);
+            row.ConfirmAsIncome(source.Id, now);
+        }
+
+        // The answer keeps the order of the request.
+        var registered = accepted.Select(a => new BankReviewIncomeDto(a.Row.Id, a.Row.LinkedIncomeSourceId!.Value)).ToList();
         return (sources, registered, already);
     }
 
