@@ -84,6 +84,16 @@ function sessionOwner(): Owner | null {
   return accessToken && userId && coupleId ? { userId, coupleId } : null;
 }
 
+/**
+ * A última pessoa que teve sessão neste aparelho desde que o app abriu. Sair da conta zera a sessão ANTES de rodar
+ * os limpadores (userData.ts); é por aqui que o limpador sabe de quem é a cópia a apagar quando o store não chegou
+ * a ter dono (ninguém consultou o status: a pessoa abriu o app sem grupo).
+ */
+let lastSessionUserId: string | null = useSessionStore.getState().userId;
+useSessionStore.subscribe((session) => {
+  if (session.userId !== null) lastSessionUserId = session.userId;
+});
+
 export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, get) => {
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   /** A consulta em andamento e a época em que começou: pedidos simultâneos viram uma chamada só. */
@@ -219,11 +229,19 @@ export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, ge
       const previousOwner = get().ownerUserId;
       cancelRetry();
       set({ ...INITIAL });
-      if (previousOwner === null) return;
-      try {
-        await SecureStore.deleteItemAsync(aiStatusStorageKey(previousOwner));
-      } catch {
-        // Não apagou: a cópia é de uma chave só desta pessoa, e só vale para o grupo que está escrito nela.
+      const leaving = new Set<string>();
+      if (previousOwner !== null) leaving.add(previousOwner);
+      // Quem saiu sem o store ter tido dono nesta abertura do app (abriu já sem grupo): a cópia que ficou de uma
+      // abertura anterior também é apagada. Quem está entrando agora (limpeza do login) fica com a sua.
+      const current = useSessionStore.getState().userId;
+      if (lastSessionUserId !== null && lastSessionUserId !== current) leaving.add(lastSessionUserId);
+      lastSessionUserId = current;
+      for (const userId of leaving) {
+        try {
+          await SecureStore.deleteItemAsync(aiStatusStorageKey(userId));
+        } catch {
+          // Não apagou: a cópia é de uma chave só desta pessoa, e só vale para o grupo que está escrito nela.
+        }
       }
     },
   };

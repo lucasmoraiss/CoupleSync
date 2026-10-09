@@ -13,7 +13,7 @@ import { useSessionStore } from '@/state/sessionStore';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { goToParent, resetOnFocus } from '@/navigation/resetOnFocus';
 import { AI_ANALYSIS_POINTS, AI_ANALYSIS_SUMMARY } from '@/modules/privacy/privacyContent';
-import { welcomeView } from '@/modules/ai/aiStatus';
+import { leaveWelcomeIfDue, welcomeView } from '@/modules/ai/aiStatus';
 import { useAiStatusStore } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
 
@@ -27,7 +27,7 @@ const WHAT_IT_DOES: readonly string[] = [
 type Action = 'activate' | 'dismiss' | 'revoke';
 
 function AiWelcomeScreen() {
-  const { status, loadFailed } = useAiStatus();
+  const { status, loadFailed, isFocused } = useAiStatus();
   const userId = useSessionStore((state) => state.userId);
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +41,11 @@ function AiWelcomeScreen() {
   const view = status ? welcomeView(status, userId) : null;
   // Nada a perguntar (IA indisponível, a pessoa já ativou) ou o status não carregou: Painel.
   const leave = (view !== null && (view.kind === 'unavailable' || view.kind === 'done')) || (status === null && loadFailed);
+  // Só a tela em foco sai: depois da primeira visita fica uma instância montada, escondida, que também vê o status
+  // mudar (IA desligada para todos, ativada em outro aparelho) e não pode tirar a pessoa de onde ela está.
   useEffect(() => {
-    if (leave && busy === null) goToParent('ai/welcome');
-  }, [leave, busy]);
+    leaveWelcomeIfDue(leave, busy !== null, { isFocused, leave: () => goToParent('ai/welcome') });
+  }, [leave, busy, isFocused]);
 
   const run = async (action: Action, work: () => Promise<unknown>, doneMessage?: string) => {
     if (busy) return;
