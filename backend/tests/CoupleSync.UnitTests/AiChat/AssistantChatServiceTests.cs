@@ -496,50 +496,98 @@ public sealed class AssistantChatServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #60, item 2 — a marker without braces of a goal that was not sent ("g3" in a group with one goal) used
-    /// to reach the person as written. When goals were sent it is read like the same marker with braces: "uma meta".
+    /// Issue #60, item 2, after review 1 — the same answers as production shows them today (origin/main, copied
+    /// here: <see cref="ProductionToday"/>) and as they are shown now, with one goal sent ("Viagem para Recife",
+    /// g1). Two things changed, and only these: a "gN" the person wrote (now or earlier in the conversation, in any
+    /// case) is their word and is never rewritten when the model repeats it without braces; and "[g3]" of a goal
+    /// that was not sent becomes "uma meta" instead of reaching the person raw. Everything else is as it was: a
+    /// bare "g1" the person did not write is the goal, after any word; a bare "g54" of no goal is left alone.
     /// </summary>
     [Theory]
-    [InlineData("Faltam R$ 5.000,00 para g3.", "Faltam R$ 5.000,00 para uma meta.")]
-    [InlineData("Faltam R$ 5.000,00 para [g3].", "Faltam R$ 5.000,00 para uma meta.")]
-    [InlineData("A meta g1 vai bem; g2 e (g07), nem tanto.", "A meta \"Viagem para Recife\" vai bem; uma meta e (uma meta), nem tanto.")]
-    public async Task AMarkerWithoutBraces_OfAGoalThatWasNotSent_NeverReachesThePersonRaw(string answer, string shown)
+    // Review 1, I1 — words of the person that look like a marker of no goal: intact, as today.
+    [InlineData("Quanto falta pra comprar o moto g54?", "Não encontrei gastos com o moto g54 nos dados.", "Não encontrei gastos com o moto g54 nos dados.", "Não encontrei gastos com o moto g54 nos dados.")]
+    [InlineData("O volante logitech g29 e o mouse g502 entram onde?", "O volante logitech g29 e o mouse g502 não aparecem nos dados.", "O volante logitech g29 e o mouse g502 não aparecem nos dados.", "O volante logitech g29 e o mouse g502 não aparecem nos dados.")]
+    [InlineData("Quanto gastamos na reunião g20?", "A reunião g20 não aparece nos dados.", "A reunião g20 não aparece nos dados.", "A reunião g20 não aparece nos dados.")]
+    [InlineData("E a sala g2, bloco g4, portão g12?", "Não há gastos com sala g2, bloco g4, portão g12.", "Não há gastos com sala g2, bloco g4, portão g12.", "Não há gastos com sala g2, bloco g4, portão g12.")]
+    // The model wrote them by itself: still no goal of that number, still intact.
+    [InlineData("Quanto gastamos?", "Nada sobre o moto g54 nem sobre a reunião g20.", "Nada sobre o moto g54 nem sobre a reunião g20.", "Nada sobre o moto g54 nem sobre a reunião g20.")]
+    [InlineData("Quanto gastamos?", "Faltam R$ 5.000,00 para g3; g2 e (g07), nem tanto.", "Faltam R$ 5.000,00 para g3; g2 e (g07), nem tanto.", "Faltam R$ 5.000,00 para g3; g2 e (g07), nem tanto.")]
+    // Review 1, I2 — the goal cited without braces, after any word: the title, as today.
+    [InlineData("Quanto gastamos?", "Vocês já guardaram R$ 2.000,00 no g1 e o progresso do g1 é de 40%.", "Vocês já guardaram R$ 2.000,00 no \"Viagem para Recife\" e o progresso do \"Viagem para Recife\" é de 40%.", "Vocês já guardaram R$ 2.000,00 no \"Viagem para Recife\" e o progresso do \"Viagem para Recife\" é de 40%.")]
+    [InlineData("Quanto falta?", "Faltam R$ 3.000,00 para o g1.", "Faltam R$ 3.000,00 para o \"Viagem para Recife\".", "Faltam R$ 3.000,00 para o \"Viagem para Recife\".")]
+    [InlineData("Quanto falta?", "Esse g1 vai bem; falta pouco pro g1 e pelo g1.", "Esse \"Viagem para Recife\" vai bem; falta pouco pro \"Viagem para Recife\" e pelo \"Viagem para Recife\".", "Esse \"Viagem para Recife\" vai bem; falta pouco pro \"Viagem para Recife\" e pelo \"Viagem para Recife\".")]
+    [InlineData("Quanto falta?", "No canal g1 e no portal g1 faltam R$ 10,00.", "No canal \"Viagem para Recife\" e no portal \"Viagem para Recife\" faltam R$ 10,00.", "No canal \"Viagem para Recife\" e no portal \"Viagem para Recife\" faltam R$ 10,00.")]
+    [InlineData("Quanto falta?", "Meta g1: faltam R$ 5.000,00; [g1] e {{g1}} vencem em 2027; {{g3}} não.", "Meta \"Viagem para Recife\": faltam R$ 5.000,00; \"Viagem para Recife\" e \"Viagem para Recife\" vencem em 2027; uma meta não.", "Meta \"Viagem para Recife\": faltam R$ 5.000,00; \"Viagem para Recife\" e \"Viagem para Recife\" vencem em 2027; uma meta não.")]
+    [InlineData("Quanto falta?", "O G1 e o G20 falaram de 5g1, de g1x e de g1,5.", "O G1 e o G20 falaram de 5g1, de g1x e de g1,5.", "O G1 e o G20 falaram de 5g1, de g1x e de g1,5.")]
+    // Changed 1 — the person wrote "g1": it is their word (the news site, a room, a product), not the goal.
+    [InlineData("Vi no g1 que a gasolina subiu. Quanto gastamos com combustível?", "Sobre o que saiu no g1 não tenho dados; com combustível foram R$ 300,00.", "Sobre o que saiu no \"Viagem para Recife\" não tenho dados; com combustível foram R$ 300,00.", "Sobre o que saiu no g1 não tenho dados; com combustível foram R$ 300,00.")]
+    [InlineData("Li no portal G1 sobre os juros. E os nossos gastos?", "O g1 e esse g1 do canal g1 não estão nos dados.", "O \"Viagem para Recife\" e esse \"Viagem para Recife\" do canal \"Viagem para Recife\" não estão nos dados.", "O g1 e esse g1 do canal g1 não estão nos dados.")]
+    [InlineData("Quanto custa o mouse g1 da sala g01?", "Não há gastos com o mouse g1.", "Não há gastos com o mouse \"Viagem para Recife\".", "Não há gastos com o mouse g1.")]
+    // ... and the goal itself, written as asked or between brackets, is still the goal.
+    [InlineData("Vi no g1 que a gasolina subiu. E a meta?", "O g1 não está nos dados; faltam R$ 10,00 para {{g1}} e para [g1].", "O \"Viagem para Recife\" não está nos dados; faltam R$ 10,00 para \"Viagem para Recife\" e para \"Viagem para Recife\".", "O g1 não está nos dados; faltam R$ 10,00 para \"Viagem para Recife\" e para \"Viagem para Recife\".")]
+    // Changed 2 — a marker between brackets of a goal that was not sent: nobody writes "[g3]" meaning anything else.
+    [InlineData("Quanto falta?", "Faltam R$ 5.000,00 para [g3] e para a meta [ g07 ].", "Faltam R$ 5.000,00 para [g3] e para a meta [ g07 ].", "Faltam R$ 5.000,00 para uma meta e para a meta uma meta.")]
+    // ... unless the person wrote that word.
+    [InlineData("E a sala g3?", "A sala [g3] não aparece nos dados.", "A sala [g3] não aparece nos dados.", "A sala [g3] não aparece nos dados.")]
+    public async Task AnAnswerWithSomethingThatLooksLikeAGoalMarkerWithoutBraces_ProductionTodayAndNow(
+        string question, string answer, string productionToday, string now)
     {
         AddGoal("Viagem para Recife");
         _first.Then(Answer(answer));
 
-        var reply = await AskAsync();
+        var reply = await AskAsync(question);
+
+        // The column "production today" is not a claim: it is what the code of origin/main gives.
+        Assert.Equal(productionToday, ProductionToday(answer, new Dictionary<string, string> { ["g1"] = "Viagem para Recife" }));
+        Assert.Equal(now, reply.Reply);
+    }
+
+    /// <summary>RestoreGoalTitles as it is in production (origin/main, 4f7c6e9), kept here to compare with.</summary>
+    private static string ProductionToday(string text, IReadOnlyDictionary<string, string> titlesByMarker)
+        => System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"\{{1,2}\s*[gG]\s*([0-9]+)\s*\}{1,2}|\[\s*g([0-9]+)\s*\]|(?<![\p{L}\p{N}_{])g([0-9]+)(?![\p{L}\p{N}_}])(?![.,][0-9])",
+            match =>
+            {
+                var braced = match.Groups[1].Success;
+                var number = braced ? match.Groups[1].Value : match.Groups[2].Success ? match.Groups[2].Value : match.Groups[3].Value;
+                var known = titlesByMarker.TryGetValue("g" + number.TrimStart('0'), out var title) && title.Trim().Length > 0;
+                if (known) return $"\"{title!.Trim()}\"";
+                return braced ? "uma meta" : match.Value;
+            },
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// What the person wrote earlier in the conversation is theirs too; what the model wrote earlier is not (an
+    /// earlier answer that came back with "g1" in it does not turn the goal into ordinary text).
+    /// </summary>
+    [Theory]
+    [InlineData("user", "Sobre o g1: R$ 10,00.")]
+    [InlineData("USER", "Sobre o g1: R$ 10,00.")]
+    [InlineData("model", "Sobre o \"Viagem para Recife\": R$ 10,00.")]
+    public async Task AWordThePersonWroteEarlierInTheConversation_IsTheirsToo_WhatTheModelWroteIsNot(string role, string shown)
+    {
+        AddGoal("Viagem para Recife");
+        _first.Then(Answer("Sobre o g1: R$ 10,00."));
+        var history = new List<ChatMessage> { new("user", "Olá."), new("model", "Olá!"), new(role, "Li no G1 que a gasolina subiu.") };
+
+        var reply = await AskAsync("E agora?", history);
 
         Assert.Equal(shown, reply.Reply);
     }
 
-    /// <summary>
-    /// Issue #60, item 2 — "g1" in lower case is also how a news site is written. A goal is "a meta": right after
-    /// "o", "do", "no", "ao", "pelo", "portal", "site" or "jornal" the word is ordinary text and stays, whether or
-    /// not a goal has that number. Between brackets it is always a marker.
-    /// </summary>
+    /// <summary>A word of the person is a whole word: "g1" inside "g12", "mg1" or "{{g1}}" is not "g1".</summary>
     [Theory]
-    [InlineData("Li no g1 e no portal g1 que os preços subiram; o g1 e o site g7 dizem o mesmo.")]
-    [InlineData("Segundo o   g1, pelo g1 e do G1: faltam R$ 10,00.")]
-    public async Task ALowerCaseWordThatLooksLikeAMarker_AfterAMasculineArticleOrTheNameOfASite_IsOrdinaryText(string answer)
+    [InlineData("E a sala g12, o mg1, o g1x e o 5g1?")]
+    [InlineData("O que é {{g1}}?")]
+    public async Task OnlyAWholeWordOfThePerson_Counts(string question)
     {
         AddGoal("Viagem para Recife");
-        _first.Then(Answer(answer));
+        _first.Then(Answer("Faltam R$ 10,00 para g1."));
 
-        var reply = await AskAsync();
+        var reply = await AskAsync(question);
 
-        Assert.Equal(answer, reply.Reply);
-    }
-
-    [Fact]
-    public async Task AMarkerBetweenBrackets_IsAMarker_EvenAfterAMasculineArticle()
-    {
-        AddGoal("Viagem para Recife");
-        _first.Then(Answer("Falta pouco para o [g1] e para [g2]."));
-
-        var reply = await AskAsync();
-
-        Assert.Equal("Falta pouco para o \"Viagem para Recife\" e para uma meta.", reply.Reply);
+        Assert.Equal("Faltam R$ 10,00 para \"Viagem para Recife\".", reply.Reply);
     }
 
     /// <summary>No goal was sent, so no marker of a goal was: "g3" there is whatever the model meant by it.</summary>
@@ -556,11 +604,12 @@ public sealed class AssistantChatServiceTests : IDisposable
     // ---------------------------------------------------------------- issue #60, item 1: the noise of "Nota do app"
 
     /// <summary>
-    /// A goal whose title is one or two characters, a word of almost every question, or the name of a member used
-    /// to add its line to nearly every question. Such a title gets no line; the others still do.
+    /// A goal whose title is one character, a word of almost every question, or the name of a member used to add
+    /// its line to nearly every question. Such a title gets no line; the others still do — a title of two letters
+    /// included ("TV"), which is what a goal is often called (review 1, I3).
     /// </summary>
     [Fact]
-    public async Task ATitleTooShort_OrTheNameOfAMember_GetsNoLine_TheOthersStillDo()
+    public async Task ATitleOfOneCharacter_OrTheNameOfAMember_GetsNoLine_TheOthersStillDo()
     {
         AddGoal("A");
         AddGoal("TV");
@@ -574,8 +623,31 @@ public sealed class AssistantChatServiceTests : IDisposable
 
         Assert.Equal(
             "A {{A}} e o {{B}} da {{B}} gastaram quanto com a TV, o carro e o PS5?"
+            + "\nNota do app: na pergunta, TV também é o nome da meta {{g2}}."
             + "\nNota do app: na pergunta, carro também é o nome da meta {{g6}}."
             + "\nNota do app: na pergunta, PS5 também é o nome da meta {{g7}}.",
+            Assert.Single(_first.Requests).Messages[^1].Text);
+    }
+
+    /// <summary>
+    /// Review 1, I3 — with the goals "TV" and "Carro", "quanto falta para a TV?" has to say which goal the TV is:
+    /// the model sees only {{g1}} and {{g2}}.
+    /// </summary>
+    [Theory]
+    [InlineData("TV", "Quanto falta para a TV?", "TV")]
+    [InlineData("TV", "quanto falta pra tv nova?", "tv")]
+    [InlineData("PC", "Quanto já guardamos para o PC?", "PC")]
+    [InlineData("AP", "E o AP, falta muito?", "AP")]
+    [InlineData("Pé", "Quanto falta para a meta pé?", "pé")]
+    public async Task AGoalWithATitleOfTwoLetters_GetsItsLine(string title, string question, string cited)
+    {
+        AddGoal(title);
+        AddGoal("Carro");
+
+        await AskAsync(question);
+
+        Assert.Equal(
+            $"{question}\nNota do app: na pergunta, {cited} também é o nome da meta {{{{g1}}}}.",
             Assert.Single(_first.Requests).Messages[^1].Text);
     }
 
@@ -588,6 +660,14 @@ public sealed class AssistantChatServiceTests : IDisposable
     [InlineData("Dinheiro", "Para onde foi o dinheiro?")]
     [InlineData("Quanto", "Quanto falta?")]
     [InlineData("Para", "Quanto falta para a viagem?")]
+    // The grammar of two letters (and of one: "é" is compared as "e").
+    [InlineData("De", "Quanto gastamos de janeiro a março?")]
+    [InlineData("EM", "Quanto gastamos em mercado?")]
+    [InlineData("No", "Quanto gastamos no mês?")]
+    [InlineData("Um", "Falta um tanto ou falta muito?")]
+    [InlineData("Já", "Quanto já guardamos?")]
+    [InlineData("É", "Qual é o maior gasto?")]
+    [InlineData("A", "Quanto falta para a viagem?")]
     public async Task ATitleThatIsAWordOfAlmostEveryQuestion_GetsNoLine(string title, string question)
     {
         AddGoal(title);
@@ -597,23 +677,39 @@ public sealed class AssistantChatServiceTests : IDisposable
         Assert.Equal(question, Assert.Single(_first.Requests).Messages[^1].Text);
     }
 
-    /// <summary>Every word of the list, with and without its accent, in any case: none of them gets a line.</summary>
+    /// <summary>
+    /// The whole list, word by word, as a title in any case: none gets a line. The list is short and is not open
+    /// to who calls: what it holds is fixed here.
+    /// </summary>
     [Fact]
-    public void TheListOfCommonWords_IsShort_AndEachOfItsWordsIsRecognizedAsATitle()
+    public void EachCommonWord_AsATitle_GetsNoLine_AndTheTypicalNamesOfGoalsDo()
     {
-        Assert.InRange(FactPackPrivacyFilter.CommonQuestionWords.Count, 10, 40);
-        foreach (var word in FactPackPrivacyFilter.CommonQuestionWords)
+        string[] common =
+        [
+            "meta", "metas", "objetivo", "gasto", "gastos", "despesa", "despesas", "dinheiro", "conta", "contas",
+            "valor", "total", "saldo", "renda", "orcamento", "orçamento", "mes", "mês", "ano", "hoje", "grupo",
+            "quanto", "quanta", "qual", "que", "como", "com", "para", "por", "uma", "mais",
+            "de", "da", "do", "em", "no", "na", "um", "se", "ou", "eu", "me", "te", "tu", "os", "as", "ao", "ja", "já", "so", "só", "ha", "há",
+        ];
+        foreach (var word in common)
         {
-            // The list is kept as it is compared: lower case, no accents, one word.
-            Assert.Equal(PromptText.Fold(word), word);
-            Assert.DoesNotContain(' ', word);
             var titles = new Dictionary<string, string> { ["g1"] = word.ToUpperInvariant() };
             Assert.Empty(FactPackPrivacyFilter.FindGoalMentions($"e {word}, como fica?", titles));
         }
 
-        // Typical names of goals are not in it: they must keep their line.
-        foreach (var typical in new[] { "carro", "casa", "viagem", "reserva", "ferias", "casamento", "reforma", "emergencia" })
-            Assert.DoesNotContain(typical, FactPackPrivacyFilter.CommonQuestionWords);
+        // Typical names of goals, the short ones included, keep their line.
+        foreach (var typical in new[] { "carro", "casa", "viagem", "reserva", "férias", "casamento", "reforma", "emergência", "tv", "pc", "ap", "ps5", "bebê", "pet", "lar", "sp", "rj" })
+        {
+            var titles = new Dictionary<string, string> { ["g1"] = typical.ToUpperInvariant() };
+            Assert.Equal(
+                $"{typical}={{{{g1}}}}",
+                string.Join("|", FactPackPrivacyFilter.FindGoalMentions($"e {typical}, como fica?", titles).Select(m => $"{m.Text}={m.Markers[0]}")));
+        }
+
+        // Nobody outside the filter can read or change the list.
+        Assert.DoesNotContain(
+            typeof(FactPackPrivacyFilter).GetMembers(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static),
+            member => member.Name.Contains("CommonQuestionWords", StringComparison.Ordinal));
     }
 
     /// <summary>Acceptance of issue #60: the common questions, with one goal, with two and with none.</summary>

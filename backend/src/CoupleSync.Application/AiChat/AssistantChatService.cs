@@ -110,7 +110,9 @@ public sealed class AssistantChatService
             case LlmGatewayOutcome.Ok:
                 // Names were never sent and the goals were cited only by marker: both are put back only now, in what the person reads.
                 var answer = FactPackPrivacyFilter.RestoreNames(result.Value!.Answer.Trim(), people);
-                return new AssistantReply(FactPackPrivacyFilter.RestoreGoalTitles(answer, facts.GoalTitles), result.Provider);
+                // A "g1" the person typed (now or earlier in this conversation) is their word, not the goal.
+                var written = history.Where(h => !IsFromModel(h)).Select(h => h.Content).Append(message);
+                return new AssistantReply(FactPackPrivacyFilter.RestoreGoalTitles(answer, facts.GoalTitles, written), result.Provider);
             case LlmGatewayOutcome.OutputRejected:
                 return new AssistantReply(RejectedAnswer, null);
             case LlmGatewayOutcome.GroupBudgetExhausted:
@@ -162,6 +164,9 @@ public sealed class AssistantChatService
         return SystemPromptRules.Replace(PeopleRulePlaceholder, rule, StringComparison.Ordinal);
     }
 
+    /// <summary>An item of the history is an answer of the model or, anything else, something the person typed.</summary>
+    private static bool IsFromModel(ChatMessage item) => string.Equals(item.Role, "model", StringComparison.OrdinalIgnoreCase);
+
     private static LlmRequest BuildRequest(IReadOnlyList<AiPerson> people, ChatFacts facts, string message, IReadOnlyList<ChatMessage> history)
     {
         // The history is what the app showed: an answer of the model comes back with the titles of the goals put
@@ -171,7 +176,7 @@ public sealed class AssistantChatService
         var filteredHistory = history
             .Select(h =>
             {
-                var fromModel = string.Equals(h.Role, "model", StringComparison.OrdinalIgnoreCase);
+                var fromModel = IsFromModel(h);
                 var text = fromModel
                     ? FactPackPrivacyFilter.MaskShownGoalTitles(h.Content, facts.GoalTitles, facts.OtherGoalTitles)
                     : h.Content;
