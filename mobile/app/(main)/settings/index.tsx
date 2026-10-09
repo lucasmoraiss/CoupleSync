@@ -126,6 +126,16 @@ export default function SettingsScreen() {
           <View style={styles.divider} />
           <TouchableOpacity
             style={styles.menuItem}
+            onPress={() => router.push('/(main)/settings/ai' as any)}
+            accessibilityLabel="Abrir a inteligência artificial: ativar, desligar e ver o consumo"
+            accessibilityRole="button"
+          >
+            <Text style={styles.menuText}>Inteligência artificial</Text>
+            <Text style={styles.menuArrow}>›</Text>
+          </TouchableOpacity>
+          <View style={styles.divider} />
+          <TouchableOpacity
+            style={styles.menuItem}
             onPress={() => router.push('/(main)/settings/change-password' as any)}
             accessibilityLabel="Alterar a senha da conta"
             accessibilityRole="button"

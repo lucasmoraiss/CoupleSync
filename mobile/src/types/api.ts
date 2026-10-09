@@ -516,3 +516,135 @@ export interface CreateBankConnectionRequest {
   readonly clientSecret: string;
   readonly historyMonths?: number;
 }
+
+// --- Análise com IA: ativação do grupo e consumo (GET /api/v1/ai/status, /ai/usage) ---
+export interface AiAcceptedByResponse {
+  readonly userId: string;
+  readonly name: string;
+  readonly acceptedAtUtc: string;
+}
+
+export interface AiStatusResponse {
+  /** A IA existe no servidor agora (não está desligada e há provedor configurado). */
+  readonly available: boolean;
+  /** O grupo ativou: há ao menos um aceite em vigor de quem ainda é membro. */
+  readonly enabled: boolean;
+  readonly consentVersion: number;
+  readonly acceptedBy: readonly AiAcceptedByResponse[];
+  readonly myAcceptance: { readonly acceptedAtUtc: string } | null;
+  /** A tela de boas-vindas da IA ainda é devida a esta pessoa neste grupo. */
+  readonly onboardingPending: boolean;
+  readonly weeklyEmailEnabled: boolean;
+  readonly emailVerified: boolean;
+  readonly emailConfigured: boolean;
+  readonly providers: readonly { readonly name: string; readonly country: string; readonly trainsOnData: boolean }[];
+  readonly features: { readonly assistant: boolean; readonly insights: boolean; readonly education: boolean; readonly weeklyEmail: boolean };
+  readonly budget: { readonly callsToday: number; readonly callLimit: number; readonly resetsAtLocal: string };
+}
+
+export interface AiUsageDayResponse {
+  /** Dia de Brasília, yyyy-MM-dd. */
+  readonly day: string;
+  readonly calls: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly failures: number;
+}
+
+export interface AiUsageProviderResponse {
+  readonly name: string;
+  readonly model: string;
+  readonly calls: number;
+  /** Cota diária do modelo; null enquanto ela não é conhecida. */
+  readonly limit: number | null;
+  readonly percentUsed: number | null;
+  readonly exhaustedToday: boolean;
+}
+
+export interface AiUsageResponse {
+  readonly days: readonly AiUsageDayResponse[];
+  readonly byFeature: readonly { readonly feature: string; readonly calls: number; readonly inputTokens: number; readonly outputTokens: number }[];
+  readonly providersToday: readonly AiUsageProviderResponse[];
+  readonly groupBudget: {
+    readonly callsToday: number;
+    readonly callLimit: number;
+    readonly tokensToday: number;
+    readonly tokenLimit: number;
+    readonly resetsAtLocal: string;
+  };
+}
+
+// --- Open Finance: sincronização e revisão do banco ---
+
+export interface SyncRunResponse {
+  readonly id: string;
+  readonly connectionId: string;
+  /** 'Pending' | 'Running' | 'Done' | 'Failed' */
+  readonly status: string;
+  /** 'User' | 'AppOpen' | 'Scheduler' */
+  readonly triggeredBy: string;
+  readonly createdAtUtc: string;
+  readonly startedAtUtc: string | null;
+  readonly finishedAtUtc: string | null;
+  readonly transactionsNew: number;
+  readonly transactionsUpdated: number;
+  readonly errorCode: string | null;
+  /** Em português, pronto para exibir. */
+  readonly errorMessage: string | null;
+}
+
+export interface BankReviewLineResponse {
+  readonly id: string;
+  /** "AAAA-MM-DD": o dia do lançamento no Brasil. */
+  readonly day: string;
+  readonly merchant: string | null;
+  readonly description: string | null;
+  /** O valor da despesa, sempre positivo. Não é editável. */
+  readonly amount: number;
+  readonly currency: string;
+  /** Chave de categoria do app (ex.: 'ALIMENTACAO'). */
+  readonly suggestedCategory: string;
+  /** 'Posted' | 'Pending' (ainda não efetivado no banco: não pode ser confirmado). */
+  readonly bankStatus: string;
+  readonly bankName: string;
+  readonly accountName: string;
+  readonly installmentNumber: number | null;
+  readonly installmentTotal: number | null;
+}
+
+export interface BankReviewMonthResponse {
+  /** "AAAA-MM" */
+  readonly month: string;
+  readonly pending: number;
+}
+
+export interface BankReviewResponse {
+  readonly month: string;
+  readonly expenses: readonly BankReviewLineResponse[];
+  readonly discarded: readonly BankReviewLineResponse[];
+  /** Soma das despesas esperando neste mês, só as em reais. */
+  readonly pendingTotalBrl: number;
+  /** Quantas despesas podem ser confirmadas, em todos os meses (sem as pendentes no banco, sem valor ou em outra moeda). */
+  readonly pendingAllMonths: number;
+  /** Por mês, tudo o que espera na revisão (também o que só pode ser descartado). */
+  readonly pendingByMonth: readonly BankReviewMonthResponse[];
+}
+
+export interface ConfirmBankReviewRequest {
+  readonly expenses?: ReadonlyArray<{ readonly id: string; readonly category?: string; readonly description?: string }>;
+  readonly discard?: readonly string[];
+}
+
+export interface ConfirmBankReviewResponse {
+  readonly created: ReadonlyArray<{ readonly id: string; readonly transactionId: string }>;
+  readonly discarded: readonly string[];
+  readonly alreadyConfirmed: number;
+  /** Linhas enviadas para confirmar que não têm valor ou estão em outra moeda: o servidor não as confirma e elas continuam na revisão. */
+  readonly skipped?: readonly string[];
+  /** As de `skipped` que foram puladas por estarem em outra moeda. */
+  readonly skippedOtherCurrency?: readonly string[];
+}
+
+export interface RestoreBankReviewResponse {
+  readonly restored: readonly string[];
+}

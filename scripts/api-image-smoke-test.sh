@@ -28,6 +28,7 @@ cleanup() {
     echo "--- API container log (last 60 lines) ---"
     docker logs --tail 60 "$API" 2>&1 || true
   fi
+  rm -f "${PDF_FILE:-}" "${ENCRYPTED_PDF_FILE:-}"
   docker rm -f "$API" "$DB" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   echo "cleanup: containers and network removed"
@@ -148,6 +149,113 @@ case "$response" in *"E-mail"*) ;; *) fail "validation message does not use the 
 # now that the image has the real time-zone database.
 response="$(request GET '/api/v1/dashboard?startDate=2018-11-04&endDate=2018-11-04')"
 expect "dashboard on a daylight-saving gap day" 200 "$response"
+
+# make_pdf <file> <"encrypted"|""> <text line>...: writes a one-page PDF with one line of text per argument (ASCII only,
+# so the byte offsets of the cross-reference table are the character counts). "encrypted" adds an encryption dictionary
+# with a password nobody knows, which makes the PDF unreadable without it.
+make_pdf() {
+  local LC_ALL=C out="$1" encrypted="$2" line content="BT /F1 12 Tf 14 TL 20 280 Td" body="%PDF-1.4"$'
+' trailer_extra="" i
+  local -a objects=()
+  shift 2
+  for line in "$@"; do content+=" ($line) '"; done
+  content+=" ET"
+  objects+=("<</Type /Catalog /Pages 2 0 R>>")
+  objects+=("<</Type /Pages /Kids [3 0 R] /Count 1>>")
+  objects+=("<</Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources <</Font <</F1 5 0 R>>>>>>")
+  objects+=("<</Length ${#content}>>"$'
+'"stream"$'
+'"$content"$'
+'"endstream")
+  objects+=("<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>")
+  if [ -n "$encrypted" ]; then
+    objects+=("<</Filter /Standard /V 1 /R 2 /P -44 /O <$(printf 'A%.0s' $(seq 1 64))> /U <$(printf 'B%.0s' $(seq 1 64))>>>")
+    trailer_extra=" /Encrypt 6 0 R /ID [<$(printf 'C%.0s' $(seq 1 32))> <$(printf 'C%.0s' $(seq 1 32))>]"
+  fi
+  local -a offsets=()
+  for i in "${!objects[@]}"; do
+    offsets+=("${#body}")
+    body+="$((i + 1)) 0 obj"$'
+'"${objects[$i]}"$'
+'"endobj"$'
+'
+  done
+  local xref="${#body}"
+  body+="xref"$'
+'"0 $((${#objects[@]} + 1))"$'
+'"0000000000 65535 f "$'
+'
+  for i in "${offsets[@]}"; do body+="$(printf '%010d' "$i") 00000 n "$'
+'; done
+  body+="trailer"$'
+'"<</Size $((${#objects[@]} + 1)) /Root 1 0 R$trailer_extra>>"$'
+'"startxref"$'
+'"$xref"$'
+'"%%EOF"$'
+'
+  printf '%s' "$body" > "$out"
+}
+
+# Statement import end to end: upload a synthetic PDF (invented bank text, no real data), let the background job read it
+# in the PDF worker child process, and check the candidates. A PDF with a password must fail with its own code, and no
+# worker process may be left running in the container afterwards.
+echo "== statement import through the PDF worker process"
+PDF_FILE="$(mktemp)"
+ENCRYPTED_PDF_FILE="$(mktemp)"
+make_pdf "$PDF_FILE" "" \
+  "Nu Pagamentos S.A. - nubank.com.br" "Extrato de conta" \
+  "03/04/2024  Supermercado Extra  -R\$ 150,00" "05/04/2024  Salario Empresa Ficticia  +R\$ 3.500,00" \
+  "07/04/2024  Assinatura de Streaming  -R\$ 45,90"
+make_pdf "$ENCRYPTED_PDF_FILE" "encrypted" "Texto qualquer"
+
+# upload_pdf <file>: prints "<status> <body>".
+upload_pdf() {
+  local out
+  out="$(curl --silent --show-error --max-time 30 --write-out '\n%{http_code}' \
+    --header "Authorization: Bearer $TOKEN" --form "file=@-;type=application/pdf;filename=extrato.pdf" "$BASE/api/v1/ocr/upload" < "$1")"
+  echo "${out##*$'\n'} ${out%$'\n'*}"
+}
+
+# wait_import <upload id> <expected status>: the job is polled by the API every few seconds.
+wait_import() {
+  local status="" body=""
+  for _ in $(seq 1 60); do
+    body="$(request GET "/api/v1/ocr/$1/status")"
+    status="$(echo "$body" | json_field status)"
+    [ "$status" = "$2" ] && break
+    sleep 1
+  done
+  echo "import status -> ${body:0:330}"
+  [ "$status" = "$2" ] || fail "the import did not reach $2"
+  IMPORT_STATUS_BODY="$body"
+}
+
+response="$(upload_pdf "$PDF_FILE")"
+expect "upload statement PDF" 200 "$response" '"uploadId"'
+UPLOAD_ID="$(echo "$response" | json_field uploadId)"
+wait_import "$UPLOAD_ID" Ready
+response="$(request GET "/api/v1/ocr/$UPLOAD_ID/results")"
+expect "statement candidates" 200 "$response" 'Supermercado Extra'
+
+response="$(upload_pdf "$ENCRYPTED_PDF_FILE")"
+expect "upload PDF with a password" 200 "$response" '"uploadId"'
+wait_import "$(echo "$response" | json_field uploadId)" Failed
+case "$IMPORT_STATUS_BODY" in *PDF_ENCRYPTED*) ;; *) fail "the PDF with a password did not fail with PDF_ENCRYPTED" ;; esac
+
+# The read really went through the child process (an image that still read in-process would pass the steps above).
+api_log="$(docker logs "$API" 2>&1)"
+case "$api_log" in *'PDF worker finished (exit code 0'*'ok=True'*) ;; *) fail "the API log has no 'PDF worker finished' line: the PDF was not read by the worker process" ;; esac
+
+# The worker made itself the process the kernel kills first when the container runs out of memory (its heap limit is
+# not a limit of the whole process): the API, process 1 of the container, must never be the one that goes.
+case "$api_log" in *'PDF worker finished (exit code 0'*'oom score adj=1000'*) ;; *) fail "the PDF worker did not raise its own out-of-memory score (no 'oom score adj=1000' in the API log)" ;; esac
+
+# The list of processes must really have been read (the API itself is in it): a failed `docker exec` is not "no worker".
+processes="$(docker exec "$API" ps)" || fail "could not list the processes of the API container"
+case "$processes" in *CoupleSync.Api.dll*) ;; *) fail "the process list of the API container does not show the API: it cannot be trusted" ;; esac
+workers="$(printf '%s\n' "$processes" | grep -c -e '--pdf-worker' || true)"
+echo "PDF worker processes still running in the container: $workers"
+[ "$workers" = "0" ] || fail "a PDF worker process was left running"
 
 echo "== category rules seeded at start-up (stored key, count)"
 rules="$(docker exec "$DB" psql --username postgres --dbname couplesync_smoke --tuples-only --no-align \

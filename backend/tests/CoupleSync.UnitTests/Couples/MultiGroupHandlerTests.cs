@@ -40,11 +40,13 @@ public sealed class MultiGroupHandlerTests
 
     private static IOptions<JwtOptions> Jwt => Options.Create(new JwtOptions());
 
-    private LeaveCoupleCommandHandler Leave => new(_couples, _auth, new FixedDateTimeProvider(T0.AddDays(3)), _jwt, new Sha256TokenHasher(), Jwt);
+    private LeaveCoupleCommandHandler Leave => new(
+        _couples, _auth, new FixedDateTimeProvider(T0.AddDays(3)), _jwt, new Sha256TokenHasher(), new RecordingPluggyClient(_couples.Steps), Jwt);
 
     private SwitchCoupleCommandHandler Switch => new(_couples, _auth, new FixedDateTimeProvider(T0.AddDays(3)), _jwt, new Sha256TokenHasher(), Jwt);
 
-    private RemoveCoupleMemberCommandHandler Remove => new(_couples, new MembershipOf(_couples), new FixedDateTimeProvider(T0.AddDays(3)));
+    private RemoveCoupleMemberCommandHandler Remove => new(
+        _couples, new MembershipOf(_couples), new FixedDateTimeProvider(T0.AddDays(3)), new RecordingPluggyClient(_couples.Steps));
 
     private JoinCoupleCommandHandler Join => new(
         _couples, new FixedDateTimeProvider(T0.AddDays(3)), _jwt, new FakeNotificationEventRepository(),
@@ -119,7 +121,7 @@ public sealed class MultiGroupHandlerTests
         Assert.Equal(_anas.Id, _ana.ActiveCoupleId);
         Assert.Equal([_anas.Id], _jwt.IssuedForCoupleIds);
         Assert.Equal([(_ana.Id, _shared.Id, (Guid?)_anas.Id)], _couples.StoppedDeliveries);
-        Assert.Equal([$"begin:{_ana.Id}", $"lock:{_shared.Id}", "save", "commit"], _couples.Steps);
+        Assert.Equal([$"begin:{_ana.Id}", $"lock:{_shared.Id}", $"openfinance:{_ana.Id}:{_shared.Id}", "save", "commit"], _couples.Steps);
     }
 
     [Fact]
@@ -162,7 +164,7 @@ public sealed class MultiGroupHandlerTests
         Assert.Equal([_ana.Id], _couples.RevokedRefreshTokenUserIds);
         Assert.Equal([(_ana.Id, _shared.Id, (Guid?)_anas.Id)], _couples.StoppedDeliveries);
         // The member being removed is locked first, then the group.
-        Assert.Equal([$"begin:{_ana.Id}", $"lock:{_shared.Id}", "save", "commit"], _couples.Steps);
+        Assert.Equal([$"begin:{_ana.Id}", $"lock:{_shared.Id}", $"openfinance:{_ana.Id}:{_shared.Id}", "save", "commit"], _couples.Steps);
     }
 
     [Fact]

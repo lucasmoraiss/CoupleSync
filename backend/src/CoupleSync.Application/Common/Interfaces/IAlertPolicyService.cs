@@ -26,4 +26,16 @@ public interface IAlertPolicyService
         IReadOnlyList<Transaction> recentTransactions,
         DateTime nowUtc,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Alerts raised by the transactions created by ONE confirmation of the review of the bank (Open Finance).
+    /// The rules of <see cref="EvaluatePostImportAsync"/>; the summary of several large lines says they were
+    /// confirmed in the review of the bank, not imported from a statement.
+    /// </summary>
+    Task<IReadOnlyList<NotificationEvent>> EvaluatePostBankReviewAsync(
+        Guid coupleId,
+        IReadOnlyList<Transaction> confirmedTransactions,
+        IReadOnlyList<Transaction> recentTransactions,
+        DateTime nowUtc,
+        CancellationToken ct = default);
 }

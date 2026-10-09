@@ -78,22 +78,34 @@ export const CAPTURE_CONSENT_SECTIONS: readonly TextSection[] = [
   },
 ];
 
-export const AI_CHAT_TITLE = 'Chat IA e seus dados';
+export const AI_ANALYSIS_TITLE = 'Análise com IA';
 
-export const AI_CHAT_SECTIONS: readonly TextSection[] = [
-  {
-    title: 'Para responder, o Chat IA usa o Google Gemini',
-    paragraphs: [
-      'Ao enviar uma pergunta, o app manda ao Google Gemini a sua mensagem e, como contexto, a renda, o orçamento, os gastos e as metas do grupo.',
-      'Sem isso a IA não consegue responder sobre as suas finanças.',
-      'Se você aceitar, as descrições das linhas dos extratos que você importar também podem ser enviadas ao Google Gemini para sugerir a categoria de cada uma. Isso só acontece quando o servidor está com a IA ligada.',
-    ],
-  },
-  {
-    title: 'Se você não aceitar',
-    paragraphs: ['O Chat IA fica desativado, nenhuma descrição de extrato vai ao Gemini e nada é enviado. O restante do app funciona normalmente.'],
-  },
+/**
+ * O texto do aceite da análise com IA: exatamente estes sete pontos, nesta ordem. É o que a pessoa lê antes de
+ * ativar para o grupo (tela de boas-vindas, Configurações > Inteligência artificial) e a seção em destaque da tela
+ * Privacidade. O aceite tem versão própria no servidor (AI_CONSENT_VERSION em modules/ai/aiStatus.ts): mudar um
+ * destes pontos de forma relevante pede versão nova lá e aqui — nunca o CONSENT_VERSION do aparelho, que apagaria
+ * os aceites de captura e de Open Finance.
+ */
+export const AI_ANALYSIS_POINTS: readonly string[] = [
+  'O que vai: resumos calculados das finanças do grupo (totais por categoria, lojas, assinaturas, parcelas, valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente, como foram escritas.',
+  'O que nunca vai: nomes, e-mails e CPF de vocês. O que o app não envia por conta própria: nomes das metas, nomes das rendas, números de conta ou cartão e nomes de quem recebeu ou enviou transferências (elas vão só como "transferência"). O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta ou de quem recebeu uma transferência, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.',
+  'Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.',
+  'Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e revisores humanos podem lê-lo."',
+  'Quem ativa liga a análise para o grupo inteiro; o outro membro é avisado no app e pode desligar a qualquer hora em Configurações; desligar não apaga o histórico, que pode ser apagado à parte.',
+  'O resumo semanal por e-mail é opcional, por pessoa, enviado pela Brevo (o serviço de e-mail que o app já usa).',
+  'Os cálculos (assinaturas, parcelas, previsão) são feitos no próprio servidor do app e funcionam sem a IA.',
 ];
+
+/** A seção "Análise com IA" da tela Privacidade (em destaque, separada do texto geral). */
+export const AI_ANALYSIS_SECTIONS: readonly TextSection[] = [{ title: AI_ANALYSIS_TITLE, paragraphs: AI_ANALYSIS_POINTS }];
+
+/** Uma linha do que vai e para onde, na tela de boas-vindas (o texto inteiro abre em "Ler tudo"). */
+export const AI_ANALYSIS_SUMMARY =
+  'Vão para o Google (Gemini), nos Estados Unidos, resumos das finanças do grupo e as suas perguntas — nunca nomes, e-mails ou CPF de vocês.';
+
+/** No texto geral, a IA só é citada assim: os detalhes e o aceite ficam na seção própria. */
+export const AI_OWN_CONSENT_NOTE = 'A análise com IA tem aceite próprio; veja Configurações > Inteligência artificial.';
 
 export const OPEN_FINANCE_CONSENT_TITLE = 'Open Finance: conectar seus bancos';
 
@@ -110,7 +122,8 @@ export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
     title: 'O que o CoupleSync passa a ver',
     paragraphs: [
       'Com as suas credenciais, o servidor do CoupleSync consulta no Pluggy os dados dos bancos que você conectou: extrato da conta, cartão de crédito e faturas, saldos e investimentos.',
-      'Nesta versão o app só confere a conexão e mostra as contas encontradas, com saldo e limite. As transações do banco começam a chegar na próxima atualização do app, e nada entra nas suas finanças sem você revisar.',
+      'Quando você sincroniza, o servidor guarda uma cópia das transações desses bancos (data, valor, descrição, estabelecimento e categoria), do período que você escolher: 3, 6 ou 12 meses. Depois da primeira vez, o app pede a sincronização sozinho ao ser aberto e o servidor repete uma vez por dia.',
+      'Nada entra nas suas finanças sem alguém do grupo revisar e confirmar. O que for descartado não vira despesa.',
     ],
   },
   {
@@ -124,30 +137,30 @@ export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
     title: 'Como as credenciais são guardadas',
     paragraphs: [
       'O Client ID e o Client Secret são guardados cifrados no servidor do CoupleSync e nunca são mostrados de novo por inteiro: só os 4 últimos caracteres do Client ID aparecem, para o grupo reconhecer a conexão. No seu celular eles não ficam guardados.',
-      'Ao desconectar, as credenciais são apagadas na hora. As contas já encontradas continuam visíveis para o grupo.',
+      'Ao desconectar, as credenciais são apagadas na hora. As contas já encontradas continuam visíveis para o grupo, e as transações já trazidas continuam na revisão.',
+      'Se você sair do grupo, ou for removido dele, a sua conexão, os seus bancos e as suas contas são apagados daquele grupo.',
+      'As transações do banco que ainda estavam na revisão são apagadas junto. As despesas que já tinham sido confirmadas ficam no grupo.',
     ],
   },
   {
     title: 'Inteligência artificial',
     paragraphs: [
-      'Conectar um banco não muda o que vai para a IA: o Chat IA continua seguindo a resposta que você deu no aviso do Chat IA. Sem aquele aceite, nada do que vier do banco é enviado ao Google Gemini.',
+      // O que é verdade com a sincronização (issue #25) e a análise com IA do grupo (issue #38) juntas: a descrição
+      // de uma linha do banco não vai a provedor nenhum (a categorização por IA está desligada no servidor); o que
+      // a IA recebe das despesas do banco é o que recebe de qualquer despesa do grupo — os totais por categoria —
+      // e só das que foram confirmadas na revisão, que é quando viram despesa do grupo.
+      `Conectar um banco não liga a IA nem muda o aceite dela. Sem a análise com IA ativada para o grupo, nada do que vier do banco é enviado à IA. Com ela ativada, as despesas do banco que alguém do grupo confirmou na revisão entram, como qualquer outra despesa, nos resumos calculados das finanças do grupo (totais por categoria). ${AI_OWN_CONSENT_NOTE}`,
     ],
   },
 ];
 
 export const PRIVACY_TITLE = 'Privacidade';
 
-const GEMINI_SHARING_WHEN_AVAILABLE =
-  'Com o Google Gemini, somente depois que você aceita o aviso do Chat IA e somente quando o servidor está com a IA ligada: a sua pergunta e os dados financeiros do grupo (chat) e as descrições das linhas dos extratos importados (categorização).';
-
-const GEMINI_SHARING_WHEN_UNAVAILABLE =
-  'Com o Google Gemini, apenas quando o recurso de IA estiver disponível no app. Nesta versão ele está desligado e nada é enviado ao Gemini. Quando estiver disponível, o app vai pedir o seu aceite antes; só então poderão ser enviados a sua pergunta e os dados financeiros do grupo (chat) e as descrições das linhas dos extratos importados (categorização).';
-
 /**
- * As seções da tela Privacidade. `aiAvailable` diz se o Chat IA existe nesta versão do app: quando não existe,
- * o texto não apresenta a IA como algo que o usuário possa usar ou tenha recusado.
+ * As seções do texto geral da tela Privacidade. A análise com IA não é descrita aqui: tem a seção própria
+ * (AI_ANALYSIS_SECTIONS) e o aceite próprio, no servidor.
  */
-export function privacySections(aiAvailable: boolean): readonly TextSection[] {
+export function privacySections(): readonly TextSection[] {
   return [
     {
       title: 'Dados que o CoupleSync coleta',
@@ -157,7 +170,7 @@ export function privacySections(aiAvailable: boolean): readonly TextSection[] {
         'Importação de extratos: o PDF que você envia é lido no servidor para extrair as transações e é apagado depois de processado.',
         'Captura de notificações (só se você aceitar): banco, valor, estabelecimento e data e hora das compras. O texto das notificações não é enviado.',
         'Alertas: o código do seu aparelho para enviar notificações do app (push).',
-        'Open Finance (só se você conectar): o Client ID e o Client Secret da sua aplicação no Pluggy, guardados cifrados, e as contas e cartões dos bancos que você conectou, com saldo, limite e os últimos dígitos do número.',
+        'Open Finance (só se você conectar): o Client ID e o Client Secret da sua aplicação no Pluggy, guardados cifrados, e as contas e cartões dos bancos que você conectou, com saldo, limite e os últimos dígitos do número, e as transações dessas contas e cartões.',
       ],
     },
     {
@@ -172,7 +185,7 @@ export function privacySections(aiAvailable: boolean): readonly TextSection[] {
       paragraphs: [
         'Com os membros do seu grupo: eles veem as transações, rendas, orçamento e metas do grupo e, se você conectar um banco pelo Open Finance, as contas, saldos e cartões dessa conexão.',
         'Com o Pluggy, somente se você conectar um banco pelo Open Finance: o servidor usa as credenciais que você informou para consultar, no Pluggy, os dados dos seus bancos. Nenhum dado seu do CoupleSync é enviado ao Pluggy além dessas credenciais e dos Item IDs.',
-        aiAvailable ? GEMINI_SHARING_WHEN_AVAILABLE : GEMINI_SHARING_WHEN_UNAVAILABLE,
+        AI_OWN_CONSENT_NOTE,
         'Com o Google Firebase Cloud Messaging, que entrega as notificações push do app ao seu aparelho (recebe o código do aparelho e o texto do alerta).',
         'Com os provedores de hospedagem e de banco de dados em que o servidor roda, que guardam os dados em nome do CoupleSync.',
         'Dependendo da configuração do servidor, o PDF do extrato pode ser lido pelo Azure Document Intelligence (Microsoft); por padrão a leitura é feita no próprio servidor.',
@@ -188,10 +201,12 @@ export function privacySections(aiAvailable: boolean): readonly TextSection[] {
   ];
 }
 
-/** As linhas de "Suas respostas neste aparelho". Sem o recurso de IA no app, não há resposta de IA a mostrar. */
+/**
+ * As linhas de "Suas respostas neste aparelho". O aceite da análise com IA não está aqui: ele é do grupo, fica no
+ * servidor e aparece em Configurações > Inteligência artificial (o campo `aiChat` do registro local não é mais usado).
+ */
 export function consentStatusLines(
   record: ConsentRecord,
-  aiAvailable: boolean,
   formatDate: (iso: string) => string = formatConsentDate,
 ): string[] {
   const lines = [
@@ -199,13 +214,6 @@ export function consentStatusLines(
       ? `Captura de notificações: aceita em ${formatDate(record.capture.acceptedAt)} (${record.capture.enabled ? 'ligada' : 'desligada'}).`
       : 'Captura de notificações: não aceita.',
   ];
-  if (aiAvailable) {
-    lines.push(
-      record.aiChat.acceptedAt
-        ? `Chat IA (Google Gemini): aceito em ${formatDate(record.aiChat.acceptedAt)}.`
-        : 'Chat IA (Google Gemini): não aceito.',
-    );
-  }
   // Só para quem passou pelo wizard: quem nunca abriu o Open Finance não tem resposta a mostrar.
   if (record.openFinance.acceptedAt) {
     lines.push(`Open Finance (Meu Pluggy): aceito em ${formatDate(record.openFinance.acceptedAt)}.`);

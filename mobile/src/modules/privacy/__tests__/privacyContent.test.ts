@@ -1,7 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  AI_CHAT_SECTIONS,
+  AI_ANALYSIS_POINTS,
+  AI_ANALYSIS_SECTIONS,
+  AI_ANALYSIS_SUMMARY,
+  AI_ANALYSIS_TITLE,
+  AI_OWN_CONSENT_NOTE,
   CAPTURE_APPS,
   CAPTURE_CONSENT_SECTIONS,
   CAPTURE_SOURCES,
@@ -9,15 +13,14 @@ import {
   consentStatusLines,
   privacySections,
 } from '../privacyContent';
-import { EMPTY_CONSENT, type ConsentRecord } from '../consent';
+import { CONSENT_VERSION, EMPTY_CONSENT, isCaptureAllowed, isOpenFinanceAccepted, parseConsent, type ConsentRecord } from '../consent';
 import patterns from '../../integrations/notification-capture/notification-patterns.json';
 
 const flat = (sections: readonly { title: string; paragraphs: readonly string[] }[]) =>
   sections.map((s) => `${s.title}\n${s.paragraphs.join('\n')}`).join('\n');
 
-// A tela Privacidade nas duas situações: com o recurso de IA no app e sem ele (como está hoje em produção).
-const WITH_AI = privacySections(true);
-const WITHOUT_AI = privacySections(false);
+// O texto geral da tela Privacidade (a análise com IA tem seção própria, testada mais abaixo).
+const GENERAL = privacySections();
 
 describe('textos de privacidade', () => {
   it('o consentimento da captura diz o que é lido, o que é enviado e que o texto bruto não sai', () => {
@@ -28,54 +31,32 @@ describe('textos de privacidade', () => {
     expect(text).toMatch(/texto da notificação NÃO é enviado/);
   });
 
-  it('o aviso do chat cita o Google Gemini e os dados enviados', () => {
-    const text = flat(AI_CHAT_SECTIONS);
-    expect(text).toContain('Google Gemini');
-    for (const dado of ['renda', 'orçamento', 'gastos', 'metas']) expect(text).toContain(dado);
-  });
-
-  it.each([
-    ['com IA', WITH_AI],
-    ['sem IA', WITHOUT_AI],
-  ])('a tela Privacidade (%s) cobre coleta, armazenamento, compartilhamento (grupo e Gemini) e exclusão', (_name, sections) => {
-    const titles = sections.map((s) => s.title);
-    expect(titles).toEqual([
+  it('a tela Privacidade cobre coleta, armazenamento, compartilhamento e exclusão', () => {
+    expect(GENERAL.map((s) => s.title)).toEqual([
       'Dados que o CoupleSync coleta',
       'Onde ficam',
       'Com quem são compartilhados',
       'Como pedir a exclusão',
     ]);
-    const text = flat(sections);
-    expect(text).toContain('membros do seu grupo');
-    expect(text).toContain('Google Gemini');
+    expect(flat(GENERAL)).toContain('membros do seu grupo');
   });
 
-  it.each([
-    ['com IA', WITH_AI],
-    ['sem IA', WITHOUT_AI],
-  ])('(%s) cita todos os destinatários que o código pode usar, e o Azure só como condicional', (_name, sections) => {
-    const text = flat(sections);
-    expect(text).toContain('Google Gemini');
+  it('cita os destinatários que o código pode usar, e o Azure só como condicional', () => {
+    const text = flat(GENERAL);
     expect(text).toContain('Firebase Cloud Messaging');
     expect(text).toContain('hospedagem');
     expect(text).toMatch(/Dependendo da configuração do servidor.*Azure Document Intelligence/);
   });
 
   it('não promete imagens: o app envia só PDF', () => {
-    expect(flat(WITH_AI)).not.toMatch(/imagens?/i);
-    expect(flat(WITHOUT_AI)).not.toMatch(/imagens?/i);
+    expect(flat(GENERAL)).not.toMatch(/imagens?/i);
   });
 
   it('o contato de exclusão vem de uma constante única', () => {
-    expect(flat(WITH_AI)).toContain(PRIVACY_CONTACT);
-    expect(flat(WITHOUT_AI)).toContain(PRIVACY_CONTACT);
+    expect(flat(GENERAL)).toContain(PRIVACY_CONTACT);
     expect(PRIVACY_CONTACT).toBe('salomaolucas13@outlook.com');
-    const deletion = WITH_AI.find((section) => section.title === 'Como pedir a exclusão');
+    const deletion = GENERAL.find((section) => section.title === 'Como pedir a exclusão');
     expect(deletion?.paragraphs.join(' ')).toContain(`escreva para ${PRIVACY_CONTACT}`);
-  });
-
-  it('o aviso do chat informa que descrições de extratos podem ir ao Gemini após o aceite', () => {
-    expect(flat(AI_CHAT_SECTIONS)).toMatch(/descrições das linhas dos extratos/);
   });
 });
 
@@ -125,7 +106,7 @@ describe('o texto lista exatamente o que a captura lê (M-M7)', () => {
   });
 });
 
-describe('a tela Privacidade com o recurso de IA desligado no app (M-I3)', () => {
+describe('"Suas respostas neste aparelho"', () => {
   const accepted: ConsentRecord = {
     ...EMPTY_CONSENT,
     capture: { acceptedAt: '2026-10-01T12:00:00Z', decidedAt: '2026-10-01T12:00:00Z', promptShownAt: null, enabled: true },
@@ -133,37 +114,95 @@ describe('a tela Privacidade com o recurso de IA desligado no app (M-I3)', () =>
   };
   const date = (iso: string) => `[${iso.slice(0, 10)}]`;
 
-  it('sem IA no app, o Gemini aparece como condicional e não como algo já em uso', () => {
-    const text = flat(WITHOUT_AI);
-    expect(text).toMatch(/apenas quando o recurso de IA estiver disponível no app/);
-    expect(text).toMatch(/Nesta versão ele está desligado e nada é enviado ao Gemini/);
-    expect(text).not.toMatch(/somente depois que você aceita o aviso do Chat IA/);
-  });
-
-  it('com IA no app, o texto é o do aceite do aviso do Chat IA', () => {
-    const text = flat(WITH_AI);
-    expect(text).toMatch(/somente depois que você aceita o aviso do Chat IA/);
-    expect(text).not.toMatch(/Nesta versão ele está desligado/);
-  });
-
-  it('sem IA no app, não há linha de "Chat IA: aceito / não aceito" (nem para quem aceitou antes)', () => {
-    expect(consentStatusLines(EMPTY_CONSENT, false, date)).toEqual(['Captura de notificações: não aceita.']);
-    expect(consentStatusLines(accepted, false, date)).toEqual(['Captura de notificações: aceita em [2026-10-01] (ligada).']);
-  });
-
-  it('com IA no app, a resposta do Chat IA aparece', () => {
-    expect(consentStatusLines(EMPTY_CONSENT, true, date)).toEqual([
-      'Captura de notificações: não aceita.',
-      'Chat IA (Google Gemini): não aceito.',
-    ]);
-    expect(consentStatusLines(accepted, true, date)).toEqual([
-      'Captura de notificações: aceita em [2026-10-01] (ligada).',
-      'Chat IA (Google Gemini): aceito em [2026-10-02].',
-    ]);
+  it('não há linha de IA, nem para quem tinha aceitado o chat antigo: o aceite de IA é do grupo e fica no servidor', () => {
+    expect(consentStatusLines(EMPTY_CONSENT, date)).toEqual(['Captura de notificações: não aceita.']);
+    expect(consentStatusLines(accepted, date)).toEqual(['Captura de notificações: aceita em [2026-10-01] (ligada).']);
   });
 
   it('captura aceita e depois desligada aparece como desligada', () => {
     const off = { ...accepted, capture: { ...accepted.capture, enabled: false } };
-    expect(consentStatusLines(off, false, date)[0]).toBe('Captura de notificações: aceita em [2026-10-01] (desligada).');
+    expect(consentStatusLines(off, date)[0]).toBe('Captura de notificações: aceita em [2026-10-01] (desligada).');
+  });
+});
+
+describe('seção "Análise com IA" (issue #38)', () => {
+  it('tem exatamente os sete pontos do texto aprovado, nesta ordem', () => {
+    expect(AI_ANALYSIS_TITLE).toBe('Análise com IA');
+    expect(AI_ANALYSIS_POINTS).toEqual([
+      'O que vai: resumos calculados das finanças do grupo (totais por categoria, lojas, assinaturas, parcelas, valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente, como foram escritas.',
+      'O que nunca vai: nomes, e-mails e CPF de vocês. O que o app não envia por conta própria: nomes das metas, nomes das rendas, números de conta ou cartão e nomes de quem recebeu ou enviou transferências (elas vão só como "transferência"). O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta ou de quem recebeu uma transferência, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.',
+      'Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.',
+      'Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e revisores humanos podem lê-lo."',
+      'Quem ativa liga a análise para o grupo inteiro; o outro membro é avisado no app e pode desligar a qualquer hora em Configurações; desligar não apaga o histórico, que pode ser apagado à parte.',
+      'O resumo semanal por e-mail é opcional, por pessoa, enviado pela Brevo (o serviço de e-mail que o app já usa).',
+      'Os cálculos (assinaturas, parcelas, previsão) são feitos no próprio servidor do app e funcionam sem a IA.',
+    ]);
+  });
+
+  it('é uma seção só, separada do texto geral, com os sete pontos', () => {
+    expect(AI_ANALYSIS_SECTIONS).toEqual([{ title: 'Análise com IA', paragraphs: AI_ANALYSIS_POINTS }]);
+    expect(GENERAL.map((s) => s.title)).not.toContain('Análise com IA');
+  });
+
+  it('no texto geral a IA só aparece como "tem aceite próprio": nenhum parágrafo antigo sobre o Chat IA ou o Gemini sobra', () => {
+    const text = flat(GENERAL);
+    expect(AI_OWN_CONSENT_NOTE).toBe('A análise com IA tem aceite próprio; veja Configurações > Inteligência artificial.');
+    expect(text).toContain(AI_OWN_CONSENT_NOTE);
+    expect(text).not.toMatch(/Chat IA/);
+    expect(text).not.toMatch(/Gemini/);
+    expect(text).not.toMatch(/Nesta versão ele está desligado/);
+  });
+
+  it('a linha da tela de boas-vindas diz o que vai e para onde, sem contradizer os sete pontos', () => {
+    expect(AI_ANALYSIS_SUMMARY).toContain('Google (Gemini), nos Estados Unidos');
+    expect(AI_ANALYSIS_SUMMARY).toContain('resumos das finanças do grupo');
+    expect(AI_ANALYSIS_SUMMARY).toContain('nunca nomes, e-mails ou CPF');
+  });
+
+  it('a tela Privacidade mostra a seção em destaque, separada do texto geral, e leva às Configurações de IA', () => {
+    const screen = fs.readFileSync(path.join(__dirname, '../../../../app/(main)/settings/privacy.tsx'), 'utf8');
+    expect(screen).toContain('AI_ANALYSIS_SECTIONS');
+    expect(screen).toContain('styles.aiBox');
+    expect(screen).toMatch(/router\.push\('\/\(main\)\/settings\/ai'/);
+    expect(screen).not.toContain('aiAvailability');
+  });
+});
+
+describe('a mudança de texto não mexe nos aceites já dados no aparelho (issue #38)', () => {
+  it('CONSENT_VERSION continua 1: subir apagaria os aceites de captura e de Open Finance de todo mundo', () => {
+    expect(CONSENT_VERSION).toBe(1);
+    expect(EMPTY_CONSENT.version).toBe(1);
+  });
+
+  it('um registro gravado antes desta versão, com captura e Open Finance aceitos, continua lido como aceito', () => {
+    // Exatamente o que o app instalado guarda hoje no armazenamento seguro (inclusive o campo aiChat, que fica).
+    const stored = JSON.stringify({
+      version: 1,
+      capture: { acceptedAt: '2026-10-01T12:00:00.000Z', decidedAt: '2026-10-01T12:00:00.000Z', promptShownAt: null, enabled: true },
+      aiChat: { acceptedAt: '2026-10-02T12:00:00.000Z', declinedAt: null },
+      openFinance: { acceptedAt: '2026-10-07T12:00:00.000Z' },
+    });
+
+    const record = parseConsent(stored);
+
+    expect(isCaptureAllowed(record)).toBe(true);
+    expect(record.capture.acceptedAt).toBe('2026-10-01T12:00:00.000Z');
+    expect(isOpenFinanceAccepted(record)).toBe(true);
+    expect(record.openFinance.acceptedAt).toBe('2026-10-07T12:00:00.000Z');
+    // O campo antigo do chat não é apagado nem migrado: só deixou de ser consultado.
+    expect(record.aiChat.acceptedAt).toBe('2026-10-02T12:00:00.000Z');
+    expect(consentStatusLines(record, (iso) => iso.slice(0, 10))).toEqual([
+      'Captura de notificações: aceita em 2026-10-01 (ligada).',
+      'Open Finance (Meu Pluggy): aceito em 2026-10-07.',
+    ]);
+  });
+
+  it('um registro de outra versão seria lido como vazio — é por isso que a versão não sobe', () => {
+    const other = JSON.stringify({
+      version: 2,
+      capture: { acceptedAt: '2026-10-01T12:00:00.000Z', enabled: true },
+      openFinance: { acceptedAt: '2026-10-07T12:00:00.000Z' },
+    });
+    expect(parseConsent(other)).toEqual(EMPTY_CONSENT);
   });
 });

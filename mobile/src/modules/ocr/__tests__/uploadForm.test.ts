@@ -1,4 +1,4 @@
-import { aiConsentForUpload, appendAiConsent, shouldResetUploadOnRevisit } from '../uploadForm';
+import { appendAiConsent, shouldResetUploadOnRevisit } from '../uploadForm';
 
 function fakeForm() {
   const fields: Record<string, unknown> = {};
@@ -6,28 +6,16 @@ function fakeForm() {
 }
 
 describe('appendAiConsent', () => {
-  it('envia true só quando o aviso de IA foi aceito', () => {
+  it('envia true só quando a análise com IA está ativada para o grupo', () => {
     const accepted = fakeForm();
     appendAiConsent(accepted, true);
     expect(accepted.fields.aiCategorizationConsent).toBe('true');
   });
 
-  it('envia false quando não aceitou', () => {
+  it('envia false quando não está ativada', () => {
     const declined = fakeForm();
     appendAiConsent(declined, false);
     expect(declined.fields.aiCategorizationConsent).toBe('false');
-  });
-});
-
-describe('aiConsentForUpload (M-I3)', () => {
-  it('com o recurso de IA desligado no app o extrato vai sempre sem consentimento de IA, mesmo com aceite antigo', () => {
-    expect(aiConsentForUpload(false, true)).toBe(false);
-    expect(aiConsentForUpload(false, false)).toBe(false);
-  });
-
-  it('com o recurso ligado vale a resposta do usuário', () => {
-    expect(aiConsentForUpload(true, true)).toBe(true);
-    expect(aiConsentForUpload(true, false)).toBe(false);
   });
 });
 

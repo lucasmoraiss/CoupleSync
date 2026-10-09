@@ -124,6 +124,81 @@ public sealed class CoupleRepository : ICoupleRepository
         }
     }
 
+    public async Task<IReadOnlyList<Guid>> RemoveOpenFinanceOfMemberAsync(Guid userId, Guid coupleId, CancellationToken cancellationToken)
+    {
+        // On PostgreSQL the connection is locked before it is read: a request changing its credentials or storing
+        // an item under it at this moment finishes first (or waits for this one), so what is deleted is what is
+        // stored, and the delete never meets a secret other than the one read here.
+        if (IsPostgres(_dbContext))
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                "SELECT 1 FROM bank_connections WHERE user_id = {0} AND couple_id = {1} FOR UPDATE",
+                [userId, coupleId],
+                cancellationToken);
+        }
+
+        // As in StopDeliveriesToMemberAsync: the caller's couple claim may not be this couple's, so the query
+        // filters are bypassed and user and couple are stated explicitly.
+        var connections = await _dbContext.BankConnections
+            .IgnoreQueryFilters()
+            .Where(c => c.UserId == userId && c.CoupleId == coupleId)
+            .ToListAsync(cancellationToken);
+        if (connections.Count == 0)
+        {
+            return [];
+        }
+
+        var connectionIds = connections.Select(c => c.Id).ToList();
+        var items = await _dbContext.BankItems
+            .IgnoreQueryFilters()
+            .Where(i => connectionIds.Contains(i.ConnectionId))
+            .ToListAsync(cancellationToken);
+        var itemIds = items.Select(i => i.Id).ToList();
+        var accounts = await _dbContext.BankAccounts
+            .IgnoreQueryFilters()
+            .Where(a => itemIds.Contains(a.ItemId))
+            .ToListAsync(cancellationToken);
+
+        // The mirror of the bank transactions of those accounts and the synchronisation runs of the connection go
+        // first, in the transaction of this exit (the membership change the caller opened): the mirror can be
+        // thousands of rows with the raw JSON of each, so it is deleted in the database instead of being loaded.
+        // Transactions already confirmed stay; their link lived in the mirror and goes with it.
+        var accountIds = accounts.Select(a => a.Id).ToList();
+        await _dbContext.BankTransactions
+            .IgnoreQueryFilters()
+            .Where(t => accountIds.Contains(t.BankAccountId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await _dbContext.SyncRuns
+            .IgnoreQueryFilters()
+            .Where(r => connectionIds.Contains(r.ConnectionId))
+            .ExecuteDeleteAsync(cancellationToken);
+
+        // The save orders the deletes by the foreign keys: accounts, then items, then the connection.
+        _dbContext.BankAccounts.RemoveRange(accounts);
+        _dbContext.BankItems.RemoveRange(items);
+        _dbContext.BankConnections.RemoveRange(connections);
+        return connectionIds;
+    }
+
+    public async Task RemoveAiOfMemberAsync(Guid userId, Guid coupleId, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        // As above: the caller's couple claim may not be this couple's, so user and couple are stated explicitly.
+        var consents = await _dbContext.AiConsents
+            .IgnoreQueryFilters()
+            .Where(c => c.UserId == userId && c.CoupleId == coupleId && c.RevokedAtUtc == null)
+            .ToListAsync(cancellationToken);
+        foreach (var consent in consents)
+        {
+            consent.Revoke(nowUtc, userId);
+        }
+
+        var preferences = await _dbContext.AiUserPreferences
+            .IgnoreQueryFilters()
+            .Where(p => p.UserId == userId && p.CoupleId == coupleId)
+            .ToListAsync(cancellationToken);
+        _dbContext.AiUserPreferences.RemoveRange(preferences);
+    }
+
     public async Task RevokeRefreshTokenAsync(Guid userId, CancellationToken cancellationToken)
     {
         var refreshTokens = await _dbContext.RefreshTokens
@@ -159,6 +234,9 @@ public sealed class CoupleRepository : ICoupleRepository
         return DbSaveTranslator.SaveAsync(_dbContext, cancellationToken);
     }
 
+    private static bool IsPostgres(AppDbContext dbContext) =>
+        dbContext.Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
+
     /// <summary>
     /// The transaction of one membership change. On PostgreSQL the rows are locked with FOR NO KEY UPDATE: it
     /// queues other membership changes of the same user or group, and (unlike FOR UPDATE) does not hold up
@@ -181,7 +259,7 @@ public sealed class CoupleRepository : ICoupleRepository
 
         public async Task LockRowAsync(string table, Guid id, CancellationToken cancellationToken)
         {
-            if (_dbContext.Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) != true)
+            if (!IsPostgres(_dbContext))
             {
                 return;
             }

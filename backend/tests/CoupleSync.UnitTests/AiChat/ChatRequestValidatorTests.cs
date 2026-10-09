@@ -58,10 +58,21 @@ public sealed class ChatRequestValidatorTests
     [Fact]
     public void HistoryContentTooLong_Fails()
     {
-        var history = new List<ChatHistoryItem> { new("user", new string('x', 2001)) };
+        var history = new List<ChatHistoryItem> { new("user", new string('x', 16001)) };
         var request = new ChatRequest("Hi", history);
         var result = Validator.Validate(request);
         Assert.False(result.IsValid);
+    }
+
+    // Issue #38, review 2 (I2): an earlier answer comes back whole as history and is longer than a question;
+    // refused here, every following question of the conversation was refused. The server cuts it.
+    [Theory]
+    [InlineData(2001)]
+    [InlineData(16000)]
+    public void HistoryContentLongerThanAQuestion_Passes(int length)
+    {
+        var history = new List<ChatHistoryItem> { new("model", new string('x', length)) };
+        Assert.True(Validator.Validate(new ChatRequest("Hi", history)).IsValid);
     }
 
     [Fact]

@@ -11,21 +11,25 @@ public sealed record RemoveCoupleMemberCommand(Guid RequesterUserId, Guid Member
 /// the removed member alerts and their access token is refused there by the membership check as soon as this
 /// commits. When it was the member's active group, they are left with NO active group (never moved to another
 /// one by someone else's action) and their refresh token is revoked, so they sign in again and choose.
+/// Their Open Finance in the group (connection, credentials, items and accounts) is deleted in the same save.
 /// </summary>
 public sealed class RemoveCoupleMemberCommandHandler
 {
     private readonly ICoupleRepository _coupleRepository;
     private readonly ICoupleMembership _membership;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IPluggyClient _pluggy;
 
     public RemoveCoupleMemberCommandHandler(
         ICoupleRepository coupleRepository,
         ICoupleMembership membership,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        IPluggyClient pluggy)
     {
         _coupleRepository = coupleRepository;
         _membership = membership;
         _dateTimeProvider = dateTimeProvider;
+        _pluggy = pluggy;
     }
 
     public async Task HandleAsync(RemoveCoupleMemberCommand command, CancellationToken cancellationToken)
@@ -85,7 +89,18 @@ public sealed class RemoveCoupleMemberCommandHandler
             await _coupleRepository.RevokeRefreshTokenAsync(member.Id, cancellationToken);
         }
 
+        var bankConnectionIds = await _coupleRepository.RemoveOpenFinanceOfMemberAsync(member.Id, coupleId, cancellationToken);
+
+        // Their acceptance of the AI analysis stops counting for the group, and their AI preferences there go.
+        await _coupleRepository.RemoveAiOfMemberAsync(member.Id, coupleId, _dateTimeProvider.UtcNow, cancellationToken);
+
         await _coupleRepository.SaveChangesAsync(cancellationToken);
         await change.CommitAsync(cancellationToken);
+
+        // Only once the connections are really gone: the Pluggy API keys kept for them are dropped.
+        foreach (var connectionId in bankConnectionIds)
+        {
+            _pluggy.ForgetConnection(connectionId);
+        }
     }
 }

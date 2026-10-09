@@ -1,12 +1,21 @@
 using CoupleSync.Domain.ValueObjects;
 using System.Globalization;
 using System.Text;
+using CoupleSync.Application.Ai;
 using CoupleSync.Application.Budget;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Goals;
 using CoupleSync.Domain.Entities;
 
 namespace CoupleSync.Application.AiChat;
+
+/// <summary>The data message of the Assistant, and the titles of the goals it cites only by marker.</summary>
+/// <param name="GoalTitles">Marker ("g1", "g2"...) to the title of the goal. The app never sends a title by itself.</param>
+/// <param name="OtherGoalTitles">
+/// Titles of the goals of the group that are not in the data (archived, completed). An earlier answer, sent back
+/// as history, may still show one of them: there it becomes "uma meta".
+/// </param>
+public sealed record ChatFacts(string Text, IReadOnlyDictionary<string, string> GoalTitles, IReadOnlyList<string> OtherGoalTitles);
 
 public sealed class ChatContextService
 {
@@ -30,18 +39,25 @@ public sealed class ChatContextService
         _dateTimeProvider = dateTimeProvider;
     }
 
-    public async Task<string> BuildSystemPromptAsync(Guid coupleId, CancellationToken ct)
+    /// <summary>
+    /// Only the data of the group (date, budget, spending by category, goals), one fact per line, with no
+    /// instruction to the model: the Assistant sends it in a message of its own, apart from the rules (which are
+    /// in <see cref="AssistantChatService"/>). The title of a goal is typed by a person and may name anything, so the
+    /// app does not send it: each goal goes as {{g1}}, {{g2}}... and the title is put back when answering the app.
+    /// </summary>
+    public async Task<ChatFacts> BuildFactsAsync(Guid coupleId, CancellationToken ct)
     {
+        var goalTitles = new Dictionary<string, string>(StringComparer.Ordinal);
         var budget = await _budgetService.GetCurrentPlanAsync(coupleId, ct);
         var now = _dateTimeProvider.UtcNow;
         var since = now.AddDays(-30);
         var recentTxns = await _transactionRepository.GetRecentByCoupleAsync(coupleId, since, ct);
 
-        var (_, goals) = await _goalRepository.GetPagedAsync(coupleId, includeArchived: false, ct);
+        // Every goal of the group: only the active ones go in the data; the titles of the others are known so that
+        // an earlier answer that shows one of them does not carry it back.
+        var (_, goals) = await _goalRepository.GetPagedAsync(coupleId, includeArchived: true, ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine("Você é um assistente financeiro do CoupleSync, um aplicativo de finanças para casais.");
-        sb.AppendLine("Responda de forma clara, objetiva e sem julgamentos sobre as finanças do casal.");
         sb.AppendLine($"Data de hoje: {BrDate(now)}");
 
         if (budget is not null)
@@ -72,7 +88,7 @@ public sealed class ChatContextService
         var activeGoals = goals.Where(g => g.Status == GoalStatus.Active).ToList();
         if (activeGoals.Count > 0)
         {
-            sb.AppendLine("Metas do casal:");
+            sb.AppendLine("Metas do grupo:");
             var goalProgress = await _goalProgressReader.ReadAsync(coupleId, activeGoals, ct);
             foreach (var goal in activeGoals)
             {
@@ -82,18 +98,14 @@ public sealed class ChatContextService
                 var deadlineStr = goal.Deadline != default
                     ? BrDate(goal.Deadline)
                     : "sem prazo definido";
-                var safeTitle = goal.Title
-                    .Replace("\r", string.Empty)
-                    .Replace("\n", string.Empty)
-                    .Trim();
-                if (safeTitle.Length > 100) safeTitle = safeTitle[..100];
-                sb.AppendLine($"  - {safeTitle}: alvo {BrlFormat.Format(goal.TargetAmount)}, progresso {BrlFormat.Format(progress)} ({(long)Math.Floor(percent)}%), prazo {deadlineStr}");
+                var marker = $"g{goalTitles.Count + 1}";
+                goalTitles[marker] = goal.Title;
+                sb.AppendLine($"  - Meta {{{{{marker}}}}}: alvo {BrlFormat.Format(goal.TargetAmount)}, progresso {BrlFormat.Format(progress)} ({(long)Math.Floor(percent)}%), prazo {deadlineStr}");
             }
         }
 
-        sb.AppendLine("IMPORTANTE: Para questões sobre investimentos, decisões legais ou fiscais, recomende que o casal consulte um profissional qualificado.");
-
-        return sb.ToString();
+        var otherTitles = goals.Where(g => g.Status != GoalStatus.Active).Select(g => g.Title).ToList();
+        return new ChatFacts(sb.ToString(), goalTitles, otherTitles);
     }
 
     // Fixed dd/MM/yyyy: with a named format the "/" would follow the host culture.

@@ -22,7 +22,7 @@
 #
 # Usage: scripts/app-e2e-run-flows.sh
 #        E2E_APK, E2E_STUB_APK, E2E_EVIDENCE_DIR and E2E_API_PORT override the defaults below.
-#        E2E_BUDGET_SECONDS (default 1320) is the time the whole script may take.
+#        E2E_BUDGET_SECONDS (default 1800) is the time the whole script may take.
 #        Needs adb and maestro on PATH and exactly one device (or ANDROID_SERIAL set).
 set -uo pipefail
 
@@ -53,12 +53,13 @@ FLOW_NAMES=(
   "05-metas-e-rendas"
   "06-abas"
   "$CAPTURE_FLOW"
+  "08-ia-ativar-e-assistente"
 )
 # Flows listed here are reported but do not fail the job. Empty on purpose: every flow is required.
 INFORMATIONAL_FLOWS=()
 
 # Time. The whole script has a budget; what is left of it caps each Maestro run.
-BUDGET_SECONDS="${E2E_BUDGET_SECONDS:-1320}"
+BUDGET_SECONDS="${E2E_BUDGET_SECONDS:-1800}"
 FLOW_TIMEOUT_SECONDS=600        # one Maestro run (a normal flow takes 1 to 3 minutes)
 SYSTEM_READY_TIMEOUT_SECONDS=180
 # After boot the emulator is busy with first-boot work. The wait ends when the 1-minute load drops below

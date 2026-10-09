@@ -23,6 +23,8 @@ public static class RateLimitPolicies
     public const string AuthConfirmEmail = "auth-confirm-email";
     public const string AuthResendEmailVerification = "auth-resend-email-verification";
     public const string OpenFinanceCredentials = "openfinance-credentials";
+    public const string OpenFinanceItems = "openfinance-items";
+    public const string OpenFinanceSync = "openfinance-sync";
     public const string AppVersion = "app-version";
 }
 
@@ -45,7 +47,9 @@ public sealed class RateLimitingOptions
 
     /// <summary>
     /// The Open Finance routes that send credentials to Pluggy (test and connect) — per authenticated user, one
-    /// budget for both, so that this API cannot be used to try client secrets freely.
+    /// budget for both, so that this API cannot be used to try client secrets freely. The routes that make the
+    /// server call Pluggy with the stored credentials (verify an item, ask for a synchronisation) follow the same
+    /// numbers, each with a budget of its own.
     /// </summary>
     public FixedWindowSettings OpenFinance { get; set; } = new();
 
@@ -114,6 +118,13 @@ public static class RateLimitingSetup
 
             limiter.AddPolicy(RateLimitPolicies.OpenFinanceCredentials, context =>
                 CreatePartition($"openfinance-credentials:{UserOrIpKey(context)}", GetOptions(context).OpenFinance));
+
+            // Each makes the server call Pluggy with the stored credentials: its own budget per user.
+            limiter.AddPolicy(RateLimitPolicies.OpenFinanceItems, context =>
+                CreatePartition($"openfinance-items:{UserOrIpKey(context)}", GetOptions(context).OpenFinance));
+
+            limiter.AddPolicy(RateLimitPolicies.OpenFinanceSync, context =>
+                CreatePartition($"openfinance-sync:{UserOrIpKey(context)}", GetOptions(context).OpenFinance));
 
             limiter.AddPolicy(RateLimitPolicies.AppVersion, context =>
                 CreatePartition($"app-version:ip:{GetClientIp(context)}", GetOptions(context).AppVersion));

@@ -3,10 +3,8 @@ using CoupleSync.Api.Filters;
 using CoupleSync.Application.AiChat;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Domain.Interfaces;
-using CoupleSync.Infrastructure.Integrations.Gemini;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using System.Security.Claims;
 
 namespace CoupleSync.Api.Controllers;
@@ -17,16 +15,17 @@ namespace CoupleSync.Api.Controllers;
 [Route("api/v1/ai")]
 public sealed class ChatController : ControllerBase
 {
-    private readonly GeminiChatService _chatService;
-    private readonly GeminiOptions _geminiOptions;
+    private readonly AssistantChatService _chatService;
 
-    public ChatController(GeminiChatService chatService, IOptions<GeminiOptions> geminiOptions)
+    public ChatController(AssistantChatService chatService)
     {
         _chatService = chatService;
-        _geminiOptions = geminiOptions.Value;
     }
 
-    /// <summary>Send a message to the AI financial assistant.</summary>
+    /// <summary>
+    /// Send a message to the AI financial assistant. 404 AI_CHAT_DISABLED while the AI is not available on the server,
+    /// 403 AI_CONSENT_REQUIRED while the group has not switched it on, 429 when a budget of the day is used up.
+    /// </summary>
     [HttpPost("chat")]
     [ProducesResponseType(typeof(ChatResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -34,13 +33,12 @@ public sealed class ChatController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ChatResponse>> Chat(
         [FromBody] ChatRequest request,
         CancellationToken ct)
     {
-        if (!IsAiChatEnabled())
-            throw new NotFoundException("AI_CHAT_DISABLED", "O assistente de IA não está disponível.");
-
         var coupleId = GetAuthenticatedCoupleId();
 
         var history = request.History?
@@ -48,10 +46,8 @@ public sealed class ChatController : ControllerBase
             .ToList() ?? new List<ChatMessage>();
 
         var reply = await _chatService.ChatAsync(coupleId, request.Message, history, ct);
-        return Ok(new ChatResponse(reply));
+        return Ok(new ChatResponse(reply.Reply, reply.Provider));
     }
-
-    private bool IsAiChatEnabled() => _geminiOptions.Enabled;
 
     private Guid GetAuthenticatedCoupleId()
     {

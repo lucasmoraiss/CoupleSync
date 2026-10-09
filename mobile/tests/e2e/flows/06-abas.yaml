@@ -10,8 +10,12 @@ name: 06 - Abas
       NOME: Gil Teste
       EMAIL: ${output.email}
 
-# Painel (já aberto).
-- assertVisible: "Ver todas as transações"
+# Painel (já aberto). O atalho fica no fim; com o aviso do e-mail e o cartão da análise com IA acima, pode estar
+# abaixo da dobra.
+- scrollUntilVisible:
+    element: "Ver todas as transações"
+    direction: DOWN
+    timeout: 20000
 - assertNotVisible: "Tentar novamente"
 - assertNotVisible: "Algo deu errado"
 

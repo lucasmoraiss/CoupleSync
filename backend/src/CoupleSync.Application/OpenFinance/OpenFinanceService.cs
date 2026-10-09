@@ -12,10 +12,22 @@ namespace CoupleSync.Application.OpenFinance;
 public sealed class OpenFinanceService
 {
     public const string UnavailableCode = "OPENFINANCE_UNAVAILABLE";
+    public const string UnavailableMessage =
+        "O Open Finance não está disponível neste servidor. Ele depende de uma configuração que ainda não foi feita.";
+    public const string CredentialsUnreadableCode = "OPENFINANCE_CREDENTIALS_UNREADABLE";
+    public const string CredentialsUnreadableMessage =
+        "Não foi possível ler as credenciais guardadas. Desconecte e conecte de novo com o Client ID e o Client Secret.";
+    public const string DisconnectedCode = "BANK_CONNECTION_DISCONNECTED";
     public const string ItemEmptyCode = "PLUGGY_ITEM_EMPTY";
 
-    /// <summary>The stored credentials changed (disconnected, or connected again) while the request was being served.</summary>
+    /// <summary>
+    /// The stored credentials changed (disconnected, or connected again), or the connection was deleted because the
+    /// person left the group or was removed from it, while the request was being served.
+    /// </summary>
     public const string ChangedCode = "BANK_CONNECTION_CHANGED";
+
+    /// <summary>The code the API answers to who is not in the group of their token (the same the route filter uses).</summary>
+    public const string NotAMemberCode = "COUPLE_REQUIRED";
 
     public const string ItemEmptyMessage =
         "Nenhuma conta neste item. Confira se o conector MeuPluggy está ligado na aplicação e se a conexão foi feita pela Demo com a sua conta do Meu Pluggy.";
@@ -23,12 +35,17 @@ public sealed class OpenFinanceService
     public const string StoredCredentialsRefusedMessage =
         "O Pluggy recusou as credenciais guardadas nesta conexão. Desconecte e conecte de novo com o Client ID e o Client Secret certos.";
 
+    /// <summary>
+    /// Leaving a group deletes the person's connection there (issue #31), so this only names connections stored
+    /// before that, by someone who connected and then left.
+    /// </summary>
     private const string FormerMemberName = "Pessoa que saiu do grupo";
 
     private const int MaxDisconnectAttempts = 3;
 
     private readonly IBankConnectionRepository _repository;
     private readonly ICoupleRepository _coupleRepository;
+    private readonly ICoupleMembership _membership;
     private readonly IPluggyClient _pluggy;
     private readonly ICredentialCipher _cipher;
     private readonly IDateTimeProvider _clock;
@@ -36,12 +53,14 @@ public sealed class OpenFinanceService
     public OpenFinanceService(
         IBankConnectionRepository repository,
         ICoupleRepository coupleRepository,
+        ICoupleMembership membership,
         IPluggyClient pluggy,
         ICredentialCipher cipher,
         IDateTimeProvider clock)
     {
         _repository = repository;
         _coupleRepository = coupleRepository;
+        _membership = membership;
         _pluggy = pluggy;
         _cipher = cipher;
         _clock = clock;
@@ -102,28 +121,45 @@ public sealed class OpenFinanceService
         var encryptedSecret = _cipher.Encrypt(clientSecret);
         var hint = BankConnection.HintOf(clientId);
 
+        // Pluggy took its time, and the person may have left the group (or been removed from it) meanwhile: the
+        // exit found no connection to delete, so storing one now would leave it in a group they are not in. The
+        // connection is stored under the lock every membership change of this person takes, after reading the
+        // membership again: either this ends first and the exit, which waited, deletes what was stored, or the
+        // exit ends first and nothing is stored.
         BankConnection connection;
-        if (existing is null)
+        await using (var change = await _coupleRepository.BeginMembershipChangeAsync(userId, ct))
         {
-            connection = BankConnection.Create(coupleId, userId, input.Label, encryptedId, encryptedSecret, hint, historyMonths, now);
-            await _repository.AddConnectionAsync(connection, ct);
-        }
-        else
-        {
-            connection = existing;
-            connection.Connect(input.Label, encryptedId, encryptedSecret, hint, historyMonths, now);
-            _pluggy.ForgetConnection(connection.Id);
-        }
+            if (!await _membership.IsMemberAsync(userId, coupleId, ct))
+                throw new ForbiddenException(NotAMemberCode, "Você não faz mais parte deste grupo.");
 
-        try
-        {
-            await _repository.SaveChangesAsync(ct);
-        }
-        catch (DataStoreException ex) when (ex is UniqueViolationException or ConcurrencyConflictException)
-        {
-            // The same person, twice at the same time: the other request stored the connection first (a new row,
-            // or new credentials on the disconnected one).
-            throw AlreadyConnected();
+            if (existing is null)
+            {
+                connection = BankConnection.Create(coupleId, userId, input.Label, encryptedId, encryptedSecret, hint, historyMonths, now);
+                await _repository.AddConnectionAsync(connection, ct);
+            }
+            else
+            {
+                connection = existing;
+                // Connecting again is about the credentials. Once something was read, the period is the one the
+                // person chose for the first synchronisation: it goes on deciding how far back a bank added later
+                // is read, and the app (which always sends the default here) cannot take it back to 3 months.
+                var period = existing.LastSyncAtUtc is null ? historyMonths : existing.HistoryMonths;
+                connection.Connect(input.Label, encryptedId, encryptedSecret, hint, period, now);
+                _pluggy.ForgetConnection(connection.Id);
+            }
+
+            try
+            {
+                await _repository.SaveChangesAsync(ct);
+            }
+            catch (DataStoreException ex) when (ex is UniqueViolationException or ConcurrencyConflictException)
+            {
+                // The same person, twice at the same time: the other request stored the connection first (a new row,
+                // or new credentials on the disconnected one).
+                throw AlreadyConnected();
+            }
+
+            await change.CommitAsync(ct);
         }
 
         var names = await _coupleRepository.GetMemberNamesAsync(coupleId, ct);
@@ -149,12 +185,10 @@ public sealed class OpenFinanceService
             || !_cipher.TryDecrypt(connection.ClientSecretEncrypted!, out var clientSecret))
         {
             // Stored with another key (the server's key changed): nothing can be read back.
-            throw new UnprocessableEntityException(
-                "OPENFINANCE_CREDENTIALS_UNREADABLE",
-                "Não foi possível ler as credenciais guardadas. Desconecte e conecte de novo com o Client ID e o Client Secret.");
+            throw new UnprocessableEntityException(CredentialsUnreadableCode, CredentialsUnreadableMessage);
         }
 
-        var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret);
+        var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret, connection.ClientSecretEncrypted!);
         PluggyItem pluggyItem;
         IReadOnlyList<PluggyAccount> pluggyAccounts;
         try
@@ -242,7 +276,16 @@ public sealed class OpenFinanceService
         await GetOwnConnectionAsync(item.ConnectionId, coupleId, userId, ct);
 
         account.SetSyncEnabled(syncEnabled, _clock.UtcNow);
-        await _repository.SaveChangesAsync(ct);
+        try
+        {
+            await _repository.SaveChangesAsync(ct);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            // The account was deleted since it was read: the person left the group, or was removed from it.
+            throw AccountNotFound();
+        }
+
         return MapAccount(account);
     }
 
@@ -276,7 +319,8 @@ public sealed class OpenFinanceService
 
     /// <summary>
     /// Stores what a verification at Pluggy found, unless the person disconnected (or connected again) while Pluggy
-    /// was answering: then nothing is written and the verification answers that the connection changed.
+    /// was answering, or left the group (which deletes the connection): then nothing is written and the verification
+    /// answers that the connection changed.
     /// </summary>
     private async Task SaveVerificationAsync(BankConnection connection, CancellationToken ct)
     {
@@ -285,8 +329,9 @@ public sealed class OpenFinanceService
         {
             await _repository.SaveChangesAsync(ct);
         }
-        catch (ConcurrencyConflictException)
+        catch (DataStoreException ex) when (ex is ConcurrencyConflictException or ForeignKeyViolationException)
         {
+            // A foreign key refuses the write when the connection itself is gone: an item cannot be stored under it.
             // This verification may have asked Pluggy for an API key with the credentials it had in memory, after
             // they were erased or replaced: that key is not kept for the connection.
             _pluggy.ForgetConnection(connection.Id);
@@ -297,10 +342,7 @@ public sealed class OpenFinanceService
     private void EnsureAvailable()
     {
         if (!_cipher.IsAvailable)
-            throw new AppException(
-                UnavailableCode,
-                "O Open Finance não está disponível neste servidor. Ele depende de uma configuração que ainda não foi feita.",
-                503);
+            throw new AppException(UnavailableCode, UnavailableMessage, 503);
     }
 
     /// <summary>The connection, when it is in the group (else 404) and belongs to the caller (else 403).</summary>
@@ -319,7 +361,7 @@ public sealed class OpenFinanceService
 
     private static ConflictException Disconnected()
         => new(
-            "BANK_CONNECTION_DISCONNECTED",
+            DisconnectedCode,
             "Esta conexão foi desconectada. Conecte de novo com o Client ID e o Client Secret para adicionar bancos.");
 
     private static NotFoundException AccountNotFound()
@@ -331,7 +373,7 @@ public sealed class OpenFinanceService
     private static ConflictException ItemAlreadyConnected()
         => new("BANK_ITEM_ALREADY_CONNECTED", "Este Item ID já está conectado em outra conexão bancária.");
 
-    private static BankAccountSnapshot ToSnapshot(PluggyAccount account) => new(
+    internal static BankAccountSnapshot ToSnapshot(PluggyAccount account) => new(
         account.Type,
         account.Subtype,
         account.Name,

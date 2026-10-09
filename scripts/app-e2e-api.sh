@@ -52,6 +52,8 @@ start() {
     fail "PostgreSQL did not become ready"
   fi
 
+  # AI: the fake provider is the only link of every chain here (no key, no call to anyone). The API itself refuses
+  # to start with it where a real provider key or the RENDER variable exists.
   # The whole emulator reaches the API from one address, and every flow signs up, signs in and signs out:
   # the production limits (5 per minute per address) would reject the tests, so they are raised here only.
   echo "== starting the API container ($API) on $BASE"
@@ -61,6 +63,7 @@ start() {
     --env ASPNETCORE_ENVIRONMENT=Production \
     --env RateLimiting__Auth__PermitLimit=1000 \
     --env RateLimiting__CoupleJoin__PermitLimit=1000 \
+    --env Ai__UseFakeProvider=true \
     "$image" >/dev/null
 
   echo "== waiting for $BASE/health/live and /health/ready"

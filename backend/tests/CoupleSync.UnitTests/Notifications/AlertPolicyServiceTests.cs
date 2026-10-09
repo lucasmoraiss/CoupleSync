@@ -391,6 +391,34 @@ public sealed class AlertPolicyServiceTests
     }
 
     [Fact]
+    public async Task BankReview_SeveralLinesAbove500_RaisesOneSummaryPerMember_ThatSaysWhereTheyCameFrom()
+    {
+        var kit = new AlertPolicyTestKit(memberCount: 2);
+        var confirmed = new[]
+        {
+            BuildTransaction(kit.CoupleId, kit.Author, 700m),
+            BuildTransaction(kit.CoupleId, kit.Author, 900m),
+            BuildTransaction(kit.CoupleId, kit.Author, 58.90m),
+        };
+
+        var events = await kit.Service.EvaluatePostBankReviewAsync(kit.CoupleId, confirmed, [], Now.UtcNow);
+
+        var large = events.Where(e => e.AlertType == "LargeTransaction").ToList();
+        Assert.Equal(2, large.Count);
+        Assert.All(large, e =>
+        {
+            Assert.Equal("Transações de valor alto", e.Title);
+            // Nothing was imported from a statement here: the text says what happened.
+            Assert.Equal("2 transações de valor alto foram confirmadas na revisão do banco, somando R$ 1.600,00.", e.Body);
+        });
+
+        // One line alone: the same alert as any single transaction.
+        var single = await kit.Service.EvaluatePostBankReviewAsync(kit.CoupleId, [confirmed[0]], [], Now.UtcNow);
+        Assert.All(single.Where(e => e.AlertType == "LargeTransaction"), e => Assert.Equal("Uma transação de R$ 700,00 foi registrada.", e.Body));
+        Assert.Equal(2, single.Count(e => e.AlertType == "LargeTransaction"));
+    }
+
+    [Fact]
     public async Task Import_OneLineAbove500_RaisesTheSameAlertAsASingleTransaction()
     {
         var kit = new AlertPolicyTestKit();

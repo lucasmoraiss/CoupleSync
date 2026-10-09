@@ -21,6 +21,32 @@ internal static class DbSaveTranslator
         }
     }
 
+    /// <summary>
+    /// As <see cref="SaveAsync(DbContext, CancellationToken)"/>, but a save refused by a concurrency token is first
+    /// handed to <paramref name="resolve"/>: when it answers true (it brought the tracked rows up to date), the save
+    /// is tried again; when it answers false, the refusal is translated as any other.
+    /// </summary>
+    public static async Task SaveAsync(
+        DbContext dbContext, Func<DbUpdateConcurrencyException, CancellationToken, Task<bool>> resolve, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                if (!await resolve(ex, cancellationToken)) throw Translate(ex);
+            }
+            catch (DbUpdateException ex)
+            {
+                throw Translate(ex);
+            }
+        }
+    }
+
     public static DataStoreException Translate(DbUpdateException ex)
     {
         if (ex is DbUpdateConcurrencyException)
@@ -29,7 +55,18 @@ internal static class DbSaveTranslator
         if (IsUniqueViolation(ex))
             return new UniqueViolationException(ex.Message, ex);
 
+        if (IsForeignKeyViolation(ex))
+            return new ForeignKeyViolationException(ex.Message, ex);
+
         return new DataStoreException(ex.Message, ex);
+    }
+
+    /// <summary>True when a save failed on a foreign key (PostgreSQL 23503, or SQLite's "FOREIGN KEY constraint failed").</summary>
+    private static bool IsForeignKeyViolation(DbUpdateException ex)
+    {
+        var message = ex.InnerException?.Message ?? ex.Message;
+        return message.Contains("23503", StringComparison.Ordinal)
+            || message.Contains("foreign key", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>True when a save failed on a unique index (PostgreSQL 23505, or SQLite's "UNIQUE constraint failed").</summary>

@@ -30,6 +30,8 @@ using CoupleSync.Application.OpenFinance;
 using CoupleSync.Application.AppUpdate;
 using CoupleSync.Application.Reports;
 using CoupleSync.Infrastructure;
+using CoupleSync.Infrastructure.Integrations.Gemini;
+using CoupleSync.Infrastructure.Integrations.Llm;
 using CoupleSync.Infrastructure.Persistence;
 using CoupleSync.Infrastructure.Persistence.Seeders;
 using CoupleSync.Infrastructure.Security;
@@ -38,6 +40,11 @@ using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
+
+// The API executable is also the PDF reading worker: started by ChildProcessPdfTextExtractor with this first argument
+// it reads one PDF from the standard input, answers on the standard output and ends, without building the web host.
+if (args.Length > 0 && args[0] == CoupleSync.Infrastructure.Integrations.LocalPdfParser.Worker.PdfWorkerHost.Command)
+    return CoupleSync.Infrastructure.Integrations.LocalPdfParser.Worker.PdfWorkerHost.RunProcess(args);
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -96,9 +103,13 @@ builder.Services.AddScoped<IncomeService>();
 builder.Services.AddScoped<ImportJobService>();
 builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<OpenFinanceService>();
+builder.Services.AddScoped<SyncConnectionService>();
+builder.Services.AddScoped<SyncRunService>();
+builder.Services.AddScoped<BankReviewService>();
 builder.Services.AddScoped<AppVersionService>();
 builder.Services.AddScoped<ChatContextService>();
-builder.Services.AddScoped<GeminiChatService>();
+builder.Services.AddScoped<AssistantChatService>();
+builder.Services.AddScoped<CoupleSync.Application.Ai.AiActivationService>();
 
 ValidationLocalization.Configure();
 builder.Services.AddControllers(ValidationLocalization.ConfigureModelBinding)
@@ -134,6 +145,11 @@ builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database");
 
 var app = builder.Build();
+
+// The fake AI provider (tests and "App E2E" only) never starts where a real provider key exists, nor on Render.
+FakeLlmProviderGuard.EnsureSafe(
+    app.Configuration,
+    app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<GeminiOptions>>().Value.ApiKey);
 
 using (var scope = app.Services.CreateScope())
 {
@@ -175,5 +191,6 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 });
 
 app.Run();
+return 0;
 
 public partial class Program;

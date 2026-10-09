@@ -431,7 +431,7 @@ public sealed class OpenFinanceTests
 
     // ---------------------------------------------------------------- helpers
 
-    private static object NewConnection(string label) => new
+    internal static object NewConnection(string label) => new
     {
         label,
         clientId = FakePluggyServer.ClientId,
@@ -440,7 +440,7 @@ public sealed class OpenFinanceTests
     };
 
     /// <summary>The same API with a server key (generated here) and the Pluggy client pointed at the fake.</summary>
-    private static DerivedTestHost WithOpenFinance(PostgresApiFactory factory, FakePluggyServer pluggy)
+    internal static DerivedTestHost WithOpenFinance(PostgresApiFactory factory, FakePluggyServer pluggy)
         => factory.WithTestHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -454,7 +454,7 @@ public sealed class OpenFinanceTests
         });
 
     /// <summary>Registers through the factory and hands back a client of the Open Finance host with the same session.</summary>
-    private static async Task<TestUser> RegisterAsync(PostgresApiFactory factory, DerivedTestHost host, string name, string? joinCode = null)
+    internal static async Task<TestUser> RegisterAsync(PostgresApiFactory factory, DerivedTestHost host, string name, string? joinCode = null)
     {
         var user = await factory.RegisterAsync(name, joinCode: joinCode);
         var client = host.CreateClient();
@@ -485,7 +485,7 @@ public sealed class OpenFinanceTests
         public Guid? CoupleId { get; }
     }
 
-    private static async Task<Guid> InsertConnectionAsync(TestDatabase database, Guid coupleId, Guid userId)
+    internal static async Task<Guid> InsertConnectionAsync(TestDatabase database, Guid coupleId, Guid userId)
     {
         var id = Guid.NewGuid();
         await database.ExecuteAsync(
@@ -497,7 +497,7 @@ public sealed class OpenFinanceTests
         return id;
     }
 
-    private static async Task<Guid> InsertItemAsync(TestDatabase database, Guid coupleId, Guid connectionId, string pluggyItemId)
+    internal static async Task<Guid> InsertItemAsync(TestDatabase database, Guid coupleId, Guid connectionId, string pluggyItemId)
     {
         var id = Guid.NewGuid();
         await database.ExecuteAsync(
@@ -509,7 +509,7 @@ public sealed class OpenFinanceTests
         return id;
     }
 
-    private static async Task<Guid> InsertAccountAsync(TestDatabase database, Guid coupleId, Guid itemId, string pluggyAccountId)
+    internal static async Task<Guid> InsertAccountAsync(TestDatabase database, Guid coupleId, Guid itemId, string pluggyAccountId)
     {
         var id = Guid.NewGuid();
         await database.ExecuteAsync(

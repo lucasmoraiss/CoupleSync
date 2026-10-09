@@ -47,10 +47,17 @@ services:
       - key: Storage__BasePath
         value: /app/uploads
 
-      # Assistente de IA desligado por padrão. Para ligar: "true" e uma chave em GEMINI_API_KEY.
-      - key: AI_CHAT_ENABLED
+      # IA: fica disponível quando GEMINI_API_KEY tem valor; cada grupo ainda precisa ativar no app (o aceite fica no
+      # servidor). Interruptor de emergência: "true" aqui desliga toda a IA na hora, sem publicar o app de novo.
+      - key: Ai__Disabled
         value: "false"
       - key: GEMINI_API_KEY
+        sync: false
+      # Chave de um segundo provedor de IA (compatível com OpenAI; Groq é a primeira escolha). Fica sem valor até
+      # essa chave existir: sem ela o provedor não entra em cadeia nenhuma. Ligar pede também
+      # Ai__OpenAiCompatible__0__{Name,BaseUrl,ApiKeyVariable}, o elo nas cadeias (Ai__Chains__...) e o provedor
+      # no texto de privacidade com versão nova do aceite de IA.
+      - key: GROQ_API_KEY
         sync: false
 
       # Versão mínima do app ainda aceita (ex.: 1.1.0). Quem tiver um APK mais antigo vê a tela "baixe a nova"

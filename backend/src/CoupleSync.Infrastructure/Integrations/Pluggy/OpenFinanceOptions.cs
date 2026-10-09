@@ -18,4 +18,13 @@ public sealed class OpenFinanceOptions
     /// There is no default and the code never generates one.
     /// </summary>
     public string EncryptionKey { get; set; } = string.Empty;
+
+    /// <summary>Seconds between two looks of the synchronisation job at its queue (configuration <c>OpenFinance:SyncPollSeconds</c>).</summary>
+    public double SyncPollSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// Seconds between two looks of the daily scheduler at the clock (configuration
+    /// <c>OpenFinance:SchedulerTickSeconds</c>). Zero or less: the scheduler does not run.
+    /// </summary>
+    public double SchedulerTickSeconds { get; set; } = 60;
 }

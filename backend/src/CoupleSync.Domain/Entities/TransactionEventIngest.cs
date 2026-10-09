@@ -44,8 +44,11 @@ public sealed class TransactionEventIngest : ICoupleScoped
     public const string ManualBank = "MANUAL";
     public const string OcrBank = "OCR";
 
+    /// <summary>Bank marker of ingest rows written when a bank transaction (Open Finance) is confirmed in the review.</summary>
+    public const string OpenFinanceBank = "OPENFINANCE";
+
     /// <summary>Banks that never come from the notification-capture endpoint (its validator only accepts real banks).</summary>
-    public static readonly string[] NonNotificationBanks = [ManualBank, OcrBank];
+    public static readonly string[] NonNotificationBanks = [ManualBank, OcrBank, OpenFinanceBank];
 
     public Guid Id { get; private set; }
     public Guid CoupleId { get; private set; }
