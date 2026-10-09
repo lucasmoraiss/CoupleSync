@@ -130,7 +130,9 @@ public sealed class OcrBackgroundJob : BackgroundService
                 // Delete the uploaded file only after successful processing
                 await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
             }
-            catch (ConcurrencyConflictException)
+            // A save the database itself ended (a deadlock) is not recovery: nobody changed the job, and it goes
+            // to a new attempt below like any other failure.
+            catch (ConcurrencyConflictException conflict) when (!conflict.EndedByTheDatabase)
             {
                 // Recovery failed this job while it was being processed: its verdict stands, the result is dropped.
                 _logger.LogWarning("Import job {JobId} was changed by recovery while processing; result discarded.", job.Id);

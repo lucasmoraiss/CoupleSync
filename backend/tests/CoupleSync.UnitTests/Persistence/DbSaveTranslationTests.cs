@@ -77,6 +77,19 @@ public sealed class DbSaveTranslationTests : IDisposable
     }
 
     [Fact]
+    public async Task TheConflict_SaysWhetherTheDatabaseEndedTheSave_OrSomeoneChangedTheRow()
+    {
+        // Who catches the conflict to mean "someone else changed this row" can tell the two apart.
+        var deadlock = Assert.IsType<ConcurrencyConflictException>(await SaveFailingWithAsync(Wrapped(new DbUpdateException("save", Postgres("40P01")))));
+        var serialization = Assert.IsType<ConcurrencyConflictException>(await SaveFailingWithAsync(new DbUpdateException("save", Postgres("40001"))));
+        var changed = Assert.IsType<ConcurrencyConflictException>(await SaveFailingWithAsync(new DbUpdateConcurrencyException("someone changed the row")));
+
+        Assert.True(deadlock.EndedByTheDatabase);
+        Assert.True(serialization.EndedByTheDatabase);
+        Assert.False(changed.EndedByTheDatabase);
+    }
+
+    [Fact]
     public async Task AnythingElseHandedOverWrapped_IsNotTranslated()
     {
         // Another failure of the database (a table that is not there), a failure that is not of the database, and

@@ -27,14 +27,17 @@ internal static class DbSaveTranslator
         }
         catch (InvalidOperationException ex) when (IsDeadlockOrSerializationFailure(ex))
         {
-            throw new ConcurrencyConflictException(ex.Message, ex);
+            throw EndedByTheDatabase(ex);
         }
     }
 
     /// <summary>
     /// As <see cref="SaveAsync(DbContext, CancellationToken)"/>, but a save refused by a concurrency token is first
     /// handed to <paramref name="resolve"/>: when it answers true (it brought the tracked rows up to date), the save
-    /// is tried again; when it answers false, the refusal is translated as any other.
+    /// is tried again; when it answers false, the refusal is translated as any other. Here a save the database ended
+    /// (deadlock, serialization failure) is NOT a concurrency conflict: who saves this way (the run of a
+    /// synchronisation) reads a conflict as "the rows are no longer the ones I read", which is not what happened. It
+    /// leaves as the general failure of the store.
     /// </summary>
     public static async Task SaveAsync(
         DbContext dbContext, Func<DbUpdateConcurrencyException, CancellationToken, Task<bool>> resolve, CancellationToken cancellationToken)
@@ -50,13 +53,17 @@ internal static class DbSaveTranslator
             {
                 if (!await resolve(ex, cancellationToken)) throw Translate(ex);
             }
+            catch (DbUpdateException ex) when (IsDeadlockOrSerializationFailure(ex))
+            {
+                throw new DataStoreException(ex.Message, ex);
+            }
             catch (DbUpdateException ex)
             {
                 throw Translate(ex);
             }
             catch (InvalidOperationException ex) when (IsDeadlockOrSerializationFailure(ex))
             {
-                throw new ConcurrencyConflictException(ex.Message, ex);
+                throw new DataStoreException(ex.Message, ex);
             }
         }
     }
@@ -73,10 +80,14 @@ internal static class DbSaveTranslator
             return new ForeignKeyViolationException(ex.Message, ex);
 
         if (IsDeadlockOrSerializationFailure(ex))
-            return new ConcurrencyConflictException(ex.Message, ex);
+            return EndedByTheDatabase(ex);
 
         return new DataStoreException(ex.Message, ex);
     }
+
+    /// <summary>The conflict of a save the database ended: marked, so that nobody reads it as a row someone changed.</summary>
+    private static ConcurrencyConflictException EndedByTheDatabase(Exception ex)
+        => new(ex.Message, ex) { EndedByTheDatabase = true };
 
     /// <summary>
     /// True when, anywhere in the chain of <paramref name="ex"/>, PostgreSQL says it ended the transaction because
