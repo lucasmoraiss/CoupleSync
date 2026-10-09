@@ -532,14 +532,22 @@ escreve é dela e vai como escreveu:
   `Nota do app: na pergunta, carro também é o nome da meta {{g1}}.` A linha repete só palavras da pergunta como ela
   é enviada (nada do título sai além do que a pessoa escreveu) e serve para o modelo saber de qual meta se fala
   quando há várias. Pergunta e linhas cabem juntas nos 600 tokens da pergunta (2.100 caracteres); linha que não
-  cabe não vai.
+  cabe não vai. Não ganha linha a meta cujo título quase toda pergunta citaria sem falar dela (issue #60): um
+  caractere só, uma palavra da lista curta de palavras comuns do `FactPackPrivacyFilter` ("meta", "gastos", "mês"… e
+  a gramática de duas letras: "de", "em", "no", "um"…) ou só o nome de membros do grupo. Título de duas letras que
+  não é gramática ("TV", "PC", "AP") ganha a linha.
 - No histórico, nas mensagens do modelo, volta a ser marcador só o que o próprio sistema repôs: a forma exata
   que a API emite, **com as aspas** (`"Carro"`), dos títulos conhecidos do grupo — ativas viram o marcador,
   arquivadas e concluídas viram "uma meta". O resto entre aspas e a mesma palavra sem aspas ficam.
 - Resíduo declarado: o título antigo de uma meta renomeada ou apagada no meio de uma conversa, mostrado entre
   aspas numa resposta anterior, volta no histórico enquanto a conversa estiver aberta.
-- Na resposta, o marcador é lido em qualquer grafia com chaves; sem chaves (`g1`, `[g1]`) só quando é exatamente o
-  marcador de uma meta enviada naquele pedido. Sobra de chave reprova a resposta.
+- Na resposta, o marcador é lido em qualquer grafia com chaves. Sem chaves (`g1`, `[g1]`), o de uma
+  meta enviada naquele pedido vira o título, depois de qualquer palavra ("no g1", "para o g1"). Fica como texto
+  normal (issue #60): o `gN` que a própria pessoa escreveu, na pergunta ou nas mensagens dela no histórico, em
+  qualquer caixa (o modelo está repetindo a palavra dela — um site de notícias, um produto, uma sala); o `gN` solto
+  que não é de nenhuma meta enviada ("moto g54", "reunião g20": trocar por "uma meta" estragaria texto real); e
+  "G20", "5g1", "g1,5". Entre colchetes, o de meta que não foi enviada (`[g3]` com duas metas) vira "uma meta",
+  salvo se o pedido não levou meta nenhuma ou se a pessoa escreveu a palavra. Sobra de chave reprova a resposta.
 
 Teste obrigatório: pacote gerado a partir de fixtures com nomes de membros, beneficiários de Pix, títulos de
 meta e nomes de renda conhecidos **não contém nenhum deles** nem CPF/telefone/e-mail. Verdade residual que vai
