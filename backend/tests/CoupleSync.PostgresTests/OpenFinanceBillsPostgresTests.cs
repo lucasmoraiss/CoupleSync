@@ -417,6 +417,53 @@ public sealed class OpenFinanceBillsPostgresTests
         Assert.Equal(77777.00m, Assert.Single(carlaPerson.GetProperty("cards").EnumerateArray()).GetProperty("currentBill").GetProperty("totalAmount").GetDecimal());
     }
 
+    [PostgresFact]
+    public async Task TheBillsOfACardThePersonTurnedOff_AreNotDueNorShown_NorPayADebit_AndAreBackWhenTurnedOn_OnPostgres()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyBanks();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connection = await ConnectWithBankAsync(ana);
+        var today = TodayInBrazil();
+        pluggy.Bills[Card] = [ClosedBill("bill-off-due", today.AddDays(5), 700.00m), ClosedBill("bill-off-paid", PaymentDay().AddDays(4), 880.40m)];
+        await DoneAsync(database, ana, connection);
+        var cardId = await database.ScalarAsync<Guid>("SELECT id FROM bank_accounts WHERE pluggy_account_id = @id", ("id", Card));
+
+        async Task<JsonElement> UpcomingAsync() => (await ana.Client.GetFromJsonAsync<JsonElement>("/api/v1/dashboard")).GetProperty("upcomingBills");
+        async Task<JsonElement> CardAsync() => Assert.Single(
+            (await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/accounts")).GetProperty("people")[0].GetProperty("cards").EnumerateArray());
+        async Task SetSyncAsync(bool enabled)
+        {
+            var answer = await ana.Client.PatchAsJsonAsync($"{Base}/accounts/{cardId}", new { syncEnabled = enabled });
+            Assert.True(answer.IsSuccessStatusCode, await answer.Content.ReadAsStringAsync());
+        }
+
+        Assert.Equal(700.00m, (await UpcomingAsync()).GetProperty("totalBrl").GetDecimal());
+
+        await SetSyncAsync(false);
+
+        var off = await UpcomingAsync();
+        Assert.Equal(0m, off.GetProperty("totalBrl").GetDecimal());
+        Assert.Empty(off.GetProperty("bills").EnumerateArray());
+        var card = await CardAsync();
+        Assert.Equal(JsonValueKind.Null, card.GetProperty("currentBill").ValueKind);
+        Assert.Empty(card.GetProperty("nextBills").EnumerateArray());
+        Assert.Empty(card.GetProperty("previousBills").EnumerateArray());
+        // A debit of the value of a stored bill of that card arrives: nothing says the bill is still that one.
+        pluggy.Transactions[Checking] = [new FakeTransaction("t27-off", Noon(), -880.40m) { Description = "PIX enviado" }];
+        await DoneAsync(database, ana, connection);
+        Assert.Equal("Pending:", await StateAsync(database, "t27-off"));
+        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM credit_card_bills"));
+
+        await SetSyncAsync(true);
+
+        Assert.Equal(700.00m, (await UpcomingAsync()).GetProperty("totalBrl").GetDecimal());
+        Assert.Equal(700.00m, (await CardAsync()).GetProperty("currentBill").GetProperty("totalAmount").GetDecimal());
+        Assert.Equal(880.40m, Assert.Single((await CardAsync()).GetProperty("previousBills").EnumerateArray()).GetProperty("totalAmount").GetDecimal());
+    }
+
     // ---------------------------------------------------------------- entries that become incomes
 
     [PostgresFact]

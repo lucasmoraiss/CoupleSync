@@ -258,6 +258,25 @@ public sealed class OpenFinanceIncomeReviewTests
     }
 
     [Fact]
+    public async Task TheNumberAddedToARepeatedName_FitsInTheLengthOfAName_EvenWhenTheNameAlreadyFillsIt()
+    {
+        await using var factory = NewFactory();
+        var full = "Pagamento mensal da Empresa Exemplo de Serviços Administrativos".PadRight(64, 's');
+        Assert.Equal(64, full.Length);
+        var (ana, _) = await SyncedAsync(factory,
+            Credit("t27-full-1", Noon(), 51.00m, full),
+            Credit("t27-full-2", Noon().AddHours(1), 61.00m, full));
+
+        await OkAsync(ConfirmAsync(ana, new { incomes = new[] { new { id = await LineIdAsync(factory, "t27-full-1") }, new { id = await LineIdAsync(factory, "t27-full-2") } } }));
+
+        var names = (await IncomesAsync(factory)).ToDictionary(r => Money(r["amount"]), r => (string)r["name"]!);
+        Assert.Equal(full, names[51.00m]);
+        // The name gives room to the number: the whole still fits in the column (64).
+        Assert.Equal(full[..60] + " (2)", names[61.00m]);
+        Assert.Equal(64, names[61.00m].Length);
+    }
+
+    [Fact]
     public async Task ConfirmingTheSameEntryTwice_CreatesOneIncomeOnly()
     {
         await using var factory = NewFactory();

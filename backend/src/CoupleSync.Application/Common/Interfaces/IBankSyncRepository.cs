@@ -89,7 +89,10 @@ public interface IBankSyncRepository
 
     Task AddBillsAsync(IEnumerable<CreditCardBill> bills, CancellationToken ct);
 
-    /// <summary>For the job: the stored bills of the cards of the group due in [<paramref name="fromDue"/>, <paramref name="toDue"/>].</summary>
+    /// <summary>
+    /// For the job: the stored bills of the cards of the group that are still synchronised (a card the person turned
+    /// off is not read any more) due in [<paramref name="fromDue"/>, <paramref name="toDue"/>].
+    /// </summary>
     Task<IReadOnlyList<CardBillFacts>> GetBillFactsForJobAsync(Guid coupleId, DateOnly fromDue, DateOnly toDue, CancellationToken ct);
 
     /// <summary>
@@ -101,8 +104,9 @@ public interface IBankSyncRepository
     Task<IReadOnlyList<BankTransaction>> GetBillPaymentCandidatesForJobAsync(Guid coupleId, DateOnly fromDay, DateOnly toDay, CancellationToken ct);
 
     /// <summary>
-    /// The bills of the cards of the group whose connection is still connected, each with its card, its bank and who
-    /// connected it. With both days, only the ones due in [<paramref name="fromDue"/>, <paramref name="toDue"/>].
+    /// The bills of the cards of the group whose connection is still connected and that the person did not turn off,
+    /// each with its card, its bank and who connected it. With both days, only the ones due in
+    /// [<paramref name="fromDue"/>, <paramref name="toDue"/>].
     /// </summary>
     Task<IReadOnlyList<GroupCardBill>> GetBillsOfGroupAsync(Guid coupleId, DateOnly? fromDue, DateOnly? toDue, CancellationToken ct);
 

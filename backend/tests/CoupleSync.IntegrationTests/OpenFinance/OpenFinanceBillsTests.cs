@@ -158,6 +158,44 @@ public sealed class OpenFinanceBillsTests
     }
 
     [Fact]
+    public async Task ABillListedTwiceInTheSameAnswer_IsMirroredOnce_AndTheSynchronisationEnds()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var due = TodayInBrazil(factory).AddDays(6);
+        Bills(factory, Card,
+            ClosedBill("bill-27-twice", due, 310.00m),
+            ClosedBill("bill-27-twice", due.AddDays(1), 999.00m),
+            ClosedBill("bill-27-once", due, 45.00m));
+
+        await DoneAsync(factory, ana, connection);
+
+        var rows = (await BillRowsAsync(factory)).ToDictionary(r => (string)r["pluggy_bill_id"]!);
+        Assert.Equal(new[] { "bill-27-once", "bill-27-twice" }, rows.Keys.Order(StringComparer.Ordinal));
+        // The first one of the answer is the one kept.
+        Assert.Equal(310.00m, Money(rows["bill-27-twice"]["total_amount"]));
+        Assert.Equal(Day(due), rows["bill-27-twice"]["due_date"]);
+    }
+
+    [Fact]
+    public async Task AListOfBillsThatNeverEnds_IsReadUpToTwentyPages_AndTheSynchronisationEnds()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var today = TodayInBrazil(factory);
+        // One bill per page, twenty-five pages announced: the reading stops at the twentieth.
+        factory.Pluggy.MaxPageSize = 1;
+        Bills(factory, Card, Enumerable.Range(1, 25).Select(i => ClosedBill($"bill-27-page-{i:D2}", today.AddDays(-i), 10m + i)).ToArray());
+
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(20, factory.Pluggy.Count("GET", "/bills"));
+        Assert.Equal(
+            Enumerable.Range(1, 20).Select(i => $"bill-27-page-{i:D2}"),
+            (await BillRowsAsync(factory)).Select(r => (string)r["pluggy_bill_id"]!));
+    }
+
+    [Fact]
     public async Task ABill_IsClosedTheDayAfterItsClosingDate_AndWithoutAClosingDate_OnlyOnceItIsDue()
     {
         await using var factory = NewFactory();
@@ -515,6 +553,68 @@ public sealed class OpenFinanceBillsTests
     }
 
     [Fact]
+    public async Task ADebitAlreadyIgnoredInAnotherGroup_OfTheSameValue_DoesNotCountAsThePaymentOfTheBillOfThisGroup()
+    {
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory); // the card and the account that pays it
+        var (carla, carlaConnection) = await WithOtherBankAsync(factory, "Carla Modelo Dias", joinCode: null); // another group
+        // In Carla's group a debit of the very same value and day is already ignored (it says what it is).
+        Bank(factory, OtherChecking, Debit("t27-carla-ignored", Noon(), 610.00m) with { DescriptionRaw = "PAGAMENTO DE FATURA CARTAO" });
+        await DoneAsync(factory, carla, carlaConnection);
+        Assert.Equal(("Ignored", "BillPayment"), await StateAsync(factory, "t27-carla-ignored"));
+
+        // Ana's bill of that value is still unpaid for Ana's group: her debit is its payment (the debit is in the
+        // mirror before the bill: the account is read before the card).
+        Bills(factory, Card, ClosedBill("bill-27-ana-unpaid", PaymentDay().AddDays(4), 610.00m));
+        Bank(factory, Checking, Debit("t27-ana-pays", Noon(), 610.00m, "Débito automático"));
+        await DoneAsync(factory, ana, anaConnection);
+        Assert.Equal(("Ignored", "BillPayment"), await StateAsync(factory, "t27-ana-pays"));
+
+        // The same when the bill is already mirrored and the debit arrives later (the other half of the rule).
+        Bills(factory, Card,
+            ClosedBill("bill-27-ana-unpaid", PaymentDay().AddDays(4), 610.00m), ClosedBill("bill-27-ana-second", PaymentDay().AddDays(5), 720.00m));
+        await DoneAsync(factory, ana, anaConnection);
+        Bank(factory, OtherChecking,
+            Debit("t27-carla-ignored", Noon(), 610.00m) with { DescriptionRaw = "PAGAMENTO DE FATURA CARTAO" },
+            Debit("t27-carla-ignored-2", Noon(), 720.00m) with { DescriptionRaw = "PAGAMENTO DE FATURA CARTAO" });
+        await DoneAsync(factory, carla, carlaConnection);
+        Assert.Equal(("Ignored", "BillPayment"), await StateAsync(factory, "t27-carla-ignored-2"));
+        Bank(factory, Checking, Debit("t27-ana-pays", Noon(), 610.00m, "Débito automático"), Debit("t27-ana-pays-2", Noon(), 720.00m, "Débito automático"));
+        await DoneAsync(factory, ana, anaConnection);
+        Assert.Equal(("Ignored", "BillPayment"), await StateAsync(factory, "t27-ana-pays-2"));
+    }
+
+    private static async Task SetSyncOfCardAsync(OpenFinanceApiFactory factory, Member member, bool enabled)
+    {
+        var cardId = (string)Assert.Single(await factory.RowsAsync($"SELECT id FROM bank_accounts WHERE pluggy_account_id = '{Card}'"))["id"]!;
+        var answer = await member.Client.PatchAsJsonAsync($"{Base}/accounts/{cardId}", new { syncEnabled = enabled });
+        Assert.True(answer.IsSuccessStatusCode, await answer.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task TheBillOfACardThePersonTurnedOff_DoesNotIgnoreADebitOfItsValue_AndDoesAgainOnceTheCardIsTurnedOn()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        Bills(factory, Card, ClosedBill("bill-27-card-off", PaymentDay().AddDays(4), 880.40m));
+        await DoneAsync(factory, ana, connection);
+        Assert.Single(await BillRowsAsync(factory));
+        await SetSyncOfCardAsync(factory, ana, enabled: false);
+
+        // The bill is stored, but nothing reads that card any more: it may be paid, changed or gone.
+        Bank(factory, Checking, Debit("t27-while-off", Noon(), 880.40m, "PIX enviado"));
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null), await StateAsync(factory, "t27-while-off"));
+        Assert.Single(await BillRowsAsync(factory));
+
+        // Turned on again, the bill is read again and counts again (here it changed: the debits that wait are looked at).
+        await SetSyncOfCardAsync(factory, ana, enabled: true);
+        Bills(factory, Card, ClosedBill("bill-27-card-off", PaymentDay().AddDays(5), 880.40m));
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Ignored", "BillPayment"), await StateAsync(factory, "t27-while-off"));
+    }
+
+    [Fact]
     public async Task ABillPaymentThePersonRestored_IsNeverIgnoredAgain_EvenWhenTheBillChanges()
     {
         await using var factory = NewFactory();
@@ -808,6 +908,47 @@ public sealed class OpenFinanceBillsTests
         Assert.Equal(bruno.UserId, person.GetProperty("userId").GetGuid());
         // The mirror itself stays (disconnecting deletes nothing).
         Assert.Single(await BillRowsAsync(factory));
+    }
+
+    [Fact]
+    public async Task TheBillsOfACardThePersonTurnedOff_AreNotDueNorShownInTheAccounts_NothingIsDeleted_AndTurnedOnTheyAreBackAndUpdated()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var today = TodayInBrazil(factory);
+        Bills(factory, Card, ClosedBill("bill-27-off-a-past", today.AddDays(-20), 500.00m), ClosedBill("bill-27-off-b-due", today.AddDays(5), 700.00m));
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(700.00m, (await ana.Client.GetFromJsonAsync<JsonElement>("/api/v1/dashboard")).GetProperty("upcomingBills").GetProperty("totalBrl").GetDecimal());
+
+        await SetSyncOfCardAsync(factory, ana, enabled: false);
+
+        // Like a disconnected connection: nothing reads the card, its bills would only grow old. Ana is still
+        // connected, so the card of the dashboard stays, with nothing due.
+        var upcoming = (await ana.Client.GetFromJsonAsync<JsonElement>("/api/v1/dashboard")).GetProperty("upcomingBills");
+        Assert.Equal(0m, upcoming.GetProperty("totalBrl").GetDecimal());
+        Assert.Empty(upcoming.GetProperty("bills").EnumerateArray());
+        // The card itself is still listed in the accounts, with no bill at all.
+        var card = Assert.Single((await AccountsAsync(ana)).GetProperty("people")[0].GetProperty("cards").EnumerateArray());
+        Assert.Equal("Cartão Exemplo Platinum", card.GetProperty("name").GetString());
+        Assert.Equal(JsonValueKind.Null, card.GetProperty("currentBill").ValueKind);
+        Assert.Empty(card.GetProperty("nextBills").EnumerateArray());
+        Assert.Empty(card.GetProperty("previousBills").EnumerateArray());
+        // Nothing is deleted, and a synchronisation with the card off changes nothing of it.
+        Bills(factory, Card, ClosedBill("bill-27-off-a-past", today.AddDays(-20), 500.00m), ClosedBill("bill-27-off-b-due", today.AddDays(5), 850.00m));
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(new[] { 500.00m, 700.00m }, (await BillRowsAsync(factory)).Select(r => Money(r["total_amount"])));
+        Assert.Empty((await ana.Client.GetFromJsonAsync<JsonElement>("/api/v1/dashboard")).GetProperty("upcomingBills").GetProperty("bills").EnumerateArray());
+
+        // Turned on again: what was stored is shown right away...
+        await SetSyncOfCardAsync(factory, ana, enabled: true);
+        Assert.Equal(700.00m, (await ana.Client.GetFromJsonAsync<JsonElement>("/api/v1/dashboard")).GetProperty("upcomingBills").GetProperty("totalBrl").GetDecimal());
+        card = (await AccountsAsync(ana)).GetProperty("people")[0].GetProperty("cards")[0];
+        Assert.Equal(700.00m, card.GetProperty("currentBill").GetProperty("totalAmount").GetDecimal());
+        Assert.Equal(500.00m, Assert.Single(card.GetProperty("previousBills").EnumerateArray()).GetProperty("totalAmount").GetDecimal());
+        // ...and the next synchronisation updates it.
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(850.00m, (await ana.Client.GetFromJsonAsync<JsonElement>("/api/v1/dashboard")).GetProperty("upcomingBills").GetProperty("totalBrl").GetDecimal());
+        Assert.Equal(850.00m, (await AccountsAsync(ana)).GetProperty("people")[0].GetProperty("cards")[0].GetProperty("currentBill").GetProperty("totalAmount").GetDecimal());
     }
 
     [Fact]

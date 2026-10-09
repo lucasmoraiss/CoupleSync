@@ -184,7 +184,9 @@ public sealed class BankSyncRepository : IBankSyncRepository
         => await _dbContext.CreditCardBills
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(b => b.CoupleId == coupleId && b.DueDate >= fromDue && b.DueDate <= toDue)
+            .Where(b => b.CoupleId == coupleId && b.DueDate >= fromDue && b.DueDate <= toDue
+                        // A card the person turned off is no longer read: its stored bills say nothing of today.
+                        && _dbContext.BankAccounts.Any(a => a.Id == b.BankAccountId && a.CoupleId == coupleId && a.SyncEnabled))
             .Select(b => new CardBillFacts(b.Id, b.TotalAmount, b.Currency, b.DueDate, b.IsClosed))
             .ToListAsync(ct);
 
@@ -214,6 +216,9 @@ public sealed class BankSyncRepository : IBankSyncRepository
             // Every table of the chain names the group: none of them is another group's.
             where bill.CoupleId == coupleId && account.CoupleId == coupleId && item.CoupleId == coupleId && connection.CoupleId == coupleId
                   && connection.Status != BankConnectionStatus.Disconnected
+                  // A card the person turned off is no longer read, like a disconnected connection: its bills stay
+                  // stored (turning it on shows them again) and are not shown meanwhile.
+                  && account.SyncEnabled
             select new { bill, account.Name, account.MarketingName, item.ConnectorName, connection.UserId, UserName = user.Name };
         if (fromDue is { } from) bills = bills.Where(r => r.bill.DueDate >= from);
         if (toDue is { } to) bills = bills.Where(r => r.bill.DueDate <= to);
