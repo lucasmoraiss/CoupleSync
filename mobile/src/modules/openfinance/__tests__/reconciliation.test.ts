@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as review from '../review';
 import {
   allSelected,
+  answerableDuplicateCount,
   answerDuplicateNotice,
   answerDuplicateRequest,
   answerDuplicateResultMessage,
@@ -116,6 +117,16 @@ describe('aviso no topo', () => {
     expect(suspectedDuplicateCount(lines)).toBe(2);
     expect(suspectedDuplicateCount([plain, otherPlain])).toBe(0);
     expect(suspectedDuplicateCount([])).toBe(0);
+  });
+
+  it('o aviso conta só as que já podem ser respondidas: a pendente no banco tem os botões desabilitados e não entra', () => {
+    const pendingAtBank = line({ id: 'l-9', bankStatus: 'Pending', match: duplicate.match });
+    expect(canAnswerDuplicate(pendingAtBank)).toBe(false);
+    expect(answerableDuplicateCount([plain, duplicate, pendingAtBank])).toBe(1);
+    expect(suspectedDuplicateCount([plain, duplicate, pendingAtBank])).toBe(2);
+    // Só pendentes no banco: nenhuma precisa da pessoa agora, sem aviso.
+    expect(duplicateNoticeText(answerableDuplicateCount([plain, pendingAtBank]))).toBeNull();
+    expect(answerableDuplicateCount([])).toBe(0);
   });
 
   it('"N possíveis duplicadas precisam de você", no singular e no plural; sem nenhuma, sem aviso', () => {
@@ -333,10 +344,15 @@ describe('a tela: os botões de possível duplicada', () => {
     expect(isSelectable(plain)).toBe(true);
   });
 
-  it('o aviso do topo vem de duplicateNoticeText, com a contagem das possíveis duplicadas das despesas', () => {
-    expect(screen).toContain('const duplicatesNotice = duplicateNoticeText(suspectedDuplicateCount(expenses));');
+  it('o aviso do topo vem de duplicateNoticeText, com a contagem das possíveis duplicadas que já podem ser respondidas', () => {
+    expect(screen).toContain('const duplicatesNotice = duplicateNoticeText(answerableDuplicateCount(expenses));');
+    expect(screen).not.toContain('suspectedDuplicateCount(');
     expect(screen).toMatch(/\{duplicatesNotice \? \(\s*<View style=\{styles\.duplicatesNotice\}[\s\S]*?\{duplicatesNotice\}/);
-    expect(duplicateNoticeText(suspectedDuplicateCount([plain, duplicate, otherPlain]))).toBe('1 possível duplicada precisa de você');
-    expect(duplicateNoticeText(suspectedDuplicateCount([plain, otherPlain]))).toBeNull();
+    expect(duplicateNoticeText(answerableDuplicateCount([plain, duplicate, otherPlain]))).toBe('1 possível duplicada precisa de você');
+    expect(duplicateNoticeText(answerableDuplicateCount([plain, otherPlain]))).toBeNull();
+  });
+
+  it('a revisão abre no mês das ignoradas quando nada espera (as duas listas vão para initialReviewMonth)', () => {
+    expect(screen).toContain('setMonth(initialReviewMonth(data.pendingByMonth, data.month, data.ignoredByMonth));');
   });
 });

@@ -39,6 +39,7 @@ import {
   ANSWER_OTHER_FAILED_TEXT,
   ANSWER_SAME_FAILED_TEXT,
   allSelected,
+  answerableDuplicateCount,
   answerDuplicateNotice,
   answerDuplicateRequest,
   buildConfirmBatches,
@@ -62,7 +63,6 @@ import {
   selectAllIds,
   selectedTotalBrl,
   shiftMonth,
-  suspectedDuplicateCount,
   toggleSelected,
   unselectableReason,
   type DuplicateAnswer,
@@ -93,7 +93,7 @@ function BankReviewScreen() {
   // A primeira resposta (mês corrente do servidor) diz onde há pendências: a revisão abre no mês mais recente
   // que tem algo esperando.
   useEffect(() => {
-    if (month === null && data) setMonth(initialReviewMonth(data.pendingByMonth, data.month));
+    if (month === null && data) setMonth(initialReviewMonth(data.pendingByMonth, data.month, data.ignoredByMonth));
   }, [month, data]);
 
   const expenses = useMemo(() => data?.expenses ?? [], [data]);
@@ -248,7 +248,7 @@ function BankReviewScreen() {
 
   const otherMonths = data.pendingByMonth.filter((m) => m.month !== month && m.pending > 0);
   const total = selectedTotalBrl(expenses, selected);
-  const duplicatesNotice = duplicateNoticeText(suspectedDuplicateCount(expenses));
+  const duplicatesNotice = duplicateNoticeText(answerableDuplicateCount(expenses));
 
   const header = (
     <View style={styles.header}>
