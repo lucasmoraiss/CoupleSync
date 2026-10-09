@@ -441,6 +441,10 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
      item se forma**. Limite assumido: um telefone escrito só com dígitos e sem palavra ao lado passa por código
      — o número não é gravado nem mostrado de qualquer forma. Isto vale só para formar o item do próprio grupo;
      o que vai a provedor continua pelo filtro de 3.8, que remove todos esses números. Ver 3.8.
+     **Obrigação da fase 4 (#40):** na fase 3 `name_source` é só **gravado** — nenhum código o lê, porque nada
+     de recorrência vai a provedor ainda. A regra "nome vindo de descrição (`name_source = description`) **nunca
+     vai a provedor**" tem de ser implementada, com teste, por quem primeiro montar um pacote com itens de
+     `recurring_streams`.
    - A chave tem no máximo 120 caracteres (corte em palavra inteira). Sufixos que a coluna `merchant_key` (160)
      recebe além da chave: `#NNxAAAAMM` (parcelamento: N parcelas, mês da primeira) e `~N` (segundo item do
      mesmo estabelecimento, tipo e cadência). Quem lê a tabela para outro fim (fase 4) tira os dois sufixos.
@@ -448,21 +452,46 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
      não conta como transferência; nos outros casos conta como está em 3.8.
 2. Agrupa por (grupo, chave); ordena por data local; mede intervalos.
    **A mesma cobrança vista duas vezes** (o celular de cada pessoa capturando a mesma conta; extrato importado
-   mais notificação; data da compra × data do registro): cobrança de mesmo valor a até **4 dias**
-   (`Recurrence:SameChargeWithinDays`) de uma cobrança da série é lida como cópia dela — vai com o item, não
-   conta como outra cobrança, não entra no total e não forma outro item (só mensal e anual).
-   Dois serviços de **mesmo valor** no mesmo estabelecimento só são **dois itens quando estão claramente
-   separados**; na dúvida, um item (ou nenhum):
-   - por pessoa — cada pessoa tem a própria série, as séries correm lado a lado e **nenhuma** cobrança de uma
-     fica a até 4 dias de uma cobrança da outra. Se alguma fica, é a mesma conta registrada pelas duas: um item,
-     uma cobrança por mês, sem pessoa;
+   mais notificação). Uma cobrança é **cópia** de uma cobrança da série quando valem as três condições:
+   - **mesmo valor**: diferença de até 5% (`Recurrence:SamePriceTolerance`; cobre imposto e arredondamento). A
+     faixa do agrupamento (±15%, ou ±40% na conta fixa variável) **não** basta: R$ 180 e R$ 230 são duas contas;
+   - **até 4 dias** de distância (`Recurrence:SameChargeWithinDays`; na cadência semanal, só o mesmo dia);
+   - em dias diferentes, **não** foram registradas pela mesma pessoa e pela mesma origem (`Transaction.Source`:
+     manual, extrato importado, notificação, Open Finance). O mesmo celular não captura a mesma cobrança duas
+     vezes: mesma pessoa e mesma origem em dias diferentes são **duas cobranças**. No mesmo dia, mesmo valor é
+     sempre uma ocorrência só (como sempre foi).
+   A cópia vai com o item, não conta como outra cobrança, não entra no total, não forma outro item e não é
+   "cobrou de novo" depois de um "Cancelei".
+   Dois serviços de **mesmo valor** no mesmo estabelecimento (só mensal e anual):
+   - por pessoa — cada pessoa tem a própria série e as séries correm lado a lado: **dois itens**, um de cada
+     pessoa. Viram **um item** (uma cobrança por mês, sem pessoa) só quando as séries **coincidem**: **todas** as
+     cobranças de uma delas são cópia de uma cobrança da outra (a mesma conta registrada pelas duas; vale também
+     quando um dos celulares pegou só alguns meses). Um par próximo, ou par só em alguns meses de cada lado, não
+     junta: planos nos dias 5 e 10, com um mês no dia 9, são dois itens e o total é o dos dois. No item único, só
+     as cobranças que são cópia vão com ele; o resto da faixa fica de fora;
    - por dia (mesma pessoa) — até 2 séries, **cada uma sempre no seu dia do mês (± 1 dia,
-     `Recurrence:SameDayToleranceDays`)**, nenhuma cobrança de uma a até 4 dias de uma da outra, e que juntas não
-     deixam quase nada de fora. Compra duas vezes por mês em dias que variam (posto, mercado) não é conta fixa
-     e não entra; compra a cada 10 ou 14 dias também não.
-   Limites assumidos: duas contas de verdade cobradas com até 4 dias de diferença viram um item só (o total fica
-   menor que o real, nunca dobrado); compra feita exatamente nos mesmos dois dias do mês, todo mês, é
-   indistinguível de duas contas e vira dois itens — a pessoa corrige com "Não é recorrente".
+     `Recurrence:SameDayToleranceDays`)**, nenhuma cobrança de uma sendo cópia de uma cobrança da outra, e que
+     juntas não deixam quase nada de fora. Quando os dias são próximos (3 e 6) as séries são procuradas pelo dia
+     do mês, e aí só valem se correm lado a lado e não deixam **nada** de fora no período delas. Compra duas vezes
+     por mês em dias que variam (posto, mercado) não é conta fixa e não entra; compra a cada 10 ou 14 dias
+     também não.
+   Limites conhecidos (issue #39, rodada 3):
+   - **O mesmo plano, mesmo valor, cobrado no mesmo dia (ou a até 4 dias, todo mês), um de cada pessoa, é
+     indistinguível de uma conta capturada pelos dois celulares: vira um item sem pessoa, e o total fica pela
+     metade.** Não há ação na tela que corrija. **Decisão para uma fase seguinte:** trazer `Transaction.Bank`
+     para a projeção — bancos diferentes são duas cobranças.
+   - O mesmo vale para a mesma pessoa com dois serviços de mesmo valor a até 4 dias, um registrado pelo extrato
+     e outro pela notificação: um item.
+   - Captura dupla em que **cada** celular perdeu algum mês (nenhuma das duas séries tem todas as cobranças
+     pareadas na outra) vira dois itens e o total dobra — é o lado visível do erro; a pessoa corrige com "Não é
+     recorrente" em um deles.
+   - Compra feita exatamente nos mesmos dois dias do mês, todo mês, é indistinguível de duas contas e vira dois
+     itens — a pessoa corrige com "Não é recorrente".
+   - **± 1 dia em "cada série no seu dia"**: duas contas fixas de mesmo valor, da mesma pessoa, em que uma anda
+     2–3 dias por fim de semana ou feriado, deixam de ser "cada uma no seu dia" e podem não formar **nenhum**
+     item. Não foi alargado para ± 2 porque isso volta a ler compra duas vezes por mês como duas contas fixas
+     (o defeito M4 da revisão). Fica para uma fase seguinte, com o banco da transação ou o calendário de dias
+     úteis como critério.
 3. **Cadência**: semanal (7 ± 2 dias, **≥ 4 ocorrências**), mensal (28–31 dias, aceitando ±3 dias de
    deslocamento por fim de mês e fim de semana, ≥ 3 ocorrências), anual (335–395 dias; 2 ocorrências →
    confiança "média").
@@ -513,7 +542,11 @@ Como ficou na fase 3 (issue #39):
   deixa de ser item anual — sai da lista, ou fica como parado se a pessoa disse algo sobre ele. Rede de
   segurança para o grupo que bate no teto de linhas (a primeira cobrança pode ficar de fora): o item anual que
   o cálculo não acha mais **fica como está** enquanto a última cobrança dele existir e não tiverem passado 395
-  dias dela. Anual com uma cobrança só não é detectada (precisa de 2).
+  dias dela. Anual com uma cobrança só não é detectada (precisa de 2). Quando a leitura bate no teto, o
+  servidor registra um aviso no log (só o id do grupo e o teto; nada das transações).
+- Cópia de uma cobrança (3.3 item 2) registrada depois do "Cancelei" **não** é `ChargedAfterCancel`: nem a
+  cópia em si, nem a cobrança da série cuja cópia já existia antes do "Cancelei" (a cópia datada depois toma o
+  lugar dela como última cobrança da série; a data da última cobrança passa a ser a dela).
 - `ChargedAfterCancel` traz o item de volta para a lista ativa e para o total mesmo quando a cobrança voltou
   depois de mais de dois meses (a série continua `Stopped`); a cobrança de **outro** item do mesmo
   estabelecimento não conta. "Cancelei" de novo oculta outra vez. A cobrança que voltou tarde demais para
