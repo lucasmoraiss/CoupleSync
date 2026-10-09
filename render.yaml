@@ -53,10 +53,11 @@ services:
         value: "false"
       - key: GEMINI_API_KEY
         sync: false
-      # Chave de um segundo provedor de IA (compatível com OpenAI; Groq é a primeira escolha). Fica sem valor até
-      # essa chave existir: sem ela o provedor não entra em cadeia nenhuma. Ligar pede também
-      # Ai__OpenAiCompatible__0__{Name,BaseUrl,ApiKeyVariable}, o elo nas cadeias (Ai__Chains__...) e o provedor
-      # no texto de privacidade com versão nova do aceite de IA.
+      # Chave do Groq, o segundo provedor de IA (reserva depois dos modelos do Gemini). É a ÚNICA coisa que o painel
+      # precisa ter: endereço, modelo, elos nas cadeias e limites do Groq são padrões no código (este serviço não é
+      # sincronizado por este arquivo). Sem valor aqui o Groq não existe: cadeia só Gemini e só o Google no texto de
+      # privacidade. Acrescentar ou trocar provedor exige subir a versão do aceite de IA no mesmo deploy em que o
+      # provedor passa a valer; retirar a chave não exige nada.
       - key: GROQ_API_KEY
         sync: false
 
