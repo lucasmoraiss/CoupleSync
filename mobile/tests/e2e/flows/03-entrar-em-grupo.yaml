@@ -124,6 +124,13 @@ name: 03 - Entrar em grupo
 - assertNotVisible: "Tentar novamente"
 - tapOn: "Voltar para as configurações"
 
+# Issue #3: a versão do APK instalado é lida do módulo nativo de verdade (este é um APK real). A linha fica no fim
+# de Configurações, depois de "Sair da conta", e não depende do GitHub. Por expressão regular: vale para 1.2.0.
+- scrollUntilVisible:
+    element: "Versão do app: [0-9]+\\.[0-9]+\\.[0-9]+"
+    direction: DOWN
+    timeout: 30000
+
 # O grupo em que entrou é o da primeira conta: mesmo código, os dois membros.
 - scrollUntilVisible:
     element: "Abrir o grupo: membros e código de convite"
