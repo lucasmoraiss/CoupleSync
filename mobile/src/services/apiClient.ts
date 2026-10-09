@@ -152,7 +152,7 @@ export function isCoupleRequiredError(error: unknown): boolean {
 export const appApiClient = {
   /** Última versão publicada do APK, versão mínima aceita e link de download. Anônima; nunca depende de grupo. */
   getVersion: (): Promise<AxiosResponse<AppVersionResponse>> =>
-    axiosInstance.get<AppVersionResponse>('/api/v1/app/version', { timeout: 10000 }),
+    axiosInstance.get<AppVersionResponse>('/api/v1/app/version'),
 };
 
 // --- Auth API ---

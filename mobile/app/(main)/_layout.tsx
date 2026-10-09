@@ -59,15 +59,17 @@ export default function MainLayout() {
   }, [gate]);
 
   // Ordem dos portões: sessão e grupo ativo primeiro (os dois saem desta área na hora, sem montar aba), depois a
-  // versão mínima. O bloqueio só existe com a resposta do servidor em mãos; posto antes deles, só valeria quando a
-  // resposta chegasse antes do redirecionamento. Com ele na tela, as abas não são montadas (e com elas as
+  // versão mínima. O app nunca espera a rede para abrir: o aparelho lembra a última resposta do servidor
+  // (rememberedAnswerStore.ts), e quem já se soube bloqueado abre direto no bloqueio. Só a leitura dessa lembrança
+  // (local) é esperada, com o indicador abaixo. Bloqueado ou esperando, nenhuma aba é montada (e com elas as
   // perguntas da IA e do Open Finance, que moram no Painel) e o que este layout dispara sozinho fica parado.
+  // Se o bloqueio é descoberto com o app aberto (resposta nova do servidor), a tela de bloqueio troca as abas.
   const blocked = gate === 'app' && blocksApp(update);
-  const appOpen = gate === 'app' && !blocked;
+  const appOpen = gate === 'app' && !blocked && !update.waitingForMemory;
 
   // Captura de notificações só com o aceite do usuário (consentimento por usuário; ver useCaptureConsentSync).
   // Sob o bloqueio a tela de consentimento não tem onde abrir: a pergunta (que só é feita uma vez) fica para depois.
-  useCaptureConsentSync(!blocked);
+  useCaptureConsentSync(!blocked && !update.waitingForMemory);
 
   // Open Finance: ao abrir o app, pede em silêncio a sincronização da minha conexão se a última tem mais de 6 horas.
   useAutoSyncOnOpen(appOpen);
@@ -79,7 +81,7 @@ export default function MainLayout() {
     }
   }, [appOpen]);
 
-  if (gate !== 'app') {
+  if (gate !== 'app' || update.waitingForMemory) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator />

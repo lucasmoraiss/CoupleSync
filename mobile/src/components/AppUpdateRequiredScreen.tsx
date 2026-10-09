@@ -1,24 +1,49 @@
 // Tela de bloqueio: a versão instalada é menor que a mínima aceita pelo servidor. Entra NO LUGAR das abas
 // (app/(main)/_layout.tsx), então nenhuma tela de dados é montada. Não pode ser dispensada; sempre oferece o
-// download e a saída da conta, para ninguém ficar preso se a versão mínima for configurada errada.
-import React, { useState } from 'react';
-import { SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+// download e a saída da conta, e pergunta de novo ao servidor sozinha (ao voltar ao primeiro plano e a
+// intervalos): se a versão mínima for corrigida lá, o aparelho destrava sem a pessoa fechar o app.
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, AppState, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { APP_UPDATE_TEXT, type AppUpdateState } from '@/modules/appUpdate/appUpdate';
+import { startBlockRecheck } from '@/modules/appUpdate/blockRecheck';
 import { openApkDownload } from '@/modules/appUpdate/openDownload';
 import { logout } from '@/services/logout';
 import { colors } from '@/theme';
 
-export function AppUpdateRequiredScreen({ update }: { update: AppUpdateState }) {
+export function AppUpdateRequiredScreen({ update }: { update: AppUpdateState & { refetch: () => void } }) {
   const [openFailure, setOpenFailure] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
 
-  const handleSignOut = async () => {
+  const recheckRef = useRef(update.refetch);
+  recheckRef.current = update.refetch;
+  useEffect(
+    () =>
+      startBlockRecheck({
+        recheck: () => recheckRef.current(),
+        onAppStateChange: (listener) => AppState.addEventListener('change', listener),
+      }),
+    [],
+  );
+
+  const signOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
     await logout();
     router.replace('/login' as any);
+  };
+
+  // A mesma confirmação de Configurações: sair encerra a sessão também nos outros aparelhos.
+  const confirmSignOut = () => {
+    Alert.alert('Sair', 'Deseja realmente sair da conta? Você também será desconectado dos outros aparelhos em que usa esta conta.', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Sair',
+        style: 'destructive',
+        onPress: () => void signOut(),
+      },
+    ]);
   };
 
   return (
@@ -48,7 +73,7 @@ export function AppUpdateRequiredScreen({ update }: { update: AppUpdateState }) 
         {openFailure ? <Text style={styles.failure} accessibilityRole="alert">{openFailure}</Text> : null}
         <TouchableOpacity
           style={styles.secondaryBtn}
-          onPress={handleSignOut}
+          onPress={confirmSignOut}
           disabled={signingOut}
           accessibilityRole="button"
           accessibilityLabel="Sair da conta"
