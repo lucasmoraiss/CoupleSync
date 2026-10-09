@@ -10,8 +10,8 @@ namespace CoupleSync.UnitTests.Transactions;
 public sealed class DeleteTransactionCommandHandlerTests
 {
     private static DeleteTransactionCommandHandler BuildHandler(FakeTransactionRepository? repo = null)
-        // No line of the bank points to these transactions: the mirror of Open Finance is only asked that, and
-        // nothing else of it is touched.
+        // No line of the bank points to these transactions (neither as its own nor as a suspected duplicate): the
+        // mirror of Open Finance is only asked that, and nothing else of it is touched.
         => new(
             repo ?? new FakeTransactionRepository(),
             NoLinkedLines.Create(),
@@ -23,9 +23,12 @@ public sealed class DeleteTransactionCommandHandlerTests
         public static IBankSyncRepository Create() => Create<IBankSyncRepository, NoLinkedLines>();
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
-            => targetMethod?.Name == nameof(IBankSyncRepository.FindAllByLinkedTransactionAsync)
-                ? Task.FromResult<IReadOnlyList<BankTransaction>>([])
-                : throw new InvalidOperationException($"IBankSyncRepository.{targetMethod?.Name} was not expected to be called.");
+            => targetMethod?.Name switch
+            {
+                nameof(IBankSyncRepository.FindAllByLinkedTransactionAsync) => (object)Task.FromResult<IReadOnlyList<BankTransaction>>([]),
+                nameof(IBankSyncRepository.FindWaitingIdsBySuspectAsync) => Task.FromResult<IReadOnlyList<Guid>>([]),
+                _ => throw new InvalidOperationException($"IBankSyncRepository.{targetMethod?.Name} was not expected to be called."),
+            };
     }
 
     private static Transaction BuildTransaction(Guid coupleId)

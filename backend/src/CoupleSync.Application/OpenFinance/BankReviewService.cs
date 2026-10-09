@@ -271,7 +271,7 @@ public sealed class BankReviewService
             discarded.Add(id);
         }
 
-        var reconciled = await ReconcileAsync(coupleId, reconcileIds.Select(id => rows[id]).ToList(), now, ct);
+        var (reconciled, taken) = await ReconcileAsync(coupleId, reconcileIds.Select(id => rows[id]).ToList(), names, now, ct);
 
         try
         {
@@ -282,7 +282,10 @@ public sealed class BankReviewService
             }
 
             // One unit of work (the repositories share the context): lines and transactions are stored together or not at all.
-            await _sync.SaveChangesAsync(ct);
+            if (taken.Count == 0)
+                await _sync.SaveChangesAsync(ct);
+            else if (!await _sync.SaveLinkingAsync(taken.Keys.ToList(), taken.Values.ToList(), coupleId, ct))
+                throw new ConflictException(MatchTakenCode, MatchTakenMessage); // another line got there first; nothing was stored
         }
         catch (DataStoreException ex) when (ex is UniqueViolationException or ConcurrencyConflictException or ForeignKeyViolationException)
         {
@@ -302,12 +305,15 @@ public sealed class BankReviewService
     /// "It is the same": each line points to the transaction it was suspected of repeating, and that transaction
     /// takes from the bank only the merchant and the category it did not have. Nothing is created and nothing is
     /// saved here (the caller saves everything together). A line reconciled before answers what it answered then.
+    /// Every other line of the group that pointed to a transaction taken here is judged again in the same save: it
+    /// points to another transaction that looks like it, or waits as an ordinary expense. Also answers which
+    /// transaction was taken here by which line, for the save (<see cref="IBankSyncRepository.SaveLinkingAsync"/>).
     /// </summary>
-    private async Task<List<BankReviewReconciledDto>> ReconcileAsync(
-        Guid coupleId, IReadOnlyList<BankTransaction> lines, DateTime now, CancellationToken ct)
+    private async Task<(List<BankReviewReconciledDto> Reconciled, Dictionary<Guid, Guid> Taken)> ReconcileAsync(
+        Guid coupleId, IReadOnlyList<BankTransaction> lines, IReadOnlyDictionary<Guid, BankAccountNames> names, DateTime now, CancellationToken ct)
     {
         var reconciled = new List<BankReviewReconciledDto>();
-        var taken = new HashSet<Guid>();
+        var taken = new Dictionary<Guid, Guid>(); // transaction → the line it is linked to here
 
         foreach (var row in lines)
         {
@@ -328,7 +334,7 @@ public sealed class BankReviewService
                 ?? throw new ConflictException(NotMatchedCode, NotMatchedMessage);
 
             // One transaction is one line of the bank: a second line can only be another expense.
-            if (!taken.Add(transaction.Id) || await _sync.FindByLinkedTransactionAsync(transaction.Id, coupleId, ct) is not null)
+            if (!taken.TryAdd(transaction.Id, row.Id) || await _sync.FindByLinkedTransactionAsync(transaction.Id, coupleId, ct) is not null)
                 throw new ConflictException(MatchTakenCode, MatchTakenMessage);
 
             transaction.FillMissing(row.MerchantName ?? row.Description ?? row.DescriptionRaw, row.SuggestedCategory);
@@ -336,7 +342,15 @@ public sealed class BankReviewService
             reconciled.Add(new BankReviewReconciledDto(row.Id, transaction.Id));
         }
 
-        return reconciled;
+        if (taken.Count > 0)
+        {
+            var pointing = (await _sync.FindWaitingBySuspectsAsync(taken.Keys, coupleId, ct))
+                .Where(l => l.MatchedTransactionId is { } suspected && taken.ContainsKey(suspected));
+            await BankSuspicionJudge.JudgeAsync(
+                _sync, coupleId, pointing, BankSuspicionJudge.ConnectorNameBy(names), leavingLineIds: [], taken.Keys, now, ct);
+        }
+
+        return (reconciled, taken);
     }
 
     /// <summary>
@@ -367,7 +381,9 @@ public sealed class BankReviewService
 
     /// <summary>
     /// Discarded lines (<see cref="BankTransaction.CountsAsDiscarded"/>) and automatically ignored ones go back to
-    /// waiting, and from then on no automatic rule decides about them again. Lines in any other state stay as they are.
+    /// waiting, and from then on no synchronisation decides about them again. Lines in any other state stay as they
+    /// are. A line that comes back and looks like a transaction of the app comes back pointing to it
+    /// (<see cref="BankSuspicionJudge"/>): it is answered "the same" or "another one", never taken by "Selecionar tudo".
     /// </summary>
     public async Task<IReadOnlyList<Guid>> RestoreAsync(Guid coupleId, IReadOnlyList<Guid>? ids, CancellationToken ct)
     {
@@ -389,12 +405,21 @@ public sealed class BankReviewService
             restored.Add(row.Id);
         }
 
+        if (restored.Count > 0)
+        {
+            var names = await _sync.GetAccountNamesAsync(coupleId, ct);
+            await BankSuspicionJudge.JudgeAsync(
+                _sync, coupleId, rows.Where(r => restored.Contains(r.Id)), BankSuspicionJudge.ConnectorNameBy(names),
+                leavingLineIds: [], takenTransactionIds: [], now, ct);
+        }
+
         try
         {
             await _sync.SaveChangesAsync(ct);
         }
-        catch (ConcurrencyConflictException)
+        catch (DataStoreException ex) when (ex is ConcurrencyConflictException or ForeignKeyViolationException)
         {
+            // Someone reviewed one of the lines meanwhile, or the transaction a line came back pointing to was deleted.
             throw new ConflictException(ConflictCode, "A revisão mudou enquanto era alterada. Atualize e tente de novo.");
         }
 

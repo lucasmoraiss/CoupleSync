@@ -273,8 +273,7 @@ public sealed class SyncConnectionService
                 var from = window.FromFor(await _sync.GetLastTransactionDayAsync(account.Id, ct));
                 var transactions = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
                 var arrived = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
-                // What the bank no longer lists leaves first: the rules must not see, held by a line that is leaving,
-                // the transaction the line that replaces it looks like.
+                // What the bank no longer lists leaves in the same save as the line that replaces it.
                 var leaving = await RemoveVanishedAsync(account, transactions, from, window.To, ct);
                 // Before anyone sees them: transfers between accounts of the group, bill payments and suspected duplicates.
                 Task DecideAsync(CancellationToken token)

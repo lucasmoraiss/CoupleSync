@@ -315,24 +315,26 @@ public sealed class OpenFinanceReconciliationTests
     }
 
     [Fact]
-    public async Task OneTransactionOfTheApp_IsSuspectedByOneBankLineOnly_AlsoInALaterSynchronisation()
+    public async Task OneTransactionOfTheApp_IsSuspectedByEveryBankLineThatLooksLikeIt_AlsoInALaterSynchronisation()
     {
         await using var factory = NewFactory();
         var (ana, connection) = await AnaAsync(factory);
         var coffee = await ManualAsync(ana, 9.00m, Noon(), "Café");
-        // Two coffees of the same value on the same day at the bank, one of them typed by hand.
+        // Two coffees of the same value on the same day at the bank, one of them typed by hand: nobody but the
+        // person knows which. Both are marked, so that neither goes in "Selecionar tudo".
         Bank(factory, Checking, Debit("t26-coffee-1", Noon(), 9.00m), Debit("t26-coffee-2", Noon().AddHours(2), 9.00m));
         await DoneAsync(factory, ana, connection);
 
         Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-1"));
-        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-coffee-2"));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-2"));
 
-        // A third one arrives later: the transaction is already under suspicion of the first line.
+        // A third one arrives later: it is marked too, and the others keep their mark.
         factory.Pluggy.Transactions[Checking].Add(Debit("t26-coffee-3", Noon().AddHours(3), 9.00m));
         await DoneAsync(factory, ana, connection);
 
-        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-coffee-3"));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-3"));
         Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-1"));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-2"));
     }
 
     [Fact]
@@ -1159,10 +1161,16 @@ public sealed class OpenFinanceReconciliationTests
         factory.Pluggy.Transactions[Checking].Add(Debit("t26-padaria-2", Noon(1).AddHours(1), 25.00m));
         await DoneAsync(factory, ana, connection);
         var second = await LineIdAsync(factory, "t26-padaria-2");
-        // Two lines suspecting the same transaction is not something a synchronisation leaves behind; forced here.
-        await factory.ExecuteAsync($"UPDATE bank_transactions SET matched_transaction_id = '{Sql(existing)}' WHERE id = '{Sql(second)}'");
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-padaria-2"));
         await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = line } } }));
+        // The answer took the mark of the other line in the same save: "É a mesma" on it has nothing to be the same as.
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-padaria-2"));
+        await AssertErrorAsync(
+            await ConfirmAsync(ana, new { reconcile = new[] { new { id = second } } }), HttpStatusCode.Conflict, "BANK_TRANSACTION_NOT_MATCHED");
 
+        // A line that still points to a transaction already of another line is not something the app leaves behind
+        // (a synchronisation that judged it at the very moment of the answer); forced here.
+        await factory.ExecuteAsync($"UPDATE bank_transactions SET matched_transaction_id = '{Sql(existing)}' WHERE id = '{Sql(second)}'");
         var refused = await ConfirmAsync(ana, new { reconcile = new[] { new { id = second } } });
 
         await AssertErrorAsync(
@@ -1437,7 +1445,7 @@ public sealed class OpenFinanceReconciliationTests
     }
 
     [Fact]
-    public async Task APendingLineThatStaysAtTheBank_KeepsItsSuspicion_AndTheTransactionIsNotOfferedToAnotherLine()
+    public async Task APendingLineThatStaysAtTheBank_KeepsItsSuspicion_AndAnotherLineOfTheSameValueIsMarkedToo()
     {
         await using var factory = NewFactory();
         var (ana, connection) = await AnaAsync(factory);
@@ -1450,7 +1458,7 @@ public sealed class OpenFinanceReconciliationTests
         await DoneAsync(factory, ana, connection);
 
         Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-authorised"));
-        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-another"));
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-another"));
     }
 
     // ================================================================ a suspicion does not change transaction (review 7)
@@ -1572,29 +1580,29 @@ public sealed class OpenFinanceReconciliationTests
     }
 
     [Fact]
-    public async Task OneTransactionOfTheApp_AndTwoBankLinesOfTheSameValue_OnlyOneCarriesTheSuspicion_AlsoAfterTheBankSettlesBoth()
+    public async Task OneTransactionOfTheApp_AndTwoBankLinesOfTheSameValue_BothCarryTheSuspicion_AlsoAfterTheBankSettlesBoth()
     {
         await using var factory = NewFactory();
         var (ana, connection) = await AnaAsync(factory);
         var coffee = await ManualAsync(ana, 9.00m, Noon(), "Café");
-        // The line of the day before comes first in the order of the run: the coffee is of the line of its own day.
+        // The line of the day before and the line of the day of the coffee: either may be it, both are marked.
         Bank(factory, Checking,
             Debit("t26-coffee-day-before", Noon(-1), 9.00m) with { Status = "PENDING" },
             Debit("t26-coffee-same-day", Noon(), 9.00m) with { Status = "PENDING" });
         await DoneAsync(factory, ana, connection);
-        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-coffee-day-before"));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-day-before"));
         Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-same-day"));
 
         Bank(factory, Checking, Debit("t26-coffee-day-before", Noon(-1), 9.00m), Debit("t26-coffee-same-day", Noon(), 9.00m));
         await DoneAsync(factory, ana, connection);
 
-        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-coffee-day-before"));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-day-before"));
         Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-same-day"));
-        Assert.Single(await factory.RowsAsync("SELECT id FROM bank_transactions WHERE matched_transaction_id IS NOT NULL"));
+        Assert.Empty(SelectAll(await ShownAsync(factory, ana, "t26-coffee-day-before"), await ShownAsync(factory, ana, "t26-coffee-same-day")));
     }
 
     [Fact]
-    public async Task WhenTheSuspectedTransactionWasDeleted_TheSuspicionIsGone_AndTheLineTheBankSettlesLater_MayLookLikeAnotherOne()
+    public async Task WhenTheSuspectedTransactionWasDeleted_TheLinePointsToTheOtherOneThatLooksLikeIt_AndKeepsItWhenTheBankSettlesIt()
     {
         await using var factory = NewFactory();
         var (ana, connection) = await AnaAsync(factory);
@@ -1605,7 +1613,8 @@ public sealed class OpenFinanceReconciliationTests
         Assert.Equal(("Pending", null, Sql(sameDay)), await StateAsync(factory, "t26-authorised"));
 
         Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"/api/v1/transactions/{sameDay}")).StatusCode);
-        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-authorised"));
+        // Judged again with the deletion: it does not wait unmarked for the bank to settle it.
+        Assert.Equal(("Pending", null, Sql(nextDay)), await StateAsync(factory, "t26-authorised"));
 
         Bank(factory, Checking, Debit("t26-authorised", Noon(), 25.00m));
         await DoneAsync(factory, ana, connection);
@@ -1904,5 +1913,234 @@ public sealed class OpenFinanceReconciliationTests
         await DoneAsync(factory, ana, anaConnection);
         Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-paid"));
         Assert.Equal(("Ignored", "Transfer", null), await StateAsync(factory, "t26-paid-in"));
+    }
+
+    // ================================================================ every line that may be a duplicate is marked (review 9)
+
+    private static async Task<Guid?> MatchShownAsync(OpenFinanceApiFactory factory, Member member, string pluggyId)
+    {
+        var match = (await ShownAsync(factory, member, pluggyId)).GetProperty("match");
+        return match.ValueKind == JsonValueKind.Null ? null : match.GetProperty("transactionId").GetGuid();
+    }
+
+    /// <summary>What "Selecionar tudo" would send now, of the lines given that still wait.</summary>
+    private static async Task<List<Guid>> SelectAllOfAsync(OpenFinanceApiFactory factory, Member member, params string[] pluggyIds)
+    {
+        var shown = new List<JsonElement>();
+        foreach (var id in pluggyIds)
+            if ((string)(await MirrorRowAsync(factory, id))["review_state"]! == "Pending") shown.Add(await ShownAsync(factory, member, id));
+        return SelectAll(shown.ToArray());
+    }
+
+    [Theory]
+    [InlineData(true)] // the duplicate is in the checking account, the other purchase on the card (the probe of the review)
+    [InlineData(false)] // the other way round: the order the accounts are read in decides nothing
+    public async Task ProbeX2_AccountAndCardInTheSameRun_BothLinesAreMarked_ItIsAnotherOneOnOneLeavesTheOtherMarked_AndNothingEntersTwice(
+        bool duplicateInChecking)
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var fuel = await ManualAsync(ana, 50.00m, Noon(), "Posto Exemplo");
+        var (duplicateAccount, otherAccount) = duplicateInChecking ? (Checking, Card) : (Card, Checking);
+        Bank(factory, duplicateAccount, Debit("px2-same-day", Noon().AddHours(1), 50.00m, "Posto Exemplo"));
+        Bank(factory, otherAccount, Debit("px2-next-day", Noon(1), 50.00m, "Outra compra"));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, Sql(fuel)), await StateAsync(factory, "px2-same-day"));
+        Assert.Equal(("Pending", null, Sql(fuel)), await StateAsync(factory, "px2-next-day"));
+        Assert.Equal(fuel, await MatchShownAsync(factory, ana, "px2-same-day"));
+        Assert.Equal(fuel, await MatchShownAsync(factory, ana, "px2-next-day"));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "px2-same-day", "px2-next-day"));
+
+        // "É outra" on the line that is another purchase: only that line loses the mark.
+        await OkAsync(ConfirmAsync(ana, new { asNew = new[] { await LineIdAsync(factory, "px2-next-day") } }));
+
+        Assert.Equal(("Pending", null, Sql(fuel)), await StateAsync(factory, "px2-same-day"));
+        Assert.Equal(fuel, await MatchShownAsync(factory, ana, "px2-same-day"));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "px2-same-day", "px2-next-day"));
+        Assert.Equal(2, await TransactionCountAsync(factory));
+
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = await LineIdAsync(factory, "px2-same-day") } } }));
+        Assert.Equal(2, await TransactionCountAsync(factory));
+        Assert.Equal(Sql(fuel), (await MirrorRowAsync(factory, "px2-same-day"))["linked_transaction_id"]);
+    }
+
+    [Theory]
+    [InlineData("py-padaria-a", "py-cafe-b")]
+    [InlineData("py-cafe-b", "py-padaria-a")]
+    public async Task ProbeY_OneAccount_TwoLinesOfTheSameValueOnTheSameDay_OneTransaction_BothAreMarked_AndTheTwoAnswersLeaveTwoTransactions(
+        string answeredAnother, string answeredTheSame)
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var coffee = await ManualAsync(ana, 9.00m, Noon(), "Cafe B");
+        Bank(factory, Checking, Debit("py-padaria-a", Noon().AddHours(-1), 9.00m, "Padaria A"), Debit("py-cafe-b", Noon().AddHours(1), 9.00m, "Cafe B"));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "py-padaria-a"));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "py-cafe-b"));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "py-padaria-a", "py-cafe-b"));
+
+        await OkAsync(ConfirmAsync(ana, new { asNew = new[] { await LineIdAsync(factory, answeredAnother) } }));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, answeredTheSame));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "py-padaria-a", "py-cafe-b"));
+
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = await LineIdAsync(factory, answeredTheSame) } } }));
+        Assert.Equal(2, await TransactionCountAsync(factory));
+    }
+
+    [Fact]
+    public async Task ProbeY_DiscardingOneMarkedLine_LeavesTheOtherMarked()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var coffee = await ManualAsync(ana, 9.00m, Noon(), "Cafe B");
+        Bank(factory, Checking, Debit("py-padaria-a", Noon().AddHours(-1), 9.00m, "Padaria A"), Debit("py-cafe-b", Noon().AddHours(1), 9.00m, "Cafe B"));
+        await DoneAsync(factory, ana, connection);
+
+        await OkAsync(ConfirmAsync(ana, new { discard = new[] { await LineIdAsync(factory, "py-padaria-a") } }));
+
+        Assert.Equal(("Discarded", null, null), await StateAsync(factory, "py-padaria-a"));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "py-cafe-b"));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "py-cafe-b"));
+    }
+
+    [Fact]
+    public async Task ProbeZ_TheLineOfTheDayNextToItArrivesInOneRun_AndTheLineOfTheSameDayInTheNext_BothAreMarked()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var lunch = await ManualAsync(ana, 30.00m, Noon(), "Almoço");
+        Bank(factory, Checking, Debit("pz-next-day", Noon(1), 30.00m));
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(lunch)), await StateAsync(factory, "pz-next-day"));
+
+        factory.Pluggy.Transactions[Checking].Add(Debit("pz-same-day", Noon().AddHours(1), 30.00m));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, Sql(lunch)), await StateAsync(factory, "pz-same-day"));
+        Assert.Equal(("Pending", null, Sql(lunch)), await StateAsync(factory, "pz-next-day"));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "pz-same-day", "pz-next-day"));
+    }
+
+    [Fact]
+    public async Task TwoEqualPurchasesInTheApp_AndTwoEqualLines_EachItIsTheSameTakesOne_AndTheOtherLineThenPointsToTheOtherPurchase()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var first = await ManualAsync(ana, 9.00m, Noon(), "Café");
+        Bank(factory, Checking, Debit("t26-coffee-1", Noon(), 9.00m), Debit("t26-coffee-2", Noon().AddHours(2), 9.00m));
+        await DoneAsync(factory, ana, connection);
+        // Both lines look like the only purchase the app had when they arrived...
+        Assert.Equal(("Pending", null, Sql(first)), await StateAsync(factory, "t26-coffee-1"));
+        Assert.Equal(("Pending", null, Sql(first)), await StateAsync(factory, "t26-coffee-2"));
+        // ...and the second purchase is typed afterwards.
+        var second = await ManualAsync(ana, 9.00m, Noon().AddHours(2), "Outro café");
+
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = await LineIdAsync(factory, "t26-coffee-1") } } }));
+
+        // In the same save, the other line was judged again: the purchase taken is no longer one to point to.
+        Assert.Equal(("Pending", null, Sql(second)), await StateAsync(factory, "t26-coffee-2"));
+        Assert.Equal(second, await MatchShownAsync(factory, ana, "t26-coffee-2"));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "t26-coffee-2"));
+
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = await LineIdAsync(factory, "t26-coffee-2") } } }));
+        Assert.Equal(2, await TransactionCountAsync(factory));
+        Assert.Equal(Sql(first), (await MirrorRowAsync(factory, "t26-coffee-1"))["linked_transaction_id"]);
+        Assert.Equal(Sql(second), (await MirrorRowAsync(factory, "t26-coffee-2"))["linked_transaction_id"]);
+    }
+
+    [Fact]
+    public async Task OneTransaction_AndThreeLines_ItIsTheSameOnTheFirst_TakesTheMarkOfTheOthers_WhichCanThenBeConfirmedAsNewExpenses()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var coffee = await ManualAsync(ana, 9.00m, Noon(), "Café");
+        Bank(factory, Checking, Debit("t26-coffee-1", Noon(), 9.00m), Debit("t26-coffee-2", Noon().AddHours(2), 9.00m));
+        Bank(factory, Card, Debit("t26-coffee-card", Noon(1), 9.00m));
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(3, (await factory.RowsAsync($"SELECT id FROM bank_transactions WHERE matched_transaction_id = '{Sql(coffee)}'")).Count);
+
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = await LineIdAsync(factory, "t26-coffee-1") } } }));
+
+        // No other line of the group still points to the purchase that now has its line (also the one of another account).
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-coffee-2"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-coffee-card"));
+        Assert.Null(await MatchShownAsync(factory, ana, "t26-coffee-2"));
+        var selected = await SelectAllOfAsync(factory, ana, "t26-coffee-2", "t26-coffee-card");
+        Assert.Equal(2, selected.Count);
+
+        await OkAsync(ConfirmAsync(ana, new { expenses = selected.Select(id => new { id }).ToArray() }));
+        Assert.Equal(3, await TransactionCountAsync(factory));
+        Assert.Equal("Confirmed", (await MirrorRowAsync(factory, "t26-coffee-2"))["review_state"]);
+    }
+
+    [Fact]
+    public async Task ATransactionCreatedFromTheBank_IsNeverWhatAnotherLineLooksLike()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        Bank(factory, Checking, Debit("t26-first", Noon(), 44.00m));
+        await DoneAsync(factory, ana, connection);
+        await OkAsync(ConfirmAsync(ana, new { expenses = new[] { new { id = await LineIdAsync(factory, "t26-first") } } }));
+
+        // The same value on the same day, on the card: the expense confirmed from the bank is not a candidate.
+        Bank(factory, Card, Debit("t26-second", Noon().AddHours(1), 44.00m));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-second"));
+    }
+
+    [Fact]
+    public async Task DeletingTheTransactionALinePointsTo_JudgesTheLineAgain_ItPointsToTheOtherPurchaseThatLooksLikeIt()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var sameDay = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        var nextDay = await ManualAsync(ana, 25.00m, Noon(1), "Padaria de novo");
+        // Already settled at the bank: no later reading would judge this line again.
+        Bank(factory, Checking, Debit("t26-padaria", Noon(), 25.00m));
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(sameDay)), await StateAsync(factory, "t26-padaria"));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"/api/v1/transactions/{sameDay}")).StatusCode);
+
+        Assert.Equal(("Pending", null, Sql(nextDay)), await StateAsync(factory, "t26-padaria"));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "t26-padaria"));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"/api/v1/transactions/{nextDay}")).StatusCode);
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-padaria"));
+    }
+
+    [Fact]
+    public async Task RestoringADiscardedLine_ThatLooksLikeATransactionOfTheApp_BringsItBackMarked_NotIntoSelectAll()
+    {
+        await using var factory = NewFactory();
+        var (ana, _, existing, line) = await WithDuplicateAsync(factory);
+        await OkAsync(ConfirmAsync(ana, new { discard = new[] { line } }));
+        Assert.Equal(("Discarded", null, null), await StateAsync(factory, "t26-padaria"));
+
+        await OkAsync(ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { line }));
+
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-padaria"));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "t26-padaria"));
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = line } } }));
+        Assert.Equal(1, await TransactionCountAsync(factory));
+    }
+
+    [Fact]
+    public async Task ASuspectedLineTheBankSettlesInAnotherCurrency_LosesTheMark()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var existing = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        Bank(factory, Checking, Debit("t26-authorised", Noon(), 25.00m) with { Status = "PENDING" });
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-authorised"));
+
+        Bank(factory, Checking, Debit("t26-authorised", Noon(), 25.00m) with { CurrencyCode = "USD" });
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-authorised"));
     }
 }
