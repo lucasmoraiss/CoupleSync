@@ -80,9 +80,27 @@ describe('decisão: nenhum | aviso | obrigatorio', () => {
     expect(decideUpdate({ installed: '1.1.0', latest: 'v1.1.0', minimum: '1.1.0' })).toBe('nenhum');
   });
 
-  it('instalada menor que a mínima: obrigatorio (mesmo sem saber a última)', () => {
+  it('instalada menor que a mínima e que a última: obrigatorio', () => {
     expect(decideUpdate({ installed: '1.0.0', latest: '1.2.0', minimum: '1.1.0' })).toBe('obrigatorio');
-    expect(decideUpdate({ installed: '1.0.0', latest: null, minimum: '1.1.0' })).toBe('obrigatorio');
+    expect(decideUpdate({ installed: '1.0.0', latest: '1.1.0', minimum: '1.1.0' })).toBe('obrigatorio');
+  });
+
+  // Uma mínima válida mas errada (11.0.0 no lugar de 1.1.0, ou criada antes de o APK sair) não tranca ninguém:
+  // "Baixar" entregaria o mesmo APK que a pessoa já tem.
+  it('quem está na última publicada (ou acima) nunca é bloqueado, qualquer que seja a mínima', () => {
+    expect(decideUpdate({ installed: '1.1.0', latest: '1.1.0', minimum: '11.0.0' })).toBe('nenhum');
+    expect(decideUpdate({ installed: '1.2.0', latest: '1.1.0', minimum: '11.0.0' })).toBe('nenhum');
+    expect(decideUpdate({ installed: '1.1.0', latest: 'v1.1.0', minimum: '1.2.0' })).toBe('nenhum');
+  });
+
+  it('com mínima acima da última, quem está abaixo da última ainda é bloqueado: o APK da última o destrava', () => {
+    expect(decideUpdate({ installed: '1.0.0', latest: '1.1.0', minimum: '11.0.0' })).toBe('obrigatorio');
+  });
+
+  it('sem saber a última ninguém é bloqueado: não há como garantir que existe APK que destrave', () => {
+    expect(decideUpdate({ installed: '1.0.0', latest: null, minimum: '1.1.0' })).toBe('nenhum');
+    expect(decideUpdate({ installed: '1.0.0', latest: 'nova', minimum: '1.1.0' })).toBe('nenhum');
+    expect(decideUpdate({ installed: '1.0.0', latest: undefined, minimum: '1.1.0' })).toBe('nenhum');
   });
 
   it('instalada igual à mínima e menor que a última: só aviso', () => {

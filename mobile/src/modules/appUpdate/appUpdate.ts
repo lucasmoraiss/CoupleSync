@@ -50,11 +50,15 @@ function formatVersion(parts: VersionParts): string {
 
 export type UpdateDecision = 'nenhum' | 'aviso' | 'obrigatorio';
 
-/** Instalada menor que a mínima: obrigatório. Menor que a última: aviso. Qualquer versão desconhecida: nada. */
+/**
+ * Instalada menor que a última: aviso; se também for menor que a mínima: obrigatório. Qualquer versão
+ * desconhecida: nada. Só se bloqueia quem tem para onde ir: quem está na última publicada (ou acima), ou quando a
+ * última é desconhecida, nunca é bloqueado, qualquer que seja a mínima. Assim uma mínima válida mas errada no
+ * servidor não tranca todo mundo numa tela cujo "Baixar" entrega o mesmo APK.
+ */
 export function decideUpdate(versions: { installed: unknown; latest: unknown; minimum: unknown }): UpdateDecision {
-  if (compareVersions(versions.installed, versions.minimum) === -1) return 'obrigatorio';
-  if (compareVersions(versions.installed, versions.latest) === -1) return 'aviso';
-  return 'nenhum';
+  if (compareVersions(versions.installed, versions.latest) !== -1) return 'nenhum';
+  return compareVersions(versions.installed, versions.minimum) === -1 ? 'obrigatorio' : 'aviso';
 }
 
 export interface AppUpdateState {
@@ -95,6 +99,68 @@ export function appUpdateState(installed: string | null | undefined, serverData:
     latestVersion: latestParts ? formatVersion(latestParts) : null,
     downloadUrl: downloadUrlOf(serverData),
   };
+}
+
+/** O que o aparelho guarda da última resposta do servidor: só as duas versões, já como `X.Y.Z` ou null. */
+export interface RememberedAnswer {
+  readonly latestVersion: string | null;
+  readonly minimumVersion: string | null;
+}
+
+function normalized(value: unknown): string | null {
+  const parts = parseVersion(value);
+  return parts ? formatVersion(parts) : null;
+}
+
+function isRecord(data: unknown): data is Record<string, unknown> {
+  return data !== null && typeof data === 'object' && !Array.isArray(data);
+}
+
+/** O texto a guardar para uma resposta do servidor, ou null se aquilo não é uma resposta (nada é guardado). */
+export function serializeAnswer(serverData: unknown): string | null {
+  if (!isRecord(serverData)) return null;
+  const answer: RememberedAnswer = {
+    latestVersion: normalized(serverData.latestVersion),
+    minimumVersion: normalized(serverData.minimumVersion),
+  };
+  return JSON.stringify(answer);
+}
+
+/** Lê o texto guardado. Ausente ou ilegível: null (o app abre normal). Nunca lança. */
+export function parseRememberedAnswer(text: unknown): RememberedAnswer | null {
+  if (typeof text !== 'string' || text === '') return null;
+  try {
+    const data: unknown = JSON.parse(text);
+    if (!isRecord(data)) return null;
+    return { latestVersion: normalized(data.latestVersion), minimumVersion: normalized(data.minimumVersion) };
+  } catch {
+    return null;
+  }
+}
+
+export interface UpdateMemory {
+  /** A lembrança deste aparelho já foi lida do armazenamento. */
+  readonly loaded: boolean;
+  readonly answer: RememberedAnswer | null;
+}
+
+export interface ResolvedUpdate extends AppUpdateState {
+  /**
+   * Ainda não se sabe se este aparelho já foi bloqueado antes: a lembrança não foi lida e o servidor não
+   * respondeu. O layout espera (a leitura é local e rápida) antes de montar as abas. Nunca é espera de rede.
+   */
+  readonly waitingForMemory: boolean;
+}
+
+/**
+ * O estado que as telas usam. Vale a resposta do servidor desta abertura (`live`; `undefined` = ainda sem
+ * resposta); enquanto ela não chega, vale a lembrança do aparelho. A versão instalada é sempre a atual.
+ */
+export function resolveUpdate(input: { installed: string | null | undefined; live: unknown; memory: UpdateMemory }): ResolvedUpdate {
+  const { installed, live, memory } = input;
+  const hasLive = live !== undefined;
+  const state = appUpdateState(installed, hasLive ? live : memory.loaded ? memory.answer ?? undefined : undefined);
+  return { ...state, waitingForMemory: !hasLive && !memory.loaded && state.installedVersion !== null };
 }
 
 export interface DismissalState {
