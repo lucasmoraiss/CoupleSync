@@ -127,7 +127,7 @@ public sealed class AiActivationTests
         var firstDate = await database.ScalarAsync<DateTime>("SELECT accepted_at_utc FROM ai_consents");
 
         var duplicate = await Assert.ThrowsAsync<PostgresException>(() => database.ExecuteAsync(
-            "INSERT INTO ai_consents (id, couple_id, user_id, version, accepted_at_utc) VALUES (@id, @couple, @user, 1, now())",
+            "INSERT INTO ai_consents (id, couple_id, user_id, version, accepted_at_utc) VALUES (@id, @couple, @user, 2, now())",
             ("id", Guid.NewGuid()), ("couple", ana.CoupleId!.Value), ("user", ana.UserId)));
         Assert.Equal(PostgresErrorCodes.UniqueViolation, duplicate.SqlState);
 
@@ -143,6 +143,41 @@ public sealed class AiActivationTests
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents WHERE revoked_at_utc IS NULL AND revoked_by_user_id IS NULL"));
         Assert.True(await database.ScalarAsync<DateTime>("SELECT accepted_at_utc FROM ai_consents") > firstDate);
         Assert.True((await ana.Client.GetFromJsonAsync<JsonElement>(Status)).GetProperty("enabled").GetBoolean());
+    }
+
+    /// <summary>
+    /// Version 2 of the text (Groq as the second provider): a row of version 1, as production has them, switches
+    /// nothing on. The person is asked again, nothing is sent meanwhile, and the new acceptance is a row of its own.
+    /// </summary>
+    [PostgresFact]
+    public async Task ARowOfVersion1_SwitchesNothingOn_ThePersonIsAskedAgain_AndTheNewAcceptanceIsARowOfVersion2()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        await using var host = WithTheFakeProvider(factory);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PatchAsJsonAsync("/api/v1/ai/preferences", new { OnboardingAnswered = true })).StatusCode);
+        await database.ExecuteAsync(
+            "INSERT INTO ai_consents (id, couple_id, user_id, version, accepted_at_utc) VALUES (@id, @couple, @user, 1, now() - interval '2 hours')",
+            ("id", Guid.NewGuid()), ("couple", ana.CoupleId!.Value), ("user", ana.UserId));
+
+        var status = await ana.Client.GetFromJsonAsync<JsonElement>(Status);
+        Assert.Equal(2, status.GetProperty("consentVersion").GetInt32());
+        Assert.False(status.GetProperty("enabled").GetBoolean());
+        Assert.True(status.GetProperty("onboardingPending").GetBoolean());
+        Assert.Equal(HttpStatusCode.Forbidden, (await ana.Client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto gastamos?" })).StatusCode);
+        Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM ai_usage"));
+        Assert.Equal(HttpStatusCode.Conflict, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 })).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
+
+        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents"));
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_consents WHERE version = 2 AND revoked_at_utc IS NULL"));
+        status = await ana.Client.GetFromJsonAsync<JsonElement>(Status);
+        Assert.True(status.GetProperty("enabled").GetBoolean());
+        Assert.False(status.GetProperty("onboardingPending").GetBoolean());
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto gastamos?" })).StatusCode);
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM ai_usage"));
     }
 
     [PostgresFact]
