@@ -71,12 +71,16 @@ public interface IBankSyncRepository
     /// <summary>
     /// For the job: the transactions of the group, in reais and not come from the bank, whose instant is in
     /// [<paramref name="fromUtc"/>, <paramref name="toUtcExclusive"/>) and that no line of the mirror points to yet
-    /// (neither as its transaction nor as a suspected duplicate). The lines <paramref name="leavingLineIds"/> do not
-    /// count: the run is taking them out of the mirror in this very save, and what they pointed to is free again.
+    /// (neither as its transaction nor as a suspected duplicate). The lines <paramref name="exceptLineIds"/> do not
+    /// count: the ones the run is taking out of the mirror in this very save (what they pointed to is free again),
+    /// and the ones the run is judging again (what each points to is still there for it to keep).
     /// Their day is the one <see cref="BankReconciliationRules.LocalDayOf"/> gives.
     /// </summary>
     Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(
-        Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> leavingLineIds, CancellationToken ct);
+        Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> exceptLineIds, CancellationToken ct);
+
+    /// <summary>The automatically ignored lines of the group, of every month: the day in Brazil of each.</summary>
+    Task<IReadOnlyList<DateOnly>> GetIgnoredDaysAsync(Guid coupleId, CancellationToken ct);
 
     /// <summary>For the job: account id → the type Pluggy gives it (<c>BANK</c>, <c>CREDIT</c>), for every account of the group.</summary>
     Task<IReadOnlyDictionary<Guid, string>> GetAccountTypesForJobAsync(Guid coupleId, CancellationToken ct);

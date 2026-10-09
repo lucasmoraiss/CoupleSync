@@ -81,6 +81,7 @@ public sealed class BankReviewService
         var ignored = await _sync.GetIgnoredAsync(coupleId, from, from.AddMonths(1), ct);
         var names = await _sync.GetAccountNamesAsync(coupleId, ct);
         var pending = await _sync.GetPendingExpensesAsync(coupleId, ct);
+        var ignoredDays = await _sync.GetIgnoredDaysAsync(coupleId, ct);
 
         var expenses = rows.Where(r => r.ReviewState == BankTransactionReviewState.Pending).ToList();
         var discarded = rows.Where(r => r.CountsAsDiscarded).ToList();
@@ -92,6 +93,11 @@ public sealed class BankReviewService
             .GroupBy(p => $"{p.Day.Year:D4}-{p.Day.Month:D2}", StringComparer.Ordinal)
             .OrderByDescending(g => g.Key, StringComparer.Ordinal)
             .Select(g => new BankReviewMonthDto(g.Key, g.Count()))
+            .ToList();
+        var ignoredByMonth = ignoredDays
+            .GroupBy(day => $"{day.Year:D4}-{day.Month:D2}", StringComparer.Ordinal)
+            .OrderByDescending(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new BankReviewIgnoredMonthDto(g.Key, g.Count()))
             .ToList();
 
         return new BankReviewDto(
@@ -105,7 +111,9 @@ public sealed class BankReviewService
             pending.Count(p => BankTransaction.CanBecomeExpense(p.Status, p.Amount, p.Currency)),
             byMonth,
             Order(ignored).Select(r => MapLine(r, names)).ToList(),
-            expenseLines.Count(l => l.Match is not null));
+            expenseLines.Count(l => l.Match is not null),
+            ignoredDays.Count,
+            ignoredByMonth);
     }
 
     /// <summary>

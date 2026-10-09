@@ -98,10 +98,15 @@ public sealed record BankReviewMatchDto(
 
 public sealed record BankReviewMonthDto(string Month, int Pending);
 
+/// <summary>How many lines of a month ("yyyy-MM") are automatically ignored.</summary>
+public sealed record BankReviewIgnoredMonthDto(string Month, int Ignored);
+
 /// <summary>
 /// <c>Ignored</c>: the lines of the month ignored automatically (transfers between accounts of the group, bill
 /// payments), money that left and money that came in. <c>SuspectedDuplicates</c>: how many of <c>Expenses</c> look
-/// the same as a transaction the app already has.
+/// the same as a transaction the app already has. <c>IgnoredAllMonths</c> and <c>IgnoredByMonth</c> (the latest
+/// month first): the automatically ignored lines of the group in every month, so that the app can lead to them also
+/// when nothing waits for the review.
 /// </summary>
 public sealed record BankReviewDto(
     string Month,
@@ -111,7 +116,9 @@ public sealed record BankReviewDto(
     int PendingAllMonths,
     IReadOnlyList<BankReviewMonthDto> PendingByMonth,
     IReadOnlyList<BankReviewLineDto> Ignored,
-    int SuspectedDuplicates);
+    int SuspectedDuplicates,
+    int IgnoredAllMonths,
+    IReadOnlyList<BankReviewIgnoredMonthDto> IgnoredByMonth);
 
 public sealed record ConfirmExpenseInput(Guid Id, string? Category, string? Description);
 

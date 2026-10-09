@@ -893,7 +893,7 @@ public sealed class OpenFinanceReconciliationTests
             Debit("t26-market", Noon(), 80.00m, "Mercado Exemplo"),
             Debit("t26-sent", Noon(), 500.00m, "PIX ENVIADO"),
             new FakeTransaction("t26-bill", Noon(), -900.00m) { Description = "Pagamento de fatura", DescriptionRaw = "PAGAMENTO DE FATURA" });
-        Bank(factory, OtherChecking, Credit("t26-received", Noon(), 500.00m, "PIX RECEBIDO"));
+        Bank(factory, OtherChecking, Credit("t26-received", Noon(), 500.00m, "PIX RECEBIDO") with { PayerName = "PAGADORA INVENTADA MARCA" });
         await DoneAsync(factory, ana, anaConnection);
         await DoneAsync(factory, bruno, brunoConnection);
         var padaria = await LineIdAsync(factory, "t26-padaria");
@@ -933,8 +933,11 @@ public sealed class OpenFinanceReconciliationTests
         Assert.Equal(105.00m, review.GetProperty("pendingTotalBrl").GetDecimal());
         Assert.Equal(2, review.GetProperty("pendingAllMonths").GetInt32());
         Assert.Empty(review.GetProperty("discarded").EnumerateArray());
-        // Never the raw JSON, nor the name of who paid.
+        // Never the raw JSON, nor the name of who paid (the bank sent one with the credit, and the mirror keeps it).
         Assert.DoesNotContain(FakePluggyServer.RawOnlyMarker, review.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("PAGADORA INVENTADA", (string)(await MirrorRowAsync(factory, "t26-received"))["raw_json"]!, StringComparison.Ordinal);
+        Assert.DoesNotContain("PAGADORA", review.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("INVENTADA", review.GetRawText(), StringComparison.OrdinalIgnoreCase);
 
         static (string?, string?, decimal) Shown(JsonElement line)
             => (line.GetProperty("autoReason").GetString(), line.GetProperty("type").GetString(), line.GetProperty("amount").GetDecimal());
@@ -1448,6 +1451,229 @@ public sealed class OpenFinanceReconciliationTests
 
         Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-authorised"));
         Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-another"));
+    }
+
+    // ================================================================ a suspicion does not change transaction (review 7)
+
+    private static async Task<JsonElement> ShownAsync(OpenFinanceApiFactory factory, Member member, string pluggyId)
+    {
+        var row = await MirrorRowAsync(factory, pluggyId);
+        var month = ((string)row["local_date"]!)[..7];
+        var review = await member.Client.GetFromJsonAsync<JsonElement>($"{Base}/review?month={month}");
+        return Find(review.GetProperty("expenses"), Guid.Parse((string)row["id"]!))!.Value;
+    }
+
+    /// <summary>What "Selecionar tudo" of the app takes: the lines that can become an expense and look like nothing the app has.</summary>
+    private static List<Guid> SelectAll(params JsonElement[] shown)
+        => shown
+            .Where(l => l.GetProperty("match").ValueKind == JsonValueKind.Null && l.GetProperty("bankStatus").GetString() == "Posted")
+            .Select(l => l.GetProperty("id").GetGuid())
+            .ToList();
+
+    private static async Task<int> TransactionCountAsync(OpenFinanceApiFactory factory)
+        => (await factory.RowsAsync("SELECT id FROM transactions")).Count;
+
+    [Theory]
+    [InlineData(1, 0, false)] // lunches on following days; the first settled under the same id (the probe of the review)
+    [InlineData(1, 0, true)] // ... settled under another id
+    [InlineData(2, 0, false)] // two days apart
+    [InlineData(2, 1, false)] // two days apart, and the bank dates the settled line one day later: next to both lunches
+    public async Task TwoPurchasesOfTheSameValueOnDifferentDays_BothAlreadyInTheApp_EachBankLinePointsToThePurchaseOfItsDay_AndNothingEntersTwice(
+        int daysApart, int settledDaysLater, bool settledUnderAnotherId)
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var first = await ManualAsync(ana, 30.00m, Noon(), "Almoço do primeiro dia");
+        var second = await ManualAsync(ana, 30.00m, Noon(daysApart), "Almoço do outro dia");
+        // The first lunch is still pending at the bank.
+        Bank(factory, Checking, Debit("t26-lunch-1", Noon(), 30.00m) with { Status = "PENDING" });
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(first)), await StateAsync(factory, "t26-lunch-1"));
+
+        // The bank settles it, and the second lunch arrives in the same reading.
+        var settled = settledUnderAnotherId ? "t26-lunch-1-settled" : "t26-lunch-1";
+        Bank(factory, Checking, Debit(settled, Noon(settledDaysLater), 30.00m), Debit("t26-lunch-2", Noon(daysApart), 30.00m));
+        await DoneAsync(factory, ana, connection);
+
+        // Each line of the bank points to the purchase of its own day.
+        Assert.Equal(("Pending", null, Sql(first)), await StateAsync(factory, settled));
+        Assert.Equal(("Pending", null, Sql(second)), await StateAsync(factory, "t26-lunch-2"));
+        var shownFirst = await ShownAsync(factory, ana, settled);
+        var shownSecond = await ShownAsync(factory, ana, "t26-lunch-2");
+        Assert.Equal(first, shownFirst.GetProperty("match").GetProperty("transactionId").GetGuid());
+        Assert.Equal(second, shownSecond.GetProperty("match").GetProperty("transactionId").GetGuid());
+
+        // "Selecionar tudo" takes neither: nothing is created...
+        Assert.Empty(SelectAll(shownFirst, shownSecond));
+        Assert.Equal(2, await TransactionCountAsync(factory));
+
+        // ...and "É a mesma" on both leaves the two purchases the app had, each with its line.
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = shownFirst.GetProperty("id").GetGuid() } } }));
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = shownSecond.GetProperty("id").GetGuid() } } }));
+        Assert.Equal(2, await TransactionCountAsync(factory));
+        Assert.Equal(Sql(first), (await MirrorRowAsync(factory, settled))["linked_transaction_id"]);
+        Assert.Equal(Sql(second), (await MirrorRowAsync(factory, "t26-lunch-2"))["linked_transaction_id"]);
+    }
+
+    [Fact]
+    public async Task ASuspectedLinePendingAtTheBank_SettledUnderTheSameId_KeepsItsSuspicion_AndItIsTheSameIsAccepted()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var existing = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        Bank(factory, Checking, Debit("t26-authorised", Noon(1), 25.00m, "Padaria Exemplo") with { Status = "PENDING" });
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-authorised"));
+        var line = await LineIdAsync(factory, "t26-authorised");
+
+        // The bank settles the purchase: the same id, now posted.
+        Bank(factory, Checking, Debit("t26-authorised", Noon(1), 25.00m, "Padaria Exemplo"));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(line, await LineIdAsync(factory, "t26-authorised"));
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-authorised"));
+        var shown = await ShownAsync(factory, ana, "t26-authorised");
+        Assert.Equal("Posted", shown.GetProperty("bankStatus").GetString());
+        Assert.Equal(existing, shown.GetProperty("match").GetProperty("transactionId").GetGuid());
+
+        var answer = await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = line } } }));
+        Assert.Equal(existing, Assert.Single(answer.GetProperty("reconciled").EnumerateArray()).GetProperty("transactionId").GetGuid());
+        Assert.Equal(1, await TransactionCountAsync(factory));
+        var row = await MirrorRowAsync(factory, "t26-authorised");
+        Assert.Equal(
+            ("Reconciled", Sql(existing), null),
+            ((string)row["review_state"]!, (string?)row["linked_transaction_id"], (string?)row["matched_transaction_id"]));
+    }
+
+    [Fact]
+    public async Task TwoPurchasesOfTheSameValueOnTheSameDay_BothInTheApp_EachLineSuspectsADifferentOne_AndKeepsItWhenTheBankSettlesBoth()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var coffees = new[] { await ManualAsync(ana, 9.00m, Noon(), "Café"), await ManualAsync(ana, 9.00m, Noon().AddHours(1), "Outro café") };
+        Bank(factory, Checking,
+            Debit("t26-coffee-1", Noon(), 9.00m) with { Status = "PENDING" },
+            Debit("t26-coffee-2", Noon().AddHours(2), 9.00m) with { Status = "PENDING" });
+        await DoneAsync(factory, ana, connection);
+        var one = (await StateAsync(factory, "t26-coffee-1")).Matched;
+        var two = (await StateAsync(factory, "t26-coffee-2")).Matched;
+        Assert.Equal(coffees.Select(Sql).Order(), new[] { one!, two! }.Order());
+
+        Bank(factory, Checking, Debit("t26-coffee-1", Noon(), 9.00m), Debit("t26-coffee-2", Noon().AddHours(2), 9.00m));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, one), await StateAsync(factory, "t26-coffee-1"));
+        Assert.Equal(("Pending", null, two), await StateAsync(factory, "t26-coffee-2"));
+        await OkAsync(ConfirmAsync(ana, new
+        {
+            reconcile = new[] { new { id = await LineIdAsync(factory, "t26-coffee-1") }, new { id = await LineIdAsync(factory, "t26-coffee-2") } },
+        }));
+        Assert.Equal(2, await TransactionCountAsync(factory));
+    }
+
+    [Fact]
+    public async Task OneTransactionOfTheApp_AndTwoBankLinesOfTheSameValue_OnlyOneCarriesTheSuspicion_AlsoAfterTheBankSettlesBoth()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var coffee = await ManualAsync(ana, 9.00m, Noon(), "Café");
+        // The line of the day before comes first in the order of the run: the coffee is of the line of its own day.
+        Bank(factory, Checking,
+            Debit("t26-coffee-day-before", Noon(-1), 9.00m) with { Status = "PENDING" },
+            Debit("t26-coffee-same-day", Noon(), 9.00m) with { Status = "PENDING" });
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-coffee-day-before"));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-same-day"));
+
+        Bank(factory, Checking, Debit("t26-coffee-day-before", Noon(-1), 9.00m), Debit("t26-coffee-same-day", Noon(), 9.00m));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-coffee-day-before"));
+        Assert.Equal(("Pending", null, Sql(coffee)), await StateAsync(factory, "t26-coffee-same-day"));
+        Assert.Single(await factory.RowsAsync("SELECT id FROM bank_transactions WHERE matched_transaction_id IS NOT NULL"));
+    }
+
+    [Fact]
+    public async Task WhenTheSuspectedTransactionWasDeleted_TheSuspicionIsGone_AndTheLineTheBankSettlesLater_MayLookLikeAnotherOne()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var sameDay = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        var nextDay = await ManualAsync(ana, 25.00m, Noon(1), "Padaria de novo");
+        Bank(factory, Checking, Debit("t26-authorised", Noon(), 25.00m) with { Status = "PENDING" });
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(sameDay)), await StateAsync(factory, "t26-authorised"));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"/api/v1/transactions/{sameDay}")).StatusCode);
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-authorised"));
+
+        Bank(factory, Checking, Debit("t26-authorised", Noon(), 25.00m));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, Sql(nextDay)), await StateAsync(factory, "t26-authorised"));
+    }
+
+    [Fact]
+    public async Task WhenTheBankSettlesTheLineWithAnotherValue_TheSuspicionThatNoLongerHoldsIsCleared_AndTheTransactionIsFreeForTheLineThatLooksLikeIt()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var existing = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        Bank(factory, Checking, Debit("t26-authorised", Noon(), 25.00m) with { Status = "PENDING" });
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-authorised"));
+
+        // Settled with another value (it was another purchase after all), and the purchase of R$ 25,00 arrives.
+        Bank(factory, Checking, Debit("t26-authorised", Noon(), 27.50m), Debit("t26-padaria", Noon().AddHours(1), 25.00m));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-authorised"));
+        Assert.Equal(("Pending", null, Sql(existing)), await StateAsync(factory, "t26-padaria"));
+    }
+
+    // ================================================================ the ignored ones, counted for the whole group (review 7)
+
+    [Fact]
+    public async Task Review_CountsTheIgnoredOfEveryMonth_OnlyOfTheGroup_AlsoWithNothingWaiting_AndRestoringTakesTheLineOutOfTheCount()
+    {
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory);
+        var (carla, carlaConnection) = await WithOtherBankAsync(factory, "Carla Modelo Lima", joinCode: null);
+        // 35 days apart: never in the same month.
+        var older = Noon(-35);
+        Bank(factory, Checking,
+            new FakeTransaction("t26-energy", Noon(), -180.00m) { Description = "Pagamento fatura energia", DescriptionRaw = "PAGAMENTO FATURA ENERGIA" },
+            new FakeTransaction("t26-bill-older", older, -800.00m) { Description = "Pagamento de fatura", DescriptionRaw = "PAGAMENTO DE FATURA" });
+        Bank(factory, OtherChecking,
+            new FakeTransaction("t26-bill-carla", Noon(), -700.00m) { Description = "Pagamento de fatura", DescriptionRaw = "PAGAMENTO DE FATURA" });
+        await DoneAsync(factory, ana, anaConnection);
+        await DoneAsync(factory, carla, carlaConnection);
+        Assert.Equal(("Ignored", "BillPayment", null), await StateAsync(factory, "t26-bill-carla"));
+
+        // Nothing waits for the review, and the two ignored lines are counted, whatever the month asked.
+        foreach (var month in new[] { Noon(), older, Noon(-70) })
+        {
+            var review = await ReviewAsync(ana, month);
+            Assert.Equal(0, review.GetProperty("pendingAllMonths").GetInt32());
+            Assert.Empty(review.GetProperty("pendingByMonth").EnumerateArray());
+            Assert.Equal(2, review.GetProperty("ignoredAllMonths").GetInt32());
+            Assert.Equal(
+                new[] { (BrazilTime.MonthOf(Noon()), 1), (BrazilTime.MonthOf(older), 1) },
+                review.GetProperty("ignoredByMonth").EnumerateArray().Select(m => (m.GetProperty("month").GetString()!, m.GetProperty("ignored").GetInt32())));
+        }
+
+        // The other group counts only its own.
+        var ofCarla = await ReviewAsync(carla, Noon());
+        Assert.Equal(1, ofCarla.GetProperty("ignoredAllMonths").GetInt32());
+        Assert.Equal(BrazilTime.MonthOf(Noon()), Assert.Single(ofCarla.GetProperty("ignoredByMonth").EnumerateArray()).GetProperty("month").GetString());
+
+        // Restored: it waits for the review, and is no longer counted as ignored.
+        await OkAsync(ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { await LineIdAsync(factory, "t26-energy") }));
+        var after = await ReviewAsync(ana, Noon());
+        Assert.Equal(1, after.GetProperty("ignoredAllMonths").GetInt32());
+        Assert.Equal(BrazilTime.MonthOf(older), Assert.Single(after.GetProperty("ignoredByMonth").EnumerateArray()).GetProperty("month").GetString());
+        Assert.Equal(1, after.GetProperty("pendingAllMonths").GetInt32());
+        Assert.Equal(1, (await ReviewAsync(carla, Noon())).GetProperty("ignoredAllMonths").GetInt32());
     }
 
     [Fact]

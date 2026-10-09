@@ -117,10 +117,14 @@ public sealed record BankReviewMatchResponse(
 
 public sealed record BankReviewMonthResponse(string Month, int Pending);
 
+public sealed record BankReviewIgnoredMonthResponse(string Month, int Ignored);
+
 /// <summary>
 /// The review of a month (of Brazil). <c>PendingTotalBrl</c> adds only the expenses in reais.
 /// <c>PendingAllMonths</c> counts, in every month, the expenses that can be confirmed (settled at the bank, with a
 /// value, in reais). <c>PendingByMonth</c> counts everything that waits in each month, also what can only be discarded.
+/// <c>IgnoredAllMonths</c> counts, in every month, the lines ignored automatically, and <c>IgnoredByMonth</c> says
+/// in which months they are (the latest first): the way to them when nothing waits for the review.
 /// </summary>
 public sealed record BankReviewResponse(
     string Month,
@@ -130,7 +134,9 @@ public sealed record BankReviewResponse(
     int PendingAllMonths,
     IReadOnlyList<BankReviewMonthResponse> PendingByMonth,
     IReadOnlyList<BankReviewLineResponse> Ignored,
-    int SuspectedDuplicates);
+    int SuspectedDuplicates,
+    int IgnoredAllMonths,
+    IReadOnlyList<BankReviewIgnoredMonthResponse> IgnoredByMonth);
 
 /// <summary>The value is never editable: only the category and the description.</summary>
 public sealed record ConfirmExpenseRequest(Guid Id, string? Category, string? Description);
