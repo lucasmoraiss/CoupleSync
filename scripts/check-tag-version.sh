@@ -11,7 +11,7 @@ if [ ! -f "${APP_JSON}" ]; then
   exit 1
 fi
 
-VERSION="$(node -p "const v=((JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).expo)||{}).version; typeof v==='string'?v:''" "${APP_JSON}")" || {
+VERSION="$(node -p "const v=((JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).expo)||{}).version; typeof v==='string'?v:''" "${APP_JSON}" 2>/dev/null)" || {
   echo "::error::Nao foi possivel ler ${APP_JSON}. Nenhum build foi gasto."
   exit 1
 }
