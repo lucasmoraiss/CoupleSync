@@ -8,12 +8,16 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '@/theme';
 import { TextSections } from '@/components/TextSections';
-import { AI_ANALYSIS_SECTIONS, PRIVACY_TITLE, consentStatusLines, privacySections } from '@/modules/privacy/privacyContent';
+import { aiAnalysisSections, PRIVACY_TITLE, consentStatusLines, privacySections } from '@/modules/privacy/privacyContent';
 import { goToParent } from '@/navigation/resetOnFocus';
 import { useConsentStore } from '@/modules/privacy/consentStore';
+import { aiDestinations } from '@/modules/ai/aiStatus';
+import { useAiStatus } from '@/modules/ai/useAiStatus';
 
 export default function PrivacyScreen() {
   const record = useConsentStore((s) => s.record);
+  // Os destinos da IA são os que o servidor tem ligados; sem resposta dele, o texto cita todos os possíveis.
+  const { status } = useAiStatus();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -31,7 +35,7 @@ export default function PrivacyScreen() {
         <Text style={styles.subtitle}>Como o CoupleSync trata os seus dados.</Text>
 
         <View style={styles.aiBox}>
-          <TextSections sections={AI_ANALYSIS_SECTIONS} />
+          <TextSections sections={aiAnalysisSections(aiDestinations(status))} />
           <TouchableOpacity
             style={styles.aiLink}
             onPress={() => router.push('/(main)/settings/ai' as any)}
