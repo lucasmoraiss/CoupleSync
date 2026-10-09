@@ -43,6 +43,8 @@ function AiWelcomeScreen() {
   const leave = (view !== null && (view.kind === 'unavailable' || view.kind === 'done')) || (status === null && loadFailed);
   // Só a tela em foco sai: depois da primeira visita fica uma instância montada, escondida, que também vê o status
   // mudar (IA desligada para todos, ativada em outro aparelho) e não pode tirar a pessoa de onde ela está.
+  // Depende da ordem: useAiStatus() fica acima de todo efeito daqui (é o efeito dele que marca o foco) e a tela é
+  // remontada a cada visita (resetOnFocus) — travado em aiStatus.test.ts.
   useEffect(() => {
     leaveWelcomeIfDue(leave, busy !== null, { isFocused, leave: () => goToParent('ai/welcome') });
   }, [leave, busy, isFocused]);

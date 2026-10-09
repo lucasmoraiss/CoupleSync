@@ -359,4 +359,20 @@ describe('tela de boas-vindas: sair sozinha para o Painel', () => {
     // O efeito antigo, que navegava sem conferir o foco, não existe mais.
     expect(source).not.toMatch(/if \(leave && busy === null\) goToParent/);
   });
+
+  // Revisão 1, M3: `isFocused()` só é verdade na montagem porque o efeito de foco de useAiStatus() é declarado
+  // ANTES do efeito de saída (os efeitos rodam na ordem em que são declarados), e a tela só volta a ser montada
+  // em foco porque é descartada a cada visita. Trocar a ordem deixaria a tela presa sem nada a perguntar.
+  it('o status (que marca o foco) é ligado antes do efeito de saída, e a tela é remontada a cada visita', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '../../../../app/(main)/ai/welcome.tsx'), 'utf8');
+    const hook = source.indexOf('useAiStatus();');
+    const firstEffect = source.indexOf('useEffect(');
+    const leaveEffect = source.indexOf('leaveWelcomeIfDue(leave');
+    expect(hook).toBeGreaterThan(-1);
+    expect(leaveEffect).toBeGreaterThan(-1);
+    // Antes de qualquer efeito da tela, não só do de saída.
+    expect(hook).toBeLessThan(firstEffect);
+    expect(firstEffect).toBeLessThan(leaveEffect);
+    expect(source).toContain('export default resetOnFocus(AiWelcomeScreen);');
+  });
 });
