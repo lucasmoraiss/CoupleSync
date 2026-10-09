@@ -22,6 +22,8 @@ export const PARENT_ROUTE = {
   'chat/index': '/',
   // Revisão do banco (Open Finance): aberta do atalho da tela de Transações e do fim do wizard.
   'openfinance/review': '/(main)/transactions',
+  // Contas (Open Finance): aberta do cartão "Faturas a vencer" do Painel e volta para ele.
+  'accounts/index': '/',
 } as const;
 
 export type ChildScreen = keyof typeof PARENT_ROUTE;

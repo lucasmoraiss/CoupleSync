@@ -30,6 +30,7 @@ import { AI_STATUS_NOTICE_TEXT, aiStatusNotice, isAssistantVisible, shouldShowAc
 import { openWelcomeIfDue } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
 import { isCaptureConsentAhead } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
+import { upcomingBillsCard } from '@/modules/openfinance/accounts';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -104,6 +105,31 @@ function CategoryBreakdown({ data }: { data: DashboardResponse }) {
         </View>
       ))}
     </View>
+  );
+}
+
+/**
+ * Open Finance: "Faturas a vencer nos próximos 30 dias", com o total do grupo (só reais). Só existe quando o
+ * servidor manda `upcomingBills` (alguém do grupo está conectado a um banco); abre a tela Contas.
+ */
+function UpcomingBillsCard({ data }: { data: DashboardResponse }) {
+  const bills = upcomingBillsCard(data.upcomingBills);
+  if (!bills) return null;
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      style={styles.billsCard}
+      onPress={() => router.push('/(main)/accounts' as any)}
+      accessibilityLabel={`Faturas a vencer nos próximos 30 dias: ${spokenBRL(bills.totalBrl)}. ${bills.countText}. Ver contas`}
+    >
+      <View style={styles.billsCardText}>
+        <Text style={styles.billsCardLabel}>Faturas a vencer nos próximos 30 dias</Text>
+        <Text style={styles.billsCardValue}>{bills.totalText}</Text>
+        <Text style={styles.cardHint}>{bills.countText}</Text>
+        {bills.otherCurrencyText ? <Text style={styles.cardHint}>{bills.otherCurrencyText}</Text> : null}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.primaryLight} />
+    </TouchableOpacity>
   );
 }
 
@@ -244,6 +270,7 @@ export default function DashboardScreen() {
           <>
             <TotalExpensesCard data={data} />
             <PartnerBreakdownRow data={data} currentUserId={userId} members={couple?.members} />
+            <UpcomingBillsCard data={data} />
             <CategoryBreakdown data={data} />
           </>
         )}
@@ -336,6 +363,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: BORDER,
   },
+  billsCard: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: CARD,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  billsCardText: { flex: 1 },
+  billsCardLabel: { fontSize: 13, color: MUTED, marginBottom: 4 },
+  billsCardValue: { fontSize: 22, fontWeight: '700', color: TEXT },
   cardLabel: { fontSize: 13, color: MUTED, marginBottom: 6 },
   cardValue: { fontSize: 34, fontWeight: '800', color: TEXT },
   cardHint: { fontSize: 12, color: MUTED, marginTop: 6 },
