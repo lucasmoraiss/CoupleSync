@@ -483,8 +483,8 @@ public sealed class AssistantChatServiceTests : IDisposable
     [InlineData("Faltam R$ 5.000,00 para [g1].", "Faltam R$ 5.000,00 para \"Viagem para Recife\".")]
     [InlineData("Faltam R$ 5.000,00 para a meta (g1).", "Faltam R$ 5.000,00 para a meta (\"Viagem para Recife\").")]
     [InlineData("Meta g1: faltam R$ 5.000,00; {{g1}} vence em 2027.", "Meta \"Viagem para Recife\": faltam R$ 5.000,00; \"Viagem para Recife\" vence em 2027.")]
-    // Ordinary text is not a marker: another case, part of a word or of a number, a goal that does not exist.
-    [InlineData("O G1 e o G20 falaram de 5g1, de g1x, de g1,5 e de g7.", "O G1 e o G20 falaram de 5g1, de g1x, de g1,5 e de g7.")]
+    // Ordinary text is not a marker: another case, part of a word or of a number.
+    [InlineData("O G1 e o G20 falaram de 5g1, de g1x e de g1,5.", "O G1 e o G20 falaram de 5g1, de g1x e de g1,5.")]
     public async Task AGoalMarkerWrittenWithoutBraces_IsReplacedByTheTitle_AndOrdinaryTextIsLeftAlone(string answer, string shown)
     {
         AddGoal("Viagem para Recife");
@@ -493,6 +493,149 @@ public sealed class AssistantChatServiceTests : IDisposable
         var reply = await AskAsync();
 
         Assert.Equal(shown, reply.Reply);
+    }
+
+    /// <summary>
+    /// Issue #60, item 2 — a marker without braces of a goal that was not sent ("g3" in a group with one goal) used
+    /// to reach the person as written. When goals were sent it is read like the same marker with braces: "uma meta".
+    /// </summary>
+    [Theory]
+    [InlineData("Faltam R$ 5.000,00 para g3.", "Faltam R$ 5.000,00 para uma meta.")]
+    [InlineData("Faltam R$ 5.000,00 para [g3].", "Faltam R$ 5.000,00 para uma meta.")]
+    [InlineData("A meta g1 vai bem; g2 e (g07), nem tanto.", "A meta \"Viagem para Recife\" vai bem; uma meta e (uma meta), nem tanto.")]
+    public async Task AMarkerWithoutBraces_OfAGoalThatWasNotSent_NeverReachesThePersonRaw(string answer, string shown)
+    {
+        AddGoal("Viagem para Recife");
+        _first.Then(Answer(answer));
+
+        var reply = await AskAsync();
+
+        Assert.Equal(shown, reply.Reply);
+    }
+
+    /// <summary>
+    /// Issue #60, item 2 — "g1" in lower case is also how a news site is written. A goal is "a meta": right after
+    /// "o", "do", "no", "ao", "pelo", "portal", "site" or "jornal" the word is ordinary text and stays, whether or
+    /// not a goal has that number. Between brackets it is always a marker.
+    /// </summary>
+    [Theory]
+    [InlineData("Li no g1 e no portal g1 que os preços subiram; o g1 e o site g7 dizem o mesmo.")]
+    [InlineData("Segundo o   g1, pelo g1 e do G1: faltam R$ 10,00.")]
+    public async Task ALowerCaseWordThatLooksLikeAMarker_AfterAMasculineArticleOrTheNameOfASite_IsOrdinaryText(string answer)
+    {
+        AddGoal("Viagem para Recife");
+        _first.Then(Answer(answer));
+
+        var reply = await AskAsync();
+
+        Assert.Equal(answer, reply.Reply);
+    }
+
+    [Fact]
+    public async Task AMarkerBetweenBrackets_IsAMarker_EvenAfterAMasculineArticle()
+    {
+        AddGoal("Viagem para Recife");
+        _first.Then(Answer("Falta pouco para o [g1] e para [g2]."));
+
+        var reply = await AskAsync();
+
+        Assert.Equal("Falta pouco para o \"Viagem para Recife\" e para uma meta.", reply.Reply);
+    }
+
+    /// <summary>No goal was sent, so no marker of a goal was: "g3" there is whatever the model meant by it.</summary>
+    [Fact]
+    public async Task InAGroupWithNoGoals_AWordThatLooksLikeAMarkerWithoutBraces_Stays()
+    {
+        _first.Then(Answer("Falam de g3 e de [g2]."));
+
+        var reply = await AskAsync();
+
+        Assert.Equal("Falam de g3 e de [g2].", reply.Reply);
+    }
+
+    // ---------------------------------------------------------------- issue #60, item 1: the noise of "Nota do app"
+
+    /// <summary>
+    /// A goal whose title is one or two characters, a word of almost every question, or the name of a member used
+    /// to add its line to nearly every question. Such a title gets no line; the others still do.
+    /// </summary>
+    [Fact]
+    public async Task ATitleTooShort_OrTheNameOfAMember_GetsNoLine_TheOthersStillDo()
+    {
+        AddGoal("A");
+        AddGoal("TV");
+        AddGoal("Mariana");
+        AddGoal("mariana souza");
+        AddGoal("João da Conceição");
+        AddGoal("Carro");
+        AddGoal("PS5");
+
+        await AskAsync("A Mariana e o João da Conceição gastaram quanto com a TV, o carro e o PS5?");
+
+        Assert.Equal(
+            "A {{A}} e o {{B}} da {{B}} gastaram quanto com a TV, o carro e o PS5?"
+            + "\nNota do app: na pergunta, carro também é o nome da meta {{g6}}."
+            + "\nNota do app: na pergunta, PS5 também é o nome da meta {{g7}}.",
+            Assert.Single(_first.Requests).Messages[^1].Text);
+    }
+
+    [Theory]
+    [InlineData("Meta", "Como está a meta?")]
+    [InlineData("METAS", "Como estão as metas?")]
+    [InlineData("Gastos", "Quais foram os gastos?")]
+    [InlineData("Mês", "Quanto gastamos este mês?")]
+    [InlineData("Orçamento", "Como está o orçamento?")]
+    [InlineData("Dinheiro", "Para onde foi o dinheiro?")]
+    [InlineData("Quanto", "Quanto falta?")]
+    [InlineData("Para", "Quanto falta para a viagem?")]
+    public async Task ATitleThatIsAWordOfAlmostEveryQuestion_GetsNoLine(string title, string question)
+    {
+        AddGoal(title);
+
+        await AskAsync(question);
+
+        Assert.Equal(question, Assert.Single(_first.Requests).Messages[^1].Text);
+    }
+
+    /// <summary>Every word of the list, with and without its accent, in any case: none of them gets a line.</summary>
+    [Fact]
+    public void TheListOfCommonWords_IsShort_AndEachOfItsWordsIsRecognizedAsATitle()
+    {
+        Assert.InRange(FactPackPrivacyFilter.CommonQuestionWords.Count, 10, 40);
+        foreach (var word in FactPackPrivacyFilter.CommonQuestionWords)
+        {
+            // The list is kept as it is compared: lower case, no accents, one word.
+            Assert.Equal(PromptText.Fold(word), word);
+            Assert.DoesNotContain(' ', word);
+            var titles = new Dictionary<string, string> { ["g1"] = word.ToUpperInvariant() };
+            Assert.Empty(FactPackPrivacyFilter.FindGoalMentions($"e {word}, como fica?", titles));
+        }
+
+        // Typical names of goals are not in it: they must keep their line.
+        foreach (var typical in new[] { "carro", "casa", "viagem", "reserva", "ferias", "casamento", "reforma", "emergencia" })
+            Assert.DoesNotContain(typical, FactPackPrivacyFilter.CommonQuestionWords);
+    }
+
+    /// <summary>Acceptance of issue #60: the common questions, with one goal, with two and with none.</summary>
+    [Fact]
+    public async Task CommonQuestions_WithAndWithoutAGoalOfThatName_AndWithTwoGoals()
+    {
+        await AskAsync("Quanto gastamos com carro?");
+        Assert.Equal("Quanto gastamos com carro?", _first.Requests[^1].Messages[^1].Text);
+
+        AddGoal("Carro");
+        await AskAsync("Quanto gastamos com carro?");
+        Assert.Equal(
+            "Quanto gastamos com carro?\nNota do app: na pergunta, carro também é o nome da meta {{g1}}.",
+            _first.Requests[^1].Messages[^1].Text);
+
+        AddGoal("Viagem");
+        await AskAsync("Quanto falta para a viagem e para o carro? E a meta do mês?");
+        Assert.Equal(
+            "Quanto falta para a viagem e para o carro? E a meta do mês?"
+            + "\nNota do app: na pergunta, viagem também é o nome da meta {{g2}}."
+            + "\nNota do app: na pergunta, carro também é o nome da meta {{g1}}.",
+            _first.Requests[^1].Messages[^1].Text);
     }
 
     [Fact]

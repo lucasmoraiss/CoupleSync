@@ -22,6 +22,29 @@ public static partial class FactPackPrivacyFilter
 
     private static readonly HashSet<string> NameParticles = new(StringComparer.Ordinal) { "de", "da", "do", "das", "dos", "e", "di", "du" };
 
+    /// <summary>
+    /// Words of almost every question about money (folded: lower case, no accents). A goal whose whole title is one
+    /// of them gets no line in <see cref="FindGoalMentions"/>: the line would go with nearly every question and tell
+    /// the model nothing. Typical names of goals ("carro", "casa", "viagem", "reserva") are not here on purpose.
+    /// </summary>
+    public static IReadOnlySet<string> CommonQuestionWords { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        // What every question is about.
+        "meta", "metas", "objetivo", "gasto", "gastos", "despesa", "despesas", "dinheiro", "conta", "contas",
+        "valor", "total", "saldo", "renda", "orcamento", "mes", "ano", "hoje", "grupo",
+        // How every question is asked.
+        "quanto", "quanta", "qual", "que", "como", "com", "para", "por", "uma", "mais",
+    };
+
+    /// <summary>The shortest title that gets a line in <see cref="FindGoalMentions"/>, in characters that are not white space.</summary>
+    public const int NotedTitleMinLength = 3;
+
+    /// <summary>
+    /// Right before a lower-case "g1" written without braces, these (folded) words say it is not a goal: a goal is
+    /// "a meta", and "o g1", "no g1", "portal g1" is how a news site is cited.
+    /// </summary>
+    private static readonly HashSet<string> NotAGoalBefore = new(StringComparer.Ordinal) { "o", "do", "no", "ao", "pelo", "portal", "site", "jornal" };
+
     [GeneratedRegex(@"[^\s@]+@[^\s@]+\.[^\s@]+", RegexOptions.CultureInvariant)]
     private static partial Regex Email();
 
@@ -89,18 +112,34 @@ public static partial class FactPackPrivacyFilter
     /// <summary>
     /// Puts the titles of the goals back in a text of the model, when answering the app (the app never sends the
     /// titles by itself: a goal goes as {{g1}}, {{g2}}...). A marker of no goal becomes "uma meta". A marker the model
-    /// wrote without the braces (g1, [g1]) is read too, but only when it is exactly the marker of a goal that was
-    /// sent: "G20", "5g1" or the "g7" of a group with one goal are ordinary text and stay.
+    /// wrote without the braces (g1, [g1]) is read too, when goals were sent: the title for a goal that was sent,
+    /// "uma meta" for one that was not ("g3" in a group with two goals is a marker the model made up, and would
+    /// reach the person raw). Ordinary text stays: "G20", "5g1", "g1,5"; a bare "g1" right after a word that says
+    /// it is not a goal ("o g1", "portal g1": <see cref="NotAGoalBefore"/>); and everything without braces when no
+    /// goal was sent, so no marker was.
     /// </summary>
     public static string RestoreGoalTitles(string text, IReadOnlyDictionary<string, string> titlesByMarker)
         => AnyGoalMarker().Replace(text, match =>
         {
             var braced = match.Groups[1].Success;
-            var number = braced ? match.Groups[1].Value : match.Groups[2].Success ? match.Groups[2].Value : match.Groups[3].Value;
+            var bare = match.Groups[3].Success;
+            if (!braced && titlesByMarker.Count == 0) return match.Value;
+            if (bare && NotAGoalBefore.Contains(WordBefore(text, match.Index))) return match.Value;
+
+            var number = braced ? match.Groups[1].Value : bare ? match.Groups[3].Value : match.Groups[2].Value;
             var known = titlesByMarker.TryGetValue("g" + number.TrimStart('0'), out var title) && ShownTitle(title).Length > 0;
-            if (known) return $"\"{ShownTitle(title)}\"";
-            return braced ? UnnamedGoal : match.Value;
+            return known ? $"\"{ShownTitle(title)}\"" : UnnamedGoal;
         });
+
+    /// <summary>The word (letters only, folded) that ends right before <paramref name="index"/>, white space apart; empty when there is none.</summary>
+    private static string WordBefore(string text, int index)
+    {
+        var end = index;
+        while (end > 0 && char.IsWhiteSpace(text[end - 1])) end--;
+        var start = end;
+        while (start > 0 && char.IsLetter(text[start - 1])) start--;
+        return PromptText.Fold(text[start..end]);
+    }
 
     /// <summary>True when the text names a person marker ({{B}}...) that belongs to nobody in the group.</summary>
     public static bool MentionsUnknownPerson(string text, IReadOnlyList<AiPerson> people)
@@ -160,7 +199,9 @@ public static partial class FactPackPrivacyFilter
     /// Where a question cites the title of a goal that is in the data — compared without accents or case, with any
     /// white space between the words of the title, whole words only, the longest title first. The question is not
     /// changed: who calls tells the model, in a line of its own, that those words are also the name of a goal.
-    /// One mention per title, in the order they appear.
+    /// One mention per title, in the order they appear. A title that would be found in almost every question is
+    /// not looked for (<see cref="IsNoiseAsATitle"/>): shorter than <see cref="NotedTitleMinLength"/>, one of
+    /// <see cref="CommonQuestionWords"/>, or nothing but the name of members of the group.
     /// </summary>
     /// <param name="text">The question as it is sent (after the privacy filter and the hygiene).</param>
     /// <param name="titlesByMarker">Marker to title, each title as it would be sent (after the same privacy filter).</param>
@@ -172,7 +213,7 @@ public static partial class FactPackPrivacyFilter
             // A title with a document or a contact in it would be compared with "[removido]": any removed piece would match.
             .Where(pair => !pair.Value.Contains(Removed, StringComparison.Ordinal))
             .Select(pair => (Marker: pair.Key, Words: TitleWords(pair.Value)))
-            .Where(title => title.Words.Length > 0)
+            .Where(title => title.Words.Length > 0 && !IsNoiseAsATitle(title.Words))
             .GroupBy(title => string.Join(' ', title.Words), StringComparer.Ordinal)
             .Select(group => (Words: group.First().Words, Markers: group.Select(title => Marker(title.Marker)).ToList()))
             .OrderByDescending(title => title.Words.Sum(word => word.Length) + title.Words.Length)
@@ -215,6 +256,23 @@ public static partial class FactPackPrivacyFilter
 
         return mentions.OrderBy(mention => mention.Start).Select(mention => mention.Mention).ToList();
     }
+
+    /// <summary>
+    /// A title (its folded words, after the privacy filter) that almost any question would cite without meaning the
+    /// goal: one or two characters; a single word of <see cref="CommonQuestionWords"/>; or only the name of members
+    /// of the group — which the filter turned into their markers, with the particles of a name between them
+    /// ("{{a}}", "{{b}} da {{b}}").
+    /// </summary>
+    private static bool IsNoiseAsATitle(string[] words)
+    {
+        if (words.Sum(word => word.Length) < NotedTitleMinLength) return true;
+        if (words.Length == 1 && CommonQuestionWords.Contains(words[0])) return true;
+        return words.Any(IsFoldedPersonMarker) && words.All(word => IsFoldedPersonMarker(word) || NameParticles.Contains(word));
+    }
+
+    /// <summary>"{{a}}": the marker of a person as the filter writes it, folded with the rest of the title.</summary>
+    private static bool IsFoldedPersonMarker(string word)
+        => word.Length == 5 && word.StartsWith("{{", StringComparison.Ordinal) && word.EndsWith("}}", StringComparison.Ordinal) && char.IsAsciiLetterLower(word[2]);
 
     /// <summary>g1, g2... g10: by number, not by text.</summary>
     private static IEnumerable<KeyValuePair<string, string>> InMarkerOrder(IReadOnlyDictionary<string, string> titlesByMarker)

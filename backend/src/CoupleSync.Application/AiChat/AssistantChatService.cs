@@ -198,7 +198,8 @@ public sealed class AssistantChatService
     /// One line for each piece of the question that is also the title of a goal in the data: with the goals cited
     /// only as {{g1}}, {{g2}}, the model would not know which one "a meta do carro" is. The line repeats words of
     /// the question as it is sent — nothing else of the title leaves — and stops when the question and its lines
-    /// reach <see cref="QuestionWithNotesMaxLength"/>.
+    /// reach <see cref="QuestionWithNotesMaxLength"/>. A title almost any question would cite (very short, a very
+    /// common word, the name of a member) gets no line: see <see cref="FactPackPrivacyFilter.FindGoalMentions"/>.
     /// </summary>
     private static string GoalNotes(string question, ChatFacts facts, IReadOnlyList<AiPerson> people)
     {
