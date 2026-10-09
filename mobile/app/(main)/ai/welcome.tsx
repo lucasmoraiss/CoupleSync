@@ -16,6 +16,7 @@ import { AI_ANALYSIS_POINTS, AI_ANALYSIS_SUMMARY } from '@/modules/privacy/priva
 import { welcomeView } from '@/modules/ai/aiStatus';
 import { useAiStatusStore } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
+import { useLeaveWelcomeWhenDue } from '@/modules/ai/useLeaveWelcome';
 
 // O que a IA faz hoje e o que chega nas próximas atualizações: ninguém ativa por uma promessa que ainda não existe.
 const WHAT_IT_DOES: readonly string[] = [
@@ -41,9 +42,11 @@ function AiWelcomeScreen() {
   const view = status ? welcomeView(status, userId) : null;
   // Nada a perguntar (IA indisponível, a pessoa já ativou) ou o status não carregou: Painel.
   const leave = (view !== null && (view.kind === 'unavailable' || view.kind === 'done')) || (status === null && loadFailed);
-  useEffect(() => {
-    if (leave && busy === null) goToParent('ai/welcome');
-  }, [leave, busy]);
+  // Só a tela em foco sai: depois da primeira visita fica uma instância montada, escondida, que também vê o status
+  // mudar (IA desligada para todos, ativada em outro aparelho) e não pode tirar a pessoa de onde ela está.
+  // A saída roda no efeito de foco da própria tela (ao receber o foco e quando isto muda com ela em foco): a tela
+  // montada já em foco sem nada a perguntar também sai — ver useLeaveWelcome.ts e welcomeLeave.test.ts.
+  useLeaveWelcomeWhenDue(leave, busy !== null, () => goToParent('ai/welcome'));
 
   const run = async (action: Action, work: () => Promise<unknown>, doneMessage?: string) => {
     if (busy) return;

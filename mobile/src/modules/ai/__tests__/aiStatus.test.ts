@@ -1,4 +1,6 @@
 // Issue #38: o que as telas decidem a partir de GET /ai/status. Tudo aqui é inventado (nomes de exemplo).
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   AI_CONSENT_VERSION,
   AI_STATUS_NOTICE_TEXT,
@@ -14,6 +16,7 @@ import {
   chatErrorMessage,
   groupBudgetText,
   isAssistantVisible,
+  leaveWelcomeIfDue,
   modelQuotaText,
   shouldShowActivationCard,
   shouldOpenWelcome,
@@ -316,4 +319,40 @@ describe('extrato: quando as descrições podem ir para a IA', () => {
     expect(aiUploadConsent(status({ available: false, enabled: true }))).toBe(false);
     expect(aiUploadConsent(status({ enabled: true, acceptedBy: [byAna] }))).toBe(true);
   });
+});
+
+// Issue #60, item 6: a tela de boas-vindas é aba oculta e fica montada, escondida, depois da primeira visita. Quando
+// o status muda (o dono desligou toda a IA; a pessoa ativou em outro aparelho) ela não tem mais o que perguntar e
+// sai para o Painel — mas a instância escondida tirava a pessoa da tela em que ela estava.
+describe('tela de boas-vindas: sair sozinha para o Painel', () => {
+  const screen = (focused: boolean) => {
+    const leave = jest.fn();
+    return { leave, deps: { isFocused: () => focused, leave } };
+  };
+
+  it('em foco, sem nada a perguntar e sem gravação em andamento: sai', () => {
+    const s = screen(true);
+    expect(leaveWelcomeIfDue(true, false, s.deps)).toBe(true);
+    expect(s.leave).toHaveBeenCalledTimes(1);
+  });
+
+  it('escondida (a pessoa está em outra tela): não navega, mesmo sem nada a perguntar', () => {
+    const s = screen(false);
+    expect(leaveWelcomeIfDue(true, false, s.deps)).toBe(false);
+    expect(s.leave).not.toHaveBeenCalled();
+  });
+
+  it('com a pergunta a fazer, ou gravando a resposta: fica', () => {
+    const asking = screen(true);
+    expect(leaveWelcomeIfDue(false, false, asking.deps)).toBe(false);
+    expect(asking.leave).not.toHaveBeenCalled();
+
+    const saving = screen(true);
+    expect(leaveWelcomeIfDue(true, true, saving.deps)).toBe(false);
+    expect(saving.leave).not.toHaveBeenCalled();
+  });
+
+  // A ligação com o foco de verdade (a tela montada já em foco, a escondida, a ordem dos efeitos do expo-router)
+  // está em welcomeLeave.test.ts. A premissa que estava aqui — "isFocused() de useAiStatus já é verdade na
+  // montagem" — era falsa (revisão final 1, I1).
 });

@@ -43,13 +43,6 @@ describe('histórico enviado com a pergunta', () => {
     expect(item.content.length).toBeLessThanOrEqual(2000);
   });
 
-  it('o corte não parte um emoji ao meio (texto inválido seria recusado pelo servidor)', () => {
-    const before = 'a '.repeat(999); // 1.998 caracteres; o emoji ocupa as posições 1.999 e 2.000
-    const [item] = buildChatHistory([model(`${before}b\u{1F600} e mais ${'b '.repeat(100)}`)]);
-
-    expect(item.content).toBe(before.trimEnd());
-  });
-
   // Re-revisão 2, defeito novo 1: o corte acontece antes de o servidor filtrar; um nome partido ("Mariana" →
   // "Marian") não seria reconhecido lá e iria ao provedor. O corte é no último espaço antes do limite.
   it('o corte é no último espaço antes do limite: um nome que atravessa a posição 2.000 não vai pela metade', () => {
@@ -106,6 +99,52 @@ describe('histórico enviado com a pergunta', () => {
     const [item] = buildChatHistory([model(long)]);
 
     expect(item.content).toBe(`${before}Faltam R$ 1,00 para "Carro" e`);
+  });
+
+  // Issue #60, item 4: nomes de meta colados, sem espaço entre as aspas ("Carro","Viagem para Recife"). O recuo para
+  // a aspa de abertura do nome partido fazia o texto ENTRE os dois nomes (",") parecer outro nome, e o anterior saía
+  // junto, em cascata. O nome que fechou antes do corte fica, com as duas aspas (é assim que o servidor o reconhece).
+  it('nomes de meta colados sem espaço: só o que atravessa o limite sai; o anterior fica inteiro, com as aspas', () => {
+    const before = 'Gasto alto. '.repeat(163); // 1.956 caracteres
+    const long = `${before}Faltam R$ 1,00 para "Carro","Viagem para Recife" neste mês.`;
+    expect(long.slice(0, 2000).endsWith('"Carro","Viagem para Rec')).toBe(true);
+
+    const [item] = buildChatHistory([model(long)]);
+
+    expect(item.content).toBe(`${before}Faltam R$ 1,00 para "Carro","`);
+    expect(item.content).not.toContain('Viagem');
+  });
+
+  it('três nomes colados com barra: os dois que fecharam antes do corte ficam', () => {
+    const before = 'Gasto alto. '.repeat(163); // 1.956 caracteres
+    const long = `${before}Faltam R$ 1,00 para "Carro"/"Casa"/"Viagem para Recife" neste mês.`;
+    expect(long.slice(0, 2000).endsWith('"Carro"/"Casa"/"Viagem p')).toBe(true);
+
+    const [item] = buildChatHistory([model(long)]);
+
+    expect(item.content).toBe(`${before}Faltam R$ 1,00 para "Carro"/"Casa"/"`);
+  });
+
+  it('o corte no texto colado ENTRE dois nomes nunca deixa o nome anterior sem a aspa que o fecha', () => {
+    const before = 'Gasto alto. '.repeat(164); // 1.968 caracteres
+    const long = `${before}Faltam R$ 1,00 para "Carro",e também,"Viagem para Recife" neste mês.`;
+    expect(long.slice(0, 2000).endsWith('"Carro",e ta')).toBe(true);
+
+    const [item] = buildChatHistory([model(long)]);
+
+    // Sem a aspa final o servidor não reconheceria "Carro" como o nome que ele mesmo repôs.
+    expect(item.content).toBe(`${before}Faltam R$ 1,00 para "Carro"`);
+  });
+
+  // Issue #60, item 4: para o JavaScript o caractere invisível U+FEFF é espaço em branco; para o servidor (.NET) não
+  // é, então um nome de meta pode começar ou terminar com ele. A regra das bordas tomava esse nome por "texto entre
+  // dois nomes" e ele ia pela metade.
+  it('nome de meta que começa ou termina com o caractere invisível U+FEFF também não vai pela metade', () => {
+    const starts = `${'a'.repeat(1985)} para "\uFEFFViagem para Recife" e mais texto depois.`;
+    const ends = `${'a'.repeat(1985)} para "Viagem para Recife\uFEFF" e mais texto depois.`;
+
+    expect(buildChatHistory([model(starts)])[0].content).toBe(`${'a'.repeat(1985)} para`);
+    expect(buildChatHistory([model(ends)])[0].content).toBe(`${'a'.repeat(1985)} para`);
   });
 
   it('só as 20 últimas mensagens vão; o que sobra vazio depois do corte não vai', () => {

@@ -31,6 +31,18 @@ function lastWordEnd(text: string): number {
 }
 
 /**
+ * Espaço em branco para o servidor nas bordas de um nome de meta. O `\s` do JavaScript inclui o caractere invisível
+ * U+FEFF, que o servidor (.NET) não apara: um nome pode começar ou terminar com ele, e continua sendo um nome.
+ */
+const TITLE_EDGE_SPACE = /[^\S\uFEFF]/;
+
+/** O trecho tem o jeito de um nome de meta reposto numa resposta: cabe no tamanho de um nome e não tem espaço nas bordas. */
+function looksLikeTitle(inside: string): boolean {
+  if (inside.length === 0 || inside.length > GOAL_TITLE_MAX_LENGTH) return false;
+  return !TITLE_EDGE_SPACE.test(inside.charAt(0)) && !TITLE_EDGE_SPACE.test(inside.charAt(inside.length - 1));
+}
+
+/**
  * Onde começa o trecho entre aspas que o fim `end` partiria, ou -1. É entre aspas que a resposta mostra o nome de
  * uma meta ("Viagem para Recife"), e o servidor só o reconhece inteiro. O trecho é o que vai da última aspa antes
  * de `end` até a primeira depois, quando tem o jeito de um nome reposto: cabe no tamanho de um nome de meta e não
@@ -41,10 +53,13 @@ function openQuoteBefore(text: string, end: number): number {
   const open = text.lastIndexOf('"', end - 1);
   const close = text.indexOf('"', end);
   if (open < 0 || close < 0) return -1;
-  const inside = text.slice(open + 1, close);
-  if (inside.length === 0 || inside.length > GOAL_TITLE_MAX_LENGTH) return -1;
-  if (WHITE_SPACE.test(inside.charAt(0)) || WHITE_SPACE.test(inside.charAt(inside.length - 1))) return -1;
-  return open;
+  return looksLikeTitle(text.slice(open + 1, close)) ? open : -1;
+}
+
+/** A aspa em `quote` pode ser a que FECHA um nome: o que vem logo antes dela, até a aspa anterior, tem o jeito de um. */
+function mayCloseTitle(text: string, quote: number): boolean {
+  const open = text.lastIndexOf('"', quote - 1);
+  return open >= 0 && looksLikeTitle(text.slice(open + 1, quote));
 }
 
 function cut(text: string): string {
@@ -55,7 +70,14 @@ function cut(text: string): string {
   // o item não vai.
   let end = lastWordEnd(text);
   if (end < 0) return '';
-  for (let open = openQuoteBefore(text, end); open >= 0; open = openQuoteBefore(text, end)) end = open;
+  const quote = openQuoteBefore(text, end);
+  if (quote >= 0) {
+    // O corte partiria um trecho entre aspas: recua, uma vez só, para a aspa onde ele começa. Daqui não dá para
+    // saber se essa aspa abre o trecho partido ou fecha o nome anterior (nomes colados: "Carro","Viagem"). Se pode
+    // fechar, ela fica — o nome anterior vai inteiro, com as duas aspas, que é como o servidor o reconhece. Nos dois
+    // casos o texto termina numa aspa ou logo antes de uma: nenhum nome vai pela metade nem sem a aspa que o fecha.
+    end = mayCloseTitle(text, quote) ? quote + 1 : quote;
+  }
   return text.slice(0, end).trimEnd();
 }
 
