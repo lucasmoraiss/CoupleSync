@@ -615,6 +615,27 @@ public sealed class OpenFinanceBillsTests
     }
 
     [Fact]
+    public async Task TheBillOfACardWhoseOwnerDisconnected_DoesNotIgnoreADebitOfItsValue_OfThePartner()
+    {
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory); // the card
+        var (bruno, brunoConnection) = await WithOtherBankAsync(factory, "Bruno Modelo Reis", ana.JoinCode); // the account that would pay
+        Bills(factory, Card, ClosedBill("bill-27-disconnected-owner", PaymentDay().AddDays(5), 1990.90m));
+        await DoneAsync(factory, ana, anaConnection);
+        Assert.Single(await BillRowsAsync(factory));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{anaConnection}")).StatusCode);
+
+        // The bill is stored (disconnecting deletes nothing), but nothing reads that card any more: like the card
+        // turned off, it may be paid, changed or gone. The debit of the partner stays for the review.
+        Bank(factory, OtherChecking, Debit("t27-bruno-after-disconnect", Noon(), 1990.90m, "Pagamento"));
+        await DoneAsync(factory, bruno, brunoConnection);
+
+        Assert.Single(await BillRowsAsync(factory));
+        Assert.Equal(("Pending", null), await StateAsync(factory, "t27-bruno-after-disconnect"));
+    }
+
+    [Fact]
     public async Task ABillPaymentThePersonRestored_IsNeverIgnoredAgain_EvenWhenTheBillChanges()
     {
         await using var factory = NewFactory();

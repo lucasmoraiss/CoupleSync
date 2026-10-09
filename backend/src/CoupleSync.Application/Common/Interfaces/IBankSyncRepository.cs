@@ -90,8 +90,9 @@ public interface IBankSyncRepository
     Task AddBillsAsync(IEnumerable<CreditCardBill> bills, CancellationToken ct);
 
     /// <summary>
-    /// For the job: the stored bills of the cards of the group that are still synchronised (a card the person turned
-    /// off is not read any more) due in [<paramref name="fromDue"/>, <paramref name="toDue"/>].
+    /// For the job: the stored bills of the cards of the group that are still read (not the ones of a card the person
+    /// turned off, nor of a disconnected connection: nothing reads those any more) due in
+    /// [<paramref name="fromDue"/>, <paramref name="toDue"/>].
     /// </summary>
     Task<IReadOnlyList<CardBillFacts>> GetBillFactsForJobAsync(Guid coupleId, DateOnly fromDue, DateOnly toDue, CancellationToken ct);
 

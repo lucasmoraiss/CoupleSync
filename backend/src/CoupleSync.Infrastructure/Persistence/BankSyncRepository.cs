@@ -185,8 +185,14 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(b => b.CoupleId == coupleId && b.DueDate >= fromDue && b.DueDate <= toDue
-                        // A card the person turned off is no longer read: its stored bills say nothing of today.
-                        && _dbContext.BankAccounts.Any(a => a.Id == b.BankAccountId && a.CoupleId == coupleId && a.SyncEnabled))
+                        // A card the person turned off, or of a disconnected connection, is no longer read: its
+                        // stored bills say nothing of today.
+                        && _dbContext.BankAccounts.Any(a =>
+                            a.Id == b.BankAccountId && a.CoupleId == coupleId && a.SyncEnabled
+                            && _dbContext.BankItems.Any(i =>
+                                i.Id == a.ItemId && i.CoupleId == coupleId
+                                && _dbContext.BankConnections.Any(c =>
+                                    c.Id == i.ConnectionId && c.CoupleId == coupleId && c.Status != BankConnectionStatus.Disconnected))))
             .Select(b => new CardBillFacts(b.Id, b.TotalAmount, b.Currency, b.DueDate, b.IsClosed))
             .ToListAsync(ct);
 
