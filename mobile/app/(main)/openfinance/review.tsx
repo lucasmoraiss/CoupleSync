@@ -113,6 +113,8 @@ function BankReviewScreen() {
   /** A entrada cujo nome de renda está sendo digitado (a folha "Registrar como renda do mês" está aberta). */
   const [registering, setRegistering] = useState<BankReviewLineResponse | null>(null);
   const [incomeName, setIncomeName] = useState('');
+  /** O erro ao registrar a renda, mostrado na própria folha (ela fica aberta: é onde a pessoa está olhando). */
+  const [incomeError, setIncomeError] = useState<string | null>(null);
 
   // A primeira resposta (mês corrente do servidor) diz onde há pendências: a revisão abre no mês mais recente
   // que tem algo esperando, despesa ou entrada.
@@ -167,6 +169,7 @@ function BankReviewScreen() {
   const openRegisterIncome = (line: BankReviewLineResponse) => {
     if (busy || !canRegisterIncome(line)) return;
     setIncomeName(defaultIncomeName(line));
+    setIncomeError(null);
     setRegistering(line);
   };
 
@@ -177,6 +180,7 @@ function BankReviewScreen() {
     const epoch = getSessionEpoch();
     setBusy('income');
     setNotice(null);
+    setIncomeError(null);
     try {
       const result = (await openFinanceApiClient.confirmReview(incomeRequest(line, incomeName))).data;
       if (getSessionEpoch() !== epoch) return;
@@ -184,8 +188,8 @@ function BankReviewScreen() {
       setNotice({ text: incomeResultMessage(line, result), error: false });
     } catch (err) {
       if (getSessionEpoch() !== epoch) return;
-      setRegistering(null);
-      setNotice({ text: getApiErrorMessage(err, REGISTER_INCOME_FAILED_TEXT), error: true });
+      // A folha fica aberta com a mensagem: o aviso do topo da lista estaria atrás dela, fora da vista.
+      setIncomeError(getApiErrorMessage(err, REGISTER_INCOME_FAILED_TEXT));
     } finally {
       if (getSessionEpoch() === epoch) {
         setBusy(null);
@@ -714,6 +718,11 @@ function BankReviewScreen() {
               returnKeyType="done"
             />
             {nameError ? <Text style={styles.errorText} accessibilityRole="alert">{nameError}</Text> : null}
+            {incomeError ? (
+              <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+                {incomeError}
+              </Text>
+            ) : null}
             <TouchableOpacity
               style={[styles.primaryBtn, (busy !== null || nameError !== null) && styles.disabled]}
               onPress={() => void handleRegisterIncome()}

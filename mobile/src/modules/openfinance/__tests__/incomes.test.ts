@@ -213,6 +213,39 @@ describe('"Selecionar tudo" continua só nas despesas', () => {
   });
 });
 
+describe('erro ao registrar a renda: fica à vista, na folha aberta', () => {
+  const screen = fs.readFileSync(path.resolve(__dirname, '../../../../app/(main)/openfinance/review.tsx'), 'utf8');
+  const handler = screen.slice(screen.indexOf('const handleRegisterIncome = async'), screen.indexOf('const handleConfirm = async'));
+  const failed = handler.slice(handler.indexOf('} catch (err) {'), handler.indexOf('} finally {'));
+  const sheet = screen.slice(screen.indexOf('visible={registering !== null}'), screen.indexOf('visible={pickingFor !== null}'));
+
+  it('a falha não fecha a folha nem vai para o aviso do topo da lista: a mensagem fica na folha', () => {
+    expect(handler.length).toBeGreaterThan(0);
+    expect(failed).toContain('setIncomeError(getApiErrorMessage(err, REGISTER_INCOME_FAILED_TEXT));');
+    expect(failed).not.toContain('setRegistering(null)');
+    expect(failed).not.toContain('setNotice(');
+    // Trabalho assíncrono preso à sessão: quem saiu da conta não recebe a mensagem.
+    expect(failed).toContain('if (getSessionEpoch() !== epoch) return;');
+  });
+
+  it('a folha mostra a mensagem como alerta, logo acima do botão de registrar', () => {
+    const message = sheet.indexOf('{incomeError ? (');
+    expect(message).toBeGreaterThan(-1);
+    expect(message).toBeLessThan(sheet.indexOf('accessibilityLabel="Registrar renda"'));
+    expect(sheet.slice(message, message + 400)).toContain('accessibilityRole="alert"');
+    expect(sheet.slice(message, message + 400)).toContain('{incomeError}');
+  });
+
+  it('a mensagem some ao abrir a folha de novo e ao tentar outra vez; o sucesso continua fechando a folha', () => {
+    const open = screen.slice(screen.indexOf('const openRegisterIncome ='), screen.indexOf('const handleRegisterIncome = async'));
+    expect(open).toContain('setIncomeError(null);');
+    const tried = handler.slice(0, handler.indexOf('} catch (err) {'));
+    expect(tried.indexOf('setIncomeError(null);')).toBeGreaterThan(-1);
+    expect(tried.indexOf('setIncomeError(null);')).toBeLessThan(tried.indexOf('await openFinanceApiClient.confirmReview('));
+    expect(tried).toContain('setRegistering(null);');
+  });
+});
+
 describe('tela de Rendas: a origem "do banco"', () => {
   it('só a renda que veio de uma entrada do banco mostra a origem', () => {
     expect(incomeOriginText({ fromBank: true })).toBe('do banco');

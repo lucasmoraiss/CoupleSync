@@ -267,6 +267,30 @@ describe('upcomingBillsCard: "Faturas a vencer nos próximos 30 dias" do Painel'
     expect(plain(shown.otherCurrencyText)).toBe('Fora do total, em outra moeda: US$ 50,00');
   });
 
+  it('"N faturas" conta só as que entram no total: em reais e de valor maior que zero', () => {
+    // A de zero e a de crédito (valor negativo) vêm na lista, mas o servidor não as soma: não contam, e a mais
+    // próxima delas não é "a primeira que vence".
+    const shown = upcomingBillsCard(
+      upcoming({
+        totalBrl: 300.3,
+        bills: [
+          due({ id: 'b-zero', totalAmount: 0, dueDate: '2026-10-10' }),
+          due({ id: 'b-credit', totalAmount: -30, dueDate: '2026-10-12' }),
+          due({ id: 'b-1', totalAmount: 100.1 }),
+          due({ id: 'b-2', totalAmount: 200.2, dueDate: '2026-11-05' }),
+        ],
+      }),
+    )!;
+    expect(shown.countText).toBe('2 faturas · a primeira vence em 27/10/2026');
+
+    const one = upcomingBillsCard(upcoming({ totalBrl: 100.1, bills: [due({ id: 'b-zero', totalAmount: 0, dueDate: '2026-10-10' }), due({ totalAmount: 100.1 })] }))!;
+    expect(one.countText).toBe('1 fatura · vence em 27/10/2026');
+
+    const none = upcomingBillsCard(upcoming({ totalBrl: 0, bills: [due({ totalAmount: 0 }), due({ id: 'b-credit', totalAmount: -30 })] }))!;
+    expect(none.countText).toBe('Nenhuma fatura a vencer');
+    expect(plain(none.totalText)).toBe('R$ 0,00');
+  });
+
   it('total que não é número (resposta estragada) vira zero, nunca "NaN"', () => {
     expect(plain(upcomingBillsCard(upcoming({ totalBrl: undefined as unknown as number, bills: [] }))!.totalText)).toBe('R$ 0,00');
   });

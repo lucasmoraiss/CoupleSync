@@ -98,7 +98,7 @@ export interface UpcomingBillsCard {
   /** O total em reais, como o servidor somou (só faturas em BRL). */
   readonly totalBrl: number;
   readonly totalText: string;
-  /** "2 faturas · a primeira vence em 27/10/2026". Conta só as em reais. */
+  /** "2 faturas · a primeira vence em 27/10/2026". Conta só as que entram no total: em reais e de valor maior que zero. */
   readonly countText: string;
   /** As faturas em outra moeda, cada uma na sua, fora do total. null: nenhuma. */
   readonly otherCurrencyText: string | null;
@@ -117,18 +117,20 @@ export function upcomingBillsCard(upcoming: UpcomingBillsResponse | null | undef
   if (!upcoming) return null;
   const bills = upcoming.bills ?? [];
   const inReais = bills.filter((bill) => bill.currency === 'BRL');
+  // As que o servidor soma: fatura de zero ou de crédito (valor negativo) vem na lista e fica fora do total.
+  const counted = inReais.filter((bill) => typeof bill.totalAmount === 'number' && bill.totalAmount > 0);
   const others = bills.filter((bill) => bill.currency !== 'BRL');
   const totalBrl = typeof upcoming.totalBrl === 'number' && Number.isFinite(upcoming.totalBrl) ? upcoming.totalBrl : 0;
 
   let countText: string;
-  if (inReais.length === 0) {
+  if (counted.length === 0) {
     countText = others.length > 0 ? 'Nenhuma fatura em reais a vencer' : 'Nenhuma fatura a vencer';
   } else {
-    const first = inReais.reduce((earliest, bill) => (bill.dueDate < earliest.dueDate ? bill : earliest));
+    const first = counted.reduce((earliest, bill) => (bill.dueDate < earliest.dueDate ? bill : earliest));
     countText =
-      inReais.length === 1
+      counted.length === 1
         ? `1 fatura · vence em ${dayLabel(first.dueDate)}`
-        : `${inReais.length} faturas · a primeira vence em ${dayLabel(first.dueDate)}`;
+        : `${counted.length} faturas · a primeira vence em ${dayLabel(first.dueDate)}`;
   }
 
   return {
