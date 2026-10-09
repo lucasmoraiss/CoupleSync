@@ -39,5 +39,5 @@ caso "app.json ausente falha"     1 "v1.2.0"     '@ausente' "nao encontrado"
 # JSON invalido: so a linha ::error::, sem o rastro de pilha do node.
 printf '%s' '{nao e json' > "${TMP}/app.json"
 saida="$(bash "${SCRIPT}" "v1.2.0" "${TMP}/app.json" 2>&1)"
-if [ "$(printf '%s\n' "${saida}" | wc -l)" -eq 1 ]; then echo "OK    JSON invalido nao despeja rastro de pilha"; else echo "FALHA JSON invalido despejou mais de uma linha"; echo "      ${saida}"; fail=1; fi
+if [ "$(printf '%s\n' "${saida}" | wc -l)" -eq 1 ] && [[ "${saida}" == ::error::* ]]; then echo "OK    JSON invalido nao despeja rastro de pilha"; else echo "FALHA JSON invalido despejou mais de uma linha"; echo "      ${saida}"; fail=1; fi
 exit "${fail}"
