@@ -49,17 +49,22 @@ public sealed class GroupMembershipConcurrencyTests
         user.Client.PostAsJsonAsync("/api/v1/couples/join", new { JoinCode = code });
 
     /// <summary>The invariant of every group and every user, read straight from the tables.</summary>
+    /// <remarks>
+    /// "The code still works" is judged with this machine's clock, the one the API stamps and checks the
+    /// expiry with — never the database's now(): the database runs in a container whose clock can be seconds
+    /// away from the host's, and a code that expired an instant ago would then still look valid.
+    /// </remarks>
     private static async Task AssertConsistentAsync(TestDatabase database)
     {
         var groups = await database.RowsAsync("""
             SELECT c.id,
                    c.owner_user_id,
-                   c.join_code_expires_at_utc > now() AS code_valid,
+                   c.join_code_expires_at_utc > @now AS code_valid,
                    (SELECT count(*) FROM couple_members m WHERE m.couple_id = c.id) AS members,
                    (SELECT count(*) FROM couple_members m WHERE m.couple_id = c.id AND m.role = 'Owner') AS owners,
                    (SELECT count(*) FROM couple_members m WHERE m.couple_id = c.id AND m.role = 'Owner' AND m.user_id = c.owner_user_id) AS registered_owner_rows
             FROM couples c
-            """);
+            """, ("now", DateTime.UtcNow));
         Assert.All(groups, g =>
         {
             var (id, owner, codeValid, members, owners, registered) = ((Guid)g[0]!, (Guid?)g[1], (bool)g[2]!, (long)g[3]!, (long)g[4]!, (long)g[5]!);

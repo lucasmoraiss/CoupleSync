@@ -187,10 +187,11 @@ public sealed class TestDatabase : IAsyncDisposable
         return result is null or DBNull ? default! : (T)result;
     }
 
-    public async Task<List<object?[]>> RowsAsync(string sql)
+    public async Task<List<object?[]>> RowsAsync(string sql, params (string Name, object Value)[] parameters)
     {
         await using var connection = await OpenAsync();
         await using var command = new NpgsqlCommand(sql, connection);
+        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value);
         await using var reader = await command.ExecuteReaderAsync();
         var rows = new List<object?[]>();
         while (await reader.ReadAsync())
