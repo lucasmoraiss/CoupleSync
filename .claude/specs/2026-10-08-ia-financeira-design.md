@@ -386,6 +386,12 @@ SQLite e PostgreSQL testados como já faz `DashboardRepository.cs:40-67` [códig
 parcelas e hábitos leem uma **projeção** por grupo — id, data local, valor, `Merchant`, categoria, `UserId`,
 origem; só BRL; até 13 meses; teto de 20.000 linhas (≈ 2 MB) — porque a normalização do estabelecimento roda
 em C#. Processamento grupo a grupo; um casal tem centenas de linhas por mês, longe dos 512 MB.
+**Como ficou na fase 3 (issue #39):** a leitura vai até **26 meses** (`Recurrence:YearlyHistoryMonths`), com o
+mesmo teto de 20.000 linhas, as mais recentes primeiro (grupo que bate no teto perde os meses mais antigos). O
+que tem mais de 13 meses (`Recurrence:HistoryMonths`) **só serve para achar cadência anual**; mensal, semanal,
+parcelas e hábitos continuam olhando 13 meses. Medido no teto (20.000 linhas, dados sintéticos): a projeção
+ocupa ≈ 4,6 MB e o detector leva de 0,5 a 1 s, com ≈ 90 MB de alocação passageira — igual ao que já custava
+com 13 meses no teto, porque o teto é o mesmo.
 
 ### 3.1 `FinancialFactsBuilder`
 
@@ -424,17 +430,39 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
      descrição; sem isso quem importa PDF não teria recorrência). A linha de `recurring_streams` guarda a origem
      em `name_source` (`merchant`/`description`; basta **uma** cobrança do item ter vindo de descrição para ser
      `description`). Regras para o nome vindo de descrição: vale a regra de transferência a pessoa inteira; se a
-     descrição tem CPF, CNPJ, telefone, e-mail ou chave Pix aleatória, a cobrança **não forma item**; outras
-     sequências de 6+ dígitos saem do nome. Ver 3.8.
+     descrição tem e-mail, chave Pix aleatória, ou um número que é documento ou telefone, a cobrança **não
+     forma item**; outras sequências de 6+ dígitos saem do nome. Um número de 9 a 14 dígitos conta como documento
+     ou telefone quando (a) está escrito com a pontuação ou os espaços de CPF, CNPJ ou telefone
+     ("123.456.789-00", "(11) 91234-5678"), quaisquer que sejam os dígitos; ou (b) tem 11 dígitos com dígito
+     verificador de CPF, ou 14 com dígito verificador de CNPJ; ou (c) o texto tem uma palavra que diz o que o
+     número é (`cpf`, `cnpj`, `rg`, `doc`, `documento`, `tel`, `telefone`, `fone`, `cel`, `celular`, `whatsapp`,
+     `whats`, `zap`, `contato`, `fax`, `pix`, `chave` — lista em código, trancada por teste). Número "cru" que
+     não cai em nenhum dos três (código de cliente, contrato: "DEB AUT ENERGIA 0012345678") **só sai do nome e o
+     item se forma**. Limite assumido: um telefone escrito só com dígitos e sem palavra ao lado passa por código
+     — o número não é gravado nem mostrado de qualquer forma. Isto vale só para formar o item do próprio grupo;
+     o que vai a provedor continua pelo filtro de 3.8, que remove todos esses números. Ver 3.8.
    - A chave tem no máximo 120 caracteres (corte em palavra inteira). Sufixos que a coluna `merchant_key` (160)
      recebe além da chave: `#NNxAAAAMM` (parcelamento: N parcelas, mês da primeira) e `~N` (segundo item do
      mesmo estabelecimento, tipo e cadência). Quem lê a tabela para outro fim (fase 4) tira os dois sufixos.
    - Com `Merchant` preenchido, o marcador `para` seguido de artigo na `Description` ("plano para a família")
      não conta como transferência; nos outros casos conta como está em 3.8.
-2. Agrupa por (grupo, chave); ordena por data local; mede intervalos. Dois serviços de **mesmo valor** no
-   mesmo estabelecimento (o mesmo plano pago por cada pessoa do casal) são dois itens quando cada pessoa tem a
-   própria série e elas correm lado a lado, ou quando há até 2 séries cada uma sempre no seu dia do mês (± 3
-   dias) que juntas não deixam quase nada de fora; compra a cada 10 ou 14 dias continua fora (só mensal e anual).
+2. Agrupa por (grupo, chave); ordena por data local; mede intervalos.
+   **A mesma cobrança vista duas vezes** (o celular de cada pessoa capturando a mesma conta; extrato importado
+   mais notificação; data da compra × data do registro): cobrança de mesmo valor a até **4 dias**
+   (`Recurrence:SameChargeWithinDays`) de uma cobrança da série é lida como cópia dela — vai com o item, não
+   conta como outra cobrança, não entra no total e não forma outro item (só mensal e anual).
+   Dois serviços de **mesmo valor** no mesmo estabelecimento só são **dois itens quando estão claramente
+   separados**; na dúvida, um item (ou nenhum):
+   - por pessoa — cada pessoa tem a própria série, as séries correm lado a lado e **nenhuma** cobrança de uma
+     fica a até 4 dias de uma cobrança da outra. Se alguma fica, é a mesma conta registrada pelas duas: um item,
+     uma cobrança por mês, sem pessoa;
+   - por dia (mesma pessoa) — até 2 séries, **cada uma sempre no seu dia do mês (± 1 dia,
+     `Recurrence:SameDayToleranceDays`)**, nenhuma cobrança de uma a até 4 dias de uma da outra, e que juntas não
+     deixam quase nada de fora. Compra duas vezes por mês em dias que variam (posto, mercado) não é conta fixa
+     e não entra; compra a cada 10 ou 14 dias também não.
+   Limites assumidos: duas contas de verdade cobradas com até 4 dias de diferença viram um item só (o total fica
+   menor que o real, nunca dobrado); compra feita exatamente nos mesmos dois dias do mês, todo mês, é
+   indistinguível de duas contas e vira dois itens — a pessoa corrige com "Não é recorrente".
 3. **Cadência**: semanal (7 ± 2 dias, **≥ 4 ocorrências**), mensal (28–31 dias, aceitando ±3 dias de
    deslocamento por fim de mês e fim de semana, ≥ 3 ocorrências), anual (335–395 dias; 2 ocorrências →
    confiança "média").
@@ -452,6 +480,8 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
    (dias de Brasília; `Recurrence:NewWithinDays`). O texto original dizia 35 dias, e o dono pediu 60; com
    qualquer um dos dois a marca quase nunca aparecia em assinatura mensal, porque a série só existe na 3ª
    cobrança, cerca de 60 dias depois da primeira. Com 90, aparece da 3ª até perto da 4ª cobrança.
+   **Decidido (controlador, issue #39): "nova" = primeira cobrança do item nos últimos 90 dias.** A marca vale
+   para o item, não para o estabelecimento: série que se refez (parou e voltou, mudou de dia) também é "nova".
 8. **Ciclo de vida** (medido contra a data de hoje, só a partir da última cobrança): passou 1,5 × o intervalo
    mediano → `SuspectedDormant`; 2 × → `Stopped`. Com a regra 4, uma cobrança que volta depois de
    `SuspectedDormant` reativa a série.
@@ -477,13 +507,18 @@ Como ficou na fase 3 (issue #39):
 - "Entrou transação" inclui excluir e **editar** (valor, data, estabelecimento, descrição, categoria): o próximo
   pedido da lista recalcula. A exclusão é vista pela contagem e a edição por um contador, os dois na memória do
   processo; depois de um reinício valem as 6 horas.
-- **Anual**: a janela lida é de 13 meses, então cerca de 30 dias depois da renovação a primeira cobrança sai
-  dela. O item anual que o cálculo não acha mais **fica na lista como está** enquanto a última cobrança dele
-  ainda existir e não tiverem passado 395 dias dela; depois disso sai (ou fica como parado, se a pessoa disse
-  algo sobre ele).
+- **Anual**: para a cadência anual a janela lida é de **26 meses** (para as demais, 13). Assim a assinatura
+  anual aparece já no primeiro cálculo, mesmo renovada meses antes (cobranças há 14 e há 2 meses → item hoje),
+  e continua sendo achada até a renovação seguinte. Renovação atrasada (mais de 395 dias da última cobrança):
+  deixa de ser item anual — sai da lista, ou fica como parado se a pessoa disse algo sobre ele. Rede de
+  segurança para o grupo que bate no teto de linhas (a primeira cobrança pode ficar de fora): o item anual que
+  o cálculo não acha mais **fica como está** enquanto a última cobrança dele existir e não tiverem passado 395
+  dias dela. Anual com uma cobrança só não é detectada (precisa de 2).
 - `ChargedAfterCancel` traz o item de volta para a lista ativa e para o total mesmo quando a cobrança voltou
   depois de mais de dois meses (a série continua `Stopped`); a cobrança de **outro** item do mesmo
-  estabelecimento não conta. "Cancelei" de novo oculta outra vez.
+  estabelecimento não conta. "Cancelei" de novo oculta outra vez. A cobrança que voltou tarde demais para
+  continuar a série (não entra em série nenhuma) **aparece no item**: entra na lista de cobranças dele e passa
+  a ser a data e o valor da última cobrança; uma vez lá, fica enquanto a transação existir.
 - Fora da lista ativa (`hidden`): `NotRecurring`, `Cancelled` sem cobrança nova e o que parou (`Stopped`).
 - Tipo de série de valor fixo que não é assinatura nem `MORADIA`/`SAUDE`: `FixedBill`, e entra no total.
 - Pequeno gasto frequente (3.2) é gravado com `cadence = Irregular`.
