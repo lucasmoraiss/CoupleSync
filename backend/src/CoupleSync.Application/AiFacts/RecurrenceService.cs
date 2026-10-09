@@ -3,6 +3,7 @@ using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CoupleSync.Application.AiFacts;
@@ -140,13 +141,16 @@ public sealed class RecurrenceService
     private readonly RecurrenceRunLog _runs;
     private readonly IDateTimeProvider _clock;
     private readonly RecurrenceOptions _options;
+    private readonly ILogger<RecurrenceService> _logger;
 
-    public RecurrenceService(IRecurringStreamRepository repository, RecurrenceRunLog runs, IDateTimeProvider clock, IOptions<RecurrenceOptions> options)
+    public RecurrenceService(
+        IRecurringStreamRepository repository, RecurrenceRunLog runs, IDateTimeProvider clock, IOptions<RecurrenceOptions> options, ILogger<RecurrenceService> logger)
     {
         _repository = repository;
         _runs = runs;
         _clock = clock;
         _options = options.Value;
+        _logger = logger;
     }
 
     public async Task<RecurringList> GetAsync(Guid coupleId, CancellationToken ct)
@@ -259,6 +263,15 @@ public sealed class RecurrenceService
         var months = Math.Max(_options.HistoryMonths, _options.YearlyHistoryMonths);
         var since = BrazilTime.ToUtc(today.AddMonths(-months).ToDateTime(TimeOnly.MinValue));
         var rows = await _repository.ReadProjectionAsync(coupleId, since, _options.ProjectionRowCap, ct);
+        if (rows.Count >= _options.ProjectionRowCap)
+        {
+            // The group and the ceiling only: nothing of the transactions goes to the log.
+            _logger.LogWarning(
+                "Recurrence detection for couple {CoupleId} reached the ceiling of {RowCap} rows: the oldest transactions were left out and a yearly stream may not be found.",
+                coupleId,
+                _options.ProjectionRowCap);
+        }
+
         var result = RecurrenceDetector.Detect(rows, today, _options);
 
         var existing = await _repository.GetForUpdateAsync(coupleId, ct);
@@ -269,6 +282,8 @@ public sealed class RecurrenceService
         // What each stored stream had before it, and where the series found for it ends.
         var chargesBefore = existing.ToDictionary(e => e.Id, e => e.Items.Select(i => i.TransactionId).ToHashSet());
         var endOfSeries = new Dictionary<Guid, DateOnly>();
+        // The charges read as copies of a charge of a stream (the same charge seen twice), and of which stream.
+        var copyOf = new Dictionary<Guid, Guid>();
 
         foreach (var group in result.Streams.GroupBy(d => (d.MerchantKey, d.Cadence)))
         {
@@ -303,6 +318,7 @@ public sealed class RecurrenceService
                 match.SetTransactions(detected.TransactionIds);
                 endOfSeries[match.Id] = detected.Facts.LastSeenLocal;
                 foreach (var transactionId in detected.TransactionIds) ownerOfCharge[transactionId] = match.Id;
+                foreach (var transactionId in detected.CopyTransactionIds) copyOf[transactionId] = match.Id;
             }
         }
 
@@ -328,13 +344,22 @@ public sealed class RecurrenceService
             var tolerance = stream.VariableAmount ? _options.VariableBillTolerance : _options.AmountTolerance;
             // A charge of another stream of the same establishment (the plan of the other person, of the same
             // amount) is not this one being charged again.
-            var similar = result.ChargesByKey.TryGetValue(BaseKey(stream.MerchantKey), out var charges)
-                ? charges
-                    .Where(c => c.Amount >= stream.MedianAmount * (1 - tolerance) && c.Amount <= stream.MedianAmount * (1 + tolerance))
-                    .ToList()
-                : [];
+            var ofKey = result.ChargesByKey.TryGetValue(BaseKey(stream.MerchantKey), out var charges) ? charges : [];
+            // A copy of a charge of a stream (the same charge seen twice) is not a new charge, of this stream or of
+            // any other.
+            var similar = ofKey
+                .Where(c => !copyOf.ContainsKey(c.TransactionId)
+                            && c.Amount >= stream.MedianAmount * (1 - tolerance) && c.Amount <= stream.MedianAmount * (1 + tolerance))
+                .ToList();
+            // Neither is a charge of this stream whose copy was already there when the person said "cancelled": the
+            // copy that was dated later took its place in the series, and it is still the charge of before.
+            var copiesBefore = ofKey
+                .Where(c => copyOf.TryGetValue(c.TransactionId, out var of) && of == stream.Id && c.TimestampUtc <= stream.OverrideAtUtc!.Value)
+                .ToList();
+            bool SeenBefore(KeyCharge charge) => copiesBefore.Any(
+                copy => Math.Abs(charge.LocalDate.DayNumber - copy.LocalDate.DayNumber) <= Math.Max(0, _options.SameChargeWithinDays));
             var chargedAgain = similar.Any(c => c.TimestampUtc > stream.OverrideAtUtc!.Value
-                                                && (!ownerOfCharge.TryGetValue(c.TransactionId, out var owner) || owner == stream.Id));
+                                                && (!ownerOfCharge.TryGetValue(c.TransactionId, out var owner) || (owner == stream.Id && !SeenBefore(c))));
             stream.SetChargedAfterCancel(chargedAgain);
 
             // A charge that came back too late to continue the series (after two missed ones) is in no series. It is

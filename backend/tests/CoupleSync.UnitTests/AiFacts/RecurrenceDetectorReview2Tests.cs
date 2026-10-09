@@ -16,12 +16,12 @@ public sealed class RecurrenceDetectorReview2Tests
     private static readonly Guid Bruno = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly RecurrenceOptions Options = new();
 
-    private static RecurrenceRow Row(string? merchant, decimal amount, DateOnly date, string category = "LAZER", string? description = null, Guid? user = null, int hour = 15)
+    private static RecurrenceRow Row(string? merchant, decimal amount, DateOnly date, string category = "LAZER", string? description = null, Guid? user = null, int hour = 15, TransactionSource source = TransactionSource.Manual)
         // 15:00 UTC is noon in Brasília: the local date is the date given.
-        => new(Guid.NewGuid(), date.ToDateTime(new TimeOnly(hour, 0), DateTimeKind.Utc), amount, merchant, description, category, user ?? Ana, TransactionSource.Manual);
+        => new(Guid.NewGuid(), date.ToDateTime(new TimeOnly(hour, 0), DateTimeKind.Utc), amount, merchant, description, category, user ?? Ana, source);
 
-    private static List<RecurrenceRow> Monthly(string? merchant, decimal amount, DateOnly first, int count, string category = "LAZER", string? description = null, Guid? user = null, int hour = 15)
-        => Enumerable.Range(0, count).Select(i => Row(merchant, amount, first.AddMonths(i), category, description, user, hour)).ToList();
+    private static List<RecurrenceRow> Monthly(string? merchant, decimal amount, DateOnly first, int count, string category = "LAZER", string? description = null, Guid? user = null, int hour = 15, TransactionSource source = TransactionSource.Manual)
+        => Enumerable.Range(0, count).Select(i => Row(merchant, amount, first.AddMonths(i), category, description, user, hour, source)).ToList();
 
     private static List<RecurrenceRow> OnDays(string merchant, decimal amount, int firstMonth, int[] days, string category = "LAZER", Guid? user = null)
         => days.Select((day, i) => Row(merchant, amount, new DateOnly(2026, firstMonth + i, day), category, user: user)).ToList();
@@ -79,8 +79,8 @@ public sealed class RecurrenceDetectorReview2Tests
     [Fact]
     public void TheSameCharge_RegisteredTwiceByTheSamePerson_ADayApart_IsOneStream()
     {
-        var rows = Monthly("Streaming Exemplo", 39.90m, new DateOnly(2026, 6, 5), 5)
-            .Concat(Monthly("Streaming Exemplo", 39.90m, new DateOnly(2026, 6, 6), 5));
+        var rows = Monthly("Streaming Exemplo", 39.90m, new DateOnly(2026, 6, 5), 5, source: TransactionSource.OcrImport)
+            .Concat(Monthly("Streaming Exemplo", 39.90m, new DateOnly(2026, 6, 6), 5, source: TransactionSource.Notification));
 
         var stream = Assert.Single(Detect(rows));
 
@@ -132,11 +132,29 @@ public sealed class RecurrenceDetectorReview2Tests
         Assert.True(streams.Sum(s => s.Facts.AnnualCost) <= 2400m);
     }
 
-    /// <summary>Each on its own day of the month, but only three days from each other: in doubt, one stream.</summary>
+    /// <summary>
+    /// Each on its own day of the month, three days from each other, of the same person and registered the same
+    /// way: the same phone does not capture one charge twice on different days — two subscriptions of the same
+    /// price (review round 3: this test used to lock one stream, which hid a real charge).
+    /// </summary>
     [Fact]
-    public void TwoSeriesOnDaysTooCloseToEachOther_AreOneStream()
+    public void TwoSeriesOfTheSamePerson_RegisteredTheSameWay_OnCloseDays_AreTwoStreams()
     {
         var rows = Monthly("APPLE.COM/BILL", 21.90m, new DateOnly(2026, 6, 3), 5).Concat(Monthly("APPLE.COM/BILL", 21.90m, new DateOnly(2026, 6, 6), 5));
+
+        var streams = Detect(rows);
+
+        Assert.Equal(2, streams.Count);
+        Assert.All(streams, s => Assert.Equal(5, s.Facts.Occurrences));
+        Assert.Equal(525.60m, streams.Sum(s => s.Facts.AnnualCost));
+    }
+
+    /// <summary>The same two series, one from the statement and one from the notification: one charge seen twice, one stream.</summary>
+    [Fact]
+    public void TwoSeriesOfTheSamePerson_RegisteredInDifferentWays_OnCloseDays_AreOneStream()
+    {
+        var rows = Monthly("APPLE.COM/BILL", 21.90m, new DateOnly(2026, 6, 3), 5, source: TransactionSource.OcrImport)
+            .Concat(Monthly("APPLE.COM/BILL", 21.90m, new DateOnly(2026, 6, 6), 5, source: TransactionSource.Notification));
 
         var stream = Assert.Single(Detect(rows));
 

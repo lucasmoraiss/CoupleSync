@@ -70,9 +70,11 @@ public sealed class RecurrenceOptions
     public int SameDayToleranceDays { get; set; } = 1;
 
     /// <summary>
-    /// A charge of the same amount at most this many days from a charge of a series is read as that same charge,
-    /// seen twice (the phone of each person, a statement and a notification, the day of the purchase and the day it
-    /// was registered). Two series are two streams only when no charge of one is this close to a charge of the other.
+    /// A charge of the same amount (within <see cref="SamePriceTolerance"/>) at most this many days from a charge
+    /// of a series is read as that same charge, seen twice (the phone of each person, a statement and a
+    /// notification) — unless the two were registered by the same person through the same means on different days:
+    /// those are two charges. The series of two people are one stream only when every charge of one of them is
+    /// such a copy of a charge of the other.
     /// </summary>
     public int SameChargeWithinDays { get; set; } = 4;
 
@@ -114,7 +116,14 @@ public sealed record RecurrenceRow(
 }
 
 /// <summary>One stream found: its key (without the suffix that tells two streams of the same shop apart), its facts and its charges.</summary>
-public sealed record DetectedStream(string MerchantKey, string Cadence, RecurringStreamFacts Facts, IReadOnlyList<Guid> TransactionIds);
+public sealed record DetectedStream(string MerchantKey, string Cadence, RecurringStreamFacts Facts, IReadOnlyList<Guid> TransactionIds)
+{
+    /// <summary>
+    /// Charges read as copies of the ones in <see cref="TransactionIds"/> (the same charge seen twice): they are of
+    /// the stream, are not counted and are not a new charge of it.
+    /// </summary>
+    public IReadOnlyList<Guid> CopyTransactionIds { get; init; } = [];
+}
 
 /// <summary>One charge of an establishment, for "was it charged again after the person cancelled?" and "is the last charge of a yearly stream still there?".</summary>
 public sealed record KeyCharge(Guid TransactionId, DateTime TimestampUtc, decimal Amount)
@@ -381,7 +390,7 @@ public static class RecurrenceDetector
                     .FirstOrDefault();
                 if (before.Chain is null) continue;
                 var merged = before.Chain.Concat(newer.Chain).ToList();
-                var echoes = EchoesOf(merged, before.Cluster.Concat(newer.Cluster).ToList(), SameChargeDays(cadence, o));
+                var echoes = EchoesOf(merged, before.Cluster.Concat(newer.Cluster).ToList(), SameChargeDays(cadence, o), o);
                 candidates.Add(new Chain(cadence, merged, CountMissed(merged, cadence), false, echoes));
             }
         }
@@ -528,7 +537,10 @@ public static class RecurrenceDetector
             InstallmentTotal: null,
             RemainingAmount: null,
             EndMonth: null);
-        return new DetectedStream(key, cadence.Name, facts, rows.Select(r => r.Row.Id).ToList());
+        return new DetectedStream(key, cadence.Name, facts, rows.Select(r => r.Row.Id).ToList())
+        {
+            CopyTransactionIds = chain.Echoes.Select(r => r.Row.Id).ToList(),
+        };
     }
 
     private static string KindOf(string key, Chain chain, string category, bool utility, decimal amount, RecurrenceOptions o)
@@ -670,16 +682,18 @@ public static class RecurrenceDetector
 
     /// <summary>
     /// The series of the cluster (charges of similar amount of one establishment) in the cadence. Usually one: the
-    /// longest chain, when it holds enough of the charges of its period. A charge of the cluster at most
-    /// <see cref="RecurrenceOptions.SameChargeWithinDays"/> days from a charge of the chain is that same charge seen
-    /// twice: it goes with the series and does not count.
+    /// longest chain, when it holds enough of the charges of its period. A charge of the cluster that is a charge
+    /// of the chain seen twice (<see cref="SameCharge"/>: the same amount, at most
+    /// <see cref="RecurrenceOptions.SameChargeWithinDays"/> days apart, not registered twice by the same person
+    /// through the same means) goes with the series and does not count.
     /// Two services of the same amount (the same plan paid by each person of the couple, two subscriptions of the
-    /// same price in an app shop) are two series only when they are clearly apart, and only for the monthly and
-    /// the yearly cadences:
-    /// by person — every person with charges has a series of their own, the series run side by side and no charge
-    /// of one is close to a charge of another (otherwise it is one service registered by more than one person);
+    /// same price in an app shop) are two series only for the monthly and the yearly cadences:
+    /// by person — every person with charges has a series of their own and the series run side by side; the series
+    /// of two people are one only when every charge of one of them is a charge of the other seen twice (one
+    /// service registered by both);
     /// by day — up to <see cref="RecurrenceOptions.MaxSeriesPerAmount"/> series, each always charged on its own day
-    /// of the month, no charge of one close to a charge of another, that together leave almost nothing out.
+    /// of the month, no charge of one being a charge of another seen twice, that together leave almost nothing out
+    /// (nothing at all, when the series had to be looked for by their day of the month).
     /// In doubt, one series (or none): a purchase every 10 or 14 days, or twice a month on days that move, fits neither.
     /// </summary>
     private static List<Series> SeriesOf(List<Keyed> cluster, CadenceSpec cadence, RecurrenceOptions o)
@@ -706,14 +720,36 @@ public static class RecurrenceDetector
             // Each series is measured against what is in no other series: what is left over is what must be rare.
             if (found.Count > 1
                 && found.All(series => OnItsOwnDay(series, o))
-                && Apart(found, within)
+                && Apart(found, within, o)
                 && found.All(series => Covers(series, Without(cluster, found.Where(other => !ReferenceEquals(other, series)).SelectMany(other => other)), within, o)))
             {
-                return found.Select(series => new Series(series, EchoesOf(series, rest, within))).ToList();
+                return found.Select(series => new Series(series, EchoesOf(series, rest, within, o))).ToList();
+            }
+
+            // Two series on days close to each other (the 3rd and the 6th) may come out of the longest chains mixed,
+            // a charge of one in the chain of the other. They are looked for again by their day of the month, and
+            // accepted only when they are apart and leave nothing of their period out.
+            var byDay = new List<List<Keyed>>();
+            var left = cluster;
+            while (byDay.Count < o.MaxSeriesPerAmount)
+            {
+                var next = ChainOnOneDay(left, cadence, o);
+                if (next.Count < cadence.MinOccurrences) break;
+                byDay.Add(next);
+                left = Without(left, next);
+            }
+
+            if (byDay.Count > 1
+                // Side by side: a series that only starts when the other ended is one service whose day changed.
+                && byDay.Max(series => series[0].Date) < byDay.Min(series => series[^1].Date)
+                && Apart(byDay, within, o)
+                && byDay.All(series => OtherDays(series, Without(cluster, byDay.Where(other => !ReferenceEquals(other, series)).SelectMany(other => other)), within, o) == 0))
+            {
+                return byDay.Select(series => new Series(series, EchoesOf(series, left, within, o))).ToList();
             }
         }
 
-        return Covers(first, cluster, within, o) ? [new Series(first, EchoesOf(first, cluster, within))] : [];
+        return Covers(first, cluster, within, o) ? [new Series(first, EchoesOf(first, cluster, within, o))] : [];
     }
 
     /// <summary>How close two charges are to be read as one. The weekly cadence has no such reading: only the same day.</summary>
@@ -738,13 +774,60 @@ public static class RecurrenceDetector
         var earliestEnd = series.Min(chain => chain[^1].Date);
         if (latestStart >= earliestEnd) return null;
 
-        if (Apart(series, within))
-            return series.Select((chain, index) => new Series(chain, EchoesOf(chain, people[index], within))).ToList();
+        // The series of two people are one only when they coincide: every charge of one of them is a charge of the
+        // other seen twice (the phone of each one, a shared card). One pair of close charges, or a pair in some of
+        // the months only, leaves them as they are: the plan of each person.
+        var together = new List<List<int>>();
+        for (var i = 0; i < series.Count; i++)
+        {
+            var joined = together.Where(group => group.Any(j => Coincide(series[i], series[j], within, o))).ToList();
+            together.RemoveAll(joined.Contains);
+            together.Add(joined.SelectMany(group => group).Append(i).ToList());
+        }
 
-        // Charges of one person next to charges of the other: the same charge registered by both (the phone of each
-        // one, a shared card). One series, one charge a month; every other charge of the cluster is a copy.
-        var one = RawChain(cluster, cadence);
-        return [new Series(one, Without(cluster, one))];
+        var result = new List<Series>();
+        foreach (var group in together.OrderBy(group => group.Min()))
+        {
+            if (group.Count == 1)
+            {
+                result.Add(new Series(series[group[0]], EchoesOf(series[group[0]], people[group[0]], within, o)));
+                continue;
+            }
+
+            // One series, one charge a month; the charges next to its charges are the copies.
+            var users = group.Select(index => people[index][0].Row.UserId).ToHashSet();
+            var charges = cluster.Where(r => users.Contains(r.Row.UserId)).ToList();
+            var one = RawChain(charges, cadence);
+            result.Add(new Series(one, EchoesOf(one, charges, within, o)));
+        }
+
+        return result;
+    }
+
+    /// <summary>True when every charge of one of the two series is a charge of the other one seen twice.</summary>
+    private static bool Coincide(List<Keyed> one, List<Keyed> other, int within, RecurrenceOptions o)
+        => one.All(charge => Near(charge, other, within, o)) || other.All(charge => Near(charge, one, within, o));
+
+    /// <summary>
+    /// The longest chain of the cluster whose charges are all on the day of the month of one of them (at most
+    /// <see cref="RecurrenceOptions.SameDayToleranceDays"/> days from it). Among chains of the same length, the one
+    /// of the earliest day of the month.
+    /// </summary>
+    private static List<Keyed> ChainOnOneDay(List<Keyed> cluster, CadenceSpec cadence, RecurrenceOptions o)
+    {
+        var best = new List<Keyed>();
+        // A chain has one charge per day, the first of the day (as in RawChain): the others need not be looked at.
+        var days = cluster.GroupBy(r => r.Date).Select(g => g.First()).ToList();
+        // The distance to the day of a charge only depends on its day of the month: one reference per day is enough.
+        foreach (var reference in days.GroupBy(r => r.Date.Day).OrderBy(g => g.Key).Select(g => g.First()))
+        {
+            var onItsDay = days.Where(charge => DaysFromTheDayOf(reference.Date, charge.Date) <= o.SameDayToleranceDays).ToList();
+            if (onItsDay.Count <= best.Count) continue;
+            var chain = RawChain(onItsDay, cadence);
+            if (chain.Count > best.Count) best = chain;
+        }
+
+        return best;
     }
 
     private static List<Keyed> Without(List<Keyed> rows, IEnumerable<Keyed> taken)
@@ -764,51 +847,74 @@ public static class RecurrenceDetector
     private static int DaysFromTheDayOf(DateOnly reference, DateOnly date)
     {
         var months = (date.Year - reference.Year) * 12 + date.Month - reference.Month;
-        return Enumerable.Range(months - 1, 3).Min(m => Math.Abs(date.DayNumber - reference.AddMonths(m).DayNumber));
+        var days = int.MaxValue;
+        for (var m = months - 1; m <= months + 1; m++) days = Math.Min(days, Math.Abs(date.DayNumber - reference.AddMonths(m).DayNumber));
+        return days;
     }
 
-    /// <summary>True when no charge of a series is at most <paramref name="within"/> days from a charge of another one.</summary>
-    private static bool Apart(List<List<Keyed>> series, int within)
+    /// <summary>True when no charge of a series is a charge of another one seen twice (<see cref="SameCharge"/>).</summary>
+    private static bool Apart(List<List<Keyed>> series, int within, RecurrenceOptions o)
     {
         for (var i = 0; i < series.Count; i++)
         {
             for (var j = i + 1; j < series.Count; j++)
             {
-                if (series[i].Any(charge => Near(charge, series[j], within))) return false;
+                if (series[i].Any(charge => Near(charge, series[j], within, o))) return false;
             }
         }
 
         return true;
     }
 
-    private static bool Near(Keyed charge, List<Keyed> chain, int within)
+    /// <summary>True when the charge is one of the charges of the chain seen twice.</summary>
+    private static bool Near(Keyed charge, List<Keyed> chain, int within, RecurrenceOptions o)
     {
         foreach (var other in chain)
         {
-            if (Math.Abs(charge.Date.DayNumber - other.Date.DayNumber) <= within) return true;
+            if (SameCharge(charge, other, within, o)) return true;
         }
 
         return false;
     }
 
+    /// <summary>
+    /// One charge seen twice: the same amount (within <see cref="RecurrenceOptions.SamePriceTolerance"/>, which
+    /// holds tax and rounding), at most <paramref name="within"/> days apart, and — on different days — not
+    /// registered by the same person through the same means: the same phone does not capture one charge twice, so
+    /// those are two charges.
+    /// </summary>
+    private static bool SameCharge(Keyed charge, Keyed other, int within, RecurrenceOptions o)
+    {
+        var days = Math.Abs(charge.Date.DayNumber - other.Date.DayNumber);
+        if (days > within || !Within(charge.Amount, other.Amount, o.SamePriceTolerance)) return false;
+        return days == 0 || charge.Row.UserId != other.Row.UserId || charge.Row.Source != other.Row.Source;
+    }
+
     /// <summary>The charges of the cluster that are not of the chain and are read as copies of its charges.</summary>
-    private static List<Keyed> EchoesOf(List<Keyed> chain, List<Keyed> cluster, int within)
+    private static List<Keyed> EchoesOf(List<Keyed> chain, List<Keyed> cluster, int within, RecurrenceOptions o)
     {
         var ids = chain.Select(r => r.Row.Id).ToHashSet();
-        return cluster.Where(r => !ids.Contains(r.Row.Id) && Near(r, chain, within)).ToList();
+        return cluster.Where(r => !ids.Contains(r.Row.Id) && Near(r, chain, within, o)).ToList();
     }
 
     /// <summary>
-    /// True when the chain holds enough of the days with a charge in its period. A charge at most
-    /// <paramref name="within"/> days from a charge of the chain is that charge seen twice, not another day.
+    /// True when the chain holds enough of the days with a charge in its period (<see cref="OtherDays"/> are the
+    /// ones it does not hold).
     /// </summary>
     private static bool Covers(List<Keyed> chain, List<Keyed> cluster, int within, RecurrenceOptions o)
+        => chain.Count > 0 && chain.Count >= o.MinChainCoverage * (chain.Count + OtherDays(chain, cluster, within, o));
+
+    /// <summary>
+    /// How many days of the period of the chain have a charge of the cluster that is not of the chain. A charge on
+    /// a day of the chain is the same occurrence, and a charge of the chain seen twice (<see cref="SameCharge"/>)
+    /// is not another day.
+    /// </summary>
+    private static int OtherDays(List<Keyed> chain, List<Keyed> cluster, int within, RecurrenceOptions o)
     {
-        if (chain.Count == 0) return false;
-        var otherDays = cluster
-            .Where(r => r.Date >= chain[0].Date && r.Date <= chain[^1].Date && !Near(r, chain, within))
+        var days = chain.Select(r => r.Date).ToHashSet();
+        return cluster
+            .Where(r => r.Date >= chain[0].Date && r.Date <= chain[^1].Date && !days.Contains(r.Date) && !Near(r, chain, within, o))
             .Select(r => r.Date).Distinct().Count();
-        return chain.Count >= o.MinChainCoverage * (chain.Count + otherDays);
     }
 
     /// <summary>

@@ -894,6 +894,121 @@ public sealed class RecurringRoutesTests
         Assert.Equal(4, factory.Scalar<long>("SELECT count(*) FROM recurring_stream_items"));
     }
 
+    // ---------------------------------------------------------------- review round 3
+
+    /// <summary>
+    /// D1 — the plan of each person, on the 5th and on the 10th; in one month the second one came on the 9th. Two
+    /// items, and the total is the two plans.
+    /// </summary>
+    [Fact]
+    public async Task ThePlanOfEachPerson_WithOneChargeCloseToTheOther_IsTwoItems_AndTheTotalIsWhole()
+    {
+        var clock = new MovingClock(new DateTime(2026, 10, 12, 15, 0, 0, DateTimeKind.Utc));
+        await using var factory = NewFactory(clock);
+        var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
+        foreach (var month in new[] { 7, 8, 9, 10 })
+        {
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER");
+            await ChargeAsync(bruno.Client, "Streaming Exemplo", 39.90m, Day(month, month == 9 ? 9 : 10), "LAZER");
+        }
+
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var list = await ListAsync(ana.Client);
+
+        var items = list.GetProperty("subscriptions").EnumerateArray().ToList();
+        Assert.Equal(2, items.Count);
+        Assert.All(items, item => Assert.Equal(4, item.GetProperty("occurrences").GetInt32()));
+        Assert.Equal(
+            new[] { "Ana Exemplo", "Bruno Exemplo" },
+            items.Select(item => item.GetProperty("person").GetProperty("name").GetString()).Order());
+        Assert.Equal(79.80m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(957.60m, list.GetProperty("annualTotal").GetDecimal());
+    }
+
+    /// <summary>
+    /// What the person cancelled, and the other person registers the last charge afterwards — dated the same day,
+    /// two hours later, or the next day: it is that same charge seen twice, not the service charging again.
+    /// </summary>
+    [Theory]
+    [InlineData(2, "2026-10-05")]
+    [InlineData(24, "2026-10-06")]
+    public async Task Cancelled_AndACopyOfItsLastChargeRegisteredAfterwards_IsNotChargedAgain(int hoursLater, string lastSeen)
+    {
+        var clock = new MovingClock(new DateTime(2026, 10, 5, 16, 0, 0, DateTimeKind.Utc));
+        await using var factory = NewFactory(clock);
+        var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
+        foreach (var month in new[] { 7, 8, 9, 10 })
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER");
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var id = (await ListAsync(ana.Client)).GetProperty("subscriptions")[0].GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, id, "Cancelled")).StatusCode);
+
+        // The next day the other person registers the charge of the 5th, dated after the "Cancelei".
+        clock.UtcNow = new DateTime(2026, 10, 6, 16, 0, 0, DateTimeKind.Utc);
+        await ChargeAsync(bruno.Client, "Streaming Exemplo", 39.90m, Day(10, 5).AddHours(hoursLater), "LAZER");
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var list = await ListAsync(ana.Client);
+
+        Assert.Equal(0, list.GetProperty("subscriptions").GetArrayLength());
+        var hidden = Assert.Single(list.GetProperty("hidden").EnumerateArray());
+        Assert.Equal(id, hidden.GetProperty("id").GetGuid());
+        Assert.Empty(hidden.GetProperty("flags").EnumerateArray());
+        Assert.Equal(4, hidden.GetProperty("occurrences").GetInt32());
+        // The date of the last charge is the one of the copy that was dated later: it is the same charge.
+        Assert.Equal(lastSeen, hidden.GetProperty("lastSeen").GetString());
+        Assert.Equal(0m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(4, factory.Scalar<long>("SELECT count(*) FROM recurring_stream_items"));
+
+        // The other side: a charge of the next month is the service charging again.
+        clock.UtcNow = new DateTime(2026, 11, 5, 16, 0, 0, DateTimeKind.Utc);
+        await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, new DateTime(2026, 11, 5, 15, 0, 0, DateTimeKind.Utc), "LAZER");
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var charged = Assert.Single((await ListAsync(ana.Client)).GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal(id, charged.GetProperty("id").GetGuid());
+        Assert.Contains("ChargedAfterCancel", charged.GetProperty("flags").EnumerateArray().Select(f => f.GetString()));
+    }
+
+    /// <summary>
+    /// A group at the ceiling of rows: the oldest transactions are left out and a yearly stream may not be found.
+    /// It is said in the log, with the group and the ceiling only; a group below the ceiling logs nothing.
+    /// </summary>
+    [Fact]
+    public async Task AGroupThatReachesTheCeilingOfRows_IsLoggedAsAWarning_WithoutAnyDataOfTheTransactions()
+    {
+        var clock = new MovingClock(Now);
+        var logs = new CoupleSync.IntegrationTests.OpenFinance.CapturedLogs();
+        await using var factory = new ChatWebApplicationFactory(
+            enabled: true,
+            config: new Dictionary<string, string?> { ["Recurrence:ProjectionRowCap"] = "5" },
+            configureServices: services =>
+            {
+                clock.Register(services);
+                services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(logs);
+            });
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        var carla = (await OwnerAsync(factory, "Carla Exemplo")).Member;
+        foreach (var month in new[] { 5, 6, 7, 8, 9, 10 })
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER", description: "Plano familia");
+        foreach (var month in new[] { 7, 8, 9, 10 })
+            await ChargeAsync(carla.Client, "Musica Exemplo", 21.90m, Day(month, 5), "LAZER");
+        clock.UtcNow = Now.AddMinutes(1);
+
+        IEnumerable<string> Warnings() => logs.Lines.Where(line => line.StartsWith("Warning ", StringComparison.Ordinal) && line.Contains(nameof(RecurrenceService), StringComparison.Ordinal));
+
+        await ListAsync(carla.Client);
+        Assert.Empty(Warnings());
+
+        await ListAsync(ana.Client);
+        var warning = Assert.Single(Warnings());
+        Assert.Contains(ana.CoupleId.ToString(), warning);
+        Assert.Contains("ceiling of 5 rows", warning);
+        Assert.DoesNotContain("Streaming", warning);
+        Assert.DoesNotContain("Plano", warning);
+        Assert.DoesNotContain("39.9", warning);
+        Assert.DoesNotContain("39,9", warning);
+        Assert.DoesNotContain(ana.UserId.ToString(), warning);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private sealed record Member(HttpClient Client, Guid UserId, Guid CoupleId);
