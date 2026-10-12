@@ -19,7 +19,7 @@ namespace CoupleSync.PostgresTests;
 public sealed class OpenFinanceBillsPostgresTests
 {
     // Named, never "the last one": migrations added later change other things.
-    private const string MigrationBefore = "20261008195546_AddOpenFinanceReconciliation";
+    private const string MigrationBefore = "20261008213746_AddRecurringStreams";
     private const string MigrationUnderTest = "20261009022052_AddCreditCardBills";
     private const string Base = "/api/v1/openfinance";
     private const string Checking = FakePluggyServer.CheckingAccountId;
