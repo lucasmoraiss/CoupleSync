@@ -4,6 +4,8 @@ using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.Transactions.Commands;
 using CoupleSync.Domain.Entities;
 using CoupleSync.UnitTests.Support;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CoupleSync.UnitTests.Transactions;
 
@@ -15,7 +17,8 @@ public sealed class DeleteTransactionCommandHandlerTests
         => new(
             repo ?? new FakeTransactionRepository(),
             NoLinkedLines.Create(),
-            new FixedDateTimeProvider(new DateTime(2026, 4, 21, 12, 0, 0, DateTimeKind.Utc)));
+            new FixedDateTimeProvider(new DateTime(2026, 4, 21, 12, 0, 0, DateTimeKind.Utc)),
+            NullLogger<DeleteTransactionCommandHandler>.Instance);
 
     /// <summary>The mirror answers "no line points to it" and refuses any other call.</summary>
     public class NoLinkedLines : DispatchProxy
@@ -77,6 +80,93 @@ public sealed class DeleteTransactionCommandHandlerTests
         }
     }
 
+    /// <summary>
+    /// A mirror with one line that looks like the transaction, whose reads after the deletion fail
+    /// <see cref="Failures"/> times with an error that is not one of the store's (a dropped connection, a timeout).
+    /// </summary>
+    public class ReadsFailAfterTheDeletion : DispatchProxy
+    {
+        public int Failures { get; set; }
+
+        public int Reads { get; private set; }
+
+        public int Saves { get; private set; }
+
+        public int Discards { get; private set; }
+
+        public static IBankSyncRepository Create() => Create<IBankSyncRepository, ReadsFailAfterTheDeletion>();
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            switch (targetMethod?.Name)
+            {
+                case nameof(IBankSyncRepository.FindAllByLinkedTransactionAsync):
+                    return Task.FromResult<IReadOnlyList<BankTransaction>>([]);
+                case nameof(IBankSyncRepository.FindWaitingIdsBySuspectAsync):
+                    return Task.FromResult<IReadOnlyList<Guid>>([Guid.NewGuid()]);
+                case nameof(IBankSyncRepository.DiscardChanges):
+                    Discards++;
+                    return null;
+                case nameof(IBankSyncRepository.FindByIdsAsync):
+                    Reads++;
+                    if (Reads <= Failures) throw new TimeoutException("the read timed out");
+                    return Task.FromResult<IReadOnlyList<BankTransaction>>([]);
+                case nameof(IBankSyncRepository.GetAccountNamesAsync):
+                    return Task.FromResult<IReadOnlyDictionary<Guid, BankAccountNames>>(new Dictionary<Guid, BankAccountNames>());
+                case nameof(IBankSyncRepository.SaveChangesAsync):
+                    Saves++;
+                    return Task.CompletedTask;
+            }
+
+            throw new InvalidOperationException($"IBankSyncRepository.{targetMethod?.Name} was not expected to be called.");
+        }
+    }
+
+    private sealed class CapturingLogger : ILogger<DeleteTransactionCommandHandler>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel != LogLevel.Warning) return;
+            Assert.Null(exception); // the exception (its text, its stack) is not logged
+            var pairs = (IReadOnlyList<KeyValuePair<string, object?>>)state!;
+            Warnings.Add((string)pairs.Single(p => p.Key == "ExceptionType").Value!);
+        }
+    }
+
+    [Theory]
+    [InlineData(1, 1)] // a passing failure: the second try judges and stores
+    [InlineData(2, 0)] // both tries fail: given up, the deletion stays stored
+    [InlineData(5, 0)]
+    public async Task HandleAsync_WhenJudgingAgainFailsAfterTheDeletionIsStored_NeverFailsTheDeletion(int failures, int expectedSaves)
+    {
+        var repo = new FakeTransactionRepository();
+        var coupleId = Guid.NewGuid();
+        var transaction = BuildTransaction(coupleId);
+        await repo.AddTransactionAsync(transaction, CancellationToken.None);
+        var mirror = ReadsFailAfterTheDeletion.Create();
+        var calls = (ReadsFailAfterTheDeletion)(object)mirror;
+        calls.Failures = failures;
+        var logger = new CapturingLogger();
+        var handler = new DeleteTransactionCommandHandler(
+            repo, mirror, new FixedDateTimeProvider(new DateTime(2026, 4, 21, 12, 0, 0, DateTimeKind.Utc)), logger);
+
+        await handler.HandleAsync(new DeleteTransactionCommand(transaction.Id, Guid.NewGuid(), coupleId), CancellationToken.None);
+
+        Assert.True(repo.DeleteCalled);
+        Assert.Equal(2, calls.Reads); // two tries at most, whatever the failure
+        Assert.Equal(expectedSaves, calls.Saves);
+        Assert.Equal(Math.Min(failures, 2), calls.Discards);
+        // Given up (both tries failed) is told once, by the kind of error alone: never its text.
+        var expectedWarnings = expectedSaves == 0 ? new[] { nameof(TimeoutException) } : [];
+        Assert.Equal(expectedWarnings, logger.Warnings);
+    }
+
     [Fact]
     public async Task HandleAsync_WhenTheRequestIsGivenUpAfterTheDeletionIsStored_StillJudgesAgainTheLinesThatLookedLikeIt()
     {
@@ -87,7 +177,8 @@ public sealed class DeleteTransactionCommandHandlerTests
         var mirror = OneLineLooksLikeIt.Create();
         var calls = (OneLineLooksLikeIt)(object)mirror;
         var handler = new DeleteTransactionCommandHandler(
-            repo, mirror, new FixedDateTimeProvider(new DateTime(2026, 4, 21, 12, 0, 0, DateTimeKind.Utc)));
+            repo, mirror, new FixedDateTimeProvider(new DateTime(2026, 4, 21, 12, 0, 0, DateTimeKind.Utc)),
+            NullLogger<DeleteTransactionCommandHandler>.Instance);
 
         await handler.HandleAsync(new DeleteTransactionCommand(transaction.Id, Guid.NewGuid(), coupleId), calls.Request.Token);
 

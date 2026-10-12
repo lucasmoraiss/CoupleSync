@@ -2,6 +2,7 @@ using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.OpenFinance;
 using CoupleSync.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.Transactions.Commands;
 
@@ -10,15 +11,18 @@ public sealed class DeleteTransactionCommandHandler
     private readonly ITransactionRepository _repository;
     private readonly IBankSyncRepository _bankSync;
     private readonly IDateTimeProvider _clock;
+    private readonly ILogger<DeleteTransactionCommandHandler> _logger;
 
     public DeleteTransactionCommandHandler(
         ITransactionRepository repository,
         IBankSyncRepository bankSync,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        ILogger<DeleteTransactionCommandHandler> logger)
     {
         _repository = repository;
         _bankSync = bankSync;
         _clock = clock;
+        _logger = logger;
     }
 
     public async Task HandleAsync(DeleteTransactionCommand command, CancellationToken cancellationToken)
@@ -55,6 +59,8 @@ public sealed class DeleteTransactionCommandHandler
     /// "it is the same": the transaction first, then the lines). It never fails the deletion, which is stored: a
     /// line answered at this very moment keeps that answer, and the others are tried once more. Nor is it given up
     /// when the request is: the deletion is stored, and a request cancelled now would leave the lines unjudged.
+    /// Whatever fails (a conflict of the store, a dropped connection, a timeout) is tried twice and then left: the
+    /// lines stay as they were, waiting, and the next synchronisation of the bank judges them again.
     /// </summary>
     private async Task JudgeAgainAsync(Guid coupleId, IReadOnlyCollection<Guid> lineIds, DateTime now)
     {
@@ -71,9 +77,15 @@ public sealed class DeleteTransactionCommandHandler
                 await _bankSync.SaveChangesAsync(ct);
                 return;
             }
-            catch (DataStoreException)
+            catch (Exception ex)
             {
+                // Nothing in this request is cancelled (the token is none), so what arrives here is a failure of the
+                // store or of the connection, never the request being given up.
                 _bankSync.DiscardChanges();
+                if (attempt == 2)
+                    _logger.LogWarning(
+                        "Judging the lines again after deleting a transaction failed for couple {CoupleId} ({ExceptionType}).",
+                        coupleId, ex.GetType().Name);
             }
         }
     }
