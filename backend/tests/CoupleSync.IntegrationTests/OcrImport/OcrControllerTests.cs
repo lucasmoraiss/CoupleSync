@@ -115,6 +115,27 @@ public sealed class OcrControllerTests
     }
 
     [Fact]
+    public async Task Upload_WithThreeUnfinishedImports_Returns409InTheSingleErrorFormat_AndStoresNothing()
+    {
+        await using var factory = new OcrWebApplicationFactory();
+        using var client = factory.CreateClient();
+        var token = await RegisterWithCoupleAndGetTokenAsync(client, $"upload-limit-{Guid.NewGuid():N}@example.com");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        for (var i = 0; i < 3; i++)
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/v1/ocr/upload", BuildMultipartContent(JpegBytes, "a.jpg"))).StatusCode);
+
+        var response = await client.PostAsync("/api/v1/ocr/upload", BuildMultipartContent(JpegBytes, "d.jpg"));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("IMPORT_QUEUE_FULL", body.GetProperty("code").GetString());
+        Assert.Equal("Já há 3 extratos sendo lidos. Espere um deles terminar para enviar outro.", body.GetProperty("message").GetString());
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(3, await db.ImportJobs.IgnoreQueryFilters().CountAsync());
+    }
+
+    [Fact]
     public async Task Upload_UnsupportedFile_Returns415()
     {
         await using var factory = new OcrWebApplicationFactory();

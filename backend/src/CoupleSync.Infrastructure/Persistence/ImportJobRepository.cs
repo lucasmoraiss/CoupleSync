@@ -46,4 +46,9 @@ public sealed class ImportJobRepository : IImportJobRepository
             .OrderBy(j => j.UpdatedAtUtc)
             .Take(limit)
             .ToListAsync(ct);
+
+    public Task<int> CountUnfinishedAsync(Guid coupleId, DateTime processingSinceUtc, CancellationToken ct)
+        => _dbContext.ImportJobs.CountAsync(j => j.CoupleId == coupleId
+            && (j.Status == ImportJobStatus.Pending
+                || (j.Status == ImportJobStatus.Processing && j.UpdatedAtUtc > processingSinceUtc)), ct);
 }

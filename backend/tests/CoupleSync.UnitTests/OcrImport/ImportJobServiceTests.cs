@@ -297,8 +297,16 @@ public sealed class ImportJobServiceTests
 
 internal sealed class FakeStorageAdapter : IStorageAdapter
 {
+    private int _uploads;
+
+    /// <summary>How many files were stored.</summary>
+    public int UploadCount => _uploads;
+
     public Task<string> UploadAsync(Guid coupleId, Guid uploadId, Stream content, string mimeType, CancellationToken ct)
-        => Task.FromResult($"couples/{coupleId}/{uploadId}");
+    {
+        Interlocked.Increment(ref _uploads);
+        return Task.FromResult($"couples/{coupleId}/{uploadId}");
+    }
 
     public Task<Stream> DownloadAsync(string storagePath, CancellationToken ct)
         => Task.FromResult<Stream>(new MemoryStream());
@@ -346,6 +354,20 @@ internal sealed class FakeImportJobRepository : IImportJobRepository
     public Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<ImportJob>>(
             Jobs.Where(j => j.Status == ImportJobStatus.Processing && j.UpdatedAtUtc <= cutoffUtc).Take(limit).ToList());
+
+    public async Task<int> CountUnfinishedAsync(Guid coupleId, DateTime processingSinceUtc, CancellationToken ct)
+    {
+        // The count is taken now but delivered a little late (a slow database): two requests without a lock would
+        // both be told there is room for the last slot.
+        var count = CountNow(coupleId, processingSinceUtc);
+        await Task.Delay(20, ct);
+        return count;
+    }
+
+    private int CountNow(Guid coupleId, DateTime processingSinceUtc)
+        => (Jobs.Count(j => j.CoupleId == coupleId
+            && (j.Status == ImportJobStatus.Pending
+                || (j.Status == ImportJobStatus.Processing && j.UpdatedAtUtc > processingSinceUtc))));
 }
 
 internal sealed class FakeDateTimeProvider : IDateTimeProvider

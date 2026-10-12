@@ -457,6 +457,9 @@ public sealed class ImportJobLifecycleTests
 
         public Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<ImportJob>>([]);
+
+        public Task<int> CountUnfinishedAsync(Guid coupleId, DateTime processingSinceUtc, CancellationToken ct)
+            => Task.FromResult(0);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

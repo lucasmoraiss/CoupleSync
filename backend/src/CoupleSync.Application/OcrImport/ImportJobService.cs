@@ -6,6 +6,7 @@ using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
 using CoupleSync.Domain.ValueObjects;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CoupleSync.Application.OcrImport;
 
@@ -22,6 +23,15 @@ public sealed class ImportJobService
     private readonly INotificationEventRepository _notificationEventRepository;
     private readonly ILogger<ImportJobService> _logger;
     private readonly ImportJobRecovery _recovery;
+    private readonly int _maxUnfinishedJobs;
+
+    // Uploads of the same group go through one of these one at a time (count, store, save), so two simultaneous
+    // uploads cannot both see room for the last slot. The API is a single instance, so a lock in the process is
+    // enough; striping by group keeps groups from waiting on each other except by rare hash collision.
+    private static readonly SemaphoreSlim[] UploadLocks =
+        Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
+
+    public const string QueueFullCode = "IMPORT_QUEUE_FULL";
 
     public ImportJobService(
         IImportJobRepository repository,
@@ -31,8 +41,11 @@ public sealed class ImportJobService
         INotificationCaptureRepository ingestRepository,
         IAlertPolicyService alertPolicyService,
         INotificationEventRepository notificationEventRepository,
-        ILogger<ImportJobService> logger)
+        ILogger<ImportJobService> logger,
+        IOptions<ImportQueueOptions>? queueOptions = null)
     {
+        _maxUnfinishedJobs = Math.Max(1, queueOptions?.Value.MaxUnfinishedJobsPerCouple
+            ?? ImportQueueOptions.DefaultMaxUnfinishedJobsPerCouple);
         _repository = repository;
         _storageAdapter = storageAdapter;
         _dateTimeProvider = dateTimeProvider;
@@ -46,6 +59,7 @@ public sealed class ImportJobService
 
     /// <summary>
     /// Uploads the file to storage, creates an ImportJob, and returns the job ID (upload_id).
+    /// A group that already has the maximum of unfinished jobs is refused (409 IMPORT_QUEUE_FULL) before the file is stored.
     /// </summary>
     public async Task<Guid> UploadAsync(
         Guid coupleId,
@@ -56,24 +70,43 @@ public sealed class ImportJobService
         string? fileName = null,
         bool aiCategorizationConsent = false)
     {
-        var uploadId = Guid.NewGuid();
-        var storagePath = await _storageAdapter.UploadAsync(
-            coupleId, uploadId, fileStream, detectedMimeType, ct);
+        var gate = UploadLocks[(coupleId.GetHashCode() & int.MaxValue) % UploadLocks.Length];
+        await gate.WaitAsync(ct);
+        try
+        {
+            var now = _dateTimeProvider.UtcNow;
+            var unfinished = await _repository.CountUnfinishedAsync(
+                coupleId, now - ImportJobRecovery.ProcessingTimeout, ct);
+            if (unfinished >= _maxUnfinishedJobs)
+                throw new ConflictException(QueueFullCode, QueueFullMessage(_maxUnfinishedJobs));
 
-        var job = ImportJob.Create(
-            coupleId,
-            userId,
-            storagePath,
-            detectedMimeType,
-            _dateTimeProvider.UtcNow,
-            fileName,
-            aiCategorizationConsent);
+            var uploadId = Guid.NewGuid();
+            var storagePath = await _storageAdapter.UploadAsync(
+                coupleId, uploadId, fileStream, detectedMimeType, ct);
 
-        await _repository.AddAsync(job, ct);
-        await _repository.SaveChangesAsync(ct);
+            var job = ImportJob.Create(
+                coupleId,
+                userId,
+                storagePath,
+                detectedMimeType,
+                now,
+                fileName,
+                aiCategorizationConsent);
 
-        return job.Id;
+            await _repository.AddAsync(job, ct);
+            await _repository.SaveChangesAsync(ct);
+
+            return job.Id;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
+
+    public static string QueueFullMessage(int limit) => limit == 1
+        ? "Já há 1 extrato sendo lido. Espere ele terminar para enviar outro."
+        : $"Já há {limit} extratos sendo lidos. Espere um deles terminar para enviar outro.";
 
     /// <summary>
     /// Returns the ImportJob for the given uploadId scoped to coupleId, or null if not found.
