@@ -7,15 +7,15 @@ describe('mensagens de falha da importação', () => {
     );
   });
 
-  it('PDF_TIMEOUT: extrato grande demais, pede um período menor', () => {
+  it('PDF_TIMEOUT: não afirma a causa, só sugere período menor se for grande', () => {
     expect(ocrFailureMessage('PDF_TIMEOUT')).toBe(
-      'O extrato é grande demais para ler de uma vez. Exporte um período menor (por exemplo, um mês) e envie de novo.',
+      'A leitura do extrato demorou demais e foi interrompida. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.',
     );
   });
 
   it('PDF_UNREADABLE: PDF que não abre, pede para baixar de novo no banco', () => {
     expect(ocrFailureMessage('PDF_UNREADABLE')).toBe(
-      'Não conseguimos abrir este PDF. Baixe o extrato de novo no app do banco e envie.',
+      'Não conseguimos abrir este PDF. Baixe o extrato de novo no app ou no site do banco e envie.',
     );
   });
 
@@ -47,5 +47,6 @@ describe('mensagens de falha da importação', () => {
   it('código desconhecido ou ausente cai na mensagem genérica', () => {
     expect(ocrFailureMessage('processing_error')).toBe('Falha no processamento. Tente novamente.');
     expect(ocrFailureMessage(undefined)).toBe('Falha no processamento. Tente novamente.');
+    expect(ocrFailureMessage(null)).toBe('Falha no processamento. Tente novamente.');
   });
 });
