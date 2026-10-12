@@ -14,11 +14,28 @@ describe('botão da tela de falha da importação', () => {
     expect(JOB_FAILURE_ACTION_LABEL).toBe('Escolher arquivo');
   });
 
-  it('a tela de importação passa o rótulo só na falha do job; o erro de envio fica com o padrão', () => {
-    expect(screen).toContain('retryLabel={state.fromJob ? JOB_FAILURE_ACTION_LABEL : undefined}');
-    expect(screen).toContain("setState({ phase: 'error', message: errorMessage, fromJob: true });");
-    // Só a falha do job (a linha acima) marca fromJob; o erro de envio e o de não-PDF não podem ter a marca.
-    expect(screen.match(/fromJob: true/g)).toHaveLength(1);
+  it('a tela de importação entrega o rótulo do estado de erro ao botão (nada de rótulo fixo)', () => {
+    expect(screen).toContain('retryLabel={state.retryLabel}');
+    expect(screen).not.toContain('fromJob');
+  });
+
+  it('falha do job, arquivo ilegível e não-PDF pedem outro arquivo; o erro de envio decide pelo código da API', () => {
+    expect(screen).toContain(
+      "setState({ phase: 'error', message: errorMessage, retryLabel: JOB_FAILURE_ACTION_LABEL });",
+    );
+    expect(screen).toContain(
+      "setState({ phase: 'error', message: PDF_READABILITY_ERROR, retryLabel: JOB_FAILURE_ACTION_LABEL });",
+    );
+    expect(screen).toContain("setState({ phase: 'error', message: NOT_PDF_ERROR, retryLabel: JOB_FAILURE_ACTION_LABEL });");
+    // O erro do envio (rede, servidor, limite, arquivo grande) passa pela função testada em failureMessage.test.ts:
+    // sem ela, erro de rede ficaria sem "Tentar novamente" ou o limite com ele.
+    expect(screen).toContain("setState({ phase: 'error', message, retryLabel: uploadErrorRetryLabel(err) });");
+  });
+
+  it("todo setState de erro da tela diz o rótulo de forma explícita: nenhum erro novo herda 'Escolher arquivo' sem querer", () => {
+    const errorStates = screen.match(/setState\(\{ phase: 'error'[^;]*\);/g) ?? [];
+    expect(errorStates).toHaveLength(4);
+    for (const call of errorStates) expect(call).toContain('retryLabel:');
   });
 
   it('ErrorState: rótulo opcional, padrão "Tentar novamente" para os demais usos, acessibilidade acompanha', () => {
