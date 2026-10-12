@@ -971,7 +971,7 @@ vai ao Google") e esquema igual ao dos leitores locais.
   Quem tinha aceitado a versão anterior **volta a ser perguntado** (`onboardingPending`), vendo o texto novo; o
   outro membro não é perguntado nem avisado até alguém aceitar a versão nova. "Agora não" encerra o aceite antigo
   da pessoa (fica revogado, não apagado) e a pergunta não volta. O app instalado sem a atualização ainda envia a
-  versão antiga: o servidor recusa com 409 `AI_CONSENT_VERSION_OUTDATED` ("Atualize o app…").
+  versão antiga: o servidor recusa com 409 `AI_CONSENT_VERSION_OUTDATED` ("Feche o app e abra de novo para ver o texto novo antes de ativar").
 - O aceite local antigo (`aiChat.acceptedAt`) **não é migrado** (o texto mudou); a tela de boas-vindas (7.3)
   pergunta de novo.
 

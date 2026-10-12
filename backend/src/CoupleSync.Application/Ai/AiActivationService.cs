@@ -213,7 +213,7 @@ public sealed class AiActivationService
         {
             throw new ConflictException(
                 "AI_CONSENT_VERSION_OUTDATED",
-                "O texto sobre a análise com IA mudou. Atualize o app e leia o texto novo antes de ativar.");
+                "O texto sobre a análise com IA mudou. Feche o app e abra de novo para ver o texto novo antes de ativar.");
         }
 
         var now = _clock.UtcNow;

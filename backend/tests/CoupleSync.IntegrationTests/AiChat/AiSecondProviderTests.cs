@@ -102,7 +102,7 @@ public sealed class AiSecondProviderTests
         Assert.Equal(HttpStatusCode.Conflict, old.StatusCode);
         var error = await ErrorOf(old);
         Assert.Equal("AI_CONSENT_VERSION_OUTDATED", error.Code);
-        Assert.Contains("Atualize o app", error.Message);
+        Assert.Equal("O texto sobre a análise com IA mudou. Feche o app e abra de novo para ver o texto novo antes de ativar.", error.Message);
         Assert.False((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
         Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 2"));
 
