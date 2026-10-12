@@ -7,10 +7,30 @@ describe('mensagens de falha da importação', () => {
     );
   });
 
-  it('PDF_TIMEOUT e PROCESSING_TIMEOUT pedem para enviar de novo', () => {
-    const expected = 'A leitura do extrato demorou demais e foi interrompida. Envie o arquivo novamente.';
-    expect(ocrFailureMessage('PDF_TIMEOUT')).toBe(expected);
-    expect(ocrFailureMessage('PROCESSING_TIMEOUT')).toBe(expected);
+  it('PDF_TIMEOUT: extrato grande demais, pede um período menor', () => {
+    expect(ocrFailureMessage('PDF_TIMEOUT')).toBe(
+      'O extrato é grande demais para ler de uma vez. Exporte um período menor (por exemplo, um mês) e envie de novo.',
+    );
+  });
+
+  it('PDF_UNREADABLE: PDF que não abre, pede para baixar de novo no banco', () => {
+    expect(ocrFailureMessage('PDF_UNREADABLE')).toBe(
+      'Não conseguimos abrir este PDF. Baixe o extrato de novo no app do banco e envie.',
+    );
+  });
+
+  it('PDF_WORKER_FAILED: não promete que repetir resolve, sugere período menor', () => {
+    expect(ocrFailureMessage('PDF_WORKER_FAILED')).toBe(
+      'Não conseguimos ler este extrato. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.',
+    );
+  });
+
+  it('PROCESSING_TIMEOUT: leitura interrompida (não é tamanho), tem texto próprio', () => {
+    const text = ocrFailureMessage('PROCESSING_TIMEOUT');
+    expect(text).toBe(
+      'A leitura foi interrompida antes de terminar. Envie o arquivo de novo; se acontecer outra vez, exporte um período menor (por exemplo, um mês).',
+    );
+    expect(text).not.toBe(ocrFailureMessage('PDF_TIMEOUT'));
   });
 
   it('códigos que já existiam seguem com a mesma mensagem', () => {
