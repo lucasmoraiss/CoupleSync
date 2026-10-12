@@ -32,6 +32,8 @@
     <Compile Include="..\CoupleSync.UnitTests\Domain\TransactionCategoriesTests.cs" Link="TransactionCategoriesTests.cs" />
     <!-- The text rules of the AI layer compare without accents: the same cases, without ICU. -->
     <Compile Include="..\CoupleSync.UnitTests\Ai\AiTextRulesTests.cs" Link="AiTextRulesTests.cs" />
+    <!-- The reconciliation rules compare descriptions, names of people and of banks without accents: the same cases, without ICU. -->
+    <Compile Include="..\CoupleSync.UnitTests\OpenFinance\BankReconciliationRulesTests.cs" Link="BankReconciliationRulesTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

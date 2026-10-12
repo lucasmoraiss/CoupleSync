@@ -2,6 +2,13 @@
 // confirmar. Nada entra sem confirmação; "Selecionar tudo" confirma num toque. O valor não é editável: só a
 // categoria. Lançamento que o banco ainda não efetivou, sem valor ou em outra moeda aparece em cinza e sem caixa.
 //
+// Conciliação: a linha que parece uma transação que o app já tinha não tem caixa nem entra em "Selecionar tudo";
+// ela mostra "Parece a mesma de: ..." e os botões "É a mesma" e "É outra". O servidor confere de novo ao confirmar:
+// a linha que ele segurar (parece uma compra já registrada) não é contada como registrada, o aviso diz quantas
+// esperam a resposta e a lista recarregada as traz marcadas. O que o servidor ignorou sozinho
+// (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas, recolhida, com "restaurar"
+// em toda linha: nas saídas e nas entradas.
+//
 // Aba oculta cujo pai é Transações. A tela é remontada a cada visita (resetOnFocus): seleção, categorias
 // trocadas e avisos de uma visita não ficam para a seguinte, e a lista é a que o servidor tem agora.
 import React, { useEffect, useMemo, useState } from 'react';
@@ -31,23 +38,37 @@ import { getCategoryLabel } from '@/modules/transactions/categories';
 import { useCategories } from '@/modules/transactions/useCategories';
 import { BANK_REVIEW_KEY, useBankReview } from '@/modules/openfinance/useBankReview';
 import {
+  ANSWER_OTHER_FAILED_TEXT,
+  ANSWER_SAME_FAILED_TEXT,
   allSelected,
+  answerableDuplicateCount,
+  answerDuplicateNotice,
+  answerDuplicateRequest,
   buildConfirmBatches,
+  canAnswerDuplicate,
+  chosenOfHeld,
   confirmInBatches,
   dayLabel,
+  duplicateNoticeText,
   groupByDay,
+  hasSuspectedDuplicate,
+  ignoredLineText,
   initialReviewMonth,
   installmentText,
   isSelectable,
   lineAmountText,
   lineTitle,
+  matchText,
   monthTitle,
   pruneSelection,
+  restoreLabel,
+  restoredNoticeText,
   selectAllIds,
   selectedTotalBrl,
   shiftMonth,
   toggleSelected,
   unselectableReason,
+  type DuplicateAnswer,
 } from '@/modules/openfinance/review';
 import type { BankReviewLineResponse } from '@/types/api';
 
@@ -67,18 +88,21 @@ function BankReviewScreen() {
   const [chosen, setChosen] = useState<Readonly<Record<string, string>>>({});
   const [pickingFor, setPickingFor] = useState<BankReviewLineResponse | null>(null);
   const [showDiscarded, setShowDiscarded] = useState(false);
+  const [showIgnored, setShowIgnored] = useState(false);
   /** O que está em andamento: uma ação por vez. */
-  const [busy, setBusy] = useState<'confirm' | 'discard' | 'restore' | null>(null);
+  const [busy, setBusy] = useState<'confirm' | 'discard' | 'restore' | 'answer' | null>(null);
   const [notice, setNotice] = useState<{ readonly text: string; readonly error: boolean } | null>(null);
 
   // A primeira resposta (mês corrente do servidor) diz onde há pendências: a revisão abre no mês mais recente
   // que tem algo esperando.
   useEffect(() => {
-    if (month === null && data) setMonth(initialReviewMonth(data.pendingByMonth, data.month));
+    if (month === null && data) setMonth(initialReviewMonth(data.pendingByMonth, data.month, data.ignoredByMonth));
   }, [month, data]);
 
   const expenses = useMemo(() => data?.expenses ?? [], [data]);
   const discarded = data?.discarded ?? [];
+  // Servidor anterior à conciliação não manda a lista: não há seção.
+  const ignored = data?.ignored ?? [];
   const sections = useMemo(
     () => groupByDay(expenses).map((group) => ({ title: group.label, day: group.day, data: [...group.lines] })),
     [expenses],
@@ -128,7 +152,7 @@ function BankReviewScreen() {
       if (outcome.kind === 'stale') return;
       if (outcome.kind === 'done') {
         setSelected(new Set());
-        setChosen({});
+        setChosen((current) => chosenOfHeld(current, outcome.heldIds));
       }
       setNotice({ text: outcome.text, error: outcome.kind === 'failed' });
     } finally {
@@ -163,6 +187,31 @@ function BankReviewScreen() {
     }
   };
 
+  /** "É a mesma" (nada é criado) ou "É outra" (despesa nova) para uma linha com possível duplicada. */
+  const handleAnswer = async (answer: DuplicateAnswer, line: BankReviewLineResponse) => {
+    if (busy || !canAnswerDuplicate(line)) return;
+    const epoch = getSessionEpoch();
+    setBusy('answer');
+    setNotice(null);
+    try {
+      const result = (await openFinanceApiClient.confirmReview(answerDuplicateRequest(answer, line, chosen))).data;
+      if (getSessionEpoch() !== epoch) return;
+      setNotice({ text: answerDuplicateNotice(answer, line, chosen, result), error: false });
+    } catch (err) {
+      if (getSessionEpoch() !== epoch) return;
+      setNotice({
+        text: getApiErrorMessage(err, answer === 'same' ? ANSWER_SAME_FAILED_TEXT : ANSWER_OTHER_FAILED_TEXT),
+        error: true,
+      });
+    } finally {
+      if (getSessionEpoch() === epoch) {
+        setBusy(null);
+        // As duas respostas mexem nas transações: uma cria, a outra completa a que já existia.
+        invalidateEverything();
+      }
+    }
+  };
+
   const handleRestore = async (line: BankReviewLineResponse) => {
     if (busy) return;
     const epoch = getSessionEpoch();
@@ -170,6 +219,9 @@ function BankReviewScreen() {
     setNotice(null);
     try {
       await openFinanceApiClient.restoreReview([line.id]);
+      if (getSessionEpoch() !== epoch) return;
+      const restoredText = restoredNoticeText(line);
+      if (restoredText) setNotice({ text: restoredText, error: false });
     } catch (err) {
       if (getSessionEpoch() !== epoch) return;
       setNotice({ text: getApiErrorMessage(err, 'Não foi possível restaurar. Tente novamente.'), error: true });
@@ -199,6 +251,7 @@ function BankReviewScreen() {
 
   const otherMonths = data.pendingByMonth.filter((m) => m.month !== month && m.pending > 0);
   const total = selectedTotalBrl(expenses, selected);
+  const duplicatesNotice = duplicateNoticeText(answerableDuplicateCount(expenses));
 
   const header = (
     <View style={styles.header}>
@@ -262,6 +315,15 @@ function BankReviewScreen() {
         </Text>
       ) : null}
 
+      {duplicatesNotice ? (
+        <View style={styles.duplicatesNotice} accessible accessibilityRole="alert">
+          <Text style={styles.duplicatesNoticeText}>{duplicatesNotice}</Text>
+          <Text style={styles.muted}>
+            Elas parecem compras que já estão no app. Diga em cada uma se é a mesma ou se é outra.
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle} accessibilityRole="header">Despesas ({expenses.length})</Text>
         {expenses.length > 0 ? (
@@ -295,6 +357,47 @@ function BankReviewScreen() {
 
   const footer = (
     <View style={styles.footer}>
+      {ignored.length > 0 ? (
+        <>
+          <TouchableOpacity
+            style={styles.collapse}
+            onPress={() => setShowIgnored((value) => !value)}
+            accessibilityRole="button"
+            accessibilityLabel={`Ignoradas, ${ignored.length}`}
+            accessibilityState={{ expanded: showIgnored }}
+          >
+            <Text style={styles.sectionTitle}>Ignoradas ({ignored.length})</Text>
+            <Text style={styles.monthArrow}>{showIgnored ? '▾' : '▸'}</Text>
+          </TouchableOpacity>
+          {showIgnored ? (
+            <Text style={styles.muted}>
+              Não viram despesa: são dinheiro passando entre contas do grupo ou o pagamento da fatura (as despesas são as compras do cartão).
+            </Text>
+          ) : null}
+          {showIgnored
+            ? ignored.map((line) => (
+                <View key={line.id} style={[styles.line, styles.lineMuted]}>
+                  <View style={styles.lineBody}>
+                    <Text style={styles.lineTitleMuted} numberOfLines={1}>{lineTitle(line)}</Text>
+                    <Text style={styles.muted}>{ignoredLineText(line)}</Text>
+                    <Text style={styles.muted} numberOfLines={1}>
+                      {[line.bankName, line.accountName].filter((part) => !!part).join(' · ')}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.smallBtn}
+                    onPress={() => void handleRestore(line)}
+                    disabled={busy !== null}
+                    accessibilityRole="button"
+                    accessibilityLabel={restoreLabel(line)}
+                  >
+                    <Text style={styles.smallBtnText}>restaurar</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            : null}
+        </>
+      ) : null}
       {discarded.length > 0 ? (
         <>
           <TouchableOpacity
@@ -347,12 +450,14 @@ function BankReviewScreen() {
         renderItem={({ item: line }) => {
           const selectable = isSelectable(line);
           const whyNot = unselectableReason(line);
+          const duplicate = hasSuspectedDuplicate(line);
+          const answerable = canAnswerDuplicate(line);
           const checked = selected.has(line.id);
           const category = chosen[line.id] ?? line.suggestedCategory;
           const installment = installmentText(line);
           const title = lineTitle(line);
           return (
-            <View style={[styles.line, !selectable && styles.lineMuted]}>
+            <View style={[styles.line, !selectable && !answerable && styles.lineMuted, duplicate && styles.lineDuplicate]}>
               {selectable ? (
                 <TouchableOpacity
                   style={styles.checkTouch}
@@ -367,14 +472,15 @@ function BankReviewScreen() {
                   </View>
                 </TouchableOpacity>
               ) : (
-                // Pendente no banco, sem valor ou em outra moeda: sem caixa. O espaço fica, para as linhas alinharem.
+                // Pendente no banco, sem valor, em outra moeda ou com possível duplicada (essa se responde pelos
+                // botões): sem caixa. O espaço fica, para as linhas alinharem.
                 <View style={styles.checkTouch} />
               )}
               <View style={styles.lineBody}>
                 <View style={styles.lineTop}>
-                  <Text style={selectable ? styles.lineTitle : styles.lineTitleMuted} numberOfLines={1}>{title}</Text>
+                  <Text style={selectable || answerable ? styles.lineTitle : styles.lineTitleMuted} numberOfLines={1}>{title}</Text>
                   <Text
-                    style={selectable ? styles.amount : styles.amountMuted}
+                    style={selectable || answerable ? styles.amount : styles.amountMuted}
                     accessibilityLabel={line.currency === 'BRL' ? spokenBRL(line.amount) : lineAmountText(line.amount, line.currency)}
                   >
                     {lineAmountText(line.amount, line.currency)}
@@ -387,14 +493,41 @@ function BankReviewScreen() {
                   {[line.bankName, line.accountName, installment].filter((part) => !!part).join(' · ')}
                 </Text>
                 {whyNot ? <Text style={styles.pendingText}>{whyNot}</Text> : null}
+                {line.match ? (
+                  <>
+                    <Text style={styles.matchText}>{matchText(line.match)}</Text>
+                    <View style={styles.answerRow}>
+                      <TouchableOpacity
+                        style={[styles.answerBtn, (busy !== null || !answerable) && styles.disabled]}
+                        onPress={() => void handleAnswer('same', line)}
+                        disabled={busy !== null || !answerable}
+                        accessibilityRole="button"
+                        accessibilityLabel={`É a mesma: ${title} já está no app, não registrar de novo`}
+                        accessibilityState={{ disabled: busy !== null || !answerable }}
+                      >
+                        <Text style={styles.answerText}>É a mesma</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.answerBtn, (busy !== null || !answerable) && styles.disabled]}
+                        onPress={() => void handleAnswer('other', line)}
+                        disabled={busy !== null || !answerable}
+                        accessibilityRole="button"
+                        accessibilityLabel={`É outra: registrar ${title} como uma despesa nova`}
+                        accessibilityState={{ disabled: busy !== null || !answerable }}
+                      >
+                        <Text style={styles.answerText}>É outra</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : null}
                 <View style={styles.lineActions}>
                   <TouchableOpacity
                     style={styles.chip}
                     onPress={() => setPickingFor(line)}
-                    disabled={busy !== null || !selectable}
+                    disabled={busy !== null || !(selectable || answerable)}
                     accessibilityRole="button"
                     accessibilityLabel={`Categoria: ${getCategoryLabel(category)}. Toque para trocar`}
-                    accessibilityState={{ disabled: busy !== null || !selectable }}
+                    accessibilityState={{ disabled: busy !== null || !(selectable || answerable) }}
                   >
                     <Text style={styles.chipText}>{getCategoryLabel(category)}</Text>
                   </TouchableOpacity>
@@ -499,6 +632,13 @@ const styles = StyleSheet.create({
   dayHeader: { fontSize: 13, fontWeight: '700', color: colors.primaryLight, marginTop: 16, marginBottom: 6 },
   line: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8 },
   lineMuted: { opacity: 0.6 },
+  lineDuplicate: { borderColor: colors.warning },
+  duplicatesNotice: { borderRadius: 12, borderWidth: 1, borderColor: colors.warning, padding: 12, gap: 4 },
+  duplicatesNoticeText: { fontSize: 15, fontWeight: '700', color: colors.warning },
+  matchText: { fontSize: 13, color: colors.warning, lineHeight: 19 },
+  answerRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  answerBtn: { flex: 1, minHeight: 44, borderRadius: 10, borderWidth: 1, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  answerText: { color: colors.primaryLight, fontSize: 14, fontWeight: '700' },
   lineBody: { flex: 1, gap: 4 },
   lineTop: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
   lineTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text },

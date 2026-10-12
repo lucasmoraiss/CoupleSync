@@ -169,7 +169,8 @@ public sealed class PluggyHttpClient : IPluggyClient
                     card is { } billed ? Text(billed, "billId") : null,
                     Text(element, "status"),
                     Number(element, "balance"),
-                    element.GetRawText()));
+                    element.GetRawText(),
+                    payment is { } sent && Child(sent, "payer") is { } payer ? Text(payer, "name") : null));
             }
 
             var totalPages = Whole(root, "totalPages");
