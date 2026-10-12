@@ -209,7 +209,9 @@ describe('"Selecionar tudo" continua só nas despesas', () => {
 
     expect(selectAllIds([expense, income])).toEqual(['out-1']);
     expect(allSelected([expense, income], new Set(['out-1']))).toBe(true);
-    expect(buildConfirmBatches([expense, income], new Set(['out-1', 'in-1']), {})).toEqual([{ expenses: [{ id: 'out-1' }] }]);
+    expect(buildConfirmBatches([expense, income], new Set(['out-1', 'in-1']), {})).toEqual([
+      { expenses: [{ id: 'out-1' }], holdPossibleDuplicates: true },
+    ]);
   });
 });
 
