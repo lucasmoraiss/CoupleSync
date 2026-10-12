@@ -1,3 +1,6 @@
+// Rótulo do botão da tela de falha da importação: ele só volta para a escolha do arquivo, não reenvia.
+export const JOB_FAILURE_ACTION_LABEL = 'Escolher arquivo';
+
 // Mensagem (pt-BR) para o código de erro com que o job de importação terminou em Failed.
 export function ocrFailureMessage(errorCode?: string | null, quotaResetDate?: string | null): string {
   switch (errorCode) {
