@@ -726,6 +726,27 @@ public sealed class OpenFinanceBillsTests
         => await OkAsync(member.Client.GetAsync($"{Base}/accounts"));
 
     [Fact]
+    public async Task TheAccountsOfWhoIsNoLongerInTheGroup_AreStillListed_UnderANameThatIsNoOnes()
+    {
+        // Data left behind by someone who connected and then left, while leaving still kept the connection.
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory);
+        var (bruno, brunoConnection) = await WithOtherBankAsync(factory, "Bruno Modelo Reis", ana.JoinCode);
+        await DoneAsync(factory, ana, anaConnection);
+        await DoneAsync(factory, bruno, brunoConnection);
+        await factory.ExecuteAsync("DELETE FROM couple_members WHERE user_id = @user", ("@user", bruno.UserId));
+
+        var people = (await AccountsAsync(ana)).GetProperty("people");
+
+        Assert.Equal(2, people.GetArrayLength());
+        Assert.Equal(("Ana Exemplo Souza", true), (people[0].GetProperty("userName").GetString(), people[0].GetProperty("isMe").GetBoolean()));
+        Assert.Equal(bruno.UserId, people[1].GetProperty("userId").GetGuid());
+        Assert.Equal("Pessoa que saiu do grupo", people[1].GetProperty("userName").GetString());
+        Assert.False(people[1].GetProperty("isMe").GetBoolean());
+        Assert.Equal("Poupança", Assert.Single(people[1].GetProperty("accounts").EnumerateArray()).GetProperty("name").GetString());
+    }
+
+    [Fact]
     public async Task Accounts_AreListedByPerson_AccountsWithBalance_AndCardsWithTheCurrentBillTheNextAndThePreviousOnes()
     {
         await using var factory = NewFactory();
