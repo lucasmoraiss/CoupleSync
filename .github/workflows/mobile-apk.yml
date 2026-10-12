@@ -88,18 +88,24 @@ jobs:
           fi
           echo "build_id=${BUILD_ID}" >> "$GITHUB_OUTPUT"
 
-      # Retrieve the download URL using the exact build ID to avoid race conditions
+      # Retrieve the download URL using the exact build ID to avoid race conditions. In a tag build the same answer
+      # also says which version the APK declares: it has to be the tag, checked before anything is downloaded or published.
       - name: Retrieve APK download URL from EAS
         id: get-apk
         working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           BUILD_ID: ${{ steps.eas-build.outputs.build_id }}
+          REF: ${{ github.ref }}
+          TAG_NAME: ${{ github.ref_name }}
         run: |
-          APK_URL=$(eas build:view \
-            "${BUILD_ID}" \
-            --json \
-            | jq -r '.artifacts.buildUrl')
+          eas build:view "${BUILD_ID}" --json > "${RUNNER_TEMP}/eas-build.json"
+
+          case "${REF}" in
+            refs/tags/v*) bash "${GITHUB_WORKSPACE}/scripts/check-built-apk-version.sh" "${TAG_NAME}" "${RUNNER_TEMP}/eas-build.json" ;;
+          esac
+
+          APK_URL=$(jq -r '.artifacts.buildUrl' "${RUNNER_TEMP}/eas-build.json")
 
           if [ -z "${APK_URL}" ] || [ "${APK_URL}" = "null" ]; then
             echo "::error::Could not retrieve APK URL from EAS build."
@@ -133,33 +139,78 @@ jobs:
       contents: write
 
     steps:
+      # Before the download: checkout cleans the workspace. The scripts come from the tag's own commit (already checked to be in main).
+      - name: Checkout (scripts)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
       - name: Download APK artifact
         uses: actions/download-artifact@v4
         with:
           name: couplesync-production-apk
 
-      # Creates the Release on the first run for a tag; a re-run replaces the asset (same fixed name).
-      - name: Create or update the Release
+      # What to do depends on the Release of this tag (scripts/release-action.sh):
+      #   criar     -> does not exist: created together with the asset, as the latest.
+      #   nada      -> published with couplesync.apk uploaded: untouched (a re-run must not take the fixed link down).
+      #   completar -> left as a draft or without the file: sends what is missing and publishes it. Which Release is
+      #                the "latest" is the owner's decision, so --latest is not passed here.
+      - name: Create or complete the Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          if gh release view "${TAG}" > /dev/null 2>&1; then
-            echo "Release ${TAG} already exists: replacing the asset."
-            gh release upload "${TAG}" couplesync.apk --clobber
-          else
-            # Created together with the asset, so the fixed "latest" link never points at an empty Release.
-            gh release create "${TAG}" couplesync.apk \
-              --verify-tag \
-              --latest \
-              --title "CoupleSync ${TAG}" \
-              --notes "APK Android do CoupleSync ${TAG}. Baixe o arquivo couplesync.apk abaixo e instale por cima do app atual."
+          VIEW="${RUNNER_TEMP}/release-view.json"
+          ERR="${RUNNER_TEMP}/release-view.err"
+          : > "${VIEW}"
+          if ! gh release view "${TAG}" --json isDraft,assets > "${VIEW}" 2> "${ERR}"; then
+            : > "${VIEW}"
+            if ! grep -qi "release not found" "${ERR}"; then
+              cat "${ERR}"
+              echo "::error::Could not read the Release ${TAG}. Nothing was changed."
+              exit 1
+            fi
+            # A draft is not found by tag: look for it in the list before deciding that there is none.
+            gh release list --limit 100 --json tagName,isDraft > "${RUNNER_TEMP}/release-list.json"
+            if node -e "const l = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); process.exit(l.some(r => r.tagName === process.env.TAG && r.isDraft === true) ? 0 : 1)" "${RUNNER_TEMP}/release-list.json"; then
+              echo '{"isDraft":true,"assets":[]}' > "${VIEW}"
+            fi
           fi
+
+          ACTION=$(bash scripts/release-action.sh "${VIEW}")
+          NEEDS_FILE=$(bash scripts/release-action.sh "${VIEW}" --arquivo)
+
+          case "${ACTION}" in
+            criar)
+              # Created together with the asset, so the fixed "latest" link never points at an empty Release.
+              gh release create "${TAG}" couplesync.apk \
+                --verify-tag \
+                --latest \
+                --title "CoupleSync ${TAG}" \
+                --notes "APK Android do CoupleSync ${TAG}. Baixe o arquivo couplesync.apk abaixo e instale por cima do app atual."
+              RESULT="Release criada com o arquivo."
+              ;;
+            nada)
+              RESULT="A Release ja estava publicada com couplesync.apk: nada foi alterado."
+              ;;
+            completar)
+              if [ "${NEEDS_FILE}" = "sim" ]; then
+                gh release upload "${TAG}" couplesync.apk --clobber
+              fi
+              gh release edit "${TAG}" --draft=false
+              RESULT="Release que estava incompleta foi completada e publicada (a escolha da mais recente nao foi alterada)."
+              ;;
+            *)
+              echo "::error::Unexpected decision '${ACTION}'."
+              exit 1
+              ;;
+          esac
 
           {
             echo "## APK publicado"
             echo ""
+            echo "- ${RESULT}"
             echo "- Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
             echo "- Link fixo (sempre o mais novo): ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/latest/download/couplesync.apk"
           } >> "${GITHUB_STEP_SUMMARY}"
