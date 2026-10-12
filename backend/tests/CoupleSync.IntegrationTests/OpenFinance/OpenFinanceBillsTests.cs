@@ -361,7 +361,8 @@ public sealed class OpenFinanceBillsTests
     {
         await using var factory = NewFactory();
         var (ana, connection) = await AnaAsync(factory);
-        // The checking account is read before the card: the bills arrive after the debits, in the same synchronisation.
+        // The fake lists the checking account before the card, so the bills arrive after the debits in this synchronisation
+        // (the order is not guaranteed in general; the rule works in either order).
         Bank(factory, Checking,
             Debit("t27-pays-the-bill", Noon(), 1500.25m, "Débito automático"),
             Debit("t27-same-value-later", Noon().AddHours(2), 1500.25m, "Outra coisa do mesmo valor"),
@@ -450,7 +451,7 @@ public sealed class OpenFinanceBillsTests
         await DoneAsync(factory, ana, connection);
         Assert.Equal(2, (await BillRowsAsync(factory)).Count);
 
-        // The bills do not change; the debit arrives now, in the account read BEFORE the card. On the card itself a
+        // The bills do not change; the debit arrives now (the bill is already mirrored). On the card itself a
         // purchase of the value of the other bill arrives too: a purchase, never a payment.
         Bank(factory, Checking, Debit("t27-arrives-later", Noon(), 880.40m, "PIX enviado"), Debit("t27-other-later", Noon(), 12.00m));
         Bank(factory, Card, new FakeTransaction("t27-purchase-of-the-value", Noon(), 91.00m) { Description = "Loja Exemplo" });
@@ -590,8 +591,8 @@ public sealed class OpenFinanceBillsTests
         await DoneAsync(factory, carla, carlaConnection);
         Assert.Equal(("Ignored", "BillPayment"), await StateAsync(factory, "t27-carla-ignored"));
 
-        // Ana's bill of that value is still unpaid for Ana's group: her debit is its payment (the debit is in the
-        // mirror before the bill: the account is read before the card).
+        // Ana's bill of that value is still unpaid for Ana's group: her debit is its payment (the debit is usually in the
+        // mirror before the bill: the fake lists the account before the card; the order is not guaranteed).
         Bills(factory, Card, ClosedBill("bill-27-ana-unpaid", PaymentDay().AddDays(4), 610.00m));
         Bank(factory, Checking, Debit("t27-ana-pays", Noon(), 610.00m, "Débito automático"));
         await DoneAsync(factory, ana, anaConnection);
