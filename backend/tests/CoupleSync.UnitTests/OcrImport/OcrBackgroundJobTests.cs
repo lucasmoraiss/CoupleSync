@@ -5,7 +5,9 @@ using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
 using CoupleSync.Infrastructure.BackgroundJobs;
 using CoupleSync.Infrastructure.Integrations.Gemini;
+using CoupleSync.Infrastructure.Integrations.Storage;
 using CoupleSync.UnitTests.Support;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -67,7 +69,7 @@ public sealed class OcrBackgroundJobTests
     {
         var provider = new ThrowingOcrProvider(() => new FileNotFoundException("Stored file not found at resolved path."));
         var (backgroundJob, jobs, _) = Build(provider);
-        var job = AddPendingJob(jobs);
+        var job = AddPendingJob(jobs, ageMinutes: 3);
 
         for (var poll = 0; poll < 5; poll++)
             await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
@@ -80,12 +82,174 @@ public sealed class OcrBackgroundJobTests
     }
 
     [Fact]
+    public async Task APendingJobWhoseFileIsMissing_WithinTheGracePeriod_StaysPendingWithoutSpendingAnAttempt_AndIsTriedAgain()
+    {
+        // During a deploy the other instance may own the file: this one must not fail the job.
+        var provider = new ThrowingOcrProvider(() => new FileNotFoundException());
+        var (backgroundJob, jobs, _) = Build(provider);
+        var job = AddPendingJob(jobs, ageMinutes: 1);
+
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(ImportJobStatus.Pending, job.Status);
+        Assert.Equal(0, job.RetryCount);
+        Assert.Null(job.ErrorCode);
+        Assert.Null(job.ErrorMessage);
+        Assert.Equal(1, provider.Calls);
+
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(ImportJobStatus.Pending, job.Status);
+        Assert.Equal(0, job.RetryCount);
+        Assert.Equal(2, provider.Calls);
+    }
+
+    [Fact]
+    public async Task TheSameJob_OnceTheGracePeriodHasPassed_FailsWithProcessingTimeout()
+    {
+        var provider = new ThrowingOcrProvider(() => new FileNotFoundException());
+        var clock = new MutableClock(FixedNow);
+        var (backgroundJob, jobs, _) = Build(provider, clock: clock);
+        var job = AddPendingJob(jobs);
+
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+        Assert.Equal(ImportJobStatus.Pending, job.Status);
+
+        clock.UtcNow = FixedNow + OcrBackgroundJob.MissingFileGracePeriod;
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(ImportJobStatus.Failed, job.Status);
+        Assert.Equal("PROCESSING_TIMEOUT", job.ErrorCode);
+        Assert.Equal(ImportJobRecovery.ProcessingTimeoutMessage, job.ErrorMessage);
+        Assert.Equal(0, job.RetryCount);
+        Assert.Equal(2, provider.Calls);
+    }
+
+    [Fact]
+    public async Task WhenRecoveryFailedTheJobFirst_TheGraceReturnToPendingIsDropped_TheVerdictStands_AndTheLoopGoesOn()
+    {
+        var provider = new PathAwareOcrProvider(missing: ["couples/x/missing.pdf"], json: ValidStatementJson);
+        // Save #1 is the job going to Processing, save #2 is the worker handing it back to the queue: the row was
+        // already changed by recovery, so that second write is a concurrency conflict.
+        ConflictingRepository? repo = null;
+        var (backgroundJob, jobs, _) = Build(provider, wrapRepository: inner => repo = new ConflictingRepository(inner, conflictOnSaveNumber: 2));
+        var inGrace = AddPendingJob(jobs, ageMinutes: 1, storagePath: "couples/x/missing.pdf");
+        var other = AddPendingJob(jobs, storagePath: "couples/x/present.pdf");
+
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(1, repo!.Reloads);
+        Assert.Equal(ImportJobStatus.Failed, inGrace.Status);
+        Assert.Equal("PROCESSING_TIMEOUT", inGrace.ErrorCode);
+        Assert.Equal(ImportJobStatus.Ready, other.Status);
+    }
+
+    [Fact]
+    public async Task WhenRecoveryFailedTheJobFirst_TheTimeoutWriteAfterTheGracePeriodIsDropped_TheVerdictStands_AndTheLoopGoesOn()
+    {
+        var provider = new PathAwareOcrProvider(missing: ["couples/x/missing.pdf"], json: ValidStatementJson);
+        ConflictingRepository? repo = null;
+        var (backgroundJob, jobs, _) = Build(provider, wrapRepository: inner => repo = new ConflictingRepository(inner, conflictOnSaveNumber: 2));
+        var pastGrace = AddPendingJob(jobs, ageMinutes: 3, storagePath: "couples/x/missing.pdf");
+        var other = AddPendingJob(jobs, storagePath: "couples/x/present.pdf");
+
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(1, repo!.Reloads);
+        Assert.Equal(ImportJobStatus.Failed, pastGrace.Status);
+        Assert.Equal("PROCESSING_TIMEOUT", pastGrace.ErrorCode);
+        Assert.Equal(ImportJobStatus.Ready, other.Status);
+    }
+
+    [Fact]
+    public async Task FiveJobsInTheGracePeriod_DoNotLeaveANewerJobUnread_AndEachIsReadOnlyOncePerPass()
+    {
+        var missing = Enumerable.Range(0, 5).Select(i => $"couples/x/missing-{i}.pdf").ToArray();
+        var provider = new PathAwareOcrProvider(missing, ValidStatementJson);
+        var clock = new MutableClock(FixedNow.AddSeconds(1));
+        var (backgroundJob, jobs, _) = Build(provider, clock: clock);
+        var waiting = missing.Select(path => AddPendingJob(jobs, ageMinutes: 1, storagePath: path)).ToList();
+        var newer = AddPendingJob(jobs, storagePath: "couples/x/present.pdf");
+
+        // Pass 1 takes the five oldest: all five are handed back, the newer job is outside the batch of five.
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.All(missing, path => Assert.Equal(1, provider.CallsFor(path)));
+        Assert.Equal(0, provider.CallsFor("couples/x/present.pdf"));
+        Assert.All(waiting, j => { Assert.Equal(ImportJobStatus.Pending, j.Status); Assert.Equal(0, j.RetryCount); });
+
+        // Pass 2 (the next poll, 5 s later): the five just tried go behind the newer job, which takes the first slot.
+        clock.UtcNow = FixedNow.AddSeconds(6);
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(ImportJobStatus.Ready, newer.Status);
+        // The batch of five in pass 2 was the newer job plus the four first in line: each read once, none twice in one pass.
+        Assert.Equal(1, provider.CallsFor("couples/x/present.pdf"));
+        Assert.Equal(5 + 4, missing.Sum(provider.CallsFor));
+        Assert.All(waiting, j => { Assert.Equal(ImportJobStatus.Pending, j.Status); Assert.Equal(0, j.RetryCount); });
+    }
+
+    [Fact]
+    public async Task AJobThatArrivesWhileFiveAreInTheGracePeriod_IsReadByTheSecondPassAfterItArrives()
+    {
+        var missing = Enumerable.Range(0, 5).Select(i => $"couples/x/missing-{i}.pdf").ToArray();
+        var provider = new PathAwareOcrProvider(missing, ValidStatementJson);
+        var clock = new MutableClock(FixedNow);
+        var (backgroundJob, jobs, _) = Build(provider, clock: clock);
+        foreach (var path in missing) AddPendingJob(jobs, ageMinutes: 1, storagePath: path);
+
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        var arrived = AddPendingJob(jobs, storagePath: "couples/x/present.pdf", createdAt: FixedNow.AddSeconds(2));
+        clock.UtcNow = FixedNow.AddSeconds(5);
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+        clock.UtcNow = FixedNow.AddSeconds(10);
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(ImportJobStatus.Ready, arrived.Status);
+    }
+
+    [Fact]
+    public async Task TheRealLocalStorage_RaisesFileNotFound_ForAMissingFile_AndForAMissingGroupDirectory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "couplesync-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Storage:BasePath"] = root })
+                .Build();
+            var storage = new LocalFileStorageAdapter(config, NullLogger<LocalFileStorageAdapter>.Instance);
+            var coupleId = Guid.NewGuid();
+
+            // Group directory does not exist at all.
+            await Assert.ThrowsAsync<FileNotFoundException>(
+                () => storage.DownloadAsync($"uploads/{coupleId}/{Guid.NewGuid()}.pdf", CancellationToken.None));
+
+            // Group directory exists, file does not.
+            Directory.CreateDirectory(Path.Combine(root, coupleId.ToString()));
+            await Assert.ThrowsAsync<FileNotFoundException>(
+                () => storage.DownloadAsync($"uploads/{coupleId}/{Guid.NewGuid()}.pdf", CancellationToken.None));
+
+            // Control: a file that is there is read, so the exceptions above come from the file being absent.
+            var present = Guid.NewGuid();
+            await File.WriteAllBytesAsync(Path.Combine(root, coupleId.ToString(), $"{present}.pdf"), [1, 2, 3]);
+            await using var stream = await storage.DownloadAsync($"uploads/{coupleId}/{present}.pdf", CancellationToken.None);
+            Assert.Equal(3, stream.Length);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AfterARestart_NoJobStaysPendingOrProcessing_EveryOneReachesAnEndWithTheRightCode()
     {
         var provider = new ThrowingOcrProvider(() => new FileNotFoundException());
         var (backgroundJob, jobs, _) = Build(provider);
-        var queued = AddPendingJob(jobs);
-        var interrupted = AddPendingJob(jobs);
+        var queued = AddPendingJob(jobs, ageMinutes: 3);
+        var interrupted = AddPendingJob(jobs, ageMinutes: 3);
         interrupted.MarkProcessing(FixedNow);
 
         // What the worker does when it starts: recover the Processing ones, then poll the queue.
@@ -141,16 +305,17 @@ public sealed class OcrBackgroundJobTests
     // ── Helpers ────────────────────────────────────────────────────────────
 
     private static (OcrBackgroundJob Job, FakeImportJobRepository Jobs, CountingStorageAdapter Storage) Build(
-        IOcrProvider provider, ICategoryClassifier? classifier = null, IAiConsentGate? gate = null)
+        IOcrProvider provider, ICategoryClassifier? classifier = null, IAiConsentGate? gate = null, IDateTimeProvider? clock = null,
+        Func<FakeImportJobRepository, IImportJobRepository>? wrapRepository = null)
     {
         var jobs = new FakeImportJobRepository();
         var storage = new CountingStorageAdapter();
 
         var services = new ServiceCollection();
-        services.AddSingleton<IImportJobRepository>(jobs);
+        services.AddSingleton<IImportJobRepository>(wrapRepository is null ? jobs : wrapRepository(jobs));
         services.AddSingleton(provider);
         services.AddSingleton<IStorageAdapter>(storage);
-        services.AddSingleton<IDateTimeProvider>(new FakeDateTimeProvider(FixedNow));
+        services.AddSingleton<IDateTimeProvider>(clock ?? new FakeDateTimeProvider(FixedNow));
         services.AddSingleton(new OcrProcessingService(
             new UniqueIndexTransactionRepository(), classifier ?? new NullCategoryClassifier(), new FakeBudgetRepository()));
         if (gate is not null) services.AddSingleton(gate);
@@ -159,11 +324,66 @@ public sealed class OcrBackgroundJobTests
         return (new OcrBackgroundJob(scopeFactory, NullLogger<OcrBackgroundJob>.Instance), jobs, storage);
     }
 
-    private static ImportJob AddPendingJob(FakeImportJobRepository jobs)
+    private static ImportJob AddPendingJob(
+        FakeImportJobRepository jobs, int ageMinutes = 0, string storagePath = "couples/x/statement.pdf", DateTime? createdAt = null)
     {
-        var job = ImportJob.Create(CoupleId, UserId, "couples/x/statement.pdf", "application/pdf", FixedNow);
+        var job = ImportJob.Create(CoupleId, UserId, storagePath, "application/pdf", createdAt ?? FixedNow.AddMinutes(-ageMinutes));
         jobs.Jobs.Add(job);
         return job;
+    }
+
+    private const string ValidStatementJson =
+        """{"provider":"local-pdf","transactions":[{"date":"2026-01-10","description":"Padaria Sol","amount":12.5,"type":"Debit"}]}""";
+
+    /// <summary>Behaves like the real table when recovery changed the row first: that save is a concurrency conflict.</summary>
+    private sealed class ConflictingRepository(FakeImportJobRepository inner, int conflictOnSaveNumber) : IImportJobRepository
+    {
+        private int _saves;
+
+        public int Reloads { get; private set; }
+
+        public Task SaveChangesAsync(CancellationToken ct)
+        {
+            if (++_saves == conflictOnSaveNumber)
+                throw new ConcurrencyConflictException("recovery failed the job first");
+            return inner.SaveChangesAsync(ct);
+        }
+
+        // The reload brings back what is stored: the verdict recovery wrote (same code and text as the worker's).
+        public Task ReloadAsync(ImportJob job, CancellationToken ct)
+        {
+            Reloads++;
+            job.MarkFailed(ImportJobRecovery.ProcessingTimeoutCode, ImportJobRecovery.ProcessingTimeoutMessage, FixedNow);
+            return Task.CompletedTask;
+        }
+
+        public Task<ImportJob?> GetByIdAsync(Guid id, Guid coupleId, CancellationToken ct) => inner.GetByIdAsync(id, coupleId, ct);
+        public Task AddAsync(ImportJob job, CancellationToken ct) => inner.AddAsync(job, ct);
+        public Task<IReadOnlyList<ImportJob>> GetPendingAsync(int limit, CancellationToken ct) => inner.GetPendingAsync(limit, ct);
+        public Task<IReadOnlyList<ImportJob>> GetReadyByCoupleAsync(Guid coupleId, int limit, CancellationToken ct) => inner.GetReadyByCoupleAsync(coupleId, limit, ct);
+        public Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct) => inner.GetStuckProcessingAsync(cutoffUtc, limit, ct);
+        public Task<int> CountUnfinishedAsync(Guid coupleId, DateTime processingSinceUtc, CancellationToken ct) => inner.CountUnfinishedAsync(coupleId, processingSinceUtc, ct);
+    }
+
+    /// <summary>The files of the paths in <c>missing</c> are not on this instance's disk; the others are read normally.</summary>
+    private sealed class PathAwareOcrProvider(IEnumerable<string> missing, string json) : IOcrProvider
+    {
+        private readonly HashSet<string> _missing = [.. missing];
+        private readonly Dictionary<string, int> _calls = new();
+
+        public int CallsFor(string path) => _calls.GetValueOrDefault(path);
+
+        public Task<string> AnalyzeAsync(string storagePath, string mimeType, CancellationToken ct)
+        {
+            _calls[storagePath] = CallsFor(storagePath) + 1;
+            if (_missing.Contains(storagePath)) throw new FileNotFoundException();
+            return Task.FromResult(json);
+        }
+    }
+
+    private sealed class MutableClock(DateTime now) : IDateTimeProvider
+    {
+        public DateTime UtcNow { get; set; } = now;
     }
 
     private sealed class FixedOcrProvider(string json) : IOcrProvider

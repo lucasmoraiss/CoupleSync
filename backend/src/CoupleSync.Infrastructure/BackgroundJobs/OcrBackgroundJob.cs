@@ -1,6 +1,7 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.OcrImport;
+using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,6 +15,12 @@ public sealed class OcrBackgroundJob : BackgroundService
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     /// <summary>Total number of processing attempts for transient failures (first try included).</summary>
     private const int MaxAttempts = 3;
+
+    /// <summary>
+    /// How long a Pending job whose file is missing may wait before it is failed. During a deploy the old and the
+    /// new instance poll the same database, each with its own disk, so the file may simply belong to the other one.
+    /// </summary>
+    public static readonly TimeSpan MissingFileGracePeriod = TimeSpan.FromMinutes(2);
 
     /// <summary>Unforeseen failure that persisted through every automatic attempt.</summary>
     public const string ProcessingErrorCode = "processing_error";
@@ -155,15 +162,26 @@ public sealed class OcrBackgroundJob : BackgroundService
                 // Stop processing remaining jobs — quota is exhausted for all
                 break;
             }
-            catch (FileNotFoundException)
+            catch (FileNotFoundException ex)
             {
-                // The upload is gone: the disk of the instance does not survive a restart or a deploy, so a job that
-                // was waiting (or being read) when the API went down has no file to read. Retrying cannot bring it
-                // back; it ends now, with the same code and text as a read that was interrupted.
-                _logger.LogWarning("Import job {JobId} has no stored file (the instance was restarted); failing it.", job.Id);
-                job.MarkFailed(
-                    ImportJobRecovery.ProcessingTimeoutCode, ImportJobRecovery.ProcessingTimeoutMessage, dateTimeProvider.UtcNow);
-                await repo.SaveChangesAsync(ct);
+                var now = dateTimeProvider.UtcNow;
+                if (now - job.CreatedAtUtc < MissingFileGracePeriod)
+                {
+                    // Another instance (the old one during a deploy) may own this file: hand the job back to the queue
+                    // without spending an attempt and let a later pass find it again.
+                    _logger.LogWarning(ex,
+                        "Import job {JobId} has no stored file on this instance yet; keeping it Pending (grace period).", job.Id);
+                    await SaveVerdictAsync(repo, job, j => j.ReturnToPending(now), ct);
+                    continue;
+                }
+
+                // Past the grace period the file is gone for good (the disk does not survive a restart or a deploy):
+                // retrying cannot bring it back, so it ends now with the same code and text as an interrupted read.
+                _logger.LogWarning(ex,
+                    "Import job {JobId} has no stored file and was created {AgeSeconds}s ago; failing it.",
+                    job.Id, (int)(now - job.CreatedAtUtc).TotalSeconds);
+                await SaveVerdictAsync(
+                    repo, job, j => j.MarkFailed(ImportJobRecovery.ProcessingTimeoutCode, ImportJobRecovery.ProcessingTimeoutMessage, now), ct);
             }
             catch (AppException ex)
             {
@@ -193,6 +211,21 @@ public sealed class OcrBackgroundJob : BackgroundService
                     await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
                 }
             }
+        }
+    }
+
+    /// <summary>Applies and saves the outcome for a job whose file is missing; if recovery changed the row first, its verdict stands.</summary>
+    private async Task SaveVerdictAsync(IImportJobRepository repo, ImportJob job, Action<ImportJob> apply, CancellationToken ct)
+    {
+        try
+        {
+            apply(job);
+            await repo.SaveChangesAsync(ct);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            _logger.LogWarning("Import job {JobId} was changed by recovery while its missing file was handled; recovery's verdict stands.", job.Id);
+            await repo.ReloadAsync(job, ct);
         }
     }
 

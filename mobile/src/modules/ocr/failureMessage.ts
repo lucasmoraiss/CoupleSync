@@ -54,7 +54,7 @@ export function ocrFailureMessage(errorCode?: string | null, quotaResetDate?: st
       // O servidor não distingue falta de memória de outras mortes do processo de leitura: o texto cobre os dois casos.
       return 'Não conseguimos ler este extrato. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.';
     case 'PROCESSING_TIMEOUT':
-      // Job abandonado em Processing (reinício/deploy no meio): na subida da API o limite é zero; na leitura do status, 10 min. Não é culpa do tamanho do arquivo.
+      // Job abandonado em Processing (reinício/deploy no meio): na subida da API o limite é zero; na leitura do status, 10 min. Também cobre o Pending cujo arquivo sumiu (disco perdido no reinício) depois da carência de 2 min. Não é culpa do tamanho do arquivo.
       return 'A leitura foi interrompida antes de terminar. Envie o arquivo de novo; se acontecer outra vez, exporte um período menor (por exemplo, um mês).';
     case 'processing_error':
       // Exceção não prevista depois das tentativas automáticas do servidor: repetir tende a não resolver.
