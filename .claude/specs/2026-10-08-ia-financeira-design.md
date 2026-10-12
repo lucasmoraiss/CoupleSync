@@ -441,6 +441,12 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
      item se forma**. Limite assumido: um telefone escrito só com dígitos e sem palavra ao lado passa por código
      — o número não é gravado nem mostrado de qualquer forma. Isto vale só para formar o item do próprio grupo;
      o que vai a provedor continua pelo filtro de 3.8, que remove todos esses números. Ver 3.8.
+   - **Dígito, na chave e na marca de parcela, é só `0`–`9`** (revisão 4). Dígito de outra escrita (largura
+     total "１", arábico-índico "١") não é lido como número: na chave separa palavras como qualquer outro sinal
+     ("Loja 12３４" → `loja 12`), "１/３" não é marca de parcela, e a conta do dígito verificador de CPF/CNPJ (b)
+     só é feita sobre 11 ou 14 dígitos `0`–`9`. Nenhum texto de transação faz o cálculo falhar. Para o nome
+     vindo de descrição, uma sequência com dígito de outra escrita continua tratada com cautela: escrita como
+     documento ou telefone conta como (a), e a de 6+ sai do nome.
      **Obrigação da fase 4 (#40):** na fase 3 `name_source` é só **gravado** — nenhum código o lê, porque nada
      de recorrência vai a provedor ainda. A regra "nome vindo de descrição (`name_source = description`) **nunca
      vai a provedor**" tem de ser implementada, com teste, por quem primeiro montar um pacote com itens de
@@ -684,12 +690,23 @@ Como ficou na fase 3 (issue #39):
   plano, somadas.
 - **A correção (`PATCH`) entra na fila do cálculo do grupo** (o mesmo semáforo): um cálculo em andamento não
   decide mais com a correção antiga nem apaga a linha recém-corrigida.
+- **A linha gravada segue as cobranças que ela já contém** (revisão 4). No recálculo, dentro do mesmo
+  estabelecimento e cadência, cada série achada fica com a linha que já guarda mais cobranças dela (os pares
+  com mais cobranças em comum primeiro); o tipo é só desempate, depois a proximidade de valor. Assim o item que
+  **muda de tipo** (o valor passa de R$ 200, as cobranças são recategorizadas, o valor passa a variar) continua
+  sendo o mesmo item, com o mesmo id e a mesma correção, ao lado de outro item do mesmo lugar; e uma série nova
+  no mesmo lugar nasce como item novo, sem tomar a linha (e a correção) de quem já estava lá. Só a série que
+  não tem **nenhuma** cobrança em linha gravada (as transações foram apagadas e registradas de novo) fica com a
+  linha livre mais próxima — mesmo tipo primeiro, depois o valor. A segunda linha do mesmo estabelecimento e
+  cadência leva o sufixo `~2` (`~3`…) em `merchant_key`, qualquer que seja o tipo: duas linhas que passam a
+  ter o mesmo tipo não esbarram no índice único.
 - Pequeno gasto frequente (3.2) é gravado com `cadence = Irregular`.
 
 ### 3.4 Parcelamentos
 
-- Fonte 1 (hoje): regex `(?<!\d)(\d{1,2})\s*/\s*(\d{1,2})(?!\d)` em estabelecimento/descrição (lida só no
-  servidor; a descrição nunca sai), aceito com 1 ≤ n ≤ N ≤ 48. Vira parcela confirmada com ≥ 2 ocorrências da
+- Fonte 1 (hoje): regex `(?<![0-9])([0-9]{1,2})\s*/\s*([0-9]{1,2})(?![0-9])` em estabelecimento/descrição (lida
+  só no servidor; a descrição nunca sai), aceito com 1 ≤ n ≤ N ≤ 48. Só dígitos `0`–`9`: "１/３" ou "١/٣" não é
+  marca, e marca que não se lê como dois números é ignorada, nunca erro (revisão 4). Vira parcela confirmada com ≥ 2 ocorrências da
   mesma chave com n consecutivos em meses consecutivos (evita confundir "15/10" com data); com 1 ocorrência
   fica "provável".
 - Fonte 2: `bank_transactions.installment_number/total` (issue de acompanhamento da fase 2 do Open Finance).
@@ -1712,3 +1729,13 @@ modelo) e configurou os segredos; os fatos (`fatos-chave-real.md`) derrubaram du
 - "Cancelei" confirma a série pela palavra da pessoa, para "cobrou de novo" não depender do movimento do lugar.
 - m2: a troca de nível de um item é dita na tela e no desenho; histerese avaliada e recusada (item 12).
 - m1: possível parada (em Ocultas) não traz a pergunta nem o aviso "entra no total".
+
+**Correção da revisão 4 da #39 (12/10/2026):**
+
+- I1: a linha gravada segue as cobranças que já contém; o tipo é só desempate (3.3, "Como ficou na fase 3").
+  Antes, com dois itens mensais no mesmo lugar, o que mudava de tipo trocava de linha com o outro e a correção
+  da pessoa ia para o item errado (total errado).
+- I2: dígito é só `0`–`9` na chave, na marca de parcela e na conta do dígito verificador (3.3 item 1, 3.4).
+  Antes, "１/３" numa transação derrubava a lista do grupo com erro 500.
+- I3: só testes — o dia da cobrança e o "hoje" são os de Brasília (cobrança às 02:00 UTC do dia 1º é do último
+  dia do mês anterior; pedido à 01:00 UTC do dia 1º ainda está no mês anterior).
