@@ -114,8 +114,10 @@ public static class DependencyInjection
         // AI auto-categorization of imported statements stays OFF until it goes through the chain with the privacy
         // filter (design 6.3, the "categorize" phase). GeminiCategoryClassifier sends the raw description of each
         // statement line, which may carry the name of who received a transfer — and the AI text the group accepts
-        // says those names never leave. So no line is sent to a provider for categorization in this phase; the
-        // import job already checks the group's consent on the server for when the classifier comes back.
+        // says those names never leave. So no line is sent to a provider for categorization in this phase.
+        // For when the classifier comes back: the group's consent is checked on the server in ONE of the two paths
+        // that reach it — the statement import (OcrBackgroundJob). The bank sync (SyncConnectionService) still
+        // trusts the flag the app sends and must get the same server-side check first (issue #47, phase 10).
         services.AddScoped<ICategoryClassifier, NullCategoryClassifier>();
 
         AddOpenFinance(services);

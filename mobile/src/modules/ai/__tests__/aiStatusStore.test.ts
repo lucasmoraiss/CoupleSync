@@ -35,9 +35,9 @@ import {
   useAiStatusStore,
   wasWelcomeShown,
 } from '../aiStatusStore';
-import { AI_STATUS_RETRY_DELAYS_MS, aiStatusNotice, isAssistantVisible, serializeStoredAiStatus, shouldShowActivationCard } from '../aiStatus';
+import { AI_STATUS_RETRY_DELAYS_MS, aiStatusNotice, aiStatusNoticeView, isAssistantVisible, serializeStoredAiStatus, shouldShowActivationCard } from '../aiStatus';
 import * as SecureStore from 'expo-secure-store';
-import { clearUserData } from '@/state/userData';
+import { clearUserData, resetUserCaches } from '@/state/userData';
 import { useSessionStore } from '@/state/sessionStore';
 import type { AiStatusResponse } from '@/types/api';
 
@@ -673,5 +673,119 @@ describe('abrir a tela de boas-vindas a partir do Painel', () => {
     await expect(routeAfterGroupSetup(4000, async () => true)).resolves.toBe('/');
 
     expect(wasWelcomeShown()).toBe(false);
+  });
+});
+
+// ─── Issue #60: acabamentos da revisão ───────────────────────────────────────────────────────────────────────
+
+describe('sair da conta sem o status ter sido consultado nesta abertura do app (issue #60, item 7)', () => {
+  it('quem abre o app já sem grupo e sai da conta não deixa a cópia da abertura anterior no aparelho', async () => {
+    // A cópia ficou de uma abertura anterior, quando a pessoa ainda tinha grupo.
+    secureStore[aiStatusStorageKey('user-1')] = serializeStoredAiStatus('couple-1', ENABLED);
+    // Nesta abertura ela já não tem grupo (foi removida): nenhuma tela consulta o status, o store fica sem dono.
+    await useSessionStore.getState().setSession('access', 'refresh', 'user-1', null);
+    expect(useAiStatusStore.getState().ownerUserId).toBeNull();
+
+    await clearUserData();
+    await settle();
+
+    expect(secureStore[aiStatusStorageKey('user-1')]).toBeUndefined();
+  });
+
+  it('a cópia de outra pessoa que usou o aparelho antes não é tocada', async () => {
+    secureStore[aiStatusStorageKey('user-2')] = serializeStoredAiStatus('couple-2', ENABLED);
+    await useSessionStore.getState().setSession('access', 'refresh', 'user-1', null);
+
+    await clearUserData();
+    await settle();
+
+    expect(secureStore[aiStatusStorageKey('user-2')]).toBeDefined();
+  });
+
+  it('o limpador rodado ao entrar numa conta (login) não apaga a cópia de quem está entrando', async () => {
+    secureStore[aiStatusStorageKey('user-1')] = serializeStoredAiStatus('couple-1', ENABLED);
+    await signIn('user-1');
+
+    await resetUserCaches();
+    await settle();
+
+    expect(secureStore[aiStatusStorageKey('user-1')]).toBeDefined();
+  });
+});
+
+describe('o aviso do Painel sobre a IA, do jeito que a pessoa o vê e usa (issue #60, item 8)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(async () => {
+    await clearUserData();
+    jest.useRealTimers();
+  });
+
+  /** O que o Painel desenha: o mesmo cálculo da tela, com o que o gancho useAiStatus entrega. */
+  function notice() {
+    return aiStatusNoticeView(forSession().status, forSession().loadFailed, loadForSession().retrying, useAiStatusStore.getState().refresh);
+  }
+
+  it('abrindo com a API dormindo: "Verificando…" sem botão; falhou: "Tentando de novo…" com "Verificar agora"; o toque consulta na hora e o aviso some quando o servidor responde', async () => {
+    await signIn('user-1');
+    const first = pendingStatus();
+    mockGetStatus.mockReturnValueOnce(first.promise);
+
+    const opening = useAiStatusStore.getState().refresh();
+    expect(notice()).toEqual({ text: 'Verificando a análise com IA…', icon: 'sparkles-outline', checkNow: null });
+
+    first.release(Promise.reject(NETWORK_DOWN) as never);
+    await opening;
+    expect(notice()).toMatchObject({ text: 'Não foi possível verificar a análise com IA. Tentando de novo…', icon: 'cloud-offline-outline' });
+    expect(notice()?.checkNow).toEqual(expect.any(Function));
+    expect(mockGetStatus).toHaveBeenCalledTimes(1);
+
+    // A pessoa toca em "Verificar agora" antes da nova tentativa marcada (3 s).
+    const server = pendingStatus();
+    mockGetStatus.mockReturnValueOnce(server.promise);
+    notice()!.checkNow!();
+
+    expect(mockGetStatus).toHaveBeenCalledTimes(2);
+    expect(notice()).toEqual({ text: 'Verificando a análise com IA…', icon: 'sparkles-outline', checkNow: null });
+
+    server.release({ data: status() });
+    await settle();
+    expect(notice()).toBeNull();
+    expect(isAssistantVisible(forSession().status)).toBe(true);
+    // A tentativa que estava marcada foi cancelada pelo toque: nada mais é consultado.
+    await jest.advanceTimersByTimeAsync(10 * 60_000);
+    expect(mockGetStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('acabadas as tentativas: "Verifique a internet." com o botão, que continua funcionando', async () => {
+    await signIn('user-1');
+    mockGetStatus.mockRejectedValue(NETWORK_DOWN);
+    await useAiStatusStore.getState().refresh();
+    for (const delay of AI_STATUS_RETRY_DELAYS_MS) await jest.advanceTimersByTimeAsync(delay);
+    const calls = mockGetStatus.mock.calls.length;
+
+    expect(notice()).toMatchObject({ text: 'Não foi possível verificar a análise com IA. Verifique a internet.', icon: 'cloud-offline-outline' });
+
+    mockGetStatus.mockResolvedValue({ data: ENABLED });
+    notice()!.checkNow!();
+    await settle();
+
+    expect(mockGetStatus).toHaveBeenCalledTimes(calls + 1);
+    expect(notice()).toBeNull();
+    expect(forSession().status).toEqual(ENABLED);
+  });
+
+  it('com um valor guardado no aparelho não há aviso, mesmo com a consulta falhando', async () => {
+    secureStore[aiStatusStorageKey('user-1')] = serializeStoredAiStatus('couple-1', ENABLED);
+    await signIn('user-1');
+    mockGetStatus.mockRejectedValue(NETWORK_DOWN);
+
+    await useAiStatusStore.getState().refresh();
+    await settle();
+
+    expect(forSession().status).toEqual(ENABLED);
+    expect(notice()).toBeNull();
   });
 });

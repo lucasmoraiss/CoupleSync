@@ -26,7 +26,7 @@ import { ocrApiClient } from '@/services/apiClient';
 import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
-import { ocrFailureMessage } from '@/modules/ocr/failureMessage';
+import { JOB_FAILURE_ACTION_LABEL, ocrFailureMessage } from '@/modules/ocr/failureMessage';
 import { buildDiscardRestRequest, openImportSummary } from '@/modules/ocr/confirmRequest';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ type ScreenState =
   | { phase: 'idle' }
   | { phase: 'uploading' }
   | { phase: 'polling'; uploadId: string; jobStatus?: string }
-  | { phase: 'error'; message: string };
+  | { phase: 'error'; message: string; fromJob?: boolean };
 
 export default function OcrUploadScreen() {
   const [state, setState] = useState<ScreenState>({ phase: 'idle' });
@@ -143,7 +143,7 @@ export default function OcrUploadScreen() {
           if (!isMounted.current) return;
           if (__DEV__) console.log('[OCR] Failed:', { errorCode, status });
           const errorMessage = ocrFailureMessage(errorCode, quotaResetDate);
-          setState({ phase: 'error', message: errorMessage });
+          setState({ phase: 'error', message: errorMessage, fromJob: true });
           return;
         }
 
@@ -354,7 +354,11 @@ export default function OcrUploadScreen() {
 
       {/* Error */}
       {state.phase === 'error' && (
-        <ErrorState message={state.message} onRetry={handleRetry} />
+        <ErrorState
+          message={state.message}
+          onRetry={handleRetry}
+          retryLabel={state.fromJob ? JOB_FAILURE_ACTION_LABEL : undefined}
+        />
       )}
     </SafeAreaView>
   );

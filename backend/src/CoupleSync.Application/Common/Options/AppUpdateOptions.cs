@@ -11,8 +11,11 @@ public sealed class AppUpdateOptions
     /// <summary>Environment variable (and configuration key) with the oldest app version still accepted, e.g. <c>1.1.0</c>.</summary>
     public const string MinimumVersionVariable = "APP_MINIMUM_VERSION";
 
+    /// <summary>Name of the APK file on every Release (compared exactly: GitHub's fixed link is case sensitive).</summary>
+    public const string ApkFileName = "couplesync.apk";
+
     /// <summary>Fixed address of the APK of the latest release: the same link whatever the version.</summary>
-    public const string DownloadUrl = "https://github.com/lucasmoraiss/CoupleSync/releases/latest/download/couplesync.apk";
+    public const string DownloadUrl = "https://github.com/lucasmoraiss/CoupleSync/releases/latest/download/" + ApkFileName;
 
     public const string DefaultLatestReleaseUrl = "https://api.github.com/repos/lucasmoraiss/CoupleSync/releases/latest";
 

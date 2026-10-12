@@ -6,11 +6,13 @@ import { colors, spacing, typography, borderRadius } from '@/theme';
 interface ErrorStateProps {
   message?: string;
   onRetry?: () => void;
+  retryLabel?: string;
 }
 
 export function ErrorState({
   message = 'Não foi possível carregar os dados.',
   onRetry,
+  retryLabel = 'Tentar novamente',
 }: ErrorStateProps) {
   return (
     <View style={styles.container} accessibilityRole="alert">
@@ -21,10 +23,10 @@ export function ErrorState({
           style={styles.retryBtn}
           onPress={onRetry}
           accessibilityRole="button"
-          accessibilityLabel="Tentar novamente"
+          accessibilityLabel={retryLabel}
           activeOpacity={0.8}
         >
-          <Text style={styles.retryText}>Tentar novamente</Text>
+          <Text style={styles.retryText}>{retryLabel}</Text>
         </TouchableOpacity>
       ) : null}
     </View>

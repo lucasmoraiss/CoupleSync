@@ -113,7 +113,15 @@ public sealed class GitHubLatestReleaseClient : ILatestAppReleaseSource, IDispos
                 && json.RootElement.TryGetProperty("tag_name", out var tagName)
                 && tagName.ValueKind == JsonValueKind.String)
             {
-                return tagName.GetString();
+                var tag = tagName.GetString();
+                // A Release without the APK would make the notice point at a 404 download: it is not a version yet.
+                if (!HasUploadedApk(json.RootElement))
+                {
+                    _logger.LogWarning("App update: the release {Tag} has no uploaded {File}; no latest version for now.", tag, AppUpdateOptions.ApkFileName);
+                    return null;
+                }
+
+                return tag;
             }
 
             _logger.LogWarning("App update: the latest release lookup answered without a tag; no latest version for now.");
@@ -129,6 +137,24 @@ public sealed class GitHubLatestReleaseClient : ILatestAppReleaseSource, IDispos
             _logger.LogWarning("App update: the latest release lookup failed ({Reason}); no latest version for now.", ex.GetType().Name);
             return null;
         }
+    }
+
+    private static bool HasUploadedApk(JsonElement release)
+    {
+        if (!release.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array) return false;
+        foreach (var asset in assets.EnumerateArray())
+        {
+            if (asset.ValueKind == JsonValueKind.Object
+                && asset.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String
+                && asset.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.String
+                && string.Equals(name.GetString(), AppUpdateOptions.ApkFileName, StringComparison.Ordinal)
+                && string.Equals(state.GetString(), "uploaded", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private sealed record CachedTag(string? Tag);
