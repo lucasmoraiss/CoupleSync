@@ -141,6 +141,10 @@ jobs:
         working-directory: mobile
         run: npm test -- --ci
 
+      # Scripts used by the APK workflow (tag/version checks, what to do with a Release): no network, a few seconds.
+      - name: Publishing scripts tests
+        run: bash scripts/test-scripts.sh
+
       - name: Secret scan
         uses: trufflesecurity/trufflehog@main
         with:
