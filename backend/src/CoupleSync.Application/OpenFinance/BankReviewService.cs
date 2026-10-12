@@ -121,6 +121,19 @@ public sealed class BankReviewService
     /// to a suspected duplicate, with the suggested category); <paramref name="reconcile"/> are the answer "it is the
     /// same": the line points to the transaction the app already had and nothing is created;
     /// <paramref name="discard"/> are discarded. All or nothing.
+    /// <para>
+    /// Before anything is created, each line of <paramref name="expenses"/> that carries no suspicion is asked of
+    /// <see cref="BankSuspicionJudge"/> once more, as the store is now: the one that looks like a transaction of the
+    /// app is not confirmed. It takes the suspicion, stays in the review to be answered ("the same" or "another
+    /// one"), and the answer lists it as held; the others of the request are confirmed. So a line no synchronisation
+    /// judged since the transaction was typed (its account is no longer read, or was not read yet) is never
+    /// registered twice by "Selecionar tudo". Every line of <paramref name="asNew"/> is the person's answer: it is
+    /// not asked again. A line already suspected sent in <paramref name="expenses"/> is confirmed as it always was
+    /// (the app published before the suspicions existed knows no other way, and the newer one answers "another
+    /// one" with a category that way), unless <paramref name="holdPossibleDuplicates"/> says the request carries
+    /// nobody's answer about duplicates ("Selecionar tudo" of an app that shows the suspicions): then the lines
+    /// already suspected are asked again too, and held while the suspicion holds.
+    /// </para>
     /// </summary>
     public async Task<BankReviewConfirmResult> ConfirmAsync(
         Guid coupleId,
@@ -128,6 +141,7 @@ public sealed class BankReviewService
         IReadOnlyList<Guid>? discard,
         IReadOnlyList<Guid>? reconcile,
         IReadOnlyList<Guid>? asNew,
+        bool holdPossibleDuplicates,
         CancellationToken ct)
     {
         expenses ??= [];
@@ -193,6 +207,15 @@ public sealed class BankReviewService
 
         var names = await _sync.GetAccountNamesAsync(coupleId, ct);
         var now = _clock.UtcNow;
+        // A line whose transaction is already there (the same request sent twice) creates nothing: nothing to check.
+        var held = await HoldPossibleDuplicatesAsync(
+            coupleId,
+            typedIds.Select(id => rows[id]).Where(row => !fingerprints.TryGetValue(row.Id, out var print) || !existing.ContainsKey(print)),
+            reconcileIds.Select(id => rows[id]),
+            alsoTheSuspected: holdPossibleDuplicates,
+            names,
+            now,
+            ct);
         var ingests = new List<TransactionEventIngest>();
         var transactions = new List<Transaction>();
         var created = new List<BankReviewCreatedDto>();
@@ -208,6 +231,9 @@ public sealed class BankReviewService
                 alreadyConfirmed++; // confirmed before (the same request sent twice): never a second transaction
                 continue;
             }
+
+            // It looks like a transaction the app already has, and nobody answered that yet: it waits for the answer.
+            if (held.Contains(row.Id)) continue;
 
             // A line without a value cannot be an expense. It does not hold the others back ("Selecionar tudo"):
             // it stays waiting, to be discarded, and the answer says it was skipped.
@@ -298,7 +324,43 @@ public sealed class BankReviewService
 
         await RaiseAlertsAsync(coupleId, transactions, ct);
 
-        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed, skipped, skippedOtherCurrency, reconciled);
+        return new BankReviewConfirmResult(
+            created, discarded, alreadyConfirmed, skipped, skippedOtherCurrency, reconciled,
+            expenses.Select(e => e.Id).Where(held.Contains).ToList());
+    }
+
+    /// <summary>
+    /// The check at the moment of confirming. Of <paramref name="asked"/> (lines sent to be confirmed as ordinary
+    /// expenses), the ones that wait with no suspicion and can become an expense (settled, in reais, with a value)
+    /// are judged as the store is now; the ones that look like a transaction of the app take the suspicion and are
+    /// answered here: they are not to be confirmed in this request. With <paramref name="alsoTheSuspected"/>, the
+    /// ones that already carried a suspicion are judged too: held while it holds, confirmed when nothing looks like
+    /// them any more. A transaction that <paramref name="reconciling"/> takes in this same request is no longer one
+    /// to look like. Nothing is saved here (the caller saves everything together, or nothing).
+    /// </summary>
+    private async Task<HashSet<Guid>> HoldPossibleDuplicatesAsync(
+        Guid coupleId,
+        IEnumerable<BankTransaction> asked,
+        IEnumerable<BankTransaction> reconciling,
+        bool alsoTheSuspected,
+        IReadOnlyDictionary<Guid, BankAccountNames> names,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var toJudge = asked
+            .Where(row => row.ReviewState == BankTransactionReviewState.Pending
+                          && (alsoTheSuspected || row.MatchedTransactionId is null)
+                          && BankTransaction.CanBecomeExpense(row.Status, row.Amount, row.Currency))
+            .ToList();
+        if (toJudge.Count == 0) return [];
+
+        var beingTaken = reconciling
+            .Where(row => row.ReviewState == BankTransactionReviewState.Pending && row.MatchedTransactionId is not null)
+            .Select(row => row.MatchedTransactionId!.Value)
+            .ToList();
+        await BankSuspicionJudge.JudgeAsync(
+            _sync, coupleId, toJudge, BankSuspicionJudge.ConnectorNameBy(names), leavingLineIds: [], beingTaken, now, ct);
+        return toJudge.Where(row => row.MatchedTransactionId is not null).Select(row => row.Id).ToHashSet();
     }
 
     /// <summary>

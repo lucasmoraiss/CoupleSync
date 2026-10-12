@@ -1003,4 +1003,170 @@ public sealed class OpenFinanceReconciliationPostgresTests
         Assert.Equal(("Pending", null, typedByCarla), await StateAsync(database, "t26-carla"));
         Assert.Equal(("Pending", null, typed), await StateAsync(database, "t26-waiting"));
     }
+
+    // ---------------------------------------------------------------- the check at the moment of confirming (review 13)
+
+    private static List<Guid> Ids(JsonElement body, string list)
+        => body.GetProperty(list).EnumerateArray()
+            .Select(e => e.ValueKind == JsonValueKind.Object ? e.GetProperty("id").GetGuid() : e.GetGuid())
+            .ToList();
+
+    [PostgresFact]
+    public async Task Confirming_ChecksEachLineWithoutAMarkAgain_ByTheDayInBrazil_OnlyInTheGroup_AndStoresTheMarkTogetherWithTheExpenses_OrNothing()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyPluggy();
+        var saves = new SaveHook();
+        await using var host = WithOpenFinanceSync(factory, pluggy, database, saves);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana Exemplo Souza");
+        var carla = await OpenFinanceTests.RegisterAsync(factory, host, "Carla Modelo");
+        var connectionId = await ConnectWithBankAsync(ana);
+        var day = Today.AddDays(-10);
+        pluggy.Transactions[Checking] =
+        [
+            // 20:00 in Brasília of the day (23:00 UTC of the same date).
+            Debit("t26-evening", day.AddHours(23), 28.00m),
+            // 23:00 in Brasília of the day BEFORE (02:00 UTC of the day).
+            Debit("t26-night-before", day.AddHours(2), 29.00m),
+            Debit("t26-plain", day.AddHours(15), 80.00m),
+            Debit("t26-refused", day.AddHours(15), 31.00m),
+            Debit("t26-refused-with", day.AddHours(15), 90.00m),
+        ];
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        // Typed after the run. 22:00 in Brasília of the NEXT day (01:00 UTC two dates later): one day apart in
+        // Brazil, two dates apart in UTC.
+        var typedNextEvening = await ManualAsync(ana, 28.00m, day.AddDays(2).AddHours(1), "No dia seguinte, à noite");
+        // Noon of the next day: two days after the line of the night before in Brazil, one date apart in UTC.
+        await ManualAsync(ana, 29.00m, day.AddDays(1).AddHours(15), "Dois dias depois");
+        // The same value on the same day, in another group.
+        await ManualAsync(carla, 80.00m, day.AddHours(15), "De outro grupo");
+        var typedRefused = await ManualAsync(ana, 31.00m, day.AddHours(15), "Igual à da confirmação recusada");
+        var evening = await LineAsync(database, "t26-evening");
+        var nightBefore = await LineAsync(database, "t26-night-before");
+        var plain = await LineAsync(database, "t26-plain");
+        var refused = await LineAsync(database, "t26-refused");
+        var refusedWith = await LineAsync(database, "t26-refused-with");
+        Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions WHERE review_state = 'Pending' AND matched_transaction_id IS NULL"));
+
+        var answered = await AnswerAsync(ana, new { expenses = new[] { new { id = evening }, new { id = nightBefore }, new { id = plain } } });
+
+        Assert.True(HttpStatusCode.OK == answered.StatusCode, await answered.Content.ReadAsStringAsync());
+        var body = await answered.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(new[] { evening }, Ids(body, "heldAsPossibleDuplicates"));
+        Assert.Equal(new[] { nightBefore, plain }.Order(), Ids(body, "created").Order());
+        Assert.Equal(("Pending", null, typedNextEvening), await StateAsync(database, "t26-evening"));
+        Assert.Equal("Confirmed", (await StateAsync(database, "t26-night-before")).State);
+        Assert.Equal("Confirmed", (await StateAsync(database, "t26-plain")).State);
+        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM transactions t WHERE EXISTS (SELECT 1 FROM bank_transactions b WHERE b.linked_transaction_id = t.id)"));
+        Assert.Equal(0, await database.ScalarAsync<long>($"SELECT count(*) FROM transactions WHERE amount = 28.00 AND id <> '{typedNextEvening}'"));
+
+        // One transaction of the database for the whole confirmation: when the save is refused (someone discards
+        // another line of the request at that moment), the mark of the line held is not stored either.
+        saves.BeforeNextSave = () => database.ExecuteAsync(
+            "UPDATE bank_transactions SET review_state = 'Discarded', reviewed_at_utc = now() WHERE pluggy_transaction_id = 't26-refused-with'");
+        var conflict = await AnswerAsync(ana, new { expenses = new[] { new { id = refused }, new { id = refusedWith } } });
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        Assert.Equal("BANK_REVIEW_CONFLICT", (await conflict.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-refused"));
+        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM transactions t WHERE EXISTS (SELECT 1 FROM bank_transactions b WHERE b.linked_transaction_id = t.id)"));
+
+        // Asked again, alone: held, and marked now.
+        var again = await AnswerAsync(ana, new { expenses = new[] { new { id = refused } } });
+        Assert.True(HttpStatusCode.OK == again.StatusCode, await again.Content.ReadAsStringAsync());
+        Assert.Equal(new[] { refused }, Ids(await again.Content.ReadFromJsonAsync<JsonElement>(), "heldAsPossibleDuplicates"));
+        Assert.Equal(("Pending", null, typedRefused), await StateAsync(database, "t26-refused"));
+        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM transactions t WHERE EXISTS (SELECT 1 FROM bank_transactions b WHERE b.linked_transaction_id = t.id)"));
+    }
+
+    [PostgresFact]
+    public async Task Confirming_SixTimesAtOnce_AsTheAppThatAsksToHoldPossibleDuplicates_ALineThatLooksLikeATransactionTypedAfter_CreatesNothing_AndLeavesTheLineMarked()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyPluggy();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana Exemplo Souza");
+        var connectionId = await ConnectWithBankAsync(ana);
+        pluggy.Transactions[Checking] = [Debit("t26-padaria", Noon(1), 25.00m)];
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        var typed = await ManualAsync(ana, 25.00m, Noon());
+        var line = await LineAsync(database, "t26-padaria");
+
+        var answers = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => AnswerAsync(ana, new { expenses = new[] { new { id = line } }, holdPossibleDuplicates = true })));
+
+        Assert.All(answers, a => Assert.Contains(a.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.Conflict }));
+        Assert.Contains(answers, a => a.StatusCode == HttpStatusCode.OK);
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM transactions"));
+        Assert.Equal(("Pending", null, typed), await StateAsync(database, "t26-padaria"));
+    }
+
+    [PostgresFact]
+    public async Task Confirming_AtOnceWithItIsTheSameOnAnotherLineOfTheSameTransaction_NeverRegistersThePurchaseTwice_AndNeverFailsAsTheServer()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyPluggy();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana Exemplo Souza");
+        var connectionId = await ConnectWithBankAsync(ana);
+        // Twelve purchases typed by hand, each with two lines of the bank of its value: one marked (to be answered
+        // "it is the same") and one as a line nothing judged yet (to be confirmed by "Selecionar tudo").
+        const int rounds = 12;
+        var existing = new List<Guid>();
+        for (var i = 0; i < rounds; i++) existing.Add(await ManualAsync(ana, 10.00m + i, Noon(), $"Compra {i}"));
+        pluggy.Transactions[Checking] = Enumerable.Range(0, rounds).Select(i => Debit($"t26-marked-{i:D2}", Noon().AddMinutes(i), 10.00m + i)).ToList();
+        pluggy.Transactions[Card] = Enumerable.Range(0, rounds).Select(i => Debit($"t26-unjudged-{i:D2}", Noon().AddMinutes(i), 10.00m + i)).ToList();
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        await database.ExecuteAsync("UPDATE bank_transactions SET matched_transaction_id = NULL WHERE pluggy_transaction_id LIKE 't26-unjudged-%'");
+        var marked = new List<Guid>();
+        var unjudged = new List<Guid>();
+        for (var i = 0; i < rounds; i++)
+        {
+            Assert.Equal(("Pending", null, existing[i]), await StateAsync(database, $"t26-marked-{i:D2}"));
+            marked.Add(await LineAsync(database, $"t26-marked-{i:D2}"));
+            unjudged.Add(await LineAsync(database, $"t26-unjudged-{i:D2}"));
+        }
+
+        var answers = await Task.WhenAll(Enumerable.Range(0, rounds).SelectMany(i => new[]
+        {
+            AnswerAsync(ana, new { reconcile = new[] { new { id = marked[i] } } }),
+            AnswerAsync(ana, new { expenses = new[] { new { id = unjudged[i] } }, holdPossibleDuplicates = true }),
+        }));
+
+        Assert.All(answers, a => Assert.Contains(a.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.Conflict }));
+        for (var i = 0; i < rounds; i++)
+        {
+            var same = await StateAsync(database, $"t26-marked-{i:D2}");
+            var other = await StateAsync(database, $"t26-unjudged-{i:D2}");
+            var linked = await database.ScalarAsync<long>($"SELECT count(*) FROM bank_transactions WHERE linked_transaction_id = '{existing[i]}'");
+            var ofTheValue = await database.ScalarAsync<long>("SELECT count(*) FROM transactions WHERE amount = @amount", ("amount", 10.00m + i));
+            if (other.State == "Confirmed")
+            {
+                // It became another expense only because the purchase typed by hand already was the first line's.
+                Assert.Equal(("Reconciled", 1L, 2L), (same.State, linked, ofTheValue));
+            }
+            else
+            {
+                // Held: nothing was created for it. It points to the purchase (even if that one was taken at the
+                // very same moment: "É a mesma" on it is then refused) or, judged again by the answer, to nothing.
+                Assert.Equal(("Pending", 1L), (other.State, ofTheValue));
+                Assert.True(other.Matched is null || other.Matched == existing[i]);
+                if (other.Matched is null) Assert.Equal("Reconciled", same.State);
+            }
+
+            Assert.True(linked <= 1);
+        }
+
+        // Whatever the order, every line can still be answered and no purchase ends up counted twice.
+        for (var i = 0; i < rounds; i++)
+        {
+            if ((await StateAsync(database, $"t26-marked-{i:D2}")).State == "Pending")
+                await OkAsync(ana, new { reconcile = new[] { new { id = marked[i] } } });
+            if ((await StateAsync(database, $"t26-unjudged-{i:D2}")).State == "Pending")
+                await OkAsync(ana, new { asNew = new[] { unjudged[i] } });
+            Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM transactions WHERE amount = @amount", ("amount", 10.00m + i)));
+            Assert.Equal(1, await database.ScalarAsync<long>($"SELECT count(*) FROM bank_transactions WHERE linked_transaction_id = '{existing[i]}'"));
+        }
+    }
 }

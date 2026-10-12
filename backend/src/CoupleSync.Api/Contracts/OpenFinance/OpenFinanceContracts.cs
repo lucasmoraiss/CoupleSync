@@ -148,12 +148,18 @@ public sealed record ReconcileBankLineRequest(Guid Id);
 /// <c>Reconcile</c>: lines that are the same as the transaction they were suspected of repeating (nothing is created).
 /// <c>AsNew</c>: suspected lines that are another expense (confirmed like <c>Expenses</c>, with the suggested category).
 /// Both are optional: a request without them means what it always meant.
+/// <c>HoldPossibleDuplicates</c> (optional; absent is false): the lines of <c>Expenses</c> carry nobody's answer
+/// about duplicates ("Selecionar tudo" of an app that shows the suspicions). Then a line of <c>Expenses</c> that
+/// already carries a suspicion is not confirmed either while the suspicion holds: it is listed in
+/// <c>heldAsPossibleDuplicates</c> like the ones found at this moment. Without it, a line already suspected sent
+/// in <c>Expenses</c> is confirmed, as before.
 /// </summary>
 public sealed record ConfirmBankReviewRequest(
     IReadOnlyList<ConfirmExpenseRequest>? Expenses,
     IReadOnlyList<Guid>? Discard,
     IReadOnlyList<ReconcileBankLineRequest>? Reconcile = null,
-    IReadOnlyList<Guid>? AsNew = null);
+    IReadOnlyList<Guid>? AsNew = null,
+    bool? HoldPossibleDuplicates = null);
 
 public sealed record BankReviewCreatedResponse(Guid Id, Guid TransactionId);
 
@@ -163,6 +169,10 @@ public sealed record BankReviewReconciledResponse(Guid Id, Guid TransactionId);
 /// <c>Skipped</c>: lines sent in <c>expenses</c> that cannot become an expense: no value (zero), or a currency that
 /// is not BRL. They do not fail the request; they stay in the review, where they can be discarded.
 /// <c>SkippedOtherCurrency</c>: the ones of <c>Skipped</c> that were skipped for the currency.
+/// <c>HeldAsPossibleDuplicates</c>: lines sent in <c>expenses</c> that carried no suspicion and were found, when
+/// confirming, to look like a transaction the app already has. They do not fail the request and nothing is created
+/// for them: they stay in the review, now with <c>match</c>, to be answered with <c>reconcile</c> or <c>asNew</c>.
+/// An app that does not read this field just finds them still in the review.
 /// </summary>
 public sealed record ConfirmBankReviewResponse(
     IReadOnlyList<BankReviewCreatedResponse> Created,
@@ -170,6 +180,7 @@ public sealed record ConfirmBankReviewResponse(
     int AlreadyConfirmed,
     IReadOnlyList<Guid> Skipped,
     IReadOnlyList<Guid> SkippedOtherCurrency,
-    IReadOnlyList<BankReviewReconciledResponse> Reconciled);
+    IReadOnlyList<BankReviewReconciledResponse> Reconciled,
+    IReadOnlyList<Guid> HeldAsPossibleDuplicates);
 
 public sealed record RestoreBankReviewResponse(IReadOnlyList<Guid> Restored);
