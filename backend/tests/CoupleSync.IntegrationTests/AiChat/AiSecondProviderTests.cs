@@ -190,6 +190,29 @@ public sealed class AiSecondProviderTests
     }
 
     [Fact]
+    public async Task AnsweringNotNow_AfterAcceptingTheNewText_EndsOnlyTheOldRow_AndTheNewAcceptanceStays()
+    {
+        await using var factory = new ChatWebApplicationFactory(enabled: true);
+        var (ana, _) = await GroupThatAcceptedTheOldVersionAsync(factory);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
+        Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 1 AND revoked_at_utc IS NULL"));
+
+        // A preference that is not the welcome answer revokes nothing.
+        var weekly = await ana.Client.PatchAsync(Preferences, JsonContent.Create(new { WeeklyEmail = false }));
+        Assert.Equal(HttpStatusCode.OK, weekly.StatusCode);
+        Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 1 AND revoked_at_utc IS NULL"));
+
+        // The answer of an old screen ("not now" / "entendi") after she already accepted the text in force.
+        var answered = await ana.Client.PatchAsync(Preferences, JsonContent.Create(new { OnboardingAnswered = true }));
+        Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
+
+        Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 2 AND revoked_at_utc IS NULL"));
+        Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 1 AND revoked_at_utc IS NULL"));
+        Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 1 AND revoked_at_utc IS NOT NULL"));
+        Assert.True((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
+    }
+
+    [Fact]
     public async Task SwitchingItOffForTheGroup_AlsoEndsAnOldAcceptance()
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
