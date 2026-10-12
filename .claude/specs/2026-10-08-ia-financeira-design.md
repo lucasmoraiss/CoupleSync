@@ -562,45 +562,85 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
       exclusivo com valor ou data fora do critério.
     - **Hábito de compra**: todo o resto. Não vira item. (O "pequeno gasto frequente" de 3.2 e a cadência semanal
       continuam listados à parte, em "Pequenos gastos frequentes", fora do total.)
-    Compras que já pertencem a um item confirmado do mesmo lugar, a série "irmã" de mesmo valor (o plano da outra
-    pessoa) e a cobrança da própria série que o ritmo deixou de fora (35 dias de intervalo) não contam como
-    "outras compras".
+    **O que é "movimento do lugar"** (as "outras compras" contra as quais a série é medida): todo dia com compra
+    ali, **da primeira cobrança da série até hoje** — o que se comprou depois da última cobrança também conta
+    (revisão 3, m3). **Não** contam: as cobranças de um compromisso **mensal ou anual já confirmado** do mesmo
+    lugar, a série "irmã" de mesmo valor (o plano da outra pessoa) e a cobrança da própria série que o ritmo
+    deixou de fora (35 dias de intervalo). **As compras de uma série semanal contam**: ela é hábito, e as compras
+    dela são justamente o movimento do lugar (revisão 3, I1 — sem isso, o posto de todo sábado "sumia" e três
+    abastecimentos maiores perto do dia 5 viravam conta fixa confirmada: 9,7–15% de item falso nesse perfil,
+    agora 0,0–0,3%).
+    **"Cancelei" também é palavra da pessoa**: como em (d), a série do item cancelado é confirmada sem outra
+    prova, para que a cobrança que vier depois apareça como "cobrou de novo" seja qual for o movimento do lugar.
     **Não precisou de coluna nova:** "possível" é `confidence = Low` em item que não é parcela (parcela com `Low`
     continua sendo "parcela provável").
+    **Um item muda de nível sozinho, e isso é dito na tela.** A prova depende das cobranças e das outras compras
+    do lugar, então muda com transação nova: uma assinatura confirmada com 3 ou 4 cobranças num lugar que só
+    cobrava aquilo volta a "possível" (e sai do total) quando aparece uma compra avulsa ali, e é confirmada de
+    novo na 5ª cobrança; uma possível vira confirmada quando completa as cobranças. A seção "Possíveis
+    recorrências" diz: "Um item pode passar para cá, ou sair daqui, conforme as próximas cobranças e as outras
+    compras no mesmo lugar. Se você disser que é recorrente, ele fica no total." **Não há histerese** (manter
+    confirmado por N meses o que já foi confirmado): foi avaliada e recusada, porque o que rebaixa um item é
+    exatamente a evidência nova que desmente um falso (o "barbeiro" e a coincidência de 3 compras ficariam presos
+    no total por meses), e exigiria guardar estado do cálculo anterior. Quem fixa o item é a pessoa.
     **Números medidos** (bancada sintética `RecurrenceProofBench`, detector real; grupo de 12 recorrências
-    verdadeiras + 13 lugares de compra, ~930 transações em 13 meses, 50 grupos por conjunto de sementes):
+    verdadeiras + 13 lugares de compra, ~930 transações em 13 meses, 50 grupos por conjunto de sementes; estado
+    depois da correção da revisão 3):
 
-    | | regra anterior | regra nova, sementes do estudo | regra nova, 3 conjuntos de sementes nunca olhadas | idem, gerador mais realista (fim de semana, início do mês, valores redondos, 26 meses) |
+    | | regra anterior | regra nova, sementes do estudo | regra nova, 3 conjuntos de sementes que não entraram no ajuste | idem, gerador mais realista (fim de semana, início do mês, valores redondos, 26 meses) |
     | --- | --- | --- | --- | --- |
-    | itens falsos no total, por grupo | 9,34 | 0,04 | 0,04 – 0,06 | 0,04 – 0,06 |
-    | grupos com o total 100% limpo (de 50) | 0 | 48 | 47 – 48 | 47 – 48 |
+    | itens falsos no total, por grupo | 9,34 | 0,04 | 0,04 – 0,06 | 0,02 – 0,04 |
+    | grupos com o total 100% limpo (de 50) | 0 | 48 | 47 – 48 | 48 – 49 |
     | verdadeiros confirmados (de 12) | 12,00 | 11,96 | 11,94 – 11,98 | 11,96 – 12,00 |
-    | itens em "possíveis", por grupo | – | 1,06 | 0,68 – 1,00 | 0,94 – 1,10 |
+    | itens em "possíveis", por grupo | – | 0,64 | 0,44 – 0,56 | 0,80 – 0,84 |
 
     Metas com que a regra foi aceita: falsos no total ≤ 0,3 por grupo; ≥ 80% dos grupos com o total limpo;
     verdadeiros confirmados ≥ 11,5 de 12; "possíveis" ≤ 3 por grupo. Os limites da regra foram ajustados nas
-    sementes do estudo e conferidos, sem novo ajuste, nas sementes novas. Por perfil de lugar de compra (300
-    históricos cada, sementes novas): mercado, restaurante e padaria 0,0–0,3% com algum item no total; posto
-    0,3–0,7%; farmácia 0,0–1,0%; app de transporte 0,3–0,7%. `RecurrenceProofBenchTests` guarda as metas.
+    sementes do estudo e conferidos, sem novo ajuste, nas outras; a correção da revisão 3 (semanal conta como
+    movimento; movimento até hoje) foi decidida nas sementes do estudo e depois medida nas mesmas outras sementes
+    da primeira conferência — que, portanto, já tinham sido vistas uma vez. Por perfil de lugar de compra (300
+    históricos cada, fora das sementes do estudo): mercado e restaurante 0,0% com algum item no total; padaria
+    0,0–0,3%; posto 0,0–0,7%; farmácia 0,0–0,7%; app de transporte 0,0–0,3%; lugar com hábito semanal e uma
+    compra maior por mês 0,0–0,3%. `RecurrenceProofBenchTests` guarda contra regressão, com limites entre o
+    medido e as metas.
     **Limites conhecidos, ditos com franqueza** (tudo isto é dado sintético; nada foi visto em dado real):
     - **Serviço de preço fixo uma vez por mês em dia qualquer** (barbeiro, banho do cachorro): entra no total em
-      cerca de **9–10%** dos casos, quando três idas seguidas caem por acaso na mesma semana do mês. O valor
-      mostrado é o que a pessoa gasta por mês ali; o rótulo "assinatura" é que está errado. É o ponto mais fraco
-      da regra, e o grupo "largo" da bancada (que inclui esse serviço) tem 0,06–0,22 falsos por grupo e 80–94%
-      dos grupos limpos, em boa parte por causa dele.
+      cerca de **5–8%** dos casos, quando três idas seguidas caem por acaso na mesma semana do mês (e sai quando
+      a ida seguinte cai fora dela). O valor mostrado é o que a pessoa gasta por mês ali; o rótulo "assinatura" é
+      que está errado. É o ponto mais fraco da regra, e o grupo "largo" da bancada (que inclui esse serviço) tem
+      0,04–0,18 falsos por grupo e 84–96% dos grupos limpos, em boa parte por causa dele.
+    - **Três idas a um lugar novo, uma por mês, em dias parecidos** (a mesma família do barbeiro, com valor
+      variável): conta fixa confirmada e "nova", até aparecer outra compra ali.
     - **Assinatura em loja onde também se compra avulso** fica em "possíveis" até a **5ª cobrança** (6ª em loja
-      muito movimentada): cerca de 92% confirmadas, 7% possíveis no histórico de até 13 meses; a assinatura
-      **nova** nesse tipo de loja (3 cobranças) espera em "possíveis" em ~85% dos casos e não é achada em ~5%.
+      muito movimentada): cerca de 91% confirmadas, 8–9% possíveis no histórico de até 13 meses; a assinatura
+      **nova** nesse tipo de loja (3 cobranças) espera em "possíveis" em ~85% dos casos e não é achada em ~8%.
       Grupo recém-criado, com poucos meses de histórico, quase não terá nada confirmado nesse tipo de loja.
-    - **Conta paga em dia irregular** (± 8 dias): confirmada só em 22–41% dos casos, possível em 4–20%, não
-      achada em mais da metade — a maior parte por causa do ritmo mensal do item 3 (25–34 dias), que já existia.
+    - **Conta paga em dia irregular** (± 8 dias): confirmada só em 17–35% dos casos, possível em 4–18%, não
+      achada em mais de 60% — a maior parte por causa do ritmo mensal do item 3 (25–34 dias), que já existia.
       É piora em relação à regra anterior para conta de utilidade (era ~68%).
-    - **Duas assinaturas na mesma loja com compras avulsas**: a medida não é achada em 6–9% dos casos.
+    - **Duas assinaturas na mesma loja com compras avulsas**: a medida não é achada em 7–10% dos casos.
     - **Plano semanal de valor fixo** continua sendo "pequeno gasto frequente", fora do total (a alternativa de
       contá-lo foi estudada e deixada de fora).
+    - **Nome das listas com palavra comum.** Com nome de lista, o lugar que só cobra aquilo confirma sem a
+      exigência do dia, e a lista de utilidades tem palavras comuns ("luz", "gas", "oi", "claro", "vivo", "tim",
+      "sky"): "Restaurante Luz" visitado uma vez por mês em dia qualquer é conta fixa confirmada. Restringir a
+      dispensa do dia é mudança de regra que não foi medida; fica para uma fase seguinte.
+    - **"É recorrente" não segura o item para sempre.** Se a cobrança para, ele vai para Ocultas como "parou de
+      ser cobrada" e sai do total (certo). Se a série deixa de ser achada (a loja passa a vender outras coisas na
+      mesma faixa de preço, ou a cobrança muda de dia e de preço ao mesmo tempo), o item marcado também vira
+      "parou de ser cobrada" mesmo cobrando; a série nova nasce como possível.
+    - **"Ocultas" acumula** o que parou sem resposta (possíveis e confirmadas que eram coincidência). Sem efeito
+      no total. Possível parada não traz a pergunta "É recorrente?": dizer "sim" não a poria no total.
+    - **Custo e memória do processo.** O cálculo roda dentro do pedido: se o app desistir antes do fim, nada é
+      gravado e o pedido seguinte recomeça (grupo no teto de linhas, em CPU lenta, pode repetir; não medido no
+      Render). O contador de edições e de correções vive na memória: um reinício entre a correção e o pedido
+      seguinte adia o efeito de "Desfazer" e de edição de transação em até 6 horas ("É recorrente" e "Não é"
+      valem pela linha gravada). Cada correção custa um recálculo inteiro.
     - O gerador não representa: vários boletos pagos por um intermediário (um nome só), o mesmo lugar com nomes
       diferentes, meses sem captura, conta bimestral ou trimestral, marketplace com assinatura própria e dezenas
-      de pedidos por mês.
+      de pedidos por mês, grupo de uma pessoa só.
+    - **Nunca rodou:** os fluxos Maestro 02/06/07/09 e a tela em aparelho ou emulador; custo em Release e no
+      Render.
     - A pessoa conserta qualquer um destes pela tela: "É recorrente" numa possível, "Não é recorrente" numa
       confirmada errada — e as duas respostas sobrevivem ao recálculo.
 
@@ -635,8 +675,10 @@ Como ficou na fase 3 (issue #39):
 - **Total** (`RecurringStreamRepository.GetTotalsAsync`, somado no banco): só o que está na lista ativa, é
   compromisso (não é `Habit`) e está **confirmado** — `confidence` diferente de `Low`, ou item que a pessoa
   marcou como `Subscription`/`FixedBill` (menos parcela provável, que não vira compromisso por correção).
-- **Possível que a pessoa cancelou** ("Cancelei" pela rota, a tela não oferece): fica oculta e **não** ganha
-  `ChargedAfterCancel` quando cobra de novo — "cobrou de novo" é dito só do que era compromisso.
+- **Possível que a pessoa cancelou** ("Cancelei" pela rota, a tela não oferece): "Cancelei" é a pessoa dizendo
+  que aquilo era compromisso, então a série passa a confirmada pela palavra dela (item 12) e, se cobrar de novo,
+  volta com `ChargedAfterCancel`. Desfeita a correção, volta a possível. `ChargedAfterCancel` nunca é posto numa
+  linha que ficou com confiança baixa.
 - **Parcela registrada duas vezes** (mesmo número, mesmo valor ± 5%, outra pessoa ou outra origem) conta uma vez
   em "Parcela n de N", "falta R$" e no total; mesma pessoa e mesma origem continuam sendo duas compras do mesmo
   plano, somadas.
@@ -1659,3 +1701,14 @@ modelo) e configurou os segredos; os fatos (`fatos-chave-real.md`) derrubaram du
   Sem coluna nem migration nova.
 - Conferida em três conjuntos de sementes nunca olhadas e num gerador mais realista, sem novo ajuste de limite
   (números e limites conhecidos em 3.3, item 12).
+
+**Correção da revisão 3 da #39 (12/10/2026):**
+
+- I1: as compras de uma série semanal (hábito) voltam a contar como movimento do lugar; só compromisso mensal ou
+  anual confirmado deixa de contar (3.3, item 12).
+- m3: o movimento do lugar é contado até hoje, não só até a última cobrança da série. Efeito colateral medido:
+  menos falsos (o "barbeiro" cai de ~9–10% para ~5–8%) e um pouco menos de verdadeiros difíceis confirmados
+  (limites conhecidos do item 12, com os números novos).
+- "Cancelei" confirma a série pela palavra da pessoa, para "cobrou de novo" não depender do movimento do lugar.
+- m2: a troca de nível de um item é dita na tela e no desenho; histerese avaliada e recusada (item 12).
+- m1: possível parada (em Ocultas) não traz a pergunta nem o aviso "entra no total".
