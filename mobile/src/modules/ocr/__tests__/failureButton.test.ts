@@ -17,7 +17,8 @@ describe('botão da tela de falha da importação', () => {
   it('a tela de importação passa o rótulo só na falha do job; o erro de envio fica com o padrão', () => {
     expect(screen).toContain('retryLabel={state.fromJob ? JOB_FAILURE_ACTION_LABEL : undefined}');
     expect(screen).toContain("setState({ phase: 'error', message: errorMessage, fromJob: true });");
-    expect(screen).not.toMatch(/fromJob: true[^\n]*\n[^\n]*NOT_PDF_ERROR/);
+    // Só a falha do job (a linha acima) marca fromJob; o erro de envio e o de não-PDF não podem ter a marca.
+    expect(screen.match(/fromJob: true/g)).toHaveLength(1);
   });
 
   it('ErrorState: rótulo opcional, padrão "Tentar novamente" para os demais usos, acessibilidade acompanha', () => {
