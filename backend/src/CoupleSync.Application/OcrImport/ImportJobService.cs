@@ -26,8 +26,9 @@ public sealed class ImportJobService
     private readonly int _maxUnfinishedJobs;
 
     // Uploads of the same group go through one of these one at a time (count, store, save), so two simultaneous
-    // uploads cannot both see room for the last slot. The API is a single instance, so a lock in the process is
-    // enough; striping by group keeps groups from waiting on each other except by rare hash collision.
+    // uploads cannot both see room for the last slot. The lock is per process: it assumes one running API instance
+    // (during a deploy's overlap the limit may be exceeded by a small margin). Striping by group keeps groups from
+    // waiting on each other except by rare hash collision.
     private static readonly SemaphoreSlim[] UploadLocks =
         Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
 

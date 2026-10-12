@@ -94,7 +94,8 @@ public sealed class OcrBackgroundJob : BackgroundService
             scope.ServiceProvider.GetRequiredService<IDateTimeProvider>(),
             _logger);
 
-        // Startup: every job still in Processing is orphaned (single instance), no need to wait for the timeout.
+        // Startup: every job still in Processing is orphaned (the API normally runs as one instance), no need to
+        // wait for the timeout.
         var recovered = await recovery.RecoverAllAsync(ct, TimeSpan.Zero);
         if (recovered > 0)
             _logger.LogWarning("{Count} import job(s) stuck in Processing were marked as failed.", recovered);

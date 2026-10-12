@@ -27,7 +27,8 @@ public sealed class ImportJobRepository : IImportJobRepository
         => _dbContext.Entry(job).ReloadAsync(ct);
 
     // Least recently touched first: a job handed back to the queue (its file is not on this instance's disk) moves
-    // behind the ones not tried yet, so five of them cannot keep every other job out of the batch.
+    // behind the ones not tried yet, so five of them cannot keep every other job out of the batch. A job reset for
+    // retry (ResetForRetry) is touched too, so it also goes to the back of the queue.
     public async Task<IReadOnlyList<ImportJob>> GetPendingAsync(int limit, CancellationToken ct)
         => await _dbContext.ImportJobs
             .Where(j => j.Status == ImportJobStatus.Pending)

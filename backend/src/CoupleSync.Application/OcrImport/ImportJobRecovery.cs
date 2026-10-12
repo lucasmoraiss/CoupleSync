@@ -67,8 +67,9 @@ public sealed class ImportJobRecovery
 
     /// <summary>
     /// Fails every job in Processing for longer than <paramref name="timeout"/>. At API startup the caller passes
-    /// <see cref="TimeSpan.Zero"/>: the API is a single instance, so a job in Processing then belongs to a process
-    /// that no longer exists. Returns how many were recovered.
+    /// <see cref="TimeSpan.Zero"/>: the API normally runs as a single instance, so a job in Processing then belongs
+    /// to a process that no longer exists (a still-running old instance during a deploy
+    /// overlap is not covered). Returns how many were recovered.
     /// </summary>
     public async Task<int> RecoverAllAsync(CancellationToken ct, TimeSpan? timeout = null)
     {
