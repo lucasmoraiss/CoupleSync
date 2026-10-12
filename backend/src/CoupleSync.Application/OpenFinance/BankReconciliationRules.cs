@@ -224,7 +224,11 @@ public static class BankReconciliationRules
     /// day). The statement import stores the date written on the statement with no time, as midnight UTC: that is
     /// the day as written, not 21:00 of the day before in Brasília (the same reading
     /// <see cref="BankTransaction.LocalDateOf"/> gives a line of the bank). An imported line someone edited later
-    /// carries the instant typed, and is read as one.
+    /// keeps the instant typed, which is read as one unless it is exactly midnight UTC. Midnight UTC is also what the
+    /// edit form sends back when the person changes only the date of an imported line (it shows that line as 21:00 of
+    /// the day before): then the day is read one day ahead of the date the person chose. Nothing stored tells the
+    /// two apart (a transaction keeps no mark of an edit), so this reading is the rule; the root is the import,
+    /// which stores a date with no time as midnight UTC.
     /// </summary>
     public static DateOnly LocalDayOf(DateTime utc, TransactionSource source)
         => source == TransactionSource.OcrImport && utc.TimeOfDay == TimeSpan.Zero
