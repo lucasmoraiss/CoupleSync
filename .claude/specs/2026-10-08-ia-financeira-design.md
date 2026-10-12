@@ -1350,7 +1350,7 @@ Riscos por fase:
 
 | # | Riscos específicos |
 | --- | --- |
-| 1 | Cota real do Gemini desconhecida (a cadeia aprende pelo 429; conferência no AI Studio é opcional); um só provedor até existir a chave do segundo (decisão em aberto 15); alias `-latest` apontando para o mesmo modelo de outro elo (conferir no início da fase); formato do erro 429 do Gemini e formato da API do Groq a confirmar. |
+| 1 | Cota real do Gemini desconhecida (a cadeia aprende pelo 429; conferência no AI Studio é opcional); um só provedor até existir a chave do segundo (decisão em aberto 15) *(substituído por 2.2, "Groq ligado"; conferido em 12/10/2026)*; alias `-latest` apontando para o mesmo modelo de outro elo (conferir no início da fase); formato do erro 429 do Gemini e formato da API do Groq a confirmar *(Groq conferido e ligado: 2.2, "Groq ligado")*. |
 | 2 | Barra de abas (decisão 4); texto de privacidade julgado "relevante" exigir a migração do registro local antes de subir `CONSENT_VERSION` (7.3). |
 | 3 | Falsos positivos (compras repetidas, contas variáveis): duas bandas, ≥ 3/≥ 4 ocorrências e correção que sobrevive; "15/10" lido como parcela (exige série consecutiva); Pix para a mesma pessoa todo mês some da lista por virar `transferencia_pessoa` (aceito: privacidade primeiro). |
 | 4 | Lista de nomes próprios incompleta deixando passar um nome de pessoa num estabelecimento (marcadores de transferência cobrem a maior parte; teste com fixtures). |
