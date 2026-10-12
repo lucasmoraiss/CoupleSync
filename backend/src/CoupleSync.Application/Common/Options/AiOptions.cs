@@ -43,9 +43,13 @@ public sealed class AiOptions
     /// <summary>The second provider (OpenAI-compatible). It only exists for the chains while GROQ_API_KEY has a value.</summary>
     public const string GroqProviderName = "groq";
 
-    // PROVISIONAL (2026-10-08): chosen from Groq's public documentation, not yet checked with the real key. A
-    // production model that accepts a strict JSON schema; published free limits per model: 30 requests and 8,000
-    // tokens per minute, 1,000 requests and 200,000 tokens per day. This is the one place to change the model.
+    // Chosen from Groq's public documentation on 2026-10-08 and checked with the real key on 2026-10-12: the account
+    // lists it among the chat models and it accepts the request as the code builds it (strict json_schema,
+    // max_tokens). A production model that accepts a strict JSON schema; published free limits per model: 30
+    // requests and 8,000 tokens per minute, 1,000 requests and 200,000 tokens per day. The response headers confirm
+    // 1,000 requests per day and 8,000 tokens per minute; the other two numbers are only the published ones. Not
+    // checked: the real 429, large requests, quality in Portuguese against Gemini (needed before promoting Groq
+    // above reserve). This is the one place to change the model.
     public const string GroqReserveModel = "openai/gpt-oss-120b";
 
     public const int GroqRpm = 30;

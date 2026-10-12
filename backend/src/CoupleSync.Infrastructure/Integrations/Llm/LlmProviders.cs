@@ -145,8 +145,9 @@ public sealed class GeminiLlmProvider : ILlmProvider
 /// <summary>
 /// Any API in the chat/completions format. Groq uses it (built-in entry of <see cref="AiConfiguration"/>, on while
 /// GROQ_API_KEY has a value); without a key a provider is in no chain. Tested against a fake HTTP server; the base
-/// URL and the strict json_schema format are the ones of Groq's documentation (read on 2026-10-08). The check
-/// against the real API is recorded in the design (2.2) when it is done.
+/// URL and the strict json_schema format are the ones of Groq's documentation (read on 2026-10-08). Checked with
+/// the real key on 2026-10-12 (design 2.2): this class, with the Groq base URL and the reserve model, got HTTP 200
+/// and a JSON that matches the schema; the real 429 was not seen.
 /// </summary>
 public sealed class OpenAiCompatibleLlmProvider : ILlmProvider
 {

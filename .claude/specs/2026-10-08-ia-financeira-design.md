@@ -193,10 +193,25 @@ o texto pesa; rapidez e cota primeiro onde há volume.
     (modelo de produção do Groq com `json_schema` estrito; limites publicados por modelo: 30 pedidos e 8.000
     tokens por minuto, 1.000 pedidos e 200.000 tokens por dia). Quem usa o app hoje recebe a mesma resposta do
     mesmo modelo; o Groq só responde quando nenhum elo do Gemini pôde (cota, modelo retirado, Google fora do
-    ar) — é o fallback entre provedores que faltava. **Modelo e posição são provisórios**: foram escolhidos pela
-    documentação pública, porque a conferência com a chave real ainda não foi feita (pendente). Promover o Groq a
-    primeiro na categorização ou no Assistente só depois dela, e de comparar a qualidade em português. O modelo
-    fica num único lugar (`AiOptions.GroqReserveModel`).
+    ar) — é o fallback entre provedores que faltava. Modelo e posição foram escolhidos pela documentação pública e
+    **conferidos com a chave real em 12/10/2026** (abaixo). Promover o Groq a primeiro na categorização ou no
+    Assistente continua dependendo de comparar a qualidade em português com a do Gemini. O modelo fica num único
+    lugar (`AiOptions.GroqReserveModel`).
+  - **Conferência com a chave real (12/10/2026).** `GET /openai/v1/models` respondeu 200; a conta lista, entre os
+    modelos de chat, `openai/gpt-oss-120b`, `openai/gpt-oss-20b` e `qwen/qwen3.8-27b`, os três com janela de
+    131.072 tokens. A classe `OpenAiCompatibleLlmProvider`, com a base `https://api.groq.com/openai/v1` e o modelo
+    `AiOptions.GroqReserveModel` (`openai/gpt-oss-120b`), fez dois pedidos com conteúdo inventado; os dois
+    voltaram HTTP 200, `LlmOutcome.Ok` e JSON que confere com o esquema: (a) o esquema do Assistente (`answer` e
+    `refs`), com mensagem de papel "model" enviada como "assistant", temperatura 0,2 e `max_tokens` 1000; (b) um
+    esquema com todos os tipos do subconjunto (objeto, lista de objetos, string com `enum`, integer, number,
+    boolean), temperatura 0. Ou seja, `response_format` `json_schema` com `strict: true` e
+    `additionalProperties: false`, como o código monta, é aceito, e `max_tokens` também. Os cabeçalhos da resposta
+    trazem `x-ratelimit-limit-requests: 1000` (por dia) e `x-ratelimit-limit-tokens: 8000` (por minuto), iguais
+    aos padrões do código; 30 pedidos por minuto e 200.000 tokens por dia não aparecem em cabeçalho e seguem
+    sendo os números publicados. `usage.completion_tokens` inclui o raciocínio do modelo: uma resposta de cerca
+    de 25 tokens visíveis contou 301 tokens de saída (a outra, 398); latência de cerca de 1,1 s. **Não foi
+    conferido**: o formato do 429 real (nenhum limite foi atingido), pedidos grandes e a qualidade em português
+    comparada à do Gemini. Conclusão: o modelo fica `openai/gpt-oss-120b` e a posição fica reserva.
   - **Limite de 8.000 tokens por minuto**: um pedido cuja estimativa passe de 90% disso (7.200) não cabe na
     janela e o elo do Groq é pulado para ele — vale para os pedidos maiores do Assistente e dos resumos.
   - **Aceite**: a versão do texto de IA subiu para 2 e a lista coberta (`AiConsentCoverage`) passou a ser
@@ -1384,7 +1399,7 @@ A fase que depende de cada decisão usa o padrão se o dono não responder antes
 | # | Pergunta | Padrão recomendado | Fase |
 | --- | --- | --- | --- |
 | 1 | Exemplos de investimento: além do Tesouro e de CDB/LCI/LCA sem emissor, citar fundos de índice da lista fixa (ex.: BOVA11, IVVB11) só para explicar o que a classe é? Ações individuais e cripto também? | Sim para a lista fixa de fundos de índice amplos (5.4); **não** para ações individuais, FIIs, BDRs e cripto — ficam mais perto de "análise de valor mobiliário específico" (Res. CVM 20 §1º). Alternativa mais conservadora: só Tesouro. **Resposta do dono (08/10/2026): pode incluir ações individuais e cripto especificamente nos exemplos** — a fase 9 aplica. | 9 |
-| 2 | Ordem dos modelos no Assistente | `gemini-flash-latest` primeiro, `gemini-flash-lite-latest` de reserva; o `gemini-3-flash-preview` fica só para os resumos e o guia. Rever quando a cota for conhecida (aprendida pelo 429 ou lida no AI Studio) ou quando o segundo provedor for ligado. Trocar é só configuração. **Respondida (08/10/2026)** com a criação da chave do Groq: os elos do Gemini ficam como estão e o Groq entra como reserva (2.2, "Groq ligado"); a ordem é revista depois da conferência com a chave real. | 1 |
+| 2 | Ordem dos modelos no Assistente | `gemini-flash-latest` primeiro, `gemini-flash-lite-latest` de reserva; o `gemini-3-flash-preview` fica só para os resumos e o guia. Rever quando a cota for conhecida (aprendida pelo 429 ou lida no AI Studio) ou quando o segundo provedor for ligado. Trocar é só configuração. **Respondida (08/10/2026)** com a criação da chave do Groq: os elos do Gemini ficam como estão e o Groq entra como reserva (2.2, "Groq ligado"). Conferido com a chave real em 12/10/2026: a posição fica reserva; a ordem só é revista depois de comparar a qualidade em português. | 1 |
 | 3 | Mistral como segundo provedor | Não por agora (pede telefone; números de terceiros; treino ligado por padrão, com opt-out); só se o dono não conseguir conta no Groq e preferir a Mistral. A abstração já atende. **Resposta do dono (08/10/2026): Mistral fica para depois.** | 1 |
 | 4 | Onde fica o Assistente (a barra já tem 7 abas) | Botão fixo no cabeçalho do Painel e dentro da seção Insights; a aba "Chat IA" some. Alternativa: "Assistente" no lugar da aba Relatórios, com Relatórios virando link no Painel. **Resposta do dono (08/10/2026): onde for melhor para a experiência** — já entregue na fase 2 (botão). | 2 |
 | 5 | Percentuais da alocação de exemplo (pós-fixado / inflação / prefixado / renda variável) | Conservador 70/20/10/0; Moderado 45/25/10/20; Arrojado 25/20/10/45 — conteúdo editorial do app, sem fonte externa. | 9 |
@@ -1397,7 +1412,7 @@ A fase que depende de cada decisão usa o padrão se o dono não responder antes
 | 12 | O insight diário chama a IA? | Sim, uma chamada curta só quando há fato novo e o grupo ativou; senão resumo automático. Alternativa mais barata: só resumo automático. | 7 |
 | 13 | Quem pode desligar a IA do grupo | Qualquer membro (protege quem não aceitou; quem quer liga de novo). | 2 |
 | 14 | Fechar a #29 como absorvida e atualizar o desenho do Open Finance | **Feito** em 08/10/2026: issues #37–#48 abertas, #29 fechada como absorvida, desenho do Open Finance apontando para cá. | — |
-| 15 | Segundo provedor de IA: hoje o fallback é só entre modelos do Gemini (mesmo provedor, cotas separadas) e não há chave do Groq | **Entregar a fase 1 sem ele; ligar quando a chave existir.** Groq como primeira escolha; alternativas e limites em 2.2. Ligar pede a chave no Render, o elo nas cadeias e o provedor no texto de privacidade, com versão nova do aceite de IA (7.3). **Resolvida (08/10/2026): Groq ligado como reserva, com a versão 2 do aceite** (2.2, "Groq ligado"; 7.1; 7.3). Pendente: conferência com a chave real (modelos, limites e formato do 429), que decide se o Groq sobe de posição. | 1 |
+| 15 | Segundo provedor de IA: hoje o fallback é só entre modelos do Gemini (mesmo provedor, cotas separadas) e não há chave do Groq | **Entregar a fase 1 sem ele; ligar quando a chave existir.** Groq como primeira escolha; alternativas e limites em 2.2. Ligar pede a chave no Render, o elo nas cadeias e o provedor no texto de privacidade, com versão nova do aceite de IA (7.3). **Resolvida (08/10/2026): Groq ligado como reserva, com a versão 2 do aceite** (2.2, "Groq ligado"; 7.1; 7.3). **Conferido com a chave real em 12/10/2026** (modelo e formato do pedido aceitos; limites por minuto e por dia confirmados em cabeçalho; o formato do 429 e a qualidade em português ficaram sem conferir): o Groq fica como reserva, e subir de posição depende de comparar a qualidade. | 1 |
 
 **Respostas do dono em 08/10/2026**: 1, 2, 3, 4 e 15 estão anotadas nas linhas acima; **5 a 14: de acordo com o
 padrão recomendado**.
