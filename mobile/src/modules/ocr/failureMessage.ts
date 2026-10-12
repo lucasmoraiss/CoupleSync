@@ -1,3 +1,6 @@
+// Rótulo do botão da tela de falha da importação: ele só volta para a escolha do arquivo, não reenvia.
+export const JOB_FAILURE_ACTION_LABEL = 'Escolher arquivo';
+
 // Mensagem (pt-BR) para o código de erro com que o job de importação terminou em Failed.
 export function ocrFailureMessage(errorCode?: string | null, quotaResetDate?: string | null): string {
   switch (errorCode) {
@@ -24,8 +27,15 @@ export function ocrFailureMessage(errorCode?: string | null, quotaResetDate?: st
     case 'PDF_TOO_MANY_PAGES':
       return 'O PDF tem páginas demais (o limite é 50). Envie apenas o período que deseja importar.';
     case 'PDF_TIMEOUT':
+      return 'A leitura do extrato demorou demais e foi interrompida. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.';
+    case 'PDF_UNREADABLE':
+      return 'Não conseguimos abrir este PDF. Baixe o extrato de novo no app ou no site do banco e envie.';
+    case 'PDF_WORKER_FAILED':
+      // O servidor não distingue falta de memória de outras mortes do processo de leitura: o texto cobre os dois casos.
+      return 'Não conseguimos ler este extrato. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.';
     case 'PROCESSING_TIMEOUT':
-      return 'A leitura do extrato demorou demais e foi interrompida. Envie o arquivo novamente.';
+      // Job abandonado em Processing (reinício/deploy no meio): na subida da API o limite é zero; na leitura do status, 10 min. Não é culpa do tamanho do arquivo.
+      return 'A leitura foi interrompida antes de terminar. Envie o arquivo de novo; se acontecer outra vez, exporte um período menor (por exemplo, um mês).';
     default:
       return 'Falha no processamento. Tente novamente.';
   }
