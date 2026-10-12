@@ -119,6 +119,11 @@ describe('tela do Assistente', () => {
     expect(screen).toMatch(/router\.push\('\/\(main\)\/ai\/welcome'/);
   });
 
+  it('a explicação do Assistente desligado cita os destinos que o servidor tem ligados (ou todos, sem status)', () => {
+    expect(screen).toMatch(/\$\{aiAnalysisSummary\(aiDestinations\(status\)\)\}/);
+    expect(screen).not.toMatch(/AI_ANALYSIS_SUMMARY/);
+  });
+
   it('tem estado de espera que muda quando a resposta demora, e sugestões de pergunta na tela vazia', () => {
     expect(screen).toMatch(/Pensando na resposta…/);
     expect(screen).toMatch(/Ainda pensando… a resposta pode levar até meio minuto\./);
