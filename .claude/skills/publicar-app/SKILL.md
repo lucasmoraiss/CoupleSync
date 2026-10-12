@@ -72,11 +72,29 @@ ponha o roteiro de teste na issue de checkpoint do dono (passo 14 da skill `entr
    O push da tag dispara `mobile-apk.yml` (perfil EAS `production`).
 4. Acompanhe: `ghp run list --repo lucasmoraiss/CoupleSync --workflow mobile-apk.yml --limit 1 --json databaseId,headBranch,status`,
    depois `ghp run watch <id> --repo lucasmoraiss/CoupleSync --exit-status` (o build no EAS pode levar dezenas de minutos).
-5. Confira a Release: `ghp release view v<versão> --repo lucasmoraiss/CoupleSync --json tagName,isDraft,isPrerelease,assets`
-   → tem o arquivo `couplesync.apk`. Link fixo para os testers (sempre o mais novo):
+5. Confira que o build se declara a versão da tag. Fonte principal: o log da execução,
+   `ghp run view <id da execução> --repo lucasmoraiss/CoupleSync --log`, procurando a linha que o script de
+   conferência imprime: `O APK construido declara a versao <versão>, igual a tag v<versão>.`
+   Alternativa com EAS CLI local: em `mobile/`, `npx eas-cli@12 build:list --platform android --limit 1 --json --non-interactive`
+   e conferir `appVersion` = `<versão>` e `gitCommitHash` = `<SHA>`. Sem EAS CLI na sessão vale o log.
+   O workflow já barra (`appVersion` diferente da tag falha antes de existir Release); se a execução ainda
+   estiver rodando e a conferência divergir, cancele-a antes do job de Release (`ghp run cancel <id>`).
+   Divergência = PARADA (nunca apague a tag).
+6. Confira a Release: `ghp release view v<versão> --repo lucasmoraiss/CoupleSync --json tagName,isDraft,isPrerelease,assets`
+   → publicada, com o arquivo `couplesync.apk` enviado. E confira qual é a mais recente:
+   `ghp api repos/lucasmoraiss/CoupleSync/releases/latest --jq .tag_name` = `v<versão>` (senão PARADA: o aviso de
+   atualização e o link fixo não apontam para o APK novo). Link fixo para os testers (sempre o mais novo):
    `https://github.com/lucasmoraiss/CoupleSync/releases/latest/download/couplesync.apk`
-6. Falhou depois da tag criada: não apague a tag. Reexecute o workflow uma vez
-   (`ghp run rerun <id> --failed`); falhou de novo → PARADA.
+7. Falhou depois da tag criada: não apague a tag. Reexecute o workflow uma vez
+   (`ghp run rerun <id> --failed`); falhou de novo → PARADA. Nunca reexecute sem necessidade: com a Release
+   completa o workflow não mexe em nada, e uma Release incompleta ele só completa e publica como a mais recente.
+
+Regras do APK que não mudam:
+- **Release que não seja de APK nunca é criada como a mais recente** (`--latest=false`). A API anuncia a "última
+  versão" a partir da Release mais recente: qualquer outra (trabalho da faculdade, notas) viraria aviso de
+  atualização em todos os aparelhos. A API ignora Release sem `couplesync.apk` enviado, mas não conte só com isso.
+- **APK com defeito: não apague Release nem tag.** A saída é decisão do dono: voltar a anterior como a mais
+  recente (`gh release edit v<anterior> --latest`) e publicar versão nova. Relate e espere.
 
 Instalar o APK e testar o que só existe nele (captura de notificações com o app fechado, reinício do aparelho)
 só o dono consegue, nos checkpoints dele: registre como **não verificado** e ponha o roteiro na issue de checkpoint.
