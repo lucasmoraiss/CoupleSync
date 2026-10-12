@@ -15,6 +15,12 @@ public sealed class OcrBackgroundJob : BackgroundService
     /// <summary>Total number of processing attempts for transient failures (first try included).</summary>
     private const int MaxAttempts = 3;
 
+    /// <summary>Unforeseen failure that persisted through every automatic attempt.</summary>
+    public const string ProcessingErrorCode = "processing_error";
+
+    public const string ProcessingErrorMessage =
+        "Não conseguimos ler este extrato. Tente exportá-lo de novo no app ou no site do banco; se continuar, cadastre as transações manualmente.";
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<OcrBackgroundJob> _logger;
 
@@ -149,6 +155,16 @@ public sealed class OcrBackgroundJob : BackgroundService
                 // Stop processing remaining jobs — quota is exhausted for all
                 break;
             }
+            catch (FileNotFoundException)
+            {
+                // The upload is gone: the disk of the instance does not survive a restart or a deploy, so a job that
+                // was waiting (or being read) when the API went down has no file to read. Retrying cannot bring it
+                // back; it ends now, with the same code and text as a read that was interrupted.
+                _logger.LogWarning("Import job {JobId} has no stored file (the instance was restarted); failing it.", job.Id);
+                job.MarkFailed(
+                    ImportJobRecovery.ProcessingTimeoutCode, ImportJobRecovery.ProcessingTimeoutMessage, dateTimeProvider.UtcNow);
+                await repo.SaveChangesAsync(ct);
+            }
             catch (AppException ex)
             {
                 // Business failures (OcrException, BankFormatUnknownException, ...) are deterministic:
@@ -172,7 +188,7 @@ public sealed class OcrBackgroundJob : BackgroundService
                 }
                 else
                 {
-                    job.MarkFailed("processing_error", "Internal processing error after max retries.", dateTimeProvider.UtcNow);
+                    job.MarkFailed(ProcessingErrorCode, ProcessingErrorMessage, dateTimeProvider.UtcNow);
                     await repo.SaveChangesAsync(ct);
                     await TryDeleteFileAsync(storageAdapter, job.StoragePath, job.Id, ct);
                 }

@@ -54,7 +54,49 @@ public sealed class OcrBackgroundJobTests
 
         Assert.Equal(ImportJobStatus.Failed, job.Status);
         Assert.Equal("processing_error", job.ErrorCode);
+        Assert.Equal(
+            "Não conseguimos ler este extrato. Tente exportá-lo de novo no app ou no site do banco; se continuar, cadastre as transações manualmente.",
+            job.ErrorMessage);
         Assert.Equal(3, provider.Calls);
+    }
+
+    // Issue 56: the disk of the instance does not survive a restart, so the file of a waiting job may be gone.
+
+    [Fact]
+    public async Task APendingJobWhoseFileIsGone_FailsAtOnceWithProcessingTimeout_InsteadOfBeingRetriedThreeTimes()
+    {
+        var provider = new ThrowingOcrProvider(() => new FileNotFoundException("Stored file not found at resolved path."));
+        var (backgroundJob, jobs, _) = Build(provider);
+        var job = AddPendingJob(jobs);
+
+        for (var poll = 0; poll < 5; poll++)
+            await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(ImportJobStatus.Failed, job.Status);
+        Assert.Equal("PROCESSING_TIMEOUT", job.ErrorCode);
+        Assert.Equal(ImportJobRecovery.ProcessingTimeoutMessage, job.ErrorMessage);
+        Assert.Equal(0, job.RetryCount);
+        Assert.Equal(1, provider.Calls);
+    }
+
+    [Fact]
+    public async Task AfterARestart_NoJobStaysPendingOrProcessing_EveryOneReachesAnEndWithTheRightCode()
+    {
+        var provider = new ThrowingOcrProvider(() => new FileNotFoundException());
+        var (backgroundJob, jobs, _) = Build(provider);
+        var queued = AddPendingJob(jobs);
+        var interrupted = AddPendingJob(jobs);
+        interrupted.MarkProcessing(FixedNow);
+
+        // What the worker does when it starts: recover the Processing ones, then poll the queue.
+        await backgroundJob.RecoverStuckJobsAsync(CancellationToken.None);
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.All(new[] { queued, interrupted }, j =>
+        {
+            Assert.Equal(ImportJobStatus.Failed, j.Status);
+            Assert.Equal("PROCESSING_TIMEOUT", j.ErrorCode);
+        });
     }
 
     [Fact]

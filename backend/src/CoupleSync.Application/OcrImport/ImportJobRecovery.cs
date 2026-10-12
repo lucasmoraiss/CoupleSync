@@ -19,7 +19,7 @@ public sealed class ImportJobRecovery
     public const string ProcessingTimeoutCode = "PROCESSING_TIMEOUT";
 
     public const string ProcessingTimeoutMessage =
-        "O processamento do extrato foi interrompido. Envie o arquivo novamente.";
+        "A leitura foi interrompida antes de terminar. Envie o arquivo de novo; se acontecer outra vez, exporte um período menor (por exemplo, um mês).";
 
     private readonly IImportJobRepository _repository;
     private readonly IStorageAdapter _storage;

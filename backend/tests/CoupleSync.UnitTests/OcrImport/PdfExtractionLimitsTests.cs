@@ -48,6 +48,7 @@ public sealed class PdfExtractionLimitsTests
         var ex = Assert.Throws<OcrException>(() => new ChildProcessPdfTextExtractor(options).ExtractText(new MemoryStream([1, 2, 3])));
 
         Assert.Equal("PDF_TIMEOUT", ex.Code);
+        Assert.Equal("A leitura do extrato demorou demais e foi interrompida. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.", ex.Message);
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), "the caller must not wait for the stuck read");
     }
 

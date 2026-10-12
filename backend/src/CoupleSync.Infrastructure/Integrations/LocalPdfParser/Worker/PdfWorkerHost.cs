@@ -111,7 +111,7 @@ public static class PdfWorkerHost
             // the exception type (never its message): it is what tells a broken file from a defect of the library.
             answer = new WorkerAnswer(
                 false, null, null, UnreadableCode,
-                "Não foi possível ler o PDF. O arquivo parece corrompido; exporte o extrato novamente.",
+                "Não conseguimos abrir este PDF. Baixe o extrato de novo no app ou no site do banco e envie.",
                 ex.GetType().Name);
         }
 
