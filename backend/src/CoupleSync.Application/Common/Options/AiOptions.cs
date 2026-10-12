@@ -100,8 +100,10 @@ public sealed class AiOptions
     /// categorization): lite alias, then two fixed models — never the two models of the summaries, so that a day
     /// full of conversation cannot exhaust them (design 2.2).
     /// Groq closes every chain as the reserve, after the Gemini links: who uses the app today gets the same answer
-    /// from the same model, and Groq only answers when no Gemini link could (quota over, model withdrawn, Google
-    /// down). Without GROQ_API_KEY its link resolves to no provider and the chain is the Gemini one.
+    /// from the same model, and Groq only answers when no Gemini link could. That covers a FAST failure of the Gemini
+    /// links (quota over, HTTP or network error, model withdrawn). It does not cover a Gemini link that is SLOW: in an
+    /// interactive call it takes the whole time of the call and Groq is not even tried. Splitting the time among the
+    /// links is not done here. Without GROQ_API_KEY its link resolves to no provider and the chain is the Gemini one.
     /// </summary>
     public Dictionary<string, IReadOnlyList<LlmLink>> Chains { get; } = new(StringComparer.OrdinalIgnoreCase)
     {

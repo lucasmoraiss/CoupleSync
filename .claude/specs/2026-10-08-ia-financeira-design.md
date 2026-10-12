@@ -197,8 +197,12 @@ o texto pesa; rapidez e cota primeiro onde há volume.
   - **Posição: reserva, depois dos elos do Gemini, em todas as cadeias**, com o modelo `openai/gpt-oss-120b`
     (modelo de produção do Groq com `json_schema` estrito; limites publicados por modelo: 30 pedidos e 8.000
     tokens por minuto, 1.000 pedidos e 200.000 tokens por dia). Quem usa o app hoje recebe a mesma resposta do
-    mesmo modelo; o Groq só responde quando nenhum elo do Gemini pôde (cota, modelo retirado, Google fora do
-    ar) — é o fallback entre provedores que faltava. Modelo e posição foram escolhidos pela documentação pública e
+    mesmo modelo; o Groq só responde quando nenhum elo do Gemini pôde. Isso cobre a falha RÁPIDA dos elos do
+    Gemini (cota ou 429, erro HTTP, erro de rede, modelo retirado). **Não cobre** um elo do Gemini que DEMORA: numa
+    chamada interativa ele consome o prazo inteiro da chamada (20 s) e o Groq nem é tentado, de modo que o
+    resultado para a pessoa é o de antes (repartir o tempo entre os elos fica no backlog). A capacidade da
+    reserva é pequena: com 7.200 tokens úteis por minuto (90% de 8.000), o Groq atende cerca de uma pergunta grande
+    do Assistente por minuto no app inteiro. É o fallback entre provedores que faltava, dentro desses limites. Modelo e posição foram escolhidos pela documentação pública e
     **conferidos com a chave real em 12/10/2026** (abaixo). Promover o Groq a primeiro na categorização ou no
     Assistente continua dependendo de comparar a qualidade em português com a do Gemini. O modelo fica num único
     lugar (`AiOptions.GroqReserveModel`).
@@ -1372,7 +1376,7 @@ Riscos por fase:
 | 512 MB de memória | Nenhum modelo local (fatos-externos 1.11); totais no banco; projeção com teto no detector; CSV do Tesouro no runner; pacote limitado. |
 | CVM | Linha "educação com exemplos, sem recomendação" (5.5), lista fixa de exemplos, validador, aviso fixo em código. Não é parecer jurídico. |
 | LGPD | Consentimento específico e em destaque, filtro campo a campo, aviso ao outro membro, desligar a um toque, retenção definida. Risco aceito pelo dono: um aceite vale para o grupo, e o Gemini gratuito pode usar o conteúdo (termos pedem não enviar dado pessoal). |
-| Um só provedor hoje (Gemini), com cotas por dia desconhecidas | Dois ou três modelos Flash com cotas separadas por cadeia; 429 põe o elo em pausa crescente e, se insistir, fora até a virada do dia; teto global do uso interativo protege a chave única (2.5); queda do Google ou bloqueio da chave → resumo automático em tudo e o Assistente avisa (7.5); segundo provedor pronto para ligar quando houver chave (decisão em aberto 15). Chamadas ≤ 6.400 tokens (regra testada), já dentro dos 8k tokens/min do Groq; jobs esperam a janela do minuto. Os aliases `-latest` mudam de alvo sem aviso: dois elos que passam a se esgotar juntos são sinal de que apontam para o mesmo modelo — trocar um deles por id fixo. |
+| Provedor principal único (Gemini), com cotas por dia desconhecidas; Groq só de reserva | Dois ou três modelos Flash com cotas separadas por cadeia; 429 põe o elo em pausa crescente e, se insistir, fora até a virada do dia; teto global do uso interativo protege a chave única (2.5); queda do Google ou bloqueio da chave → resumo automático em tudo e o Assistente avisa (7.5), **salvo** quando os elos do Gemini falham rápido: aí o Groq, ligado como reserva desde 08/10/2026 (2.2, "Groq ligado"; decisão em aberto 15 resolvida), responde. O Groq **não cobre** um elo do Gemini que demora (consome os 20 s da chamada interativa e o Groq nem é tentado) nem pedidos acima de 7.200 tokens; repartir o tempo entre os elos é item de backlog. Chamadas ≤ 6.400 tokens (regra testada), já dentro dos 8k tokens/min do Groq; jobs esperam a janela do minuto. Os aliases `-latest` mudam de alvo sem aviso: dois elos que passam a se esgotar juntos são sinal de que apontam para o mesmo modelo — trocar um deles por id fixo. |
 | Workflow desativado por 60 dias | Commits frequentes; recuperação ao abrir o app. |
 
 Itens manuais do dono (nada além disto):
