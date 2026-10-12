@@ -205,12 +205,35 @@ public sealed class RecurrenceDetectorTests
         Assert.Equal(180m, stream.Facts.MedianAmount);
     }
 
+    /// <summary>
+    /// The criterion of the issue ("the same values in LAZER form no series") changed with the rule of proof (decision
+    /// of the owner): an establishment that only charges that, once a month on its own day, is a fixed bill in any
+    /// category, also when the amount varies. What tells a bill from a shopping habit is the movement of the
+    /// establishment, not its category (RecurrenceDetectorProofTests).
+    /// </summary>
     [Fact]
-    public void TheSameValuesInLazer_DoNotFormASeries()
+    public void TheSameValuesInLazer_AreAVariableFixedBillToo_WhenTheEstablishmentOnlyChargesThat()
     {
         var rows = new[] { (8, 180m), (9, 230m), (10, 150m) }.Select(v => Row("Companhia Exemplo", v.Item2, new DateOnly(2026, v.Item1, 6), "LAZER"));
 
-        Assert.Empty(Detect(rows));
+        var stream = Assert.Single(Detect(rows));
+
+        Assert.Equal(RecurringKinds.FixedBill, stream.Facts.Kind);
+        Assert.True(stream.Facts.VariableAmount);
+        Assert.Equal(RecurringConfidences.High, stream.Facts.Confidence);
+        Assert.Equal(180m, stream.Facts.MedianAmount);
+    }
+
+    /// <summary>The other side of the same rule: the same three amounts in an establishment full of other purchases are a habit.</summary>
+    [Fact]
+    public void TheSameValues_InAnEstablishmentWithManyOtherPurchases_DoNotFormASeries()
+    {
+        var bills = new[] { (8, 180m), (9, 230m), (10, 150m) }.Select(v => Row("Mercado Exemplo", v.Item2, new DateOnly(2026, v.Item1, 6), "ALIMENTACAO"));
+        int[] days = [2, 11, 15, 19, 23, 27];
+        var others = Enumerable.Range(0, 18).Select(i => Row("Mercado Exemplo", 31m + i * 23.7m, new DateOnly(2026, 8 + i / 6, days[i % 6]), "ALIMENTACAO"))
+            .Where(r => r.LocalDate <= Today);
+
+        Assert.Empty(Detect(bills.Concat(others)));
     }
 
     [Fact]

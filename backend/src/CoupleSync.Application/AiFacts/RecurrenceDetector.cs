@@ -96,6 +96,41 @@ public sealed class RecurrenceOptions
     public int HabitMinOccurrences { get; set; } = 4;
 
     public decimal HabitMaxMedian { get; set; } = 50m;
+
+    // ---- proof: what makes a series a commitment that counts in the total (design 3.3, "prova proporcional ao movimento")
+
+    /// <summary>
+    /// A monthly series is charged "on its own day" when all its charges fit in a window of this many days of the
+    /// month (the end of the month counts as one day: the 31st, the 30th and the 28th of February are the same day).
+    /// </summary>
+    public int OwnDayWindowDays { get; set; } = 7;
+
+    /// <summary>
+    /// An establishment "only charges that" when the series holds at least this share of the days with a purchase
+    /// there, in the period of the series.
+    /// </summary>
+    public decimal ExclusiveShare { get; set; } = 0.8m;
+
+    /// <summary>
+    /// In an establishment with other purchases, a series of one price on its own day counts in the total only with
+    /// this many charges. With fewer it is shown as possible.
+    /// </summary>
+    public int SamePriceMinCharges { get; set; } = 5;
+
+    /// <summary>
+    /// An establishment is "busy" when it has more than this many other days with a purchase for each charge of the
+    /// series: a coincidence is more likely there, so more proof is asked. 0 switches the rule off.
+    /// </summary>
+    public decimal BusyPlaceRatio { get; set; } = 2m;
+
+    /// <summary>How many charges more than <see cref="SamePriceMinCharges"/> a busy establishment asks for the total.</summary>
+    public int BusyPlaceExtraCharges { get; set; } = 1;
+
+    /// <summary>In a busy establishment a series of one price on its own day is only shown as possible with this many charges.</summary>
+    public int BusyPlacePossibleMinCharges { get; set; } = 4;
+
+    /// <summary>The charges of a yearly series are "one year apart" within this many days.</summary>
+    public int YearlyAnniversaryDays { get; set; } = 15;
 }
 
 /// <summary>One transaction as the detector reads it. The description never leaves the server.</summary>
@@ -115,7 +150,11 @@ public sealed record RecurrenceRow(
     public string? Establishment => string.IsNullOrWhiteSpace(Merchant) ? (string.IsNullOrWhiteSpace(Description) ? null : Description.Trim()) : Merchant.Trim();
 }
 
-/// <summary>One stream found: its key (without the suffix that tells two streams of the same shop apart), its facts and its charges.</summary>
+/// <summary>
+/// One stream found: its key (without the suffix that tells two streams of the same shop apart), its facts and its
+/// charges. A stream with a pattern but without proof is "possible": its confidence is
+/// <see cref="RecurringConfidences.Low"/>, it is shown apart and never counts in the total.
+/// </summary>
 public sealed record DetectedStream(string MerchantKey, string Cadence, RecurringStreamFacts Facts, IReadOnlyList<Guid> TransactionIds)
 {
     /// <summary>
@@ -154,13 +193,36 @@ public static class RecurrenceDetector
     private sealed record CadenceSpec(string Name, int Min, int Max, int? MissedMin, int? MissedMax, int NominalDays, int MinOccurrences, decimal PerYear);
 
     /// <param name="Echoes">Charges read as copies of the ones in <paramref name="Rows"/>: they are of the stream, and are not counted.</param>
-    private sealed record Chain(CadenceSpec Cadence, List<Keyed> Rows, int Missed, bool Variable, List<Keyed> Echoes);
+    private sealed record Chain(CadenceSpec Cadence, List<Keyed> Rows, int Missed, bool Variable, List<Keyed> Echoes)
+    {
+        public Proof Proof { get; init; } = Proof.Confirmed;
+
+        /// <summary>The charges of the other series found side by side with this one, among charges of the same amount (the plan of the other person).</summary>
+        public HashSet<Guid>? Siblings { get; init; }
+    }
+
+    /// <summary>
+    /// How much proof a series has. <see cref="Confirmed"/> counts in the total; <see cref="Possible"/> is only
+    /// shown, waiting for the person to say what it is; <see cref="None"/> is a shopping habit, and is not shown.
+    /// </summary>
+    private enum Proof
+    {
+        None,
+        Possible,
+        Confirmed,
+    }
 
     /// <summary>One series of a cluster, and the charges of the cluster read as copies of its charges.</summary>
     private sealed record Series(List<Keyed> Rows, List<Keyed> Echoes);
 
-    public static DetectionResult Detect(IReadOnlyList<RecurrenceRow> rows, DateOnly today, RecurrenceOptions options)
+    /// <param name="saidRecurring">
+    /// The charges of each stream the person said is recurring ("it is a subscription", "it is a fixed bill"): the
+    /// series that holds most of the charges of one of them is confirmed without any other proof.
+    /// </param>
+    public static DetectionResult Detect(
+        IReadOnlyList<RecurrenceRow> rows, DateOnly today, RecurrenceOptions options, IReadOnlyCollection<IReadOnlyCollection<Guid>>? saidRecurring = null)
     {
+        var pinned = (saidRecurring ?? []).Where(charges => charges.Count > 0).Select(charges => charges.ToHashSet()).ToList();
         var keyed = new List<Keyed>(rows.Count);
         foreach (var row in rows)
         {
@@ -197,7 +259,7 @@ public static class RecurrenceDetector
             var older = all.Where(k => k.Date < recentFrom).ToList();
             if (pool.Count == 0 && older.Count == 0) continue;
 
-            var found = DetectCadences(group.Key, pool, older, today, options);
+            var found = DetectCadences(group.Key, pool, older, today, options, pinned);
             streams.AddRange(found);
             if (found.Count == 0 && DetectFrequentSmallSpend(group.Key, pool, today, options) is { } habit) streams.Add(habit);
         }
@@ -268,8 +330,18 @@ public static class RecurrenceDetector
 
             if (MonthIndex(today) > endMonth) continue;   // paid off
 
-            // Two purchases of the same plan in the same shop and month count as one commitment.
-            var amount = parts.Where(p => p.Number == last.Number).Sum(p => p.Row.Amount);
+            // Two purchases of the same plan in the same shop and month count as one commitment. The same part
+            // seen twice (the phone of each person, a statement and a notification: the same number, the same
+            // amount, another person or another means) is one part, and is counted once.
+            var counted = new List<Keyed>();
+            foreach (var part in parts.Where(p => p.Number == last.Number).Select(p => p.Row))
+            {
+                var copy = counted.Any(other => Within(part.Amount, other.Amount, options.SamePriceTolerance)
+                                                && (part.Row.UserId != other.Row.UserId || part.Row.Source != other.Row.Source));
+                if (!copy) counted.Add(part);
+            }
+
+            var amount = counted.Sum(p => p.Amount);
             var remainingParts = plan.Key.Total - last.Number;
             var status = remainingParts == 0 ? RecurringStatuses.Active : Lifecycle(daysSince, 30m, options);
             var users = parts.Select(p => p.Row.Row.UserId).Distinct().ToList();
@@ -332,9 +404,32 @@ public static class RecurrenceDetector
 
     // ---------------------------------------------------------------- cadences (3.3)
 
+    /// <summary>A series that may be a stream, and the band of amounts it was found in.</summary>
+    private sealed record Candidate(Chain Chain, Band Band);
+
+    /// <summary>
+    /// Where a candidate series came from. <see cref="BillBand"/>: the wide band of a "variable fixed bill", in an
+    /// establishment that is a utility or whose category is MORADIA or SAUDE — looked at before everything else.
+    /// <see cref="PriceBand"/>: charges of similar amount (also across one step of price). <see cref="AnyAmount"/>:
+    /// the wide band in any other establishment, only for a series whose amount does vary.
+    /// </summary>
+    private enum Band
+    {
+        BillBand,
+        PriceBand,
+        AnyAmount,
+    }
+
+    /// <summary>
+    /// The streams of one establishment. Every series in the rhythm of a cadence is a candidate; what decides is its
+    /// proof (<see cref="ProofOf"/>): the confirmed ones are chosen first, then the possible ones among what is
+    /// left, and a series without proof is a shopping habit and is not a stream.
+    /// </summary>
     /// <param name="pool">The charges of the establishment in the months of history.</param>
     /// <param name="older">Its charges before that: only the yearly cadence reads them.</param>
-    private static List<DetectedStream> DetectCadences(string key, List<Keyed> pool, List<Keyed> older, DateOnly today, RecurrenceOptions o)
+    /// <param name="pinned">The charges of each stream the person said is recurring.</param>
+    private static List<DetectedStream> DetectCadences(
+        string key, List<Keyed> pool, List<Keyed> older, DateOnly today, RecurrenceOptions o, List<HashSet<Guid>> pinned)
     {
         var monthly = new CadenceSpec(RecurringCadences.Monthly, 25, 34, 53, 65, 30, o.MonthlyMinOccurrences, 12m);
         var weekly = new CadenceSpec(RecurringCadences.Weekly, 5, 9, 12, 16, 7, o.WeeklyMinOccurrences, 52m);
@@ -342,32 +437,36 @@ public static class RecurrenceDetector
 
         var category = ModeCategory(pool.Count > 0 ? pool : older);
         var utility = MerchantHints.IsUtility(key);
-        var variableEligible = category is "MORADIA" or "SAUDE" || utility;
-        var chosen = new List<Chain>();
-        var remaining = pool.ToList();
+        var knownName = utility || MerchantHints.IsSubscription(key);
+        var billPlace = utility || category is "MORADIA" or "SAUDE";
+        var everything = older.Concat(pool).ToList();
+        var candidates = new List<Candidate>();
 
-        // Track "variable fixed bill" first where it applies: its band holds every charge the narrow band would.
-        if (variableEligible)
+        void AddSeries(List<Keyed> cluster, CadenceSpec cadence, Band band)
         {
-            foreach (var cluster in Cluster(remaining, o.VariableBillTolerance))
+            var found = SeriesOf(cluster, cadence, o);
+            foreach (var series in found)
             {
-                foreach (var series in SeriesOf(cluster, monthly, o))
-                {
-                    var chain = series.Rows;
-                    var median = Median(chain.Select(r => r.Amount));
-                    var variable = chain.Any(r => !Within(r.Amount, median, o.AmountTolerance));
-                    chosen.Add(new Chain(monthly, chain, CountMissed(chain, monthly), variable, series.Echoes));
-                }
-            }
+                var median = Median(series.Rows.Select(r => r.Amount));
+                var variable = band != Band.PriceBand && series.Rows.Any(r => !Within(r.Amount, median, o.AmountTolerance));
+                if (band == Band.AnyAmount && !variable) continue;   // a steady amount is found in its own band
 
-            RemoveUsed(remaining, chosen);
+                // The charges of the series next to it (the plan of the other person) are not "other purchases" of this one.
+                var siblings = found.Count < 2
+                    ? null
+                    : found.Where(other => !ReferenceEquals(other, series)).SelectMany(other => other.Rows.Concat(other.Echoes)).Select(r => r.Row.Id).ToHashSet();
+                candidates.Add(new Candidate(
+                    new Chain(cadence, series.Rows, CountMissed(series.Rows, cadence), variable, series.Echoes) { Siblings = siblings }, band));
+            }
         }
 
-        // Track "subscription and purchase": every cluster of similar amounts, every cadence, plus one price step.
-        var candidates = new List<Chain>();
-        var clusters = Cluster(remaining, o.AmountTolerance);
+        // The band of a "variable fixed bill" (electricity, water...): its amounts may be far from each other.
+        foreach (var cluster in Cluster(pool, o.VariableBillTolerance)) AddSeries(cluster, monthly, billPlace ? Band.BillBand : Band.AnyAmount);
+
+        // Charges of similar amount, in every cadence, plus one step of price.
+        var clusters = Cluster(pool, o.AmountTolerance);
         // The yearly cadence also reads what is older than the months of history.
-        var yearlyClusters = older.Count == 0 ? clusters : Cluster(remaining.Concat(older).ToList(), o.AmountTolerance);
+        var yearlyClusters = older.Count == 0 ? clusters : Cluster(everything, o.AmountTolerance);
         foreach (var cadence in new[] { monthly, weekly, yearly })
         {
             var raw = new List<(List<Keyed> Chain, List<Keyed> Cluster)>();
@@ -376,11 +475,14 @@ public static class RecurrenceDetector
                 var chain = RawChain(cluster, cadence);
                 if (chain.Count == 0) continue;
                 raw.Add((chain, cluster));
-                foreach (var series in SeriesOf(cluster, cadence, o))
-                    candidates.Add(new Chain(cadence, series.Rows, CountMissed(series.Rows, cadence), false, series.Echoes));
+                AddSeries(cluster, cadence, Band.PriceBand);
             }
 
             // One step of price: the old price in one cluster, the new one in another, the dates in the same rhythm.
+            // Only when one of the two sides is a series by itself: two pairs of purchases of two prices are not
+            // "the same bill, that got more expensive".
+            bool IsSeries((List<Keyed> Chain, List<Keyed> Cluster) side)
+                => side.Chain.Count >= cadence.MinOccurrences && Covers(side.Chain, side.Cluster, SameChargeDays(cadence, o), o);
             foreach (var newer in raw.Where(c => c.Chain.Count >= 2))
             {
                 var before = raw
@@ -389,38 +491,209 @@ public static class RecurrenceDetector
                     .OrderByDescending(c => c.Chain[^1].Date)
                     .FirstOrDefault();
                 if (before.Chain is null) continue;
+                if (!IsSeries(newer) && !IsSeries(before)) continue;
                 var merged = before.Chain.Concat(newer.Chain).ToList();
                 var echoes = EchoesOf(merged, before.Cluster.Concat(newer.Cluster).ToList(), SameChargeDays(cadence, o), o);
-                candidates.Add(new Chain(cadence, merged, CountMissed(merged, cadence), false, echoes));
+                candidates.Add(new Candidate(new Chain(cadence, merged, CountMissed(merged, cadence), false, echoes), Band.PriceBand));
             }
         }
 
-        var used = new HashSet<Guid>();
-        foreach (var candidate in candidates
-                     .Where(c => c.Rows.Count >= c.Cadence.MinOccurrences)
-                     // A yearly charge whose renewal is late is not a yearly charge any more.
-                     .Where(c => !ReferenceEquals(c.Cadence, yearly) || today.DayNumber - c.Rows[^1].Date.DayNumber <= YearlyMaxIntervalDays)
-                     .OrderByDescending(c => c.Rows.Count)
-                     .ThenBy(c => c.Cadence.NominalDays == 30 ? 0 : c.Cadence.NominalDays)
-                     .ThenByDescending(c => c.Rows[^1].Date))
+        // The same price to the cent (within the "same price" band): the series of a subscription in a shop where
+        // loose purchases of a near amount would otherwise be mixed with its charges.
+        var samePrice = Cluster(pool, o.SamePriceTolerance);
+        var samePriceYearly = older.Count == 0 ? samePrice : Cluster(everything, o.SamePriceTolerance);
+        foreach (var cadence in new[] { monthly, yearly })
         {
-            if (candidate.Rows.Any(r => used.Contains(r.Row.Id))) continue;
-            // The copies of its charges go with the stream: they form no other one.
+            foreach (var cluster in ReferenceEquals(cadence, yearly) ? samePriceYearly : samePrice) AddSeries(cluster, cadence, Band.PriceBand);
+        }
+
+        var ordered = candidates
+            .Where(c => c.Chain.Rows.Count >= c.Chain.Cadence.MinOccurrences)
+            // A yearly charge whose renewal is late is not a yearly charge any more.
+            .Where(c => !ReferenceEquals(c.Chain.Cadence, yearly) || today.DayNumber - c.Chain.Rows[^1].Date.DayNumber <= YearlyMaxIntervalDays)
+            .OrderBy(c => c.Band == Band.BillBand ? 0 : 1)
+            .ThenByDescending(c => c.Chain.Rows.Count)
+            .ThenBy(c => c.Band)
+            .ThenBy(c => c.Chain.Cadence.NominalDays == 30 ? 0 : c.Chain.Cadence.NominalDays)
+            .ThenByDescending(c => c.Chain.Rows[^1].Date)
+            .Select(c => c.Chain)
+            .ToList();
+
+        var chosen = new List<Chain>();
+        // The charges of the streams chosen so far, with their copies: they form no other stream, and for another
+        // series of the establishment they are not "other purchases".
+        var used = new HashSet<Guid>();
+
+        Proof Judge(Chain candidate)
+            => IsSaidRecurring(candidate, everything, pinned) ? Proof.Confirmed : ProofOf(candidate, everything, used, knownName, o);
+
+        void Choose(Chain candidate, Proof proof)
+        {
             foreach (var r in candidate.Rows.Concat(candidate.Echoes)) used.Add(r.Row.Id);
-            chosen.Add(candidate);
+            chosen.Add(candidate with { Proof = proof });
+        }
+
+        // Each confirmed stream takes its charges out of the "other purchases" of the establishment, which may be
+        // what another series needed to be confirmed: again, until nothing changes.
+        for (var progress = true; progress;)
+        {
+            progress = false;
+            foreach (var candidate in ordered)
+            {
+                if (candidate.Rows.Any(r => used.Contains(r.Row.Id)) || Judge(candidate) != Proof.Confirmed) continue;
+                Choose(candidate, Proof.Confirmed);
+                progress = true;
+            }
+        }
+
+        var confirmed = used.ToHashSet();
+        foreach (var candidate in ordered)
+        {
+            if (candidate.Rows.Any(r => used.Contains(r.Row.Id)) || ProofOf(candidate, everything, confirmed, knownName, o) != Proof.Possible) continue;
+            Choose(candidate, Proof.Possible);
         }
 
         return chosen
-            .Where(c => c.Rows.Count >= c.Cadence.MinOccurrences)
             .OrderBy(c => c.Rows[0].Date).ThenBy(c => c.Rows[0].Amount).ThenBy(c => c.Rows[0].Row.Id)
             .Select(c => Build(key, c, utility, today, o))
             .ToList();
     }
 
-    private static void RemoveUsed(List<Keyed> remaining, List<Chain> chosen)
+    /// <summary>True when the series holds most of the charges (the ones still read) of a stream the person said is recurring.</summary>
+    private static bool IsSaidRecurring(Chain candidate, List<Keyed> everything, List<HashSet<Guid>> pinned)
     {
-        var ids = chosen.SelectMany(c => c.Rows.Concat(c.Echoes)).Select(r => r.Row.Id).ToHashSet();
-        remaining.RemoveAll(r => ids.Contains(r.Row.Id));
+        if (pinned.Count == 0) return false;
+        var ofSeries = candidate.Rows.Concat(candidate.Echoes).Select(r => r.Row.Id).ToHashSet();
+        foreach (var charges in pinned)
+        {
+            var stillRead = everything.Count(r => charges.Contains(r.Row.Id));
+            if (stillRead > 0 && 2 * ofSeries.Count(charges.Contains) > stillRead) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The proof of a series, proportional to the movement of the establishment (design 3.3):
+    /// <list type="bullet">
+    /// <item>the establishment only charges that (<see cref="RecurrenceOptions.ExclusiveShare"/>) and the series is
+    /// on its own day (<see cref="RecurrenceOptions.OwnDayWindowDays"/>) → confirmed, also when the amount varies,
+    /// in any category; with a name of the lists of subscriptions and utilities the day may even move;</item>
+    /// <item>the establishment also has loose purchases: one price (one step accepted), on its own day, that price
+    /// not seen out of that day, for <see cref="RecurrenceOptions.SamePriceMinCharges"/> charges (more in a busy
+    /// establishment) → confirmed; with fewer charges → possible;</item>
+    /// <item>the establishment only charges that, on days that move → possible;</item>
+    /// <item>anything else is a shopping habit: no proof.</item>
+    /// </list>
+    /// Yearly: confirmed when the establishment only charges that, at one price, one year apart; possible when it
+    /// only charges that. Weekly: always a habit, listed apart and never in the total.
+    /// </summary>
+    /// <param name="taken">The charges of the streams already chosen: they are not "other purchases" of this series.</param>
+    private static Proof ProofOf(Chain chain, List<Keyed> everything, HashSet<Guid> taken, bool knownName, RecurrenceOptions o)
+    {
+        if (chain.Cadence.Name == RecurringCadences.Weekly) return Proof.Confirmed;
+
+        var rows = chain.Rows;
+        var charges = rows.Count;
+        var within = SameChargeDays(chain.Cadence, o);
+        var isMonthly = chain.Cadence.Name == RecurringCadences.Monthly;
+        var ofSeries = rows.Select(r => r.Row.Id).ToHashSet();
+        var lowest = rows.Min(r => r.Amount) * (1 - o.SamePriceTolerance);
+        var highest = rows.Max(r => r.Amount) * (1 + o.SamePriceTolerance);
+
+        bool SamePriceAsSeries(Keyed r) => rows.Any(x => Within(r.Amount, x.Amount, o.SamePriceTolerance));
+
+        // A charge of the price of the series, on the day of the series, that the rhythm left out (a gap of 35
+        // days) is a charge of the series: it is not "another purchase" of the establishment.
+        bool LeftOutByTheRhythm(Keyed r)
+        {
+            if (!isMonthly || ofSeries.Contains(r.Row.Id)) return false;
+            var priceOfSeries = chain.Variable ? r.Amount >= lowest && r.Amount <= highest : SamePriceAsSeries(r);
+            return priceOfSeries && OnItsOwnDayOfTheMonth(rows.Append(r).ToList(), o);
+        }
+
+        var purchases = everything
+            .Where(r => ofSeries.Contains(r.Row.Id) || (!taken.Contains(r.Row.Id) && chain.Siblings?.Contains(r.Row.Id) != true && !LeftOutByTheRhythm(r)))
+            .ToList();
+        var otherDays = OtherDays(rows, purchases, within, o);
+        var onlyChargesThat = charges >= o.ExclusiveShare * (charges + otherDays);
+
+        if (chain.Cadence.Name == RecurringCadences.Yearly)
+        {
+            var median = Median(rows.Select(r => r.Amount));
+            var onePriceAYear = rows.All(r => Within(r.Amount, median, o.SamePriceTolerance));
+            var aYearApart = true;
+            for (var i = 1; i < charges; i++)
+                aYearApart &= Math.Abs(rows[i].Date.DayNumber - rows[i - 1].Date.DayNumber - 365) <= o.YearlyAnniversaryDays;
+            if (!onlyChargesThat) return Proof.None;
+            return onePriceAYear && aYearApart ? Proof.Confirmed : Proof.Possible;
+        }
+
+        var onItsDay = OnItsOwnDayOfTheMonth(rows, o);
+        if (onlyChargesThat && (onItsDay || knownName)) return Proof.Confirmed;
+
+        // The price of the series is (almost) only seen on the day of the series.
+        var priceOnlyOnItsDay = charges >= o.ExclusiveShare * (charges + OtherDays(rows, purchases.Where(SamePriceAsSeries).ToList(), within, o));
+        if (OnePriceWithOneStep(rows, o.SamePriceTolerance) && onItsDay && priceOnlyOnItsDay)
+        {
+            var busy = o.BusyPlaceRatio > 0 && otherDays > o.BusyPlaceRatio * charges;
+            if (charges >= o.SamePriceMinCharges + (busy ? o.BusyPlaceExtraCharges : 0)) return Proof.Confirmed;
+            if (!busy || charges >= o.BusyPlacePossibleMinCharges) return Proof.Possible;
+        }
+
+        return onlyChargesThat ? Proof.Possible : Proof.None;
+    }
+
+    /// <summary>One price (within the tolerance, around the median) — or two, one after the other: one step of price.</summary>
+    private static bool OnePriceWithOneStep(List<Keyed> rows, decimal tolerance)
+    {
+        bool OnePrice(List<Keyed> part)
+        {
+            if (part.Count == 0) return true;
+            var median = Median(part.Select(r => r.Amount));
+            return part.All(r => Within(r.Amount, median, tolerance));
+        }
+
+        for (var split = 0; split < rows.Count; split++)
+        {
+            if (OnePrice(rows.Take(split).ToList()) && OnePrice(rows.Skip(split).ToList())) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>True when every charge falls in one window of <see cref="RecurrenceOptions.OwnDayWindowDays"/> days of the month.</summary>
+    private static bool OnItsOwnDayOfTheMonth(List<Keyed> rows, RecurrenceOptions o) => DaysOfTheMonthSpanned(rows) < o.OwnDayWindowDays;
+
+    /// <summary>
+    /// How far apart, in days, the charges are within the month (0 = always the same day). Each charge is measured
+    /// from the day of the month of one of them, in its own month or in the ones next to it, so the end of the month
+    /// is one day (the 31st, the 30th, the 28th of February) and a window may cross from one month to the next.
+    /// </summary>
+    private static int DaysOfTheMonthSpanned(List<Keyed> rows)
+    {
+        var best = int.MaxValue;
+        foreach (var reference in rows)
+        {
+            int earliest = 0, latest = 0;
+            foreach (var charge in rows)
+            {
+                var months = (charge.Date.Year - reference.Date.Year) * 12 + charge.Date.Month - reference.Date.Month;
+                var offset = int.MaxValue;
+                for (var m = months - 1; m <= months + 1; m++)
+                {
+                    var days = charge.Date.DayNumber - reference.Date.AddMonths(m).DayNumber;
+                    if (Math.Abs((long)days) < Math.Abs((long)offset)) offset = days;
+                }
+
+                earliest = Math.Min(earliest, offset);
+                latest = Math.Max(latest, offset);
+            }
+
+            best = Math.Min(best, latest - earliest);
+        }
+
+        return best;
     }
 
     private static DetectedStream Build(string key, Chain chain, bool utility, DateOnly today, RecurrenceOptions o)
@@ -512,7 +785,10 @@ public static class RecurrenceDetector
         };
         // A charge registered by more than one person (its copies) is of nobody in particular.
         var users = rows.Concat(chain.Echoes).Select(r => r.Row.UserId).Distinct().ToList();
-        var confidence = cadence.Name == RecurringCadences.Yearly && rows.Count < 3 ? RecurringConfidences.Medium : RecurringConfidences.High;
+        var confidence = chain.Proof == Proof.Possible ? RecurringConfidences.Low
+            : cadence.Name == RecurringCadences.Yearly && rows.Count < 3 ? RecurringConfidences.Medium : RecurringConfidences.High;
+        // "Forgotten", "got more expensive" and "new" are said of what is a commitment: a possible one says nothing yet.
+        if (chain.Proof == Proof.Possible) flags.Clear();
 
         var facts = new RecurringStreamFacts(
             DisplayName: DisplayName(last.Text),
