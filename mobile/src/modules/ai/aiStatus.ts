@@ -64,6 +64,23 @@ export function welcomeView(status: AiStatusResponse, myUserId: string | null): 
   return { kind: 'ask' };
 }
 
+export interface LeaveWelcomeDeps {
+  /** A tela de boas-vindas está em foco agora? (Ela é aba oculta: fica montada, escondida, entre as visitas.) */
+  isFocused(): boolean;
+  leave(): void;
+}
+
+/**
+ * A tela de boas-vindas sai sozinha para o Painel quando não tem o que perguntar (IA indisponível, a pessoa já
+ * ativou, o status não carregou) e nenhuma resposta está sendo gravada — mas só a que está em foco: a instância
+ * escondida não tira a pessoa da tela em que ela está quando o status muda.
+ */
+export function leaveWelcomeIfDue(nothingToAsk: boolean, busy: boolean, deps: LeaveWelcomeDeps): boolean {
+  if (!nothingToAsk || busy || !deps.isFocused()) return false;
+  deps.leave();
+  return true;
+}
+
 /** "Ativada por Ana em 8 de outubro de 2026" / "Desligada" (Configurações > Inteligência artificial). */
 export function activationSummary(status: AiStatusResponse, formatDate: (iso: string | null) => string): string {
   if (!status.available) return 'Indisponível no momento';
@@ -156,6 +173,31 @@ export const AI_STATUS_NOTICE_TEXT: Readonly<Record<Exclude<AiStatusNotice, 'non
   retrying: 'Não foi possível verificar a análise com IA. Tentando de novo…',
   failed: 'Não foi possível verificar a análise com IA. Verifique a internet.',
 };
+
+/** O aviso como o Painel o desenha: o texto, o ícone e, depois de uma falha, o botão "Verificar agora". */
+export interface AiStatusNoticeView {
+  readonly text: string;
+  readonly icon: 'sparkles-outline' | 'cloud-offline-outline';
+  /** O toque em "Verificar agora": consulta o servidor na hora. Null enquanto a consulta está em andamento (sem botão). */
+  readonly checkNow: (() => void) | null;
+}
+
+/** Null: há status (do servidor ou guardado no aparelho) e o Painel não mostra aviso nenhum. */
+export function aiStatusNoticeView(
+  status: AiStatusResponse | null,
+  loadFailed: boolean,
+  retrying: boolean,
+  refresh: () => unknown,
+): AiStatusNoticeView | null {
+  const notice = aiStatusNotice(status, loadFailed, retrying);
+  if (notice === 'none') return null;
+  const checking = notice === 'checking';
+  return {
+    text: AI_STATUS_NOTICE_TEXT[notice],
+    icon: checking ? 'sparkles-outline' : 'cloud-offline-outline',
+    checkNow: checking ? null : () => void refresh(),
+  };
+}
 
 /** Esperas entre as novas tentativas da consulta do status que falhou (cobrem a API acordando: cerca de 2 minutos). */
 export const AI_STATUS_RETRY_DELAYS_MS: readonly number[] = [3_000, 8_000, 20_000, 40_000, 60_000];

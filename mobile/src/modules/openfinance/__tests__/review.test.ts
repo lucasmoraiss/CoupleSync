@@ -109,7 +109,7 @@ describe('compra em outra moeda (revisão 5, I1)', () => {
 
   it('nunca entra num lote de confirmação nem no total em reais, mesmo que estivesse marcada', () => {
     const forced = new Set(['a', 'u', 'b']);
-    expect(buildConfirmBatches(lines, forced, { u: 'LAZER' })).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }] }]);
+    expect(buildConfirmBatches(lines, forced, { u: 'LAZER' })).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }], holdPossibleDuplicates: true }]);
     expect(selectedTotalBrl(lines, forced)).toBeCloseTo(82.3, 2);
     expect(buildConfirmBatches([dollars], new Set(['u']), {})).toEqual([]);
   });
@@ -145,7 +145,7 @@ describe('lançamento sem valor (revisão 1, I5)', () => {
 
   it('nunca entra num lote de confirmação nem no total, mesmo que estivesse marcado', () => {
     const forced = new Set(['a', 'z', 'b']);
-    expect(buildConfirmBatches(withZero, forced, {})).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }] }]);
+    expect(buildConfirmBatches(withZero, forced, {})).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }], holdPossibleDuplicates: true }]);
     expect([...pruneSelection(forced, withZero)]).toEqual(['a', 'b']);
     expect(selectedTotalBrl(withZero, forced)).toBeCloseTo(82.3);
   });
@@ -160,13 +160,13 @@ describe('lançamento sem valor (revisão 1, I5)', () => {
 describe('lotes de confirmação', () => {
   it('monta um lote com as selecionadas, na ordem da tela, sem as pendentes no banco', () => {
     const batches = buildConfirmBatches(lines, new Set(['b', 'a', 'p']), {});
-    expect(batches).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }] }]);
+    expect(batches).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }], holdPossibleDuplicates: true }]);
   });
 
   it('manda a categoria só quando a pessoa escolheu outra que não a sugerida', () => {
     const reais = line({ id: 'r', day: '2026-10-05', amount: 12, suggestedCategory: 'OUTROS' });
     const batches = buildConfirmBatches([posted, reais, other], new Set(['a', 'b', 'r']), { a: 'LAZER', b: 'TRANSPORTE', gone: 'SAUDE' });
-    expect(batches).toEqual([{ expenses: [{ id: 'a', category: 'LAZER' }, { id: 'r' }, { id: 'b' }] }]);
+    expect(batches).toEqual([{ expenses: [{ id: 'a', category: 'LAZER' }, { id: 'r' }, { id: 'b' }], holdPossibleDuplicates: true }]);
   });
 
   it('nunca manda valor nem descrição: o valor não é editável', () => {

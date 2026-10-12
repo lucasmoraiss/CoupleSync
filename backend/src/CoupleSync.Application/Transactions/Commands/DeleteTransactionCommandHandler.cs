@@ -1,6 +1,8 @@
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
+using CoupleSync.Application.OpenFinance;
 using CoupleSync.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace CoupleSync.Application.Transactions.Commands;
 
@@ -9,15 +11,18 @@ public sealed class DeleteTransactionCommandHandler
     private readonly ITransactionRepository _repository;
     private readonly IBankSyncRepository _bankSync;
     private readonly IDateTimeProvider _clock;
+    private readonly ILogger<DeleteTransactionCommandHandler> _logger;
 
     public DeleteTransactionCommandHandler(
         ITransactionRepository repository,
         IBankSyncRepository bankSync,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        ILogger<DeleteTransactionCommandHandler> logger)
     {
         _repository = repository;
         _bankSync = bankSync;
         _clock = clock;
+        _logger = logger;
     }
 
     public async Task HandleAsync(DeleteTransactionCommand command, CancellationToken cancellationToken)
@@ -37,7 +42,51 @@ public sealed class DeleteTransactionCommandHandler
         foreach (var line in await _bankSync.FindAllByLinkedTransactionAsync(transaction.Id, transaction.CoupleId, cancellationToken))
             line.Discard(now);
 
+        // The lines that only looked like it (suspected duplicates still waiting): the store clears their suspicion
+        // with the deletion; which ones they were is read before.
+        var lookedLikeIt = await _bankSync.FindWaitingIdsBySuspectAsync(transaction.Id, transaction.CoupleId, cancellationToken);
+
         await _repository.DeleteAsync(transaction, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
+
+        if (lookedLikeIt.Count > 0)
+            await JudgeAgainAsync(command.CoupleId, lookedLikeIt, now);
+    }
+
+    /// <summary>
+    /// The transaction is gone. Each line that looked like it is judged again: it points to another transaction that
+    /// looks like it, or waits as an ordinary expense. A second save, after the deletion (the same order of locks as
+    /// "it is the same": the transaction first, then the lines). It never fails the deletion, which is stored: a
+    /// line answered at this very moment keeps that answer, and the others are tried once more. Nor is it given up
+    /// when the request is: the deletion is stored, and a request cancelled now would leave the lines unjudged.
+    /// Whatever fails (a conflict of the store, a dropped connection, a timeout) is tried twice and then left: the
+    /// lines stay as they were, waiting, and the next synchronisation of the bank judges them again.
+    /// </summary>
+    private async Task JudgeAgainAsync(Guid coupleId, IReadOnlyCollection<Guid> lineIds, DateTime now)
+    {
+        var ct = CancellationToken.None;
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            try
+            {
+                var lines = await _bankSync.FindByIdsAsync(lineIds, coupleId, ct);
+                var names = await _bankSync.GetAccountNamesAsync(coupleId, ct);
+                await BankSuspicionJudge.JudgeAsync(
+                    _bankSync, coupleId, lines, BankSuspicionJudge.ConnectorNameBy(names),
+                    leavingLineIds: [], takenTransactionIds: [], now, ct);
+                await _bankSync.SaveChangesAsync(ct);
+                return;
+            }
+            catch (Exception ex)
+            {
+                // Nothing in this request is cancelled (the token is none), so what arrives here is a failure of the
+                // store or of the connection, never the request being given up.
+                _bankSync.DiscardChanges();
+                if (attempt == 2)
+                    _logger.LogWarning(
+                        "Judging the lines again after deleting a transaction failed for couple {CoupleId} ({ExceptionType}).",
+                        coupleId, ex.GetType().Name);
+            }
+        }
     }
 }

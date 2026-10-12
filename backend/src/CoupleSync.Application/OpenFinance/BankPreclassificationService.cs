@@ -20,9 +20,13 @@ public sealed record ArrivedBankLine(BankTransaction Row, string? PayerName)
 /// within ten days: each bill is paid by one debit only) or by its description: ignored;</item>
 /// <item>a credit paid by who holds another account of the group: ignored;</item>
 /// <item>an expense that looks like a transaction the app already has: it stays waiting, pointing to that one
-/// (<see cref="BankReconciliationRules.AssignSuspectedDuplicates"/>: a line judged again keeps the transaction it
-/// pointed to, the same day wins over the day next to it, one transaction is of one line only).</item>
+/// (<see cref="BankSuspicionJudge"/>: every line that may be a duplicate is marked, whatever the other lines; a
+/// line judged again keeps the transaction it pointed to, the same day wins over the day next to it).</item>
 /// </list>
+/// Rules 1 to 3 decide only when a line arrives or is settled at the bank. Rule 4 is asked again at every reading,
+/// also of every line of the account that already waited, whatever its age: a line stored before
+/// this rule existed, a transaction typed, captured, imported or edited after the line arrived, a settled line the
+/// bank corrects later.
 /// Only lines <see cref="BankTransaction.OpenToAutomaticRules"/>, in reais and with a value. What is ignored was
 /// settled at the bank: a line the bank may still change or drop is never ignored. A purchase on a credit card is
 /// never a leg of a transfer. Nothing is saved here: the run saves; when someone reviewed a line meanwhile, that
@@ -51,29 +55,112 @@ public sealed class BankPreclassificationService
     /// Decides about <paramref name="lines"/>, all of <paramref name="account"/> (of the bank named
     /// <paramref name="connectorName"/>), looking at the whole group <paramref name="coupleId"/>.
     /// <paramref name="leaving"/> are the lines of the account this same reading takes out of the mirror (the bank no
-    /// longer lists them): the transaction one of them was suspected of repeating is free for the line that replaces
-    /// it (a pending purchase the bank settled under another id). A line of <paramref name="lines"/> judged before (a
-    /// pending purchase settled under the same id) keeps the transaction it points to while that one is still there
-    /// and still looks like it; otherwise the suspicion is cleared and the line is judged as a new one.
+    /// longer lists them, as a pending purchase the bank settled under another id). A line of
+    /// <paramref name="lines"/> judged before (a pending purchase settled under the same id) keeps the transaction it
+    /// points to while that one is still there and still looks like it; otherwise it is judged as a new one, and
+    /// loses the suspicion when nothing looks like it any more (also when it is no longer in reais or has no value).
+    /// Every other line of the account that already waited for the review is judged as a suspected duplicate in the
+    /// same way, and never ignored here (rules 1 to 3 are only for <paramref name="lines"/>):
+    /// <paramref name="readAgain"/> are the ones this reading has in hand (the bank listed them again, maybe
+    /// corrected), judged as they are now; the others are judged as the store has them
+    /// (<see cref="IBankSyncRepository.GetWaitingOpenToRulesForJobAsync"/>), and only the ones whose suspicion
+    /// changes are read whole.
     /// </summary>
     public async Task ApplyAsync(
         Guid coupleId,
         BankAccount account,
         string? connectorName,
         IReadOnlyList<ArrivedBankLine> lines,
+        IReadOnlyCollection<BankTransaction> readAgain,
         IReadOnlyCollection<BankTransaction> leaving,
         CancellationToken ct)
     {
+        var now = _clock.UtcNow;
         // Oldest first, so that the same data always pairs the same way.
         var open = lines
             .Where(l => l.Row.OpenToAutomaticRules && BankReconciliationRules.HasComparableValue(FactsOf(l.Row)))
             .OrderBy(l => l.Row.Date)
             .ThenBy(l => l.Row.PluggyTransactionId, StringComparer.Ordinal)
             .ToList();
-        if (open.Count == 0) return;
+        if (open.Count > 0) await IgnoreWhatIsNoExpenseNorIncomeAsync(coupleId, account, open, now, ct);
 
-        var firstDay = open.Min(l => l.Row.LocalDate);
-        var lastDay = open.Max(l => l.Row.LocalDate);
+        // What was not ignored: which transaction of the app each line looks like, asked of the store for each one.
+        // The lines in hand are judged as they are now, whatever the store still says of them.
+        var inHand = lines.Select(l => l.Row).Concat(readAgain).Distinct().ToList();
+        var leavingIds = leaving.Select(l => l.Id).ToList();
+        var notFromTheStore = inHand.Select(l => l.Id).Concat(leavingIds).ToHashSet();
+        var waiting = inHand.Where(row => row.OpenToAutomaticRules).ToDictionary(row => row.Id);
+        var stored = (await _sync.GetWaitingOpenToRulesForJobAsync(coupleId, account.Id, ct))
+            .Where(l => !notFromTheStore.Contains(l.Id))
+            .ToList();
+
+        var answers = await BankSuspicionJudge.AnswerAsync(
+            _sync,
+            coupleId,
+            waiting.Values.Select(row => JudgedLine.Of(row, connectorName))
+                .Concat(stored.Select(l => JudgedLine.Of(l, account.Id, connectorName))),
+            leavingIds,
+            takenTransactionIds: [],
+            ct);
+
+        // Of the lines judged as the store has them, only the ones whose suspicion changes are read whole.
+        var changed = answers
+            .Where(a => !waiting.ContainsKey(a.Line.Id) && a.Suspect != a.Line.MatchedTransactionId)
+            .Select(a => a.Line.Id)
+            .ToList();
+        if (changed.Count > 0)
+        {
+            foreach (var row in await _sync.FindByIdsForJobAsync(changed, coupleId, ct))
+                if (row.OpenToAutomaticRules) waiting[row.Id] = row;
+        }
+
+        foreach (var (line, suspect) in answers)
+            if (waiting.TryGetValue(line.Id, out var row)) BankSuspicionJudge.Apply(row, suspect, now);
+    }
+
+    /// <summary>
+    /// Judges, as suspected duplicates only, every line of the group <paramref name="coupleId"/> that waits for the
+    /// review and is still open to the automatic rules, in every account: also the ones no run reads any more
+    /// (synchronisation turned off, a connection disconnected or whose bank asks for the login again). Nothing is
+    /// asked of the bank and nothing is ignored here (rules 1 to 3 are for what arrives); a line a person brought
+    /// back to the review is left as it is. The lines are judged as the store has them and only the ones whose
+    /// suspicion changes are read whole. Answers whether any changed (the caller saves).
+    /// </summary>
+    public async Task<bool> JudgeWaitingOfGroupAsync(Guid coupleId, CancellationToken ct)
+    {
+        var stored = await _sync.GetWaitingOpenToRulesOfGroupForJobAsync(coupleId, ct);
+        if (stored.Count == 0) return false;
+
+        var connectors = await _sync.GetConnectorNamesForJobAsync(coupleId, ct);
+        var answers = await BankSuspicionJudge.AnswerAsync(
+            _sync,
+            coupleId,
+            stored.Select(l => JudgedLine.Of(l, l.BankAccountId, connectors.GetValueOrDefault(l.BankAccountId))),
+            leavingLineIds: [],
+            takenTransactionIds: [],
+            ct);
+
+        var changed = answers
+            .Where(a => a.Suspect != a.Line.MatchedTransactionId)
+            .ToDictionary(a => a.Line.Id, a => a.Suspect);
+        if (changed.Count == 0) return false;
+
+        var now = _clock.UtcNow;
+        var any = false;
+        foreach (var row in await _sync.FindByIdsForJobAsync(changed.Keys.ToList(), coupleId, ct))
+        {
+            if (!row.OpenToAutomaticRules) continue;
+            BankSuspicionJudge.Apply(row, changed[row.Id], now);
+            any = true;
+        }
+
+        return any;
+    }
+
+    /// <summary>Rules 1 to 3, over the lines the bank has settled: what it has not may still change or vanish.</summary>
+    private async Task IgnoreWhatIsNoExpenseNorIncomeAsync(
+        Guid coupleId, BankAccount account, IReadOnlyList<ArrivedBankLine> open, DateTime now, CancellationToken ct)
+    {
         var settled = open.Where(l => l.Row.Status == BankTransactionStatus.Posted).ToList();
 
         // A purchase on a credit card is never a leg: neither the line that arrives nor the one that waits.
@@ -100,20 +187,7 @@ public sealed class BankPreclassificationService
         var unpaidBills = await UnpaidBillsForAsync(
             coupleId, settled.Where(l => BankReconciliationRules.CanPayABill(FactsOf(l.Row), account.Type)).Select(l => l.Row.LocalDate).ToList(), ct);
 
-        // What a line that is leaving holds is free again; what a line judged here holds is its own to keep, and is
-        // among the candidates only for that.
-        var (fromUtc, toUtcExclusive) = BankReconciliationRules.DuplicateSearchWindowUtc(firstDay, lastDay);
-        var existing = open.Any(l => l.Row.IsExpense)
-            ? await _sync.GetDuplicateCandidatesForJobAsync(
-                coupleId,
-                fromUtc,
-                toUtcExclusive,
-                leaving.Concat(open.Select(l => l.Row)).Where(l => l.MatchedTransactionId is not null).Select(l => l.Id).ToList(),
-                ct)
-            : [];
-
-        var now = _clock.UtcNow;
-        // What the bank has not settled may still change or vanish: it is never ignored, only (below) suspected.
+        // What the bank has not settled may still change or vanish: it is never ignored, only suspected (by the caller).
         foreach (var line in settled)
         {
             var row = line.Row;
@@ -146,17 +220,6 @@ public sealed class BankPreclassificationService
 
             if (BankReconciliationRules.IsCreditFromGroupHolder(facts, line.PayerName, holdersOfOtherAccounts))
                 row.IgnoreAutomatically(BankTransactionAutoReasons.Transfer, now);
-        }
-
-        // What was not ignored, all at once: which transaction of the app each line looks like.
-        var waiting = open.Where(l => l.Row.OpenToAutomaticRules).ToList();
-        var suspects = BankReconciliationRules.AssignSuspectedDuplicates(
-            waiting.Select(l => new SuspicionQuestion(FactsOf(l.Row), l.Row.MatchedTransactionId)).ToList(), connectorName, existing);
-        for (var i = 0; i < waiting.Count; i++)
-        {
-            var row = waiting[i].Row;
-            if (suspects[i] is not { } suspect) row.ClearSuspectedDuplicate(now);
-            else if (row.MatchedTransactionId != suspect.Id) row.MarkSuspectedDuplicate(suspect.Id, now);
         }
     }
 

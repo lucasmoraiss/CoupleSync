@@ -147,6 +147,19 @@ public sealed class BankReviewService
     /// <paramref name="discard"/> are discarded (expenses and entries alike); <paramref name="incomes"/> are entries
     /// (money that came in) that become an income of the month of their day in Brazil, shared, not recurring, of who
     /// connected the account. All or nothing.
+    /// <para>
+    /// Before anything is created, each line of <paramref name="expenses"/> that carries no suspicion is asked of
+    /// <see cref="BankSuspicionJudge"/> once more, as the store is now: the one that looks like a transaction of the
+    /// app is not confirmed. It takes the suspicion, stays in the review to be answered ("the same" or "another
+    /// one"), and the answer lists it as held; the others of the request are confirmed. So a line no synchronisation
+    /// judged since the transaction was typed (its account is no longer read, or was not read yet) is never
+    /// registered twice by "Selecionar tudo". Every line of <paramref name="asNew"/> is the person's answer: it is
+    /// not asked again. A line already suspected sent in <paramref name="expenses"/> is confirmed as it always was
+    /// (the app published before the suspicions existed knows no other way, and the newer one answers "another
+    /// one" with a category that way), unless <paramref name="holdPossibleDuplicates"/> says the request carries
+    /// nobody's answer about duplicates ("Selecionar tudo" of an app that shows the suspicions): then the lines
+    /// already suspected are asked again too, and held while the suspicion holds.
+    /// </para>
     /// </summary>
     public async Task<BankReviewConfirmResult> ConfirmAsync(
         Guid coupleId,
@@ -155,6 +168,7 @@ public sealed class BankReviewService
         IReadOnlyList<Guid>? reconcile,
         IReadOnlyList<Guid>? asNew,
         IReadOnlyList<ConfirmIncomeInput>? incomes,
+        bool holdPossibleDuplicates,
         CancellationToken ct)
     {
         expenses ??= [];
@@ -230,6 +244,15 @@ public sealed class BankReviewService
 
         var names = await _sync.GetAccountNamesAsync(coupleId, ct);
         var now = _clock.UtcNow;
+        // A line whose transaction is already there (the same request sent twice) creates nothing: nothing to check.
+        var held = await HoldPossibleDuplicatesAsync(
+            coupleId,
+            typedIds.Select(id => rows[id]).Where(row => !fingerprints.TryGetValue(row.Id, out var print) || !existing.ContainsKey(print)),
+            reconcileIds.Select(id => rows[id]),
+            alsoTheSuspected: holdPossibleDuplicates,
+            names,
+            now,
+            ct);
         var ingests = new List<TransactionEventIngest>();
         var transactions = new List<Transaction>();
         var created = new List<BankReviewCreatedDto>();
@@ -245,6 +268,9 @@ public sealed class BankReviewService
                 alreadyConfirmed++; // confirmed before (the same request sent twice): never a second transaction
                 continue;
             }
+
+            // It looks like a transaction the app already has, and nobody answered that yet: it waits for the answer.
+            if (held.Contains(row.Id)) continue;
 
             // A line without a value cannot be an expense. It does not hold the others back ("Selecionar tudo"):
             // it stays waiting, to be discarded, and the answer says it was skipped.
@@ -311,7 +337,7 @@ public sealed class BankReviewService
             discarded.Add(id);
         }
 
-        var reconciled = await ReconcileAsync(coupleId, reconcileIds.Select(id => rows[id]).ToList(), now, ct);
+        var (reconciled, taken) = await ReconcileAsync(coupleId, reconcileIds.Select(id => rows[id]).ToList(), names, now, ct);
 
         try
         {
@@ -324,7 +350,10 @@ public sealed class BankReviewService
             foreach (var income in newIncomes) await _incomes.AddAsync(income, ct);
 
             // One unit of work (the repositories share the context): lines and transactions are stored together or not at all.
-            await _sync.SaveChangesAsync(ct);
+            if (taken.Count == 0)
+                await _sync.SaveChangesAsync(ct);
+            else if (!await _sync.SaveLinkingAsync(taken.Keys.ToList(), taken.Values.ToList(), coupleId, ct))
+                throw new ConflictException(MatchTakenCode, MatchTakenMessage); // another line got there first; nothing was stored
         }
         catch (DataStoreException ex) when (ex is UniqueViolationException or ConcurrencyConflictException or ForeignKeyViolationException)
         {
@@ -338,7 +367,43 @@ public sealed class BankReviewService
 
         await RaiseAlertsAsync(coupleId, transactions, ct);
 
-        return new BankReviewConfirmResult(created, discarded, alreadyConfirmed, skipped, skippedOtherCurrency, reconciled, registered);
+        return new BankReviewConfirmResult(
+            created, discarded, alreadyConfirmed, skipped, skippedOtherCurrency, reconciled, registered,
+            expenses.Select(e => e.Id).Where(held.Contains).ToList());
+    }
+
+    /// <summary>
+    /// The check at the moment of confirming. Of <paramref name="asked"/> (lines sent to be confirmed as ordinary
+    /// expenses), the ones that wait with no suspicion and can become an expense (settled, in reais, with a value)
+    /// are judged as the store is now; the ones that look like a transaction of the app take the suspicion and are
+    /// answered here: they are not to be confirmed in this request. With <paramref name="alsoTheSuspected"/>, the
+    /// ones that already carried a suspicion are judged too: held while it holds, confirmed when nothing looks like
+    /// them any more. A transaction that <paramref name="reconciling"/> takes in this same request is no longer one
+    /// to look like. Nothing is saved here (the caller saves everything together, or nothing).
+    /// </summary>
+    private async Task<HashSet<Guid>> HoldPossibleDuplicatesAsync(
+        Guid coupleId,
+        IEnumerable<BankTransaction> asked,
+        IEnumerable<BankTransaction> reconciling,
+        bool alsoTheSuspected,
+        IReadOnlyDictionary<Guid, BankAccountNames> names,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var toJudge = asked
+            .Where(row => row.ReviewState == BankTransactionReviewState.Pending
+                          && (alsoTheSuspected || row.MatchedTransactionId is null)
+                          && BankTransaction.CanBecomeExpense(row.Status, row.Amount, row.Currency))
+            .ToList();
+        if (toJudge.Count == 0) return [];
+
+        var beingTaken = reconciling
+            .Where(row => row.ReviewState == BankTransactionReviewState.Pending && row.MatchedTransactionId is not null)
+            .Select(row => row.MatchedTransactionId!.Value)
+            .ToList();
+        await BankSuspicionJudge.JudgeAsync(
+            _sync, coupleId, toJudge, BankSuspicionJudge.ConnectorNameBy(names), leavingLineIds: [], beingTaken, now, ct);
+        return toJudge.Where(row => row.MatchedTransactionId is not null).Select(row => row.Id).ToHashSet();
     }
 
     private static bool IsRegisteredAsIncome(BankTransaction row)
@@ -462,12 +527,15 @@ public sealed class BankReviewService
     /// "It is the same": each line points to the transaction it was suspected of repeating, and that transaction
     /// takes from the bank only the merchant and the category it did not have. Nothing is created and nothing is
     /// saved here (the caller saves everything together). A line reconciled before answers what it answered then.
+    /// Every other line of the group that pointed to a transaction taken here is judged again in the same save: it
+    /// points to another transaction that looks like it, or waits as an ordinary expense. Also answers which
+    /// transaction was taken here by which line, for the save (<see cref="IBankSyncRepository.SaveLinkingAsync"/>).
     /// </summary>
-    private async Task<List<BankReviewReconciledDto>> ReconcileAsync(
-        Guid coupleId, IReadOnlyList<BankTransaction> lines, DateTime now, CancellationToken ct)
+    private async Task<(List<BankReviewReconciledDto> Reconciled, Dictionary<Guid, Guid> Taken)> ReconcileAsync(
+        Guid coupleId, IReadOnlyList<BankTransaction> lines, IReadOnlyDictionary<Guid, BankAccountNames> names, DateTime now, CancellationToken ct)
     {
         var reconciled = new List<BankReviewReconciledDto>();
-        var taken = new HashSet<Guid>();
+        var taken = new Dictionary<Guid, Guid>(); // transaction → the line it is linked to here
 
         foreach (var row in lines)
         {
@@ -488,7 +556,7 @@ public sealed class BankReviewService
                 ?? throw new ConflictException(NotMatchedCode, NotMatchedMessage);
 
             // One transaction is one line of the bank: a second line can only be another expense.
-            if (!taken.Add(transaction.Id) || await _sync.FindByLinkedTransactionAsync(transaction.Id, coupleId, ct) is not null)
+            if (!taken.TryAdd(transaction.Id, row.Id) || await _sync.FindByLinkedTransactionAsync(transaction.Id, coupleId, ct) is not null)
                 throw new ConflictException(MatchTakenCode, MatchTakenMessage);
 
             transaction.FillMissing(row.MerchantName ?? row.Description ?? row.DescriptionRaw, row.SuggestedCategory);
@@ -496,7 +564,15 @@ public sealed class BankReviewService
             reconciled.Add(new BankReviewReconciledDto(row.Id, transaction.Id));
         }
 
-        return reconciled;
+        if (taken.Count > 0)
+        {
+            var pointing = (await _sync.FindWaitingBySuspectsAsync(taken.Keys, coupleId, ct))
+                .Where(l => l.MatchedTransactionId is { } suspected && taken.ContainsKey(suspected));
+            await BankSuspicionJudge.JudgeAsync(
+                _sync, coupleId, pointing, BankSuspicionJudge.ConnectorNameBy(names), leavingLineIds: [], taken.Keys, now, ct);
+        }
+
+        return (reconciled, taken);
     }
 
     /// <summary>
@@ -527,7 +603,9 @@ public sealed class BankReviewService
 
     /// <summary>
     /// Discarded lines (<see cref="BankTransaction.CountsAsDiscarded"/>) and automatically ignored ones go back to
-    /// waiting, and from then on no automatic rule decides about them again. Lines in any other state stay as they are.
+    /// waiting, and from then on no synchronisation decides about them again. Lines in any other state stay as they
+    /// are. A line that comes back and looks like a transaction of the app comes back pointing to it
+    /// (<see cref="BankSuspicionJudge"/>): it is answered "the same" or "another one", never taken by "Selecionar tudo".
     /// </summary>
     public async Task<IReadOnlyList<Guid>> RestoreAsync(Guid coupleId, IReadOnlyList<Guid>? ids, CancellationToken ct)
     {
@@ -549,12 +627,21 @@ public sealed class BankReviewService
             restored.Add(row.Id);
         }
 
+        if (restored.Count > 0)
+        {
+            var names = await _sync.GetAccountNamesAsync(coupleId, ct);
+            await BankSuspicionJudge.JudgeAsync(
+                _sync, coupleId, rows.Where(r => restored.Contains(r.Id)), BankSuspicionJudge.ConnectorNameBy(names),
+                leavingLineIds: [], takenTransactionIds: [], now, ct);
+        }
+
         try
         {
             await _sync.SaveChangesAsync(ct);
         }
-        catch (ConcurrencyConflictException)
+        catch (DataStoreException ex) when (ex is ConcurrencyConflictException or ForeignKeyViolationException)
         {
+            // Someone reviewed one of the lines meanwhile, or the transaction a line came back pointing to was deleted.
             throw new ConflictException(ConflictCode, "A revisão mudou enquanto era alterada. Atualize e tente de novo.");
         }
 

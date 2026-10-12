@@ -708,6 +708,11 @@ export interface ConfirmBankReviewRequest {
   readonly asNew?: readonly string[];
   /** Entradas que viram renda do mês do dia delas (compartilhada, não recorrente). Sem `name`, a descrição da linha. */
   readonly incomes?: ReadonlyArray<{ readonly id: string; readonly name?: string }>;
+  /**
+   * "Confirmar selecionadas": ninguém respondeu sobre duplicadas nas linhas de `expenses`. O servidor então também
+   * segura a linha que já tinha possível duplicada (marcada depois de a tela carregar). Servidor anterior ignora.
+   */
+  readonly holdPossibleDuplicates?: boolean;
 }
 
 export interface ConfirmBankReviewResponse {
@@ -722,6 +727,11 @@ export interface ConfirmBankReviewResponse {
   readonly reconciled?: ReadonlyArray<{ readonly id: string; readonly transactionId: string }>;
   /** Entradas que este pedido registrou como renda, e a renda de cada uma. */
   readonly incomes?: ReadonlyArray<{ readonly id: string; readonly incomeSourceId: string }>;
+  /**
+   * Linhas enviadas para confirmar que o servidor, conferindo na hora, viu que parecem uma transação que o app já
+   * tinha: nada foi criado para elas; continuam na revisão, agora com `match`. Ausente em servidor anterior.
+   */
+  readonly heldAsPossibleDuplicates?: readonly string[];
 }
 
 // --- Open Finance: contas e faturas (GET /openfinance/accounts) ---

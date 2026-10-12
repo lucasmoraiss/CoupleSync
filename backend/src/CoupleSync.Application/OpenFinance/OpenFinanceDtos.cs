@@ -142,6 +142,9 @@ public sealed record BankReviewReconciledDto(Guid Id, Guid TransactionId);
 /// <c>Skipped</c>: lines asked to be confirmed that cannot become an expense (no value, or another currency); they
 /// stay waiting (to be discarded). <c>SkippedOtherCurrency</c>: the ones of them skipped for the currency.
 /// <c>Reconciled</c>: the lines that now point to the transaction the app already had (nothing was created for them).
+/// <c>HeldAsPossibleDuplicates</c>: lines asked to be confirmed that were found, at this very moment, to look like a
+/// transaction the app already has: nothing was created for them; they stay in the review, now suspected, to be
+/// answered "the same" or "another one".
 /// </summary>
 public sealed record BankReviewConfirmResult(
     IReadOnlyList<BankReviewCreatedDto> Created,
@@ -150,7 +153,8 @@ public sealed record BankReviewConfirmResult(
     IReadOnlyList<Guid> Skipped,
     IReadOnlyList<Guid> SkippedOtherCurrency,
     IReadOnlyList<BankReviewReconciledDto> Reconciled,
-    IReadOnlyList<BankReviewIncomeDto> Incomes);
+    IReadOnlyList<BankReviewIncomeDto> Incomes,
+    IReadOnlyList<Guid> HeldAsPossibleDuplicates);
 
 // ---------------------------------------------------------------- accounts and bills (GET accounts)
 

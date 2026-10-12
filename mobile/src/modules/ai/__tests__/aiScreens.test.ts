@@ -67,6 +67,15 @@ describe('nada mais decide a IA na geração do pacote nem pelo aceite guardado 
     expect(offenders.map((file) => path.relative(REPO_DIR, file))).toEqual([]);
   });
 
+  // Issue #60, item 13: o interruptor de emergência é posto no painel do Render. Um valor versionado no arquivo
+  // ("false") poderia desfazer o "true" de uma emergência numa sincronização; o arquivo só explica.
+  it('render.yaml não declara o interruptor de emergência da IA; só explica onde ele é ligado', () => {
+    const blueprint = fs.readFileSync(path.join(REPO_DIR, 'render.yaml'), 'utf8');
+    const declared = blueprint.split(/\r?\n/).filter((line) => !line.trim().startsWith('#') && line.includes('Ai__Disabled'));
+    expect(declared).toEqual([]);
+    expect(blueprint).toMatch(/# Interruptor de emergência: a variável Ai__Disabled=true, posta no PAINEL do Render/);
+  });
+
   it('o Assistente e o envio de extrato não consultam o aceite local (aiChat): quem decide é GET /ai/status', () => {
     for (const file of [
       'src/modules/chat/api/chatApi.ts',
@@ -202,10 +211,15 @@ describe('Painel', () => {
   });
 
   it('sem status nenhum, diz o que está acontecendo com a IA e oferece verificar de novo (revisão 1, I3)', () => {
-    expect(dashboard).toMatch(/const aiNotice = aiStatusNotice\(aiStatus, ai\.loadFailed, ai\.retrying\);/);
-    expect(dashboard).toMatch(/\{aiNotice !== 'none' && \(/);
-    expect(dashboard).toMatch(/\{AI_STATUS_NOTICE_TEXT\[aiNotice\]\}/);
-    expect(dashboard).toMatch(/onPress=\{\(\) => void ai\.refresh\(\)\}\s*accessibilityLabel="Verificar a análise com IA agora"/);
+    // O que o aviso diz, quando tem botão e o que o toque faz está em aiStatusNoticeView, exercitado com o store
+    // de verdade em aiStatusStore.test.ts ("o aviso do Painel sobre a IA"); aqui, só que a tela desenha a partir dele.
+    expect(dashboard).toMatch(/const aiNotice = aiStatusNoticeView\(aiStatus, ai\.loadFailed, ai\.retrying, ai\.refresh\);/);
+    expect(dashboard).toMatch(/\{aiNotice !== null && \(/);
+    expect(dashboard).toMatch(/<Ionicons name=\{aiNotice\.icon\}/);
+    expect(dashboard).toMatch(/accessibilityLiveRegion="polite">\{aiNotice\.text\}</);
+    expect(dashboard).toMatch(/\{aiNotice\.checkNow !== null && \(/);
+    expect(dashboard).toMatch(/onPress=\{aiNotice\.checkNow\}\s*accessibilityLabel="Verificar a análise com IA agora"/);
+    expect(dashboard).toMatch(/>Verificar agora</);
     // Os fluxos Maestro afirmam que "Tentar novamente" (botão das telas de erro) não aparece: o aviso da IA não usa esse texto.
     expect(dashboard).not.toMatch(/Tentar novamente/);
   });

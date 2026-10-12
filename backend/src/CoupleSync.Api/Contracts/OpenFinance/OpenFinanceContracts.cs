@@ -158,14 +158,21 @@ public sealed record ConfirmIncomeRequest(Guid Id, string? Name);
 /// <c>Reconcile</c>: lines that are the same as the transaction they were suspected of repeating (nothing is created).
 /// <c>AsNew</c>: suspected lines that are another expense (confirmed like <c>Expenses</c>, with the suggested category).
 /// <c>Incomes</c>: entries (money that came in) that become an income of the month of their day in Brazil: shared,
-/// not recurring, of who connected the account. All are optional: a request without them means what it always meant.
+/// not recurring, of who connected the account.
+/// All are optional: a request without them means what it always meant.
+/// <c>HoldPossibleDuplicates</c> (optional; absent is false): the lines of <c>Expenses</c> carry nobody's answer
+/// about duplicates ("Selecionar tudo" of an app that shows the suspicions). Then a line of <c>Expenses</c> that
+/// already carries a suspicion is not confirmed either while the suspicion holds: it is listed in
+/// <c>heldAsPossibleDuplicates</c> like the ones found at this moment. Without it, a line already suspected sent
+/// in <c>Expenses</c> is confirmed, as before.
 /// </summary>
 public sealed record ConfirmBankReviewRequest(
     IReadOnlyList<ConfirmExpenseRequest>? Expenses,
     IReadOnlyList<Guid>? Discard,
     IReadOnlyList<ReconcileBankLineRequest>? Reconcile = null,
     IReadOnlyList<Guid>? AsNew = null,
-    IReadOnlyList<ConfirmIncomeRequest>? Incomes = null);
+    IReadOnlyList<ConfirmIncomeRequest>? Incomes = null,
+    bool? HoldPossibleDuplicates = null);
 
 public sealed record BankReviewCreatedResponse(Guid Id, Guid TransactionId);
 
@@ -180,6 +187,10 @@ public sealed record BankReviewReconciledResponse(Guid Id, Guid TransactionId);
 /// <c>SkippedOtherCurrency</c>: the ones of <c>Skipped</c> that were skipped for the currency.
 /// <c>Incomes</c> (new, additive): the entries registered as an income by this request. An entry skipped (no value,
 /// another currency) or registered before is in <c>Skipped</c> or counted in <c>AlreadyConfirmed</c>, as an expense is.
+/// <c>HeldAsPossibleDuplicates</c>: lines sent in <c>expenses</c> that carried no suspicion and were found, when
+/// confirming, to look like a transaction the app already has. They do not fail the request and nothing is created
+/// for them: they stay in the review, now with <c>match</c>, to be answered with <c>reconcile</c> or <c>asNew</c>.
+/// An app that does not read this field just finds them still in the review.
 /// </summary>
 public sealed record ConfirmBankReviewResponse(
     IReadOnlyList<BankReviewCreatedResponse> Created,
@@ -188,7 +199,8 @@ public sealed record ConfirmBankReviewResponse(
     IReadOnlyList<Guid> Skipped,
     IReadOnlyList<Guid> SkippedOtherCurrency,
     IReadOnlyList<BankReviewReconciledResponse> Reconciled,
-    IReadOnlyList<BankReviewIncomeResponse> Incomes);
+    IReadOnlyList<BankReviewIncomeResponse> Incomes,
+    IReadOnlyList<Guid> HeldAsPossibleDuplicates);
 
 public sealed record RestoreBankReviewResponse(IReadOnlyList<Guid> Restored);
 

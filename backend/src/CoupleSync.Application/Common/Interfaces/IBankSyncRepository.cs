@@ -69,15 +69,56 @@ public interface IBankSyncRepository
     Task<IReadOnlyList<BankTransaction>> GetTransferCandidatesForJobAsync(Guid coupleId, DateOnly fromDay, DateOnly toDay, CancellationToken ct);
 
     /// <summary>
-    /// For the job: the transactions of the group, in reais and not come from the bank, whose instant is in
-    /// [<paramref name="fromUtc"/>, <paramref name="toUtcExclusive"/>) and that no line of the mirror points to yet
-    /// (neither as its transaction nor as a suspected duplicate). The lines <paramref name="exceptLineIds"/> do not
-    /// count: the ones the run is taking out of the mirror in this very save (what they pointed to is free again),
-    /// and the ones the run is judging again (what each points to is still there for it to keep).
+    /// For the job, nothing tracked: the lines of the account <paramref name="bankAccountId"/> (of the group
+    /// <paramref name="coupleId"/>) that already wait for the review and are still open to the automatic rules (no
+    /// person brought them back to the review), of any age, as the store has them: the ones a reading judges again
+    /// although they did not arrive in it. Only what can carry a suspicion (money that left, or a line that still
+    /// points to a transaction), and only what the judgement looks at: never the whole line.
+    /// </summary>
+    Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct);
+
+    /// <summary>
+    /// The same as <see cref="GetWaitingOpenToRulesForJobAsync"/>, for every account of the group
+    /// <paramref name="coupleId"/>: also the accounts no run reads (synchronisation turned off, a connection
+    /// disconnected or whose bank asks for the login again, another connection of the group).
+    /// </summary>
+    Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesOfGroupForJobAsync(Guid coupleId, CancellationToken ct);
+
+    /// <summary>For the job: account id → the name of its bank, for every account of the group.</summary>
+    Task<IReadOnlyDictionary<Guid, string>> GetConnectorNamesForJobAsync(Guid coupleId, CancellationToken ct);
+
+    /// <summary>For the job, tracked: the lines of the group <paramref name="coupleId"/> with these ids.</summary>
+    Task<IReadOnlyList<BankTransaction>> FindByIdsForJobAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct);
+
+    /// <summary>
+    /// The transactions a line of the bank may still look like: of the group <paramref name="coupleId"/> (named here,
+    /// whoever asks: the job or a route), in reais, not come from the bank, whose instant is in
+    /// [<paramref name="fromUtc"/>, <paramref name="toUtcExclusive"/>) and that NO line of the mirror is linked to
+    /// (neither confirmed from the bank nor reconciled by "it is the same"). A line that only suspects a transaction
+    /// does not take it from the others. Each one says whether a line other than <paramref name="exceptLineIds"/>
+    /// (the ones being judged now, and the ones leaving the mirror in this very save) already points to it.
     /// Their day is the one <see cref="BankReconciliationRules.LocalDayOf"/> gives.
     /// </summary>
     Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(
         Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> exceptLineIds, CancellationToken ct);
+
+    /// <summary>
+    /// Tracked: the lines of the group still waiting for the review that point to one of these transactions as a
+    /// suspected duplicate.
+    /// </summary>
+    Task<IReadOnlyList<BankTransaction>> FindWaitingBySuspectsAsync(IReadOnlyCollection<Guid> transactionIds, Guid coupleId, CancellationToken ct);
+
+    /// <summary>The same question for one transaction, answered with ids only: nothing is tracked.</summary>
+    Task<IReadOnlyList<Guid>> FindWaitingIdsBySuspectAsync(Guid transactionId, Guid coupleId, CancellationToken ct);
+
+    /// <summary>
+    /// The save of "it is the same": stores everything pending, unless one of <paramref name="transactionIds"/> is
+    /// already linked to a line of the mirror other than <paramref name="lineIds"/> (the ones this save links to
+    /// them). Then nothing is stored and the answer is false. The transactions are locked before that is looked at,
+    /// so that of two answers given at once for two lines that point to one transaction, the second finds the link
+    /// of the first: one transaction is never linked to two lines.
+    /// </summary>
+    Task<bool> SaveLinkingAsync(IReadOnlyCollection<Guid> transactionIds, IReadOnlyCollection<Guid> lineIds, Guid coupleId, CancellationToken ct);
 
     /// <summary>The automatically ignored lines of the group, of every month: the day in Brazil of each.</summary>
     Task<IReadOnlyList<DateOnly>> GetIgnoredDaysAsync(Guid coupleId, CancellationToken ct);
@@ -128,8 +169,7 @@ public interface IBankSyncRepository
     /// comes from Pluggy over it, and does not delete it. When that happens, nothing the automatic rules decided in
     /// this save is written as it was: every line the run was changing is back to the review the store has, every
     /// new line is back to waiting, and <paramref name="decideAgain"/> runs over what is stored now before the save
-    /// is tried again (a decision about one line depends on the others: the two legs of a transfer, the transaction
-    /// one line only may suspect).
+    /// is tried again (a decision about one line depends on the others: the two legs of a transfer).
     /// </summary>
     Task SaveRunProgressAsync(BankConnection connection, Func<CancellationToken, Task>? decideAgain, CancellationToken ct);
 
@@ -179,6 +219,18 @@ public interface IBankSyncRepository
 }
 
 public sealed record BankAccountNames(string BankName, string AccountName);
+
+/// <summary>What the judgement of a suspected duplicate looks at in a line that waits, as the store has it.</summary>
+public sealed record WaitingBankLine(
+    Guid Id,
+    string PluggyTransactionId,
+    DateTime Date,
+    DateOnly LocalDate,
+    decimal Amount,
+    BankTransactionType Type,
+    string Currency,
+    Guid? MatchedTransactionId,
+    Guid BankAccountId);
 
 public sealed record PendingBankExpense(DateOnly Day, BankTransactionStatus Status, decimal Amount, string Currency);
 

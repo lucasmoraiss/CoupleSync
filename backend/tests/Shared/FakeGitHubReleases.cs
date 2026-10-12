@@ -16,6 +16,9 @@ internal sealed class FakeGitHubReleases : HttpMessageHandler
     /// <summary>Tag of the latest release (GitHub's <c>tag_name</c>).</summary>
     public string TagName { get; set; } = "v1.1.0";
 
+    /// <summary>The <c>assets</c> array of the release, as JSON. By default the APK is there and uploaded.</summary>
+    public string? AssetsJson { get; set; } = "[{\"name\":\"couplesync.apk\",\"state\":\"uploaded\"}]";
+
     public HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
 
     /// <summary>When set, the body of the answer whatever the tag (to test unexpected shapes).</summary>
@@ -62,7 +65,8 @@ internal sealed class FakeGitHubReleases : HttpMessageHandler
         if (NetworkDown) throw new HttpRequestException("Connection refused (fake).");
         if (TimesOut) throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout (fake).", new TimeoutException());
 
-        var body = Body ?? "{\"url\":\"https://github.test/releases/1\",\"tag_name\":\"" + TagName + "\",\"draft\":false,\"prerelease\":false}";
+        var body = Body ?? "{\"url\":\"https://github.test/releases/1\",\"tag_name\":\"" + TagName + "\",\"draft\":false,\"prerelease\":false"
+            + (AssetsJson is null ? "" : ",\"assets\":" + AssetsJson) + "}";
         return new HttpResponseMessage(Status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
     }
 }

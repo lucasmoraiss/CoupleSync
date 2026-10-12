@@ -230,6 +230,10 @@ public sealed class OpenFinanceController : ControllerBase
     /// shared and not recurring, of who connected the account, named as informed or by the description of the line
     /// (a name the person already has in that month gets " (2)"); an expense sent there answers 422, and so does the
     /// limit of incomes of a person in a month (INCOME_SOURCE_LIMIT). Entries can be discarded like expenses.
+    /// A line of <c>expenses</c> without a suspicion that, checked at this moment, looks like a transaction the app
+    /// already has is not an error either: nothing is created for it, it stays in the review with the suspicion and
+    /// is listed in <c>heldAsPossibleDuplicates</c>. With <c>holdPossibleDuplicates: true</c> the same goes for a line
+    /// of <c>expenses</c> that already carried the suspicion.
     /// </summary>
     [HttpPost("review/confirm")]
     [ProducesResponseType(typeof(ConfirmBankReviewResponse), StatusCodes.Status200OK)]
@@ -251,6 +255,7 @@ public sealed class OpenFinanceController : ControllerBase
             request.Reconcile?.Select(r => r.Id).ToList(),
             request.AsNew,
             request.Incomes?.Select(i => new ConfirmIncomeInput(i.Id, i.Name)).ToList(),
+            request.HoldPossibleDuplicates == true,
             ct);
         return Ok(new ConfirmBankReviewResponse(
             result.Created.Select(c => new BankReviewCreatedResponse(c.Id, c.TransactionId)).ToList(),
@@ -259,7 +264,8 @@ public sealed class OpenFinanceController : ControllerBase
             result.Skipped,
             result.SkippedOtherCurrency,
             result.Reconciled.Select(r => new BankReviewReconciledResponse(r.Id, r.TransactionId)).ToList(),
-            result.Incomes.Select(i => new BankReviewIncomeResponse(i.Id, i.IncomeSourceId)).ToList()));
+            result.Incomes.Select(i => new BankReviewIncomeResponse(i.Id, i.IncomeSourceId)).ToList(),
+            result.HeldAsPossibleDuplicates));
     }
 
     /// <summary>Discarded and automatically ignored lines go back to waiting for the review, and are never ignored automatically again.</summary>

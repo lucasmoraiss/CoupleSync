@@ -20,14 +20,18 @@ public enum MoneyDirection
 /// </summary>
 public sealed record MoneyMovement(decimal Amount, string? Currency, DateOnly LocalDay, MoneyDirection Direction, Guid? AccountId = null);
 
-/// <summary>A transaction the app already has, as far as the rules look at it.</summary>
-public sealed record ExistingTransactionFacts(Guid Id, decimal Amount, string? Currency, DateOnly LocalDay, TransactionSource Source, string? Bank);
+/// <summary>
+/// A transaction the app already has, as far as the rules look at it. <paramref name="PointedByAnotherLine"/>: a line
+/// of the bank other than the ones being asked about already looks like it (it only breaks a tie).
+/// </summary>
+public sealed record ExistingTransactionFacts(
+    Guid Id, decimal Amount, string? Currency, DateOnly LocalDay, TransactionSource Source, string? Bank, bool PointedByAnotherLine = false);
 
 /// <summary>
-/// A bank line asking which transaction of the app it looks like. <paramref name="CurrentSuspectId"/> is the one it
-/// already points to, when it was judged before (a purchase that was pending at the bank and has now been settled).
+/// A bank line (of the bank named <paramref name="ConnectorName"/>) asking which transaction of the app it looks
+/// like. <paramref name="CurrentSuspectId"/> is the one it already points to, when it was judged before.
 /// </summary>
-public sealed record SuspicionQuestion(MoneyMovement Line, Guid? CurrentSuspectId = null);
+public sealed record SuspicionQuestion(MoneyMovement Line, Guid? CurrentSuspectId = null, string? ConnectorName = null);
 
 /// <summary>
 /// A bill of a credit card of the group, as far as the rules look at it. <paramref name="IsClosed"/> says the total
@@ -212,61 +216,45 @@ public static class BankReconciliationRules
            && IsSameBankOrUnknown(existing.Bank, connectorName);
 
     /// <summary>
-    /// The transaction of <paramref name="candidates"/> the line most looks like: the nearest day first, then the
-    /// smallest id (so that the same data always gives the same answer); null when none looks like it.
-    /// </summary>
-    public static ExistingTransactionFacts? PickSuspectedDuplicate(
-        MoneyMovement bankLine, string? connectorName, IEnumerable<ExistingTransactionFacts> candidates)
-        => candidates
-            .Where(candidate => IsSuspectedDuplicate(bankLine, connectorName, candidate))
-            .OrderBy(candidate => Math.Abs(candidate.LocalDay.DayNumber - bankLine.LocalDay.DayNumber))
-            .ThenBy(candidate => candidate.Id)
-            .FirstOrDefault();
-
-    /// <summary>
-    /// Which transaction each of <paramref name="lines"/> looks like, answered for all of them at once (the answers
-    /// come in the order of the lines; null: none). One transaction is the answer of one line only. In this order:
+    /// Which transaction each of <paramref name="lines"/> looks like (the answers come in the order of the lines;
+    /// null: none). <paramref name="candidates"/> are the transactions no line of the bank is linked to yet. A line
+    /// has an answer whenever at least one candidate looks like it (<see cref="IsSuspectedDuplicate"/>), whatever
+    /// the other lines are and whatever the order: one transaction may be the answer of several lines at once (two
+    /// lines of the same value, and only one of them is the purchase the app has: both ask the person). Which one
+    /// is shown, in this order:
     /// <list type="number">
-    /// <item>a line that already points to a transaction keeps it, while that transaction is still among
-    /// <paramref name="candidates"/> and still looks like it (<see cref="IsSuspectedDuplicate"/>): the suspicion
-    /// never moves to another transaction when the line is judged again;</item>
-    /// <item>then every line takes a transaction of its own day in Brazil;</item>
-    /// <item>and only the lines still without one take a transaction of the day before or after. Two purchases of
-    /// the same value on following days are two purchases: each line looks like the one of its day, never like the
-    /// one next to it.</item>
+    /// <item>the one the line already points to, while it is still a candidate and still looks like it;</item>
+    /// <item>one of the same day in Brazil: purchases of the same value on different days are different purchases;</item>
+    /// <item>one of the day before or after, only when none is of the same day.</item>
     /// </list>
-    /// Within a step the lines are served in the order given, and ties go to the smallest id (the same data always
-    /// gives the same answer).
+    /// Ties go to a transaction no other line points to (so that two equal purchases and two equal lines show one
+    /// each), then to the smallest id (the same data always gives the same answer).
     /// </summary>
     public static IReadOnlyList<ExistingTransactionFacts?> AssignSuspectedDuplicates(
-        IReadOnlyList<SuspicionQuestion> lines, string? connectorName, IEnumerable<ExistingTransactionFacts> candidates)
+        IReadOnlyList<SuspicionQuestion> lines, IEnumerable<ExistingTransactionFacts> candidates)
     {
-        var free = candidates.ToList();
+        var all = candidates.ToList();
         var answers = new ExistingTransactionFacts?[lines.Count];
-
-        void Take(int index, ExistingTransactionFacts? transaction)
-        {
-            if (transaction is null) return;
-            answers[index] = transaction;
-            free.Remove(transaction);
-        }
+        var pointed = all.Where(c => c.PointedByAnotherLine).Select(c => c.Id).ToHashSet();
 
         for (var i = 0; i < lines.Count; i++)
         {
             if (lines[i].CurrentSuspectId is not { } current) continue;
-            Take(i, free.FirstOrDefault(c => c.Id == current && IsSuspectedDuplicate(lines[i].Line, connectorName, c)));
+            answers[i] = all.FirstOrDefault(c => c.Id == current && IsSuspectedDuplicate(lines[i].Line, lines[i].ConnectorName, c));
+            if (answers[i] is not null) pointed.Add(current);
         }
 
         for (var i = 0; i < lines.Count; i++)
         {
             if (answers[i] is not null) continue;
-            var day = lines[i].Line.LocalDay;
-            Take(i, PickSuspectedDuplicate(lines[i].Line, connectorName, free.Where(c => c.LocalDay == day)));
-        }
-
-        for (var i = 0; i < lines.Count; i++)
-        {
-            if (answers[i] is null) Take(i, PickSuspectedDuplicate(lines[i].Line, connectorName, free));
+            var line = lines[i];
+            answers[i] = all
+                .Where(c => IsSuspectedDuplicate(line.Line, line.ConnectorName, c))
+                .OrderBy(c => Math.Abs(c.LocalDay.DayNumber - line.Line.LocalDay.DayNumber))
+                .ThenBy(c => pointed.Contains(c.Id))
+                .ThenBy(c => c.Id)
+                .FirstOrDefault();
+            if (answers[i] is { } answer) pointed.Add(answer.Id);
         }
 
         return answers;
@@ -278,7 +266,11 @@ public static class BankReconciliationRules
     /// day). The statement import stores the date written on the statement with no time, as midnight UTC: that is
     /// the day as written, not 21:00 of the day before in Brasília (the same reading
     /// <see cref="BankTransaction.LocalDateOf"/> gives a line of the bank). An imported line someone edited later
-    /// carries the instant typed, and is read as one.
+    /// keeps the instant typed, which is read as one unless it is exactly midnight UTC. Midnight UTC is also what the
+    /// edit form sends back when the person changes only the date of an imported line (it shows that line as 21:00 of
+    /// the day before): then the day is read one day ahead of the date the person chose. Nothing stored tells the
+    /// two apart (a transaction keeps no mark of an edit), so this reading is the rule; the root is the import,
+    /// which stores a date with no time as midnight UTC.
     /// </summary>
     public static DateOnly LocalDayOf(DateTime utc, TransactionSource source)
         => source == TransactionSource.OcrImport && utc.TimeOfDay == TimeSpan.Zero

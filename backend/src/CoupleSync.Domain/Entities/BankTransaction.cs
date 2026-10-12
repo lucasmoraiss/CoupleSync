@@ -128,7 +128,8 @@ public sealed class BankTransaction : ICoupleScoped
 
     /// <summary>
     /// The transaction of the app this line looks the same as (suspected duplicate). Only while the line waits: the
-    /// person says "the same" (<see cref="Reconcile"/>) or "another one" (<see cref="Confirm"/>).
+    /// person says "the same" (<see cref="Reconcile"/>) or "another one" (<see cref="Confirm"/>). Several lines may
+    /// point to the same transaction; only one of them can be linked to it.
     /// </summary>
     public Guid? MatchedTransactionId { get; private set; }
 
@@ -136,8 +137,9 @@ public sealed class BankTransaction : ICoupleScoped
     public string? AutoReason { get; private set; }
 
     /// <summary>
-    /// When the person brought the line back to the review. From then on no automatic rule touches it again: it is
-    /// never ignored nor marked as a suspected duplicate by a synchronisation.
+    /// When the person brought the line back to the review. From then on no synchronisation decides about it again:
+    /// it is never ignored, and the suspicion it has is the one judged when it came back (or when the transaction
+    /// it pointed to was taken by another line or deleted).
     /// </summary>
     public DateTime? PersonDecidedAtUtc { get; private set; }
 
@@ -370,24 +372,25 @@ public sealed class BankTransaction : ICoupleScoped
 
     /// <summary>
     /// The line stays waiting, pointing to the transaction it looks the same as. Does nothing, and says so, when the
-    /// line is not <see cref="OpenToAutomaticRules"/>.
+    /// line no longer waits for the review. (Which lines a synchronisation may judge is for the synchronisation to
+    /// say: <see cref="OpenToAutomaticRules"/>.)
     /// </summary>
     public bool MarkSuspectedDuplicate(Guid transactionId, DateTime nowUtc)
     {
-        if (!OpenToAutomaticRules) return false;
+        if (ReviewState != BankTransactionReviewState.Pending) return false;
         MatchedTransactionId = transactionId;
         UpdatedAtUtc = nowUtc;
         return true;
     }
 
     /// <summary>
-    /// The line no longer looks like the transaction it pointed to (the bank settled it with another value or on
-    /// another day): it waits as an ordinary expense. Does nothing, and says so, when there is no suspicion to clear
-    /// or the line is not <see cref="OpenToAutomaticRules"/>.
+    /// The line no longer looks like any transaction (the bank settled it with another value or on another day, or
+    /// the one it pointed to is now of another line): it waits as an ordinary expense. Does nothing, and says so,
+    /// when there is no suspicion to clear or the line no longer waits for the review.
     /// </summary>
     public bool ClearSuspectedDuplicate(DateTime nowUtc)
     {
-        if (!OpenToAutomaticRules || MatchedTransactionId is null) return false;
+        if (ReviewState != BankTransactionReviewState.Pending || MatchedTransactionId is null) return false;
         MatchedTransactionId = null;
         UpdatedAtUtc = nowUtc;
         return true;

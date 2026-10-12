@@ -218,6 +218,13 @@ public sealed class SyncConnectionService
         if (items.Count == 0)
             throw new SyncStoppedException(NoBankCode, NoBankMessage);
 
+        // Before anything is asked of the bank: every line of the group that waits, in every account, is judged as a
+        // suspected duplicate against what the app has now. The accounts this run will not read (synchronisation
+        // turned off, a bank asking for the login again, another connection of the group, also a disconnected one)
+        // are judged only here; and a run that fails further on has judged all the same.
+        Task<bool> JudgeGroupAsync(CancellationToken token) => _preclassification.JudgeWaitingOfGroupAsync(connection.CoupleId, token);
+        if (await JudgeGroupAsync(ct)) await SaveAsync(connection, ct, JudgeGroupAsync);
+
         var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret, connection.ClientSecretEncrypted!);
         var window = SyncWindow.For(connection, _clock.UtcNow);
         var ai = new AiBudget(run.AiCategorizationConsent ? MaxAiSuggestionsPerRun : 0, AiTimeBudget);
@@ -272,13 +279,15 @@ public sealed class SyncConnectionService
                 // could not be read (login error at the bank, another bank of the same connection going on alone).
                 var from = window.FromFor(await _sync.GetLastTransactionDayAsync(account.Id, ct));
                 var transactions = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
-                var arrived = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
-                // What the bank no longer lists leaves first: the rules must not see, held by a line that is leaving,
-                // the transaction the line that replaces it looks like.
+                var (arrived, readAgain) = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
+                // What the bank no longer lists leaves in the same save as the line that replaces it.
                 var leaving = await RemoveVanishedAsync(account, transactions, from, window.To, ct);
-                // Before anyone sees them: transfers between accounts of the group, bill payments and suspected duplicates.
+                // Before anyone sees them: transfers between accounts of the group, bill payments and suspected
+                // duplicates. The last one also for every line of the account that already waited, of any age: what
+                // the app has may have changed since they arrived, and the history stored before these rules existed
+                // was never judged.
                 Task DecideAsync(CancellationToken token)
-                    => _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, leaving, token);
+                    => _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, readAgain, leaving, token);
                 await DecideAsync(ct);
                 await SaveAsync(connection, ct, DecideAsync);
 
@@ -410,10 +419,10 @@ public sealed class SyncConnectionService
     }
 
     /// <summary>
-    /// Returns the lines the automatic rules have not seen as settled yet: the new ones, and the ones the bank had
-    /// not settled the last time and has now.
+    /// Returns the lines the automatic rules have not seen as settled yet (the new ones, and the ones the bank had
+    /// not settled the last time and has now), and every line of the account the bank listed again, as it is now.
     /// </summary>
-    private async Task<IReadOnlyList<ArrivedBankLine>> UpsertTransactionsAsync(
+    private async Task<(IReadOnlyList<ArrivedBankLine> Arrived, IReadOnlyList<BankTransaction> ReadAgain)> UpsertTransactionsAsync(
         SyncRun run, BankConnection connection, BankAccount account, IReadOnlyList<PluggyTransaction> transactions, AiBudget ai, CancellationToken ct)
     {
         var incoming = transactions
@@ -424,6 +433,7 @@ public sealed class SyncConnectionService
         var added = 0;
         var updated = 0;
         var arrived = new List<ArrivedBankLine>();
+        var readAgain = new List<BankTransaction>();
 
         foreach (var chunk in incoming.Chunk(LookupChunk))
         {
@@ -440,6 +450,7 @@ public sealed class SyncConnectionService
                     if (row.BankAccountId != account.Id) continue;
                     var waitedForTheBank = row.Status == BankTransactionStatus.Pending;
                     row.Refresh(snapshot, run.Id, now);
+                    readAgain.Add(row);
                     updated++;
                     if (waitedForTheBank && row.Status == BankTransactionStatus.Posted)
                         arrived.Add(new ArrivedBankLine(row, transaction.PayerName));
@@ -460,7 +471,7 @@ public sealed class SyncConnectionService
         }
 
         run.AddCounts(added, updated);
-        return arrived;
+        return (arrived, readAgain);
     }
 
     /// <summary>

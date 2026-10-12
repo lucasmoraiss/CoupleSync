@@ -145,6 +145,52 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .ThenBy(t => t.PluggyTransactionId, StringComparer.Ordinal)
             .ToList();
 
+    public Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct)
+        => GetWaitingOpenToRulesAsync(coupleId, bankAccountId, ct);
+
+    public Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesOfGroupForJobAsync(Guid coupleId, CancellationToken ct)
+        => GetWaitingOpenToRulesAsync(coupleId, bankAccountId: null, ct);
+
+    private async Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesAsync(Guid coupleId, Guid? bankAccountId, CancellationToken ct)
+    {
+        var waiting = _dbContext.BankTransactions
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(t => t.CoupleId == coupleId
+                        && t.ReviewState == BankTransactionReviewState.Pending
+                        && t.PersonDecidedAtUtc == null
+                        && (t.Type == BankTransactionType.Debit || t.MatchedTransactionId != null));
+        if (bankAccountId is { } account) waiting = waiting.Where(t => t.BankAccountId == account);
+
+        // A few narrow columns: never what Pluggy sent for each line (raw_json), however many months wait.
+        return await waiting
+            .Select(t => new WaitingBankLine(
+                t.Id, t.PluggyTransactionId, t.Date, t.LocalDate, t.Amount, t.Type, t.Currency, t.MatchedTransactionId, t.BankAccountId))
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, string>> GetConnectorNamesForJobAsync(Guid coupleId, CancellationToken ct)
+        => await (
+                from account in _dbContext.BankAccounts.IgnoreQueryFilters().AsNoTracking()
+                join item in _dbContext.BankItems on account.ItemId equals item.Id
+                where account.CoupleId == coupleId && item.CoupleId == coupleId
+                select new { account.Id, item.ConnectorName })
+            .ToDictionaryAsync(a => a.Id, a => a.ConnectorName, ct);
+
+    public async Task<IReadOnlyList<BankTransaction>> FindByIdsForJobAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct)
+    {
+        var found = new List<BankTransaction>(ids.Count);
+        foreach (var chunk in ids.Chunk(ReviewLookupChunk))
+        {
+            found.AddRange(await _dbContext.BankTransactions
+                .IgnoreQueryFilters()
+                .Where(t => t.CoupleId == coupleId && chunk.Contains(t.Id))
+                .ToListAsync(ct));
+        }
+
+        return found;
+    }
+
     public async Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(
         Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> exceptLineIds, CancellationToken ct)
     {
@@ -158,15 +204,84 @@ public sealed class BankSyncRepository : IBankSyncRepository
                         && t.Source != TransactionSource.OpenFinance
                         && t.EventTimestampUtc >= fromUtc
                         && t.EventTimestampUtc < toUtcExclusive
-                        && !_dbContext.BankTransactions.Any(b =>
-                            (b.LinkedTransactionId == t.Id || b.MatchedTransactionId == t.Id) && !except.Contains(b.Id)))
-            .Select(t => new { t.Id, t.Amount, t.Currency, t.EventTimestampUtc, t.Source, t.Bank })
+                        // Only a link takes a transaction out: a suspicion of another line does not.
+                        && !_dbContext.BankTransactions.Any(b => b.LinkedTransactionId == t.Id))
+            .Select(t => new
+            {
+                t.Id,
+                t.Amount,
+                t.Currency,
+                t.EventTimestampUtc,
+                t.Source,
+                t.Bank,
+                Pointed = _dbContext.BankTransactions.Any(b => b.MatchedTransactionId == t.Id && !except.Contains(b.Id)),
+            })
             .ToListAsync(ct);
 
         return rows
             .Select(t => new ExistingTransactionFacts(
-                t.Id, t.Amount, t.Currency, BankReconciliationRules.LocalDayOf(t.EventTimestampUtc, t.Source), t.Source, t.Bank))
+                t.Id, t.Amount, t.Currency, BankReconciliationRules.LocalDayOf(t.EventTimestampUtc, t.Source), t.Source, t.Bank, t.Pointed))
             .ToList();
+    }
+
+    public async Task<IReadOnlyList<BankTransaction>> FindWaitingBySuspectsAsync(
+        IReadOnlyCollection<Guid> transactionIds, Guid coupleId, CancellationToken ct)
+    {
+        if (transactionIds.Count == 0) return [];
+        var ids = transactionIds.Cast<Guid?>().ToList();
+        return await _dbContext.BankTransactions
+            .IgnoreQueryFilters()
+            .Where(t => t.CoupleId == coupleId
+                        && t.ReviewState == BankTransactionReviewState.Pending
+                        && ids.Contains(t.MatchedTransactionId))
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<Guid>> FindWaitingIdsBySuspectAsync(Guid transactionId, Guid coupleId, CancellationToken ct)
+        => await _dbContext.BankTransactions
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(t => t.CoupleId == coupleId
+                        && t.ReviewState == BankTransactionReviewState.Pending
+                        && t.MatchedTransactionId == transactionId)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+
+    public async Task<bool> SaveLinkingAsync(
+        IReadOnlyCollection<Guid> transactionIds, IReadOnlyCollection<Guid> lineIds, Guid coupleId, CancellationToken ct)
+    {
+        if (!IsPostgres() || _dbContext.Database.CurrentTransaction is not null)
+        {
+            if (await IsLinkedToAnotherLineAsync(transactionIds, lineIds, coupleId, ct)) return false;
+            await DbSaveTranslator.SaveAsync(_dbContext, ct);
+            return true;
+        }
+
+        // Every answer "it is the same" about a transaction waits here for the one before it, and then reads what
+        // that one stored. Always in the same order (by id), and never a lock that holds back the foreign keys of
+        // other lines (a synchronisation marking a line as looking like this transaction goes on).
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
+        foreach (var id in transactionIds.Order())
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                "SELECT 1 FROM transactions WHERE id = {0} FOR NO KEY UPDATE", [id], ct);
+        }
+
+        if (await IsLinkedToAnotherLineAsync(transactionIds, lineIds, coupleId, ct)) return false;
+        await DbSaveTranslator.SaveAsync(_dbContext, ct);
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
+    private Task<bool> IsLinkedToAnotherLineAsync(
+        IReadOnlyCollection<Guid> transactionIds, IReadOnlyCollection<Guid> lineIds, Guid coupleId, CancellationToken ct)
+    {
+        var transactions = transactionIds.Cast<Guid?>().ToList();
+        var lines = lineIds.ToList();
+        return _dbContext.BankTransactions
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .AnyAsync(t => t.CoupleId == coupleId && transactions.Contains(t.LinkedTransactionId) && !lines.Contains(t.Id), ct);
     }
 
     // ---------------------------------------------------------------- credit card bills
