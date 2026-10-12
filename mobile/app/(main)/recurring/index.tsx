@@ -1,7 +1,8 @@
 // Assinaturas e recorrências (aba oculta, pai Painel): o que o grupo paga todo mês, toda semana ou todo ano,
-// calculado no servidor sem IA. Total mensal e anual; Assinaturas, Contas fixas, Parcelamentos, Pequenos gastos
-// frequentes e Ocultas; tocar num item mostra as cobranças dele e as correções ("Não é recorrente", "Cancelei",
-// "É assinatura", "É conta fixa"), que o servidor guarda e respeita nos próximos cálculos.
+// calculado no servidor sem IA. Total mensal e anual (só do que tem prova); Assinaturas, Contas fixas, Parcelamentos,
+// Possíveis recorrências (o que parece se repetir mas ainda não tem prova: fora do total, com "É recorrente" e
+// "Não é"), Pequenos gastos frequentes e Ocultas; tocar num item mostra as cobranças dele e as correções ("Não é
+// recorrente", "Cancelei", "É assinatura", "É conta fixa"), que o servidor guarda e respeita nos próximos cálculos.
 //
 // A tela é remontada a cada visita (resetOnFocus): o item aberto e os avisos de uma visita não ficam para a
 // seguinte, e a lista é a que o servidor tem agora. Não há campo de texto.
@@ -23,12 +24,17 @@ import {
   RECURRING_EMPTY_TEXT,
   RECURRING_HINT,
   RECURRING_NOT_LISTED_NOTE,
+  RECURRING_ONLY_POSSIBLE_TEXT,
+  RECURRING_POSSIBLE_NOTE,
+  RECURRING_POSSIBLE_QUESTION,
   RECURRING_QUERY_KEY,
   RECURRING_STALE_TEXT,
   RECURRING_TITLE,
   RECURRING_TOTALS_NOTE,
   amountText,
   formatBRL,
+  hasOnlyPossible,
+  isPossibleItem,
   isRecurringEmpty,
   itemActions,
   itemBadges,
@@ -107,7 +113,7 @@ function RecurringScreen() {
       // A resposta de uma sessão que já acabou (saiu da conta, trocou de grupo) não mexe em nada.
       if (getSessionEpoch() !== epoch) return;
       setOpenId(null);
-      showToastGlobal(overrideDoneMessage(item.name, action.override), 'success');
+      showToastGlobal(overrideDoneMessage(item.name, action.override, isPossibleItem(item)), 'success');
       await queryClient.invalidateQueries({ queryKey: RECURRING_QUERY_KEY });
     } catch (err) {
       if (getSessionEpoch() !== epoch) return;
@@ -162,12 +168,14 @@ function RecurringScreen() {
               </View>
             </View>
             <Text style={styles.note}>{RECURRING_TOTALS_NOTE}</Text>
+            {hasOnlyPossible(data) && <Text style={styles.note}>{RECURRING_ONLY_POSSIBLE_TEXT}</Text>}
             <Text style={styles.note}>{RECURRING_HINT}</Text>
             <Text style={styles.note}>{RECURRING_NOT_LISTED_NOTE}</Text>
 
             {sections.map((section) => (
               <View key={section.key} style={styles.section}>
                 <Text style={styles.sectionTitle} accessibilityRole="header">{section.title}</Text>
+                {section.key === 'possible' && <Text style={styles.sectionNote}>{RECURRING_POSSIBLE_NOTE}</Text>}
                 {section.items.map((item) => {
                   const open = openId === item.id;
                   const badges = itemBadges(item);
@@ -200,7 +208,7 @@ function RecurringScreen() {
                       {open && (
                         <View style={styles.itemBody}>
                           <Charges id={item.id} />
-                          <Text style={styles.chargesTitle}>Está errado?</Text>
+                          <Text style={styles.chargesTitle}>{isPossibleItem(item) ? RECURRING_POSSIBLE_QUESTION : 'Está errado?'}</Text>
                           <View style={styles.actions}>
                             {itemActions(item).map((action) => (
                               <TouchableOpacity
@@ -209,7 +217,7 @@ function RecurringScreen() {
                                 onPress={() => void applyAction(item, action)}
                                 disabled={busy}
                                 accessibilityRole="button"
-                                accessibilityLabel={action.label}
+                                accessibilityLabel={action.spoken ?? action.label}
                               >
                                 <Text style={styles.actionText}>{action.label}</Text>
                               </TouchableOpacity>
@@ -249,6 +257,7 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 16, fontWeight: '600', color: colors.text, textAlign: 'center', marginTop: 16, marginBottom: 8, lineHeight: 22 },
   section: { marginTop: 24 },
   sectionTitle: { fontSize: 12, fontWeight: '600', color: colors.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionNote: { fontSize: 13, color: colors.textMuted, marginBottom: 8, lineHeight: 19 },
   item: { backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 8 },
   itemHeader: { flexDirection: 'row', alignItems: 'center', padding: 14, minHeight: 56, gap: 8 },
   itemMain: { flex: 1 },

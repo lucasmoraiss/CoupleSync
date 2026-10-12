@@ -676,7 +676,7 @@ export interface RecurringItemResponse {
   readonly nextExpected?: string | null;
   readonly status: RecurringStatus;
   readonly flags: readonly RecurringFlag[];
-  /** `Low`: parcela provável (uma marca "n/N" só). */
+  /** `Low`: parcela provável (uma marca "n/N" só) ou possível recorrência (padrão sem prova, fora do total). */
   readonly confidence?: 'High' | 'Medium' | 'Low';
   readonly category: string;
   readonly person?: { readonly userId: string; readonly name: string } | null;
@@ -700,6 +700,8 @@ export interface RecurringListResponse {
   readonly habits: readonly RecurringItemResponse[];
   readonly hidden: readonly RecurringItemResponse[];
   readonly installmentsByMonth?: readonly { readonly month: string; readonly amount: number }[];
+  /** O que parece se repetir mas ainda não tem prova: fora dos totais e das outras listas, à espera da pessoa. */
+  readonly possible?: readonly RecurringItemResponse[];
 }
 
 export interface RecurringChargeResponse {

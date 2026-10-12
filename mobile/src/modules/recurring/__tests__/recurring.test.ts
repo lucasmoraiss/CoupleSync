@@ -12,11 +12,16 @@ import {
   RECURRING_EMPTY_TEXT,
   RECURRING_ENTRY_LABEL,
   RECURRING_NOT_LISTED_NOTE,
+  RECURRING_ONLY_POSSIBLE_TEXT,
+  RECURRING_POSSIBLE_NOTE,
+  RECURRING_POSSIBLE_QUESTION,
   RECURRING_QUERY_KEY,
   RECURRING_STALE_TEXT,
   RECURRING_TOTALS_NOTE,
   amountText,
   dateLabel,
+  hasOnlyPossible,
+  isPossibleItem,
   isRecurringEmpty,
   itemActions,
   itemBadges,
@@ -95,11 +100,12 @@ describe('seções da tela', () => {
     expect(recurringSections(data).map((s) => s.title)).toEqual(['Assinaturas', 'Pequenos gastos frequentes', 'Ocultas']);
   });
 
-  it('todas as cinco, com os títulos da tela', () => {
+  it('todas as seis, com os títulos da tela: as possíveis vêm logo abaixo das confirmadas', () => {
     const data = list({
       subscriptions: [item()],
       fixedBills: [item({ id: 'b', kind: 'FixedBill' })],
       installments: [item({ id: 'c', kind: 'Installment' })],
+      possible: [item({ id: 'f', confidence: 'Low' })],
       habits: [item({ id: 'd', kind: 'Habit' })],
       hidden: [item({ id: 'e', override: 'Cancelled' })],
     });
@@ -107,9 +113,11 @@ describe('seções da tela', () => {
       'Assinaturas',
       'Contas fixas',
       'Parcelamentos',
+      'Possíveis recorrências',
       'Pequenos gastos frequentes',
       'Ocultas',
     ]);
+    expect(recurringSections(data).map((s) => s.key)).toEqual(['subscriptions', 'fixedBills', 'installments', 'possible', 'habits', 'hidden']);
   });
 
   it('lista sem nenhum item é o estado vazio, com o texto pedido', () => {
@@ -214,6 +222,89 @@ describe('valor e detalhe de um item', () => {
   });
 });
 
+describe('possíveis recorrências (padrão sem prova: fora do total, à espera de um toque)', () => {
+  const possible = (overrides: Partial<RecurringItemResponse> = {}) => item({ id: 'p', name: 'Loja Exemplo', confidence: 'Low', ...overrides });
+
+  it('é possível o item de confiança baixa que não é parcela e que a pessoa ainda não disse que é recorrente', () => {
+    expect(isPossibleItem(possible())).toBe(true);
+    expect(isPossibleItem(possible({ kind: 'FixedBill' }))).toBe(true);
+    expect(isPossibleItem(possible({ kind: 'Installment' }))).toBe(false);
+    expect(isPossibleItem(possible({ override: 'Subscription' }))).toBe(false);
+    expect(isPossibleItem(possible({ override: 'FixedBill' }))).toBe(false);
+    expect(isPossibleItem(item())).toBe(false);
+    expect(isPossibleItem(item({ confidence: undefined }))).toBe(false);
+  });
+
+  it('o texto da seção diz, para leigo, o que é e que não entra no total', () => {
+    expect(RECURRING_POSSIBLE_NOTE).toBe('Parece se repetir, mas ainda não temos certeza. Não entra no total. Toque em um item e diga se é recorrente.');
+    expect(RECURRING_POSSIBLE_QUESTION).toBe('É recorrente?');
+  });
+
+  it('as duas ações: "É recorrente" (guarda o tipo que o servidor achou) e "Não é", com rótulo falado completo', () => {
+    expect(itemActions(possible())).toEqual([
+      { override: 'Subscription', label: 'É recorrente', spoken: 'Sim, é recorrente' },
+      { override: 'NotRecurring', label: 'Não é', spoken: 'Não, não é recorrente' },
+    ]);
+    expect(itemActions(possible({ kind: 'FixedBill' })).map((a) => a.override)).toEqual(['FixedBill', 'NotRecurring']);
+  });
+
+  it('o rótulo acessível da linha diz que é possível e que está fora do total', () => {
+    expect(itemLabel(possible())).toBe(
+      'Loja Exemplo, 39 reais e 90 centavos por mês. Possível recorrência, fora do total. Ver cobranças e dizer se é recorrente',
+    );
+  });
+
+  it('não leva "talvez esquecida", "ficou mais cara" nem "nova", mesmo que o servidor mande', () => {
+    expect(itemBadges(possible({ flags: ['Forgotten', 'PriceIncrease', 'New'] }))).toEqual([]);
+    expect(itemBadges(possible({ variableAmount: true }))).toEqual(['valor variável']);
+  });
+
+  it('o aviso de "É recorrente" diz que o item passou a entrar no total', () => {
+    expect(overrideDoneMessage('Loja Exemplo', 'Subscription', true)).toBe('Loja Exemplo agora é assinatura e entra no total.');
+    expect(overrideDoneMessage('Loja Exemplo', 'FixedBill', true)).toBe('Loja Exemplo agora é conta fixa e entra no total.');
+    expect(overrideDoneMessage('Loja Exemplo', 'NotRecurring', true)).toBe('Loja Exemplo foi para Ocultas: não é recorrente.');
+  });
+
+  it('o cartão do Painel soma só o confirmado e diz quantas possíveis há', () => {
+    expect(plain(recurringCardText({ monthlyTotal: 39.9, possible: [possible(), possible({ id: 'q' })] }))).toBe('Recorrências: R$ 39,90/mês · +2 possíveis');
+    expect(plain(recurringCardText({ monthlyTotal: 0, possible: [possible()] }))).toBe('Recorrências: R$ 0,00/mês · +1 possível');
+    expect(plain(recurringCardText({ monthlyTotal: 39.9, possible: [] }))).toBe('Recorrências: R$ 39,90/mês');
+    expect(recurringCardLabel({ monthlyTotal: 39.9, possible: [possible(), possible({ id: 'q' })] })).toBe(
+      'Recorrências: 39 reais e 90 centavos por mês, mais 2 possíveis recorrências para conferir. Abrir assinaturas e recorrências',
+    );
+    expect(recurringCardLabel({ monthlyTotal: 39.9, possible: [possible()] })).toBe(
+      'Recorrências: 39 reais e 90 centavos por mês, mais 1 possível recorrência para conferir. Abrir assinaturas e recorrências',
+    );
+  });
+
+  it('só possíveis, nada confirmado: a tela não é o vazio e explica o total zerado', () => {
+    const data = list({ possible: [possible()] });
+    expect(isRecurringEmpty(data)).toBe(false);
+    expect(hasOnlyPossible(data)).toBe(true);
+    expect(hasOnlyPossible(list({ possible: [possible()], subscriptions: [item()] }))).toBe(false);
+    expect(hasOnlyPossible(list({ possible: [possible()], installments: [item({ kind: 'Installment' })] }))).toBe(false);
+    expect(hasOnlyPossible(list())).toBe(false);
+    expect(RECURRING_ONLY_POSSIBLE_TEXT).toBe('Nada confirmado ainda. O que parece se repetir está em "Possíveis recorrências", logo abaixo: diga se é recorrente para entrar no total.');
+  });
+
+  it('a tela põe o texto da seção, a pergunta e o rótulo falado das ações (código lido do arquivo)', () => {
+    const screen = read('app/(main)/recurring/index.tsx');
+    expect(screen).toMatch(/section\.key === 'possible' && <Text style=\{styles\.sectionNote\}>\{RECURRING_POSSIBLE_NOTE\}<\/Text>/);
+    expect(screen).toMatch(/\{isPossibleItem\(item\) \? RECURRING_POSSIBLE_QUESTION : 'Está errado\?'\}/);
+    expect(screen).toMatch(/overrideDoneMessage\(item\.name, action\.override, isPossibleItem\(item\)\)/);
+    expect(screen).toMatch(/hasOnlyPossible\(data\) && <Text style=\{styles\.note\}>\{RECURRING_ONLY_POSSIBLE_TEXT\}<\/Text>/);
+  });
+});
+
+describe('item anual', () => {
+  it('não repete o valor: "por ano" já está ao lado', () => {
+    const yearly = item({ cadence: 'Yearly', amount: 1200, annualCost: 1200, nextExpected: '2027-03-10' });
+    expect(plain(amountText(yearly))).toBe('R$ 1.200,00 por ano');
+    expect(plain(itemDetail(yearly))).toBe('próxima por volta de 10/03/2027');
+    expect(plain(itemDetail(item({ cadence: 'Yearly', amount: 1200, annualCost: 1200, status: 'Stopped', person: { userId: 'u', name: 'Ana Exemplo' } })))).toBe('Ana Exemplo');
+  });
+});
+
 describe('correções que cabem em cada item', () => {
   const labels = (i: RecurringItemResponse) => itemActions(i).map((a) => a.label);
 
@@ -281,7 +372,7 @@ describe('a tela, o cartão e as rotas (código lido do arquivo)', () => {
     expect(screen).toMatch(/itemBadges\(item\)/);
     expect(screen).toMatch(/\{itemDetail\(item\)\}/);
     expect(screen).toMatch(/\{open && \(\s*<View style=\{styles\.itemBody\}>\s*<Charges id=\{item\.id\} \/>/);
-    expect(screen).toMatch(/itemActions\(item\)\.map\(\(action\) => \(\s*<TouchableOpacity[\s\S]{0,400}accessibilityLabel=\{action\.label\}/);
+    expect(screen).toMatch(/itemActions\(item\)\.map\(\(action\) => \(\s*<TouchableOpacity[\s\S]{0,400}accessibilityLabel=\{action\.spoken \?\? action\.label\}/);
   });
 
   it('a correção vai ao servidor, fica presa à sessão e atualiza a lista e o cartão', () => {
@@ -341,7 +432,7 @@ describe('a tela, o cartão e as rotas (código lido do arquivo)', () => {
 
   it('as notas dizem o que entra no total e o que nunca aparece na lista', () => {
     expect(RECURRING_TOTALS_NOTE).toBe(
-      'Soma de assinaturas, contas fixas e parcelas confirmadas. Cobrança anual entra no mês como 1/12; de um parcelamento, "Em 12 meses" é só o que falta pagar. Pequenos gastos frequentes, parcelas prováveis e itens ocultos não entram.',
+      'Soma de assinaturas, contas fixas e parcelas confirmadas. Cobrança anual entra no mês como 1/12; de um parcelamento, "Em 12 meses" é só o que falta pagar. Possíveis recorrências, pequenos gastos frequentes, parcelas prováveis e itens ocultos não entram.',
     );
     expect(RECURRING_NOT_LISTED_NOTE).toBe('Pix e transferências para pessoas não aparecem aqui, mesmo que se repitam.');
     expect(screen.match(/\{RECURRING_NOT_LISTED_NOTE\}/g)).toHaveLength(2);

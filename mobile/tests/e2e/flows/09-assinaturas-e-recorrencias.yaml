@@ -1,6 +1,7 @@
-# Abrir "Assinaturas e recorrências" pelo cartão do Painel, ver a assinatura que o servidor encontrou, abrir as
-# cobranças dela e marcar "Não é recorrente"; no fim, abrir a mesma tela pela entrada fixa de Configurações.
-# A conta, o grupo e as três cobranças mensais (estabelecimento inventado) são criados pela API de teste antes de
+# Abrir "Assinaturas e recorrências" pelo cartão do Painel, ver a assinatura que o servidor encontrou, dizer que a
+# "possível recorrência" é recorrente (ela entra no total), abrir as cobranças da assinatura e marcar "Não é
+# recorrente"; no fim, abrir a mesma tela pela entrada fixa de Configurações.
+# A conta, o grupo e as cobranças mensais (estabelecimentos inventados) são criados pela API de teste antes de
 # o app abrir (scripts/09-semear-recorrencia.js): o Maestro roda na máquina que dirige o emulador, onde a API
 # responde em 127.0.0.1 (porta de scripts/app-e2e-api.sh; scripts/app-e2e-run-flows.sh passa o endereço em API_URL).
 appId: com.couplesync.app
@@ -27,7 +28,7 @@ env:
 # No primeiro uso do grupo o app pergunta pela análise com IA antes de mostrar o Painel.
 - runFlow: comum/responder-agora-nao-a-ia.yaml
 
-# Painel: o cartão das recorrências com o total mensal da assinatura semeada.
+# Painel: o cartão das recorrências com o total mensal da assinatura semeada (a possível não soma: é contada ao lado).
 - extendedWaitUntil:
     visible: "Recorrências: 39 reais e 90 centavos por mês.*"
     timeout: 90000
@@ -43,6 +44,27 @@ env:
 - assertVisible: "Total por mês: 39 reais e 90 centavos"
 - assertNotVisible: "Tentar novamente"
 
+# Abaixo das confirmadas: o que parece se repetir mas ainda não tem prova. "É recorrente" leva o item para o total.
+- scrollUntilVisible:
+    element: "Loja E2E, 19 reais e 90 centavos por mês. Possível recorrência, fora do total.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn: "Loja E2E, 19 reais e 90 centavos por mês. Possível recorrência, fora do total.*"
+- scrollUntilVisible:
+    element: "Sim, é recorrente"
+    direction: DOWN
+    timeout: 30000
+- assertVisible: "Não, não é recorrente"
+- tapOn: "Sim, é recorrente"
+- scrollUntilVisible:
+    element: "Total por mês: 59 reais e 80 centavos"
+    direction: UP
+    timeout: 30000
+- scrollUntilVisible:
+    element: "Streaming E2E, 39 reais e 90 centavos por mês.*"
+    direction: DOWN
+    timeout: 30000
+
 # O toque abre as cobranças e as correções.
 - tapOn: "Streaming E2E, 39 reais e 90 centavos por mês.*"
 - extendedWaitUntil:
@@ -52,17 +74,25 @@ env:
 - assertVisible: "É conta fixa"
 - assertVisible: "39 reais e 90 centavos"
 
-# "Não é recorrente": o item vai para Ocultas, marcado, e sai do total.
+# "Não é recorrente": o item vai para Ocultas, marcado, e sai do total (fica o que a pessoa disse que é recorrente).
 - tapOn: "Não é recorrente"
-- extendedWaitUntil:
-    visible: "Streaming E2E, 39 reais e 90 centavos por mês. marcada como não recorrente.*"
+- scrollUntilVisible:
+    element: "Streaming E2E, 39 reais e 90 centavos por mês. marcada como não recorrente.*"
+    direction: DOWN
     timeout: 30000
-- assertVisible: "Total por mês: zero reais"
+- scrollUntilVisible:
+    element: "Total por mês: 19 reais e 90 centavos"
+    direction: UP
+    timeout: 30000
 
 # De volta ao Painel, o cartão mostra o total novo.
+- scrollUntilVisible:
+    element: "Voltar para o Painel"
+    direction: UP
+    timeout: 30000
 - tapOn: "Voltar para o Painel"
 - extendedWaitUntil:
-    visible: "Recorrências: zero reais por mês.*"
+    visible: "Recorrências: 19 reais e 90 centavos por mês.*"
     timeout: 30000
 - assertNotVisible: "Algo deu errado"
 
@@ -73,6 +103,9 @@ env:
     timeout: 30000
 - tapOn: "Abrir assinaturas e contas fixas.*"
 - extendedWaitUntil:
-    visible: "Streaming E2E, 39 reais e 90 centavos por mês. marcada como não recorrente.*"
+    visible: "Assinaturas e recorrências"
     timeout: 30000
-- assertVisible: "Assinaturas e recorrências"
+- scrollUntilVisible:
+    element: "Streaming E2E, 39 reais e 90 centavos por mês. marcada como não recorrente.*"
+    direction: DOWN
+    timeout: 30000
