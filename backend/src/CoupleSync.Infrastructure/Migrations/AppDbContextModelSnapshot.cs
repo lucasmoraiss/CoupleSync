@@ -536,6 +536,10 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("payment_method");
 
+                    b.Property<DateTime?>("PersonDecidedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("person_decided_at_utc");
+
                     b.Property<string>("PluggyCategory")
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)")
@@ -604,6 +608,8 @@ namespace CoupleSync.Infrastructure.Migrations
                     b.HasIndex("LinkedIncomeSourceId");
 
                     b.HasIndex("LinkedTransactionId");
+
+                    b.HasIndex("MatchedTransactionId");
 
                     b.HasIndex("PluggyTransactionId")
                         .IsUnique();
@@ -1684,6 +1690,11 @@ namespace CoupleSync.Infrastructure.Migrations
                     b.HasOne("CoupleSync.Domain.Entities.Transaction", null)
                         .WithMany()
                         .HasForeignKey("LinkedTransactionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CoupleSync.Domain.Entities.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("MatchedTransactionId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("CoupleSync.Domain.Entities.SyncRun", null)

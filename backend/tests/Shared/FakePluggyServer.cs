@@ -125,6 +125,9 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     /// <summary>Status GET /items/{id} gives for an item, instead of the one of the fixture.</summary>
     public Dictionary<string, string> ItemStatusOverride { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Name of the bank GET /items/{id} gives for an item, instead of the one of the fixture.</summary>
+    public Dictionary<string, string> ConnectorNameOverride { get; } = new(StringComparer.Ordinal);
+
     /// <summary>The (from, to) of every GET /transactions of an account, in order.</summary>
     public List<(string From, string To)> WindowsAsked(string accountId)
     {
@@ -239,6 +242,8 @@ internal sealed class FakePluggyServer : HttpMessageHandler
             var itemId = path["/items/".Length..];
             if (ItemStatusOverride.TryGetValue(itemId, out var overridden))
                 return Json(HttpStatusCode.OK, ItemJson(itemId, "Banco Exemplo", overridden, overridden, null));
+            if (ConnectorNameOverride.TryGetValue(itemId, out var connector))
+                return Json(HttpStatusCode.OK, ItemJson(itemId, connector, "UPDATED", "SUCCESS", null));
             return itemId switch
             {
                 ItemWithAccounts => Json(HttpStatusCode.OK, ItemJson(itemId, "Banco Exemplo", "UPDATED", "SUCCESS", null)),
@@ -396,6 +401,9 @@ internal sealed record FakeTransaction(string Id, DateTime Date, decimal Amount)
     public string? BillId { get; init; }
     public decimal? Balance { get; init; }
 
+    /// <summary>Who sent the money (<c>paymentData.payer.name</c>), as the banks say it in a transfer received.</summary>
+    public string? PayerName { get; init; }
+
     /// <summary>The date exactly as it goes in the JSON, when a test needs a shape other than the ISO instant.</summary>
     public string? DateText { get; init; }
 
@@ -416,7 +424,13 @@ internal sealed record FakeTransaction(string Id, DateTime Date, decimal Amount)
             ["providerCode"] = FakePluggyServer.RawOnlyMarker,
             ["status"] = Status,
             ["type"] = Type,
-            ["paymentData"] = PaymentMethod is null ? null : new Dictionary<string, object?> { ["paymentMethod"] = PaymentMethod },
+            ["paymentData"] = PaymentMethod is null && PayerName is null
+                ? null
+                : new Dictionary<string, object?>
+                {
+                    ["paymentMethod"] = PaymentMethod,
+                    ["payer"] = PayerName is null ? null : new Dictionary<string, object?> { ["name"] = PayerName },
+                },
             ["merchant"] = MerchantName is null
                 ? null
                 : new Dictionary<string, object?> { ["name"] = MerchantName, ["businessName"] = MerchantName, ["cnpj"] = MerchantCnpj, ["category"] = Category },

@@ -24,6 +24,7 @@ import { goToParent, useOnRefocus } from '@/navigation/resetOnFocus';
 import { colors } from '@/theme';
 import { OPEN_FINANCE_STATUS_KEY, useOpenFinanceStatus } from '@/modules/openfinance/useOpenFinanceStatus';
 import { BANK_REVIEW_KEY } from '@/modules/openfinance/useBankReview';
+import { hasReviewAccess } from '@/modules/openfinance/review';
 import { useSyncRun } from '@/modules/openfinance/useSyncRun';
 import {
   CHOOSE_PERIOD_BUTTON,
@@ -63,6 +64,10 @@ function formatMoney(value: number, currency: string): string {
 
 function openWizard() {
   router.push('/(main)/settings/openfinance/wizard' as any);
+}
+
+function openReview() {
+  router.push('/(main)/openfinance/review' as any);
 }
 
 export default function OpenFinanceScreen() {
@@ -195,6 +200,8 @@ export default function OpenFinanceScreen() {
   const available = isOpenFinanceAvailable(data);
   const mine = myConnectionOf(data);
   const connections = data.connections ?? [];
+  // O caminho fixo até a revisão (e às ignoradas, que se restauram lá): não depende de haver algo esperando.
+  const reviewAccess = hasReviewAccess(data);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -224,6 +231,22 @@ export default function OpenFinanceScreen() {
               <Text style={styles.primaryText}>Conectar meus bancos</Text>
             </TouchableOpacity>
           </View>
+        ) : null}
+
+        {reviewAccess ? (
+          <TouchableOpacity
+            style={styles.card}
+            onPress={openReview}
+            accessibilityRole="button"
+            accessibilityLabel="Abrir a Revisão do banco: despesas para confirmar, descartadas e ignoradas"
+            activeOpacity={0.8}
+          >
+            <Text style={styles.cardTitle}>Revisão do banco</Text>
+            <Text style={styles.cardText}>
+              O que veio do banco: as despesas para confirmar e o que foi ignorado automaticamente (transferências entre contas do grupo e pagamentos de fatura), com a opção de restaurar.
+            </Text>
+            <Text style={styles.linkText}>Abrir a revisão ›</Text>
+          </TouchableOpacity>
         ) : null}
 
         {connections.map((connection) => {
@@ -372,6 +395,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
   cardText: { fontSize: 14, color: colors.textSubtle, lineHeight: 20 },
   muted: { fontSize: 13, color: colors.textMuted, lineHeight: 19 },
+  linkText: { fontSize: 15, color: colors.primaryLight, fontWeight: '600', marginTop: 4 },
   errorText: { fontSize: 14, color: colors.errorLight, lineHeight: 20 },
   warningText: { fontSize: 13, color: colors.warning, lineHeight: 19 },
   item: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border, gap: 6 },
