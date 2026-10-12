@@ -335,6 +335,18 @@ describe('a tela: os botões de possível duplicada', () => {
     expect(answerDuplicateRequest('other', duplicate, {})).toHaveProperty('asNew');
   });
 
+  it('sessão trocada no meio da resposta: nada é mostrado nem recarregado, no aviso, no erro e no fim (época da sessão)', () => {
+    const handler = screen.slice(screen.indexOf('const handleAnswer = async'), screen.indexOf('const handleRestore = async'));
+    // A época é lida antes do pedido, e cada caminho depois dele confere a mesma época antes de mexer na tela.
+    expect(handler).toMatch(/const epoch = getSessionEpoch\(\);\s+setBusy\('answer'\);/);
+    expect(handler).toMatch(
+      /confirmReview\(answerDuplicateRequest\(answer, line, chosen\)\)\)\.data;\s+if \(getSessionEpoch\(\) !== epoch\) return;\s+setNotice\(\{ text: answerDuplicateNotice\(/,
+    );
+    expect(handler).toMatch(/\} catch \(err\) \{\s+if \(getSessionEpoch\(\) !== epoch\) return;\s+setNotice\(/);
+    expect(handler).toMatch(/finally \{\s+if \(getSessionEpoch\(\) === epoch\) \{\s+setBusy\(null\);\s+(?:\/\/[^\r\n]*[\r\n]+\s*)*invalidateEverything\(\);\s+\}\s+\}/);
+    expect(handler.match(/getSessionEpoch\(\)/g)).toHaveLength(4);
+  });
+
   it('o aviso depois da resposta vem de answerDuplicateNotice (com a categoria não usada)', () => {
     const handler = screen.slice(screen.indexOf('const handleAnswer = async'), screen.indexOf('const handleRestore = async'));
     expect(handler).toContain('answerDuplicateNotice(answer, line, chosen, result)');
