@@ -51,8 +51,11 @@ public static partial class MerchantKey
     private static readonly HashSet<string> States = StateSuffixes.ToHashSet(StringComparer.Ordinal);
     private static readonly string[][] Cities = CitySuffixes.Select(c => c.Split(' ')).OrderByDescending(c => c.Length).ToArray();
 
-    /// <summary>The mark of an instalment, "03/10": part 3 of 10 (design 3.4).</summary>
-    [GeneratedRegex(@"(?<!\d)(\d{1,2})\s*/\s*(\d{1,2})(?!\d)", RegexOptions.CultureInvariant)]
+    /// <summary>
+    /// The mark of an instalment, "03/10": part 3 of 10 (design 3.4). ASCII digits only ([0-9], not \d, which is
+    /// also a digit of any other script): what the two groups hold can always be read as a number.
+    /// </summary>
+    [GeneratedRegex(@"(?<![0-9])([0-9]{1,2})\s*/\s*([0-9]{1,2})(?![0-9])", RegexOptions.CultureInvariant)]
     public static partial Regex InstallmentMark();
 
     [GeneratedRegex(@"\bparc(ela)?\.?\s*$", RegexOptions.CultureInvariant)]
@@ -64,7 +67,9 @@ public static partial class MerchantKey
     [GeneratedRegex(@"\.com(\.br)?(?![a-z0-9])", RegexOptions.CultureInvariant)]
     private static partial Regex DotCom();
 
-    [GeneratedRegex(@"\d{3,}", RegexOptions.CultureInvariant)]
+    // ASCII digits, like everything else in a key: a digit of another script is not a number here, it only
+    // separates words (see Tokens).
+    [GeneratedRegex(@"[0-9]{3,}", RegexOptions.CultureInvariant)]
     private static partial Regex LongDigits();
 
     /// <summary>Lower case, without accents: the form every rule of this context compares text in.</summary>

@@ -53,7 +53,9 @@ internal static partial class ContactPatterns
 
     // ---------------------------------------------------------------- what a number in a statement line is
 
-    [GeneratedRegex(@"(?<!\d)(?:\d{11}|\d{14})(?!\d)", RegexOptions.CultureInvariant)]
+    // ASCII digits only ([0-9], not \d): the check digits below are counted over what this matches, and a digit
+    // of another script is not a number to count with.
+    [GeneratedRegex(@"(?<![0-9])(?:[0-9]{11}|[0-9]{14})(?![0-9])", RegexOptions.CultureInvariant)]
     private static partial Regex RawDocumentLength();
 
     /// <summary>True when any of the patterns above matches: a document or a phone in any spelling, valid or not.</summary>
@@ -66,7 +68,7 @@ internal static partial class ContactPatterns
     public static bool HasFormatted(string text)
         => InOrder.Any(pattern => pattern().Matches(text).Any(match => match.Value.Any(ch => !char.IsAsciiDigit(ch))));
 
-    /// <summary>True when a run of exactly 11 or 14 digits has the check digits of a CPF or of a CNPJ.</summary>
+    /// <summary>True when a run of exactly 11 or 14 digits (0 to 9) has the check digits of a CPF or of a CNPJ.</summary>
     public static bool HasValidRawDocument(string text)
         => RawDocumentLength().Matches(text).Any(match => match.Length == 11 ? IsCpf(match.ValueSpan) : IsCnpj(match.ValueSpan));
 

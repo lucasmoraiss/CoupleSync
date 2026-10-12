@@ -394,8 +394,14 @@ public static class RecurrenceDetector
             var after = match.Index + match.Length < text.Length ? text[match.Index + match.Length] : ' ';
             if (before is '/' or '-' or '.' || after is '/' or '-') continue;
 
-            var number = int.Parse(match.Groups[1].ValueSpan, System.Globalization.CultureInfo.InvariantCulture);
-            var total = int.Parse(match.Groups[2].ValueSpan, System.Globalization.CultureInfo.InvariantCulture);
+            // The text of a transaction is whatever a person, a statement or a notification wrote: a mark that
+            // cannot be read as two numbers is not a mark, and never an error.
+            if (!int.TryParse(match.Groups[1].ValueSpan, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number)
+                || !int.TryParse(match.Groups[2].ValueSpan, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var total))
+            {
+                continue;
+            }
+
             if (number >= 1 && number <= total && total >= 2 && total <= options.InstallmentMaxParts) return (number, total);
         }
 

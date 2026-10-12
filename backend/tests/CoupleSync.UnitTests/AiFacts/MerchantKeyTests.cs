@@ -38,6 +38,29 @@ public sealed class MerchantKeyTests
     public void Normalize_RemovesAccentsByTheExplicitTable(string merchant, string expected)
         => Assert.Equal(expected, MerchantKey.Normalize(merchant));
 
+    /// <summary>
+    /// Review 4, I2 — only 0 to 9 are digits here. A digit of another script (full width, Arabic-Indic) is a
+    /// character like any other that is not a letter: it separates words and is never read as a number.
+    /// </summary>
+    [Theory]
+    [InlineData("Loja Exemplo １/３", "loja exemplo")]
+    [InlineData("Loja Exemplo ١/٣", "loja exemplo")]
+    [InlineData("Loja Exemplo １２３４", "loja exemplo")]
+    [InlineData("Loja 12３４", "loja 12")]
+    public void Normalize_OnlyReadsAsciiDigitsAsNumbers(string merchant, string expected)
+        => Assert.Equal(expected, MerchantKey.Normalize(merchant));
+
+    [Theory]
+    [InlineData("Loja Exemplo １/３")]
+    [InlineData("Loja Exemplo ١/٣")]
+    [InlineData("Loja Exemplo 1/３")]
+    [InlineData("Loja Exemplo ١/3")]
+    public void TheInstallmentMark_IsOnlyWrittenWithAsciiDigits(string text)
+    {
+        Assert.DoesNotMatch(MerchantKey.InstallmentMark(), text);
+        Assert.Equal(text, MerchantKey.RemoveInstallmentMark(text));
+    }
+
     /// <summary>Trap 1 of CLAUDE.md: nothing in this context may depend on ICU (Unicode normalization, named cultures).</summary>
     [Fact]
     public void TheAiFactsSources_NeverUseUnicodeNormalizationNorANamedCulture()
