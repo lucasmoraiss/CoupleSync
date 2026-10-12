@@ -65,12 +65,15 @@ public sealed class RecurringStreamRepository : IRecurringStreamRepository
 
     public async Task<RecurringTotals> GetTotalsAsync(Guid coupleId, CancellationToken ct)
     {
-        // The same rule as RecurringStream.IsHidden, written for the database: what is in the active list and is a
-        // commitment (a habit is a projection; a probable instalment is not confirmed). What the person cancelled
-        // and was charged again counts, also while its series is still "stopped".
+        // The same rule as RecurringStream.IsHidden and IsPossible, written for the database: what is in the active
+        // list and is a commitment with proof (a habit is a projection; a probable instalment is not confirmed; a
+        // possible recurrence only counts once the person says it is recurring). What the person cancelled and was
+        // charged again counts, also while its series is still "stopped".
         var counted = _dbContext.RecurringStreams.AsNoTracking()
             .Where(s => s.CoupleId == coupleId
-                        && s.Confidence != RecurringConfidences.Low
+                        && (s.Confidence != RecurringConfidences.Low
+                            || (s.Kind != RecurringKinds.Installment
+                                && (s.UserOverride == RecurringOverrides.Subscription || s.UserOverride == RecurringOverrides.FixedBill)))
                         && ((s.UserOverride == RecurringOverrides.Cancelled && s.Flags.Contains(RecurringFlags.ChargedAfterCancel))
                             || (s.Status != RecurringStatuses.Stopped
                                 && (s.UserOverride == null

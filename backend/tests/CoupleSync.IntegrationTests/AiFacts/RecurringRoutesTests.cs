@@ -46,7 +46,7 @@ public sealed class RecurringRoutesTests
 
         var list = await ListAsync(ana.Client);
 
-        foreach (var field in new[] { "monthlyTotal", "annualTotal", "detectedAtUtc", "subscriptions", "fixedBills", "installments", "habits", "hidden", "installmentsByMonth" })
+        foreach (var field in new[] { "monthlyTotal", "annualTotal", "detectedAtUtc", "subscriptions", "fixedBills", "installments", "habits", "hidden", "installmentsByMonth", "possible" })
             Assert.True(list.TryGetProperty(field, out _), $"the list should carry '{field}'");
         Assert.Equal(clock.UtcNow, list.GetProperty("detectedAtUtc").GetDateTime().ToUniversalTime());
 
@@ -389,7 +389,8 @@ public sealed class RecurringRoutesTests
         await ChargeAsync(ana.Client, "Streaming Exemplo", 250m, Day(9, 20), "LAZER");
         clock.UtcNow = Now.AddMinutes(1);
         var list = await ListAsync(ana.Client);
-        var id = list.GetProperty("subscriptions")[0].GetProperty("id").GetGuid();
+        // Three charges in a shop that also has another purchase: by the rule of proof, a possible recurrence.
+        var id = list.GetProperty("possible")[0].GetProperty("id").GetGuid();
 
         var response = await ana.Client.GetAsync($"{Recurring}/{id}/transactions");
 
@@ -1010,6 +1011,268 @@ public sealed class RecurringRoutesTests
     }
 
     // ---------------------------------------------------------------- helpers
+
+    // ---------------------------------------------------------------- proof: possible recurrences (the rule of the resumption)
+
+    /// <summary>Three charges of R$ 19,90 on the 5th, in a shop that also has a loose purchase: a pattern, not yet the proof.</summary>
+    private static async Task SeedPossibleAsync(HttpClient client, string merchant = "Loja Exemplo")
+    {
+        foreach (var month in new[] { 8, 9, 10 })
+            await ChargeAsync(client, merchant, 19.90m, Day(month, 5), "COMPRAS");
+        await ChargeAsync(client, merchant, 75m, Day(9, 18), "COMPRAS");
+    }
+
+    private static List<string?> Flags(JsonElement item) => item.GetProperty("flags").EnumerateArray().Select(f => f.GetString()).ToList();
+
+    [Fact]
+    public async Task APossibleRecurrence_IsInItsOwnList_OutOfTheOtherSections_AndOutOfTheTotals()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        foreach (var month in new[] { 8, 9, 10 })
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER");
+        await SeedPossibleAsync(ana.Client);
+        clock.UtcNow = Now.AddMinutes(1);
+
+        var list = await ListAsync(ana.Client);
+
+        var possible = Assert.Single(list.GetProperty("possible").EnumerateArray());
+        Assert.Equal("Loja Exemplo", possible.GetProperty("name").GetString());
+        Assert.Equal("Low", possible.GetProperty("confidence").GetString());
+        Assert.Equal("Subscription", possible.GetProperty("kind").GetString());
+        Assert.Equal(19.90m, possible.GetProperty("amount").GetDecimal());
+        Assert.Equal(3, possible.GetProperty("occurrences").GetInt32());
+        // Nothing is said of it yet: not "new", not "forgotten", not "got more expensive".
+        Assert.Empty(Flags(possible));
+
+        // Only what has proof is in the sections of commitments and in the totals.
+        Assert.Equal("Streaming Exemplo", Assert.Single(list.GetProperty("subscriptions").EnumerateArray()).GetProperty("name").GetString());
+        Assert.Equal(0, list.GetProperty("fixedBills").GetArrayLength());
+        Assert.Equal(0, list.GetProperty("habits").GetArrayLength());
+        Assert.Equal(0, list.GetProperty("hidden").GetArrayLength());
+        Assert.Equal(39.90m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(478.80m, list.GetProperty("annualTotal").GetDecimal());
+    }
+
+    /// <summary>
+    /// Rule (d): what the person said is recurring is confirmed — at once, for the whole group, through every
+    /// recalculation — and taking it back makes it possible again.
+    /// </summary>
+    [Fact]
+    public async Task SayingAPossibleOneIsRecurring_ConfirmsItAtOnce_ForTheGroup_ThroughRecalculations_AndTakingItBackUndoesIt()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
+        await SeedPossibleAsync(ana.Client);
+        clock.UtcNow = Now.AddMinutes(1);
+        var first = await ListAsync(ana.Client);
+        var id = Assert.Single(first.GetProperty("possible").EnumerateArray()).GetProperty("id").GetGuid();
+        Assert.Equal(0m, first.GetProperty("monthlyTotal").GetDecimal());
+
+        // "É recorrente": the app sends the kind the server found.
+        clock.UtcNow = Now.AddMinutes(2);
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, id, "Subscription")).StatusCode);
+
+        // The very next request, with no new transaction and no six hours: confirmed, in its section, in the total.
+        clock.UtcNow = Now.AddMinutes(3);
+        var confirmed = await ListAsync(ana.Client);
+        var item = Assert.Single(confirmed.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal(id, item.GetProperty("id").GetGuid());
+        Assert.Equal("Subscription", item.GetProperty("override").GetString());
+        Assert.Equal("High", item.GetProperty("confidence").GetString());
+        Assert.Contains("New", Flags(item));
+        Assert.Equal(0, confirmed.GetProperty("possible").GetArrayLength());
+        Assert.Equal(19.90m, confirmed.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(238.80m, confirmed.GetProperty("annualTotal").GetDecimal());
+
+        // The other person of the group sees the same.
+        var ofBruno = await ListAsync(bruno.Client);
+        Assert.Equal(id, Assert.Single(ofBruno.GetProperty("subscriptions").EnumerateArray()).GetProperty("id").GetGuid());
+        Assert.Equal(19.90m, ofBruno.GetProperty("monthlyTotal").GetDecimal());
+
+        // More loose purchases, the next charge and a recalculation: still confirmed (alone it would be possible: 4 charges).
+        await ChargeAsync(ana.Client, "Loja Exemplo", 132m, Day(10, 7), "COMPRAS");
+        clock.UtcNow = new DateTime(2026, 11, 5, 15, 0, 0, DateTimeKind.Utc);
+        await ChargeAsync(bruno.Client, "Loja Exemplo", 19.90m, clock.UtcNow, "COMPRAS");
+        await ChargeAsync(bruno.Client, "Loja Exemplo", 48m, clock.UtcNow.AddDays(-9), "COMPRAS");
+        clock.UtcNow = clock.UtcNow.AddHours(7);
+        var later = await ListAsync(bruno.Client);
+        var still = Assert.Single(later.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal(id, still.GetProperty("id").GetGuid());
+        Assert.Equal(4, still.GetProperty("occurrences").GetInt32());
+        Assert.Equal("High", still.GetProperty("confidence").GetString());
+        Assert.Equal(0, later.GetProperty("possible").GetArrayLength());
+        Assert.Equal(19.90m, later.GetProperty("monthlyTotal").GetDecimal());
+
+        // Taking it back: possible again, out of the total, at the next request.
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(bruno.Client, id, null)).StatusCode);
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var back = await ListAsync(ana.Client);
+        var again = Assert.Single(back.GetProperty("possible").EnumerateArray());
+        Assert.Equal(id, again.GetProperty("id").GetGuid());
+        Assert.Equal("Low", again.GetProperty("confidence").GetString());
+        Assert.Empty(Flags(again));
+        Assert.Equal(0, back.GetProperty("subscriptions").GetArrayLength());
+        Assert.Equal(0m, back.GetProperty("monthlyTotal").GetDecimal());
+    }
+
+    /// <summary>
+    /// The guarantee behind rule (d): a stream the person said is recurring counts in the total and is listed in its
+    /// section also while its stored confidence is still low (a row the detector did not confirm for some reason).
+    /// A probable instalment does not become a commitment that way.
+    /// </summary>
+    [Fact]
+    public async Task AStreamSaidRecurring_CountsInTheTotal_AlsoWhileItsStoredConfidenceIsLow()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        await SeedPossibleAsync(ana.Client);
+        await ChargeAsync(ana.Client, "OUTRA LOJA 01/06", 70m, Day(10, 2), "COMPRAS");   // a probable instalment
+        clock.UtcNow = Now.AddMinutes(1);
+        var first = await ListAsync(ana.Client);
+        Assert.Equal(0m, first.GetProperty("monthlyTotal").GetDecimal());
+
+        // Written straight in the rows: no recalculation is asked for, and none is due.
+        factory.Execute("UPDATE recurring_streams SET user_override = 'Subscription'");
+        clock.UtcNow = Now.AddMinutes(2);
+        var list = await ListAsync(ana.Client);
+
+        Assert.Equal(DetectedAt(first), DetectedAt(list));
+        var item = Assert.Single(list.GetProperty("subscriptions").EnumerateArray(), i => i.GetProperty("name").GetString() == "Loja Exemplo");
+        Assert.Equal("Low", item.GetProperty("confidence").GetString());
+        Assert.Equal(0, list.GetProperty("possible").GetArrayLength());
+        Assert.Equal(19.90m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(238.80m, list.GetProperty("annualTotal").GetDecimal());
+    }
+
+    [Fact]
+    public async Task NotRecurring_OnAPossibleOne_HidesIt_AndSurvivesTheRecalculation()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        await SeedPossibleAsync(ana.Client);
+        clock.UtcNow = Now.AddMinutes(1);
+        var id = Assert.Single((await ListAsync(ana.Client)).GetProperty("possible").EnumerateArray()).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, id, "NotRecurring")).StatusCode);
+        await ChargeAsync(ana.Client, "Outra Loja Exemplo", 10m, clock.UtcNow, "COMPRAS");
+        clock.UtcNow = Now.AddHours(7);
+        var list = await ListAsync(ana.Client);
+
+        Assert.Equal(clock.UtcNow, DetectedAt(list));
+        Assert.Equal(0, list.GetProperty("possible").GetArrayLength());
+        var hidden = Assert.Single(list.GetProperty("hidden").EnumerateArray());
+        Assert.Equal(id, hidden.GetProperty("id").GetGuid());
+        Assert.Equal("NotRecurring", hidden.GetProperty("override").GetString());
+        Assert.Equal(0m, list.GetProperty("monthlyTotal").GetDecimal());
+    }
+
+    /// <summary>"Charged again after cancelled" is said of what was a commitment: a possible recurrence was never one.</summary>
+    [Fact]
+    public async Task APossibleOneThePersonCancelled_IsNotMarkedAsChargedAgain_WhenItsNextChargeComes()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        await SeedPossibleAsync(ana.Client);
+        clock.UtcNow = Now.AddMinutes(1);
+        var id = Assert.Single((await ListAsync(ana.Client)).GetProperty("possible").EnumerateArray()).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, id, "Cancelled")).StatusCode);
+
+        // The next charge comes, and one more loose purchase: with four charges the shop still gives no proof.
+        clock.UtcNow = new DateTime(2026, 11, 5, 15, 0, 0, DateTimeKind.Utc);
+        await ChargeAsync(ana.Client, "Loja Exemplo", 120m, Day(10, 20), "COMPRAS");
+        await ChargeAsync(ana.Client, "Loja Exemplo", 19.90m, clock.UtcNow, "COMPRAS");
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var list = await ListAsync(ana.Client);
+
+        var hidden = Assert.Single(list.GetProperty("hidden").EnumerateArray());
+        Assert.Equal(id, hidden.GetProperty("id").GetGuid());
+        Assert.Equal(4, hidden.GetProperty("occurrences").GetInt32());
+        Assert.Equal("Low", hidden.GetProperty("confidence").GetString());
+        Assert.DoesNotContain("ChargedAfterCancel", Flags(hidden));
+        Assert.Equal(0, list.GetProperty("possible").GetArrayLength());
+        Assert.Equal(0, list.GetProperty("subscriptions").GetArrayLength());
+        Assert.Equal(0m, list.GetProperty("monthlyTotal").GetDecimal());
+    }
+
+    /// <summary>
+    /// Review 2, m3 — a correction waits for the calculation of the group that is running (and the other way round):
+    /// a calculation that already read the streams would decide with the correction of before.
+    /// </summary>
+    [Fact]
+    public async Task ACorrection_WaitsForTheCalculationOfTheGroupThatIsRunning()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        foreach (var month in new[] { 8, 9, 10 })
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER");
+        clock.UtcNow = Now.AddMinutes(1);
+        var id = (await ListAsync(ana.Client)).GetProperty("subscriptions")[0].GetProperty("id").GetGuid();
+
+        // What a calculation of this group holds while it runs.
+        var gate = factory.Services.GetRequiredService<RecurrenceRunLog>().LockOf(ana.CoupleId);
+        await gate.WaitAsync();
+        Task<HttpResponseMessage> patch;
+        try
+        {
+            patch = PatchAsync(ana.Client, id, "NotRecurring");
+            var finishedFirst = await Task.WhenAny(patch, Task.Delay(TimeSpan.FromSeconds(2)));
+            Assert.NotSame(patch, finishedFirst);
+            Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM recurring_streams WHERE user_override IS NOT NULL"));
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await patch).StatusCode);
+        Assert.Equal("NotRecurring", factory.Scalar<string>("SELECT user_override FROM recurring_streams"));
+    }
+
+    /// <summary>
+    /// Review 2, m4 — the side effect admitted in round 3, locked: a charge registered by both phones, each of
+    /// which missed one month, is two items (the transactions themselves are doubled in the whole app). "Not
+    /// recurring" on one of them puts the total right, and stays through the recalculation.
+    /// </summary>
+    [Fact]
+    public async Task TheSameChargeRegisteredByBothPeople_EachMissingAMonth_IsTwoItems_AndHidingOneFixesTheTotal()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
+        foreach (var month in new[] { 6, 7, 8, 10 })
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER");
+        foreach (var month in new[] { 6, 7, 9, 10 })
+            await ChargeAsync(bruno.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER");
+        clock.UtcNow = Now.AddMinutes(1);
+
+        var list = await ListAsync(ana.Client);
+
+        var items = list.GetProperty("subscriptions").EnumerateArray().ToList();
+        Assert.Equal(2, items.Count);
+        Assert.Equal(["Ana Exemplo", "Bruno Exemplo"], items.Select(i => i.GetProperty("person").GetProperty("name").GetString()).Order());
+        Assert.All(items, i => Assert.Equal(1, i.GetProperty("missedCount").GetInt32()));
+        Assert.Equal(79.80m, list.GetProperty("monthlyTotal").GetDecimal());
+
+        var ofBruno = items.Single(i => i.GetProperty("person").GetProperty("userId").GetGuid() == bruno.UserId).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, ofBruno, "NotRecurring")).StatusCode);
+        await ChargeAsync(ana.Client, "Outra Loja Exemplo", 10m, clock.UtcNow, "COMPRAS");
+        clock.UtcNow = Now.AddHours(7);
+        var later = await ListAsync(ana.Client);
+
+        Assert.Equal(clock.UtcNow, DetectedAt(later));
+        var one = Assert.Single(later.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal("Ana Exemplo", one.GetProperty("person").GetProperty("name").GetString());
+        Assert.Equal(ofBruno, Assert.Single(later.GetProperty("hidden").EnumerateArray()).GetProperty("id").GetGuid());
+        Assert.Equal(39.90m, later.GetProperty("monthlyTotal").GetDecimal());
+    }
 
     private sealed record Member(HttpClient Client, Guid UserId, Guid CoupleId);
 

@@ -39,7 +39,10 @@ public interface IRecurringStreamRepository
 
     Task<IReadOnlyList<RecurringStream>> ListAsync(Guid coupleId, CancellationToken ct);
 
-    /// <summary>Monthly and annual cost of what is in the active list and is a commitment (habits and probable instalments are not).</summary>
+    /// <summary>
+    /// Monthly and annual cost of what is in the active list and is a commitment with proof (habits, probable
+    /// instalments and possible recurrences are not; a possible one the person said is recurring is).
+    /// </summary>
     Task<RecurringTotals> GetTotalsAsync(Guid coupleId, CancellationToken ct);
 
     Task<RecurringStream?> FindAsync(Guid coupleId, Guid id, CancellationToken ct);
@@ -125,7 +128,8 @@ public sealed record RecurringList(
     IReadOnlyList<RecurringItem> Installments,
     IReadOnlyList<RecurringItem> Habits,
     IReadOnlyList<RecurringItem> Hidden,
-    IReadOnlyList<RecurringMonthCommitment> InstallmentsByMonth);
+    IReadOnlyList<RecurringMonthCommitment> InstallmentsByMonth,
+    IReadOnlyList<RecurringItem> Possible);
 
 /// <summary>
 /// "Assinaturas e recorrências" of one group (design 3.3 and 10.3): calculates the streams when the stored ones are
@@ -163,7 +167,7 @@ public sealed class RecurrenceService
         var items = streams.Select(s => (Stream: s, Item: Map(s, names))).ToList();
 
         IReadOnlyList<RecurringItem> Section(string kind) => items
-            .Where(i => !i.Stream.IsHidden && i.Stream.EffectiveKind == kind)
+            .Where(i => !i.Stream.IsHidden && !i.Stream.IsPossible && i.Stream.EffectiveKind == kind)
             .OrderByDescending(i => i.Stream.AnnualCost).ThenBy(i => i.Stream.DisplayName, StringComparer.Ordinal).ThenBy(i => i.Stream.Id)
             .Select(i => i.Item)
             .ToList();
@@ -187,7 +191,11 @@ public sealed class RecurrenceService
             items.Where(i => i.Stream.IsHidden)
                 .OrderBy(i => i.Stream.DisplayName, StringComparer.Ordinal).ThenBy(i => i.Stream.Id)
                 .Select(i => i.Item).ToList(),
-            committed.Select(c => new RecurringMonthCommitment(c.Month, c.Amount)).ToList());
+            committed.Select(c => new RecurringMonthCommitment(c.Month, c.Amount)).ToList(),
+            // What has a pattern but not the proof: shown apart, out of the total, until the person says what it is.
+            items.Where(i => !i.Stream.IsHidden && i.Stream.IsPossible)
+                .OrderByDescending(i => i.Stream.AnnualCost).ThenBy(i => i.Stream.DisplayName, StringComparer.Ordinal).ThenBy(i => i.Stream.Id)
+                .Select(i => i.Item).ToList());
     }
 
     public async Task<IReadOnlyList<RecurringCharge>> GetChargesAsync(Guid coupleId, Guid id, CancellationToken ct)
@@ -202,10 +210,24 @@ public sealed class RecurrenceService
         if (userOverride is not null && !RecurringOverrides.All.Contains(userOverride))
             throw new BadRequestException("INVALID_OVERRIDE", "Correção inválida. Use NotRecurring, Cancelled, Subscription, FixedBill ou null.");
 
-        var stream = await FindOrThrowAsync(coupleId, id, ct);
-        stream.SetOverride(userOverride, userId, _clock.UtcNow);
-        await _repository.SaveChangesAsync(ct);
-        return Map(stream, await _repository.GetMemberNamesAsync(coupleId, ct));
+        // One at a time with the calculation of the group: a calculation that already read the streams would decide
+        // with the correction of before (and could remove the stream that was just corrected).
+        var gate = _runs.LockOf(coupleId);
+        await gate.WaitAsync(ct);
+        try
+        {
+            var stream = await FindOrThrowAsync(coupleId, id, ct);
+            stream.SetOverride(userOverride, userId, _clock.UtcNow);
+            await _repository.SaveChangesAsync(ct);
+            // What the person says changes what the detector answers ("it is recurring" confirms the series; taking
+            // it back makes it possible again): the next request for the list calculates again.
+            _runs.TransactionEdited(coupleId);
+            return Map(stream, await _repository.GetMemberNamesAsync(coupleId, ct));
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     private async Task<RecurringStream> FindOrThrowAsync(Guid coupleId, Guid id, CancellationToken ct)
@@ -272,9 +294,14 @@ public sealed class RecurrenceService
                 _options.ProjectionRowCap);
         }
 
-        var result = RecurrenceDetector.Detect(rows, today, _options);
-
         var existing = await _repository.GetForUpdateAsync(coupleId, ct);
+        // What the person said is recurring is confirmed whatever its proof: the detector is told its charges.
+        var saidRecurring = existing
+            .Where(e => e.IsSaidRecurring)
+            .Select(e => (IReadOnlyCollection<Guid>)e.Items.Select(i => i.TransactionId).ToList())
+            .ToList();
+        var result = RecurrenceDetector.Detect(rows, today, _options, saidRecurring);
+
         var unmatched = existing.ToList();
         var taken = existing.Select(e => (e.MerchantKey, e.Cadence)).ToHashSet();
         // Which stream each charge belongs to after this calculation.
@@ -360,7 +387,8 @@ public sealed class RecurrenceService
                 copy => Math.Abs(charge.LocalDate.DayNumber - copy.LocalDate.DayNumber) <= Math.Max(0, _options.SameChargeWithinDays));
             var chargedAgain = similar.Any(c => c.TimestampUtc > stream.OverrideAtUtc!.Value
                                                 && (!ownerOfCharge.TryGetValue(c.TransactionId, out var owner) || (owner == stream.Id && !SeenBefore(c))));
-            stream.SetChargedAfterCancel(chargedAgain);
+            // "Charged again" is said of what was a commitment: a possible recurrence was never one.
+            stream.SetChargedAfterCancel(chargedAgain && stream.Confidence != RecurringConfidences.Low);
 
             // A charge that came back too late to continue the series (after two missed ones) is in no series. It is
             // shown with the stream all the same: among its charges, and as the date of its last charge. Once

@@ -43,7 +43,8 @@ public sealed class RecurringController : ControllerBase
             list.Installments.Select(Map).ToList(),
             list.Habits.Select(Map).ToList(),
             list.Hidden.Select(Map).ToList(),
-            list.InstallmentsByMonth.Select(m => new RecurringMonthCommitmentResponse(m.Month, m.Amount)).ToList()));
+            list.InstallmentsByMonth.Select(m => new RecurringMonthCommitmentResponse(m.Month, m.Amount)).ToList(),
+            list.Possible.Select(Map).ToList()));
     }
 
     [HttpGet("{id:guid}/transactions")]

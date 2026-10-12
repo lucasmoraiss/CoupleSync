@@ -38,6 +38,10 @@ public static class RecurringFlags
     public const string ChargedAfterCancel = "ChargedAfterCancel";
 }
 
+/// <summary>
+/// How sure the detector is. <see cref="Low"/> is what has a pattern but not the proof: a "possible recurrence" (or
+/// a probable instalment). It is shown apart and never counts in the total, until the person says it is recurring.
+/// </summary>
 public static class RecurringConfidences
 {
     public const string High = "High";
@@ -188,6 +192,18 @@ public sealed class RecurringStream : ICoupleScoped
     /// <summary>The kind as the person sees it: what they said it is, or what the detector found.</summary>
     public string EffectiveKind
         => UserOverride is RecurringOverrides.Subscription or RecurringOverrides.FixedBill ? UserOverride : Kind;
+
+    /// <summary>True when the person said the stream is recurring ("it is a subscription", "it is a fixed bill").</summary>
+    public bool IsSaidRecurring
+        => UserOverride is RecurringOverrides.Subscription or RecurringOverrides.FixedBill;
+
+    /// <summary>
+    /// A "possible recurrence": the detector found a pattern without the proof, and the person did not say it is
+    /// recurring. It is shown in a section of its own and is not in the total. (A probable instalment is of low
+    /// confidence too, and is not this: it stays among the instalments.)
+    /// </summary>
+    public bool IsPossible
+        => Confidence == RecurringConfidences.Low && Kind != RecurringKinds.Installment && !IsSaidRecurring;
 
     /// <summary>
     /// Out of the active list: the person said it is not recurring, or cancelled it, or it stopped being charged.

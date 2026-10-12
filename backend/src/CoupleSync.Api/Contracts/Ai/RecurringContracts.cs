@@ -14,7 +14,7 @@ public sealed record RecurringInstallmentResponse(int Number, int Total, decimal
 /// <param name="FirstSeen">Brasília dates, "yyyy-MM-dd".</param>
 /// <param name="Status">"Active", "SuspectedDormant" or "Stopped".</param>
 /// <param name="Flags">"Forgotten", "PriceIncrease", "New", "ChargedAfterCancel".</param>
-/// <param name="Confidence">"High", "Medium" or "Low" (a probable instalment).</param>
+/// <param name="Confidence">"High", "Medium" or "Low" (a probable instalment, or a possible recurrence: a pattern without the proof).</param>
 public sealed record RecurringItemResponse(
     Guid Id,
     string Name,
@@ -41,10 +41,14 @@ public sealed record RecurringItemResponse(
 /// <param name="Month">"yyyy-MM".</param>
 public sealed record RecurringMonthCommitmentResponse(string Month, decimal Amount);
 
-/// <param name="MonthlyTotal">Subscriptions, fixed bills and confirmed instalments of the active list, per month.</param>
+/// <param name="MonthlyTotal">Subscriptions, fixed bills and confirmed instalments of the active list, per month. What is in <paramref name="Possible"/> is not counted.</param>
 /// <param name="AnnualTotal">The same, in 12 months (instalments: only the parts still to be paid).</param>
 /// <param name="Hidden">What the person said is not recurring or cancelled, and what stopped being charged.</param>
 /// <param name="InstallmentsByMonth">What the confirmed instalments still commit in each of the next 12 months.</param>
+/// <param name="Possible">
+/// What seems to repeat but has no proof yet. In no other list and out of the totals; the person says it is
+/// recurring (override "Subscription" or "FixedBill": it goes to that list and counts) or not ("NotRecurring").
+/// </param>
 public sealed record RecurringListResponse(
     decimal MonthlyTotal,
     decimal AnnualTotal,
@@ -54,7 +58,8 @@ public sealed record RecurringListResponse(
     IReadOnlyList<RecurringItemResponse> Installments,
     IReadOnlyList<RecurringItemResponse> Habits,
     IReadOnlyList<RecurringItemResponse> Hidden,
-    IReadOnlyList<RecurringMonthCommitmentResponse> InstallmentsByMonth);
+    IReadOnlyList<RecurringMonthCommitmentResponse> InstallmentsByMonth,
+    IReadOnlyList<RecurringItemResponse> Possible);
 
 /// <param name="Date">The instant of the charge (UTC).</param>
 /// <param name="Merchant">The establishment as the transaction list shows it.</param>

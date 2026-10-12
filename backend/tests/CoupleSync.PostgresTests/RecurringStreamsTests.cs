@@ -298,6 +298,57 @@ public sealed class RecurringStreamsTests
     }
 
     /// <summary>
+    /// The rule of proof, summed by PostgreSQL: a possible recurrence (low confidence) is out of the totals; once the
+    /// person says it is recurring it counts — through the recalculation that confirms it, and also by the filter
+    /// alone, while the stored confidence is still low. A probable instalment never becomes a commitment that way.
+    /// </summary>
+    [PostgresFact]
+    public async Task TheTotals_LeaveAPossibleRecurrenceOut_AndCountItOnceThePersonSaysItIsRecurring()
+    {
+        var clock = new MovingClock(Now);
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        await using var host = WithTheClock(factory, clock);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        await SeedMonthlyAsync(ana.Client, "Streaming Exemplo", 39.90m, [8, 9, 10], "LAZER");   // confirmed
+        await SeedMonthlyAsync(ana.Client, "Loja Exemplo", 19.90m, [8, 9, 10], "COMPRAS");      // possible: the shop has a loose purchase
+        await ChargeAsync(ana.Client, "Loja Exemplo", 75m, Day(9, 18), "COMPRAS");
+        await ChargeAsync(ana.Client, "OUTRA LOJA 01/06", 70m, Day(10, 2), "COMPRAS");          // a probable instalment
+        clock.UtcNow = Now.AddMinutes(1);
+
+        var first = await ListAsync(ana.Client);
+
+        var possible = Assert.Single(first.GetProperty("possible").EnumerateArray());
+        Assert.Equal("Loja Exemplo", possible.GetProperty("name").GetString());
+        Assert.Equal("Low", possible.GetProperty("confidence").GetString());
+        Assert.Equal(1, first.GetProperty("subscriptions").GetArrayLength());
+        Assert.Equal(39.90m, first.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(478.80m, first.GetProperty("annualTotal").GetDecimal());
+
+        // By the filter alone: the correction written straight in the rows, no recalculation asked for and none due.
+        await database.ExecuteAsync("UPDATE recurring_streams SET user_override = 'Subscription' WHERE confidence = 'Low'");
+        clock.UtcNow = Now.AddMinutes(2);
+        var byTheFilter = await ListAsync(ana.Client);
+        Assert.Equal(first.GetProperty("detectedAtUtc").GetDateTime(), byTheFilter.GetProperty("detectedAtUtc").GetDateTime());
+        Assert.Equal(2L, await database.ScalarAsync<long>("SELECT count(*) FROM recurring_streams WHERE confidence = 'Low' AND user_override = 'Subscription'"));
+        Assert.Equal(0, byTheFilter.GetProperty("possible").GetArrayLength());
+        Assert.Equal(39.90m + 19.90m, byTheFilter.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(478.80m + 238.80m, byTheFilter.GetProperty("annualTotal").GetDecimal());
+
+        // Through the route: taken back, it is possible again; said recurring, the recalculation confirms it.
+        await database.ExecuteAsync("UPDATE recurring_streams SET user_override = NULL");
+        var id = possible.GetProperty("id").GetGuid();
+        var patched = await ana.Client.PatchAsync($"{Recurring}/{id}", JsonContent.Create(new Dictionary<string, string?> { ["override"] = "Subscription" }));
+        Assert.Equal(HttpStatusCode.OK, patched.StatusCode);
+        clock.UtcNow = Now.AddMinutes(3);
+        var confirmed = await ListAsync(ana.Client);
+        Assert.Equal("High", await database.ScalarAsync<string>("SELECT confidence FROM recurring_streams WHERE id = @id", ("id", id)));
+        Assert.Equal(2, confirmed.GetProperty("subscriptions").GetArrayLength());
+        Assert.Equal(0, confirmed.GetProperty("possible").GetArrayLength());
+        Assert.Equal(59.80m, confirmed.GetProperty("monthlyTotal").GetDecimal());
+    }
+
+    /// <summary>
     /// Review round 1 (I3) — a transaction accepts 512 characters of merchant and of description; the columns of a
     /// stream are shorter and PostgreSQL refuses what does not fit (SQLite does not). One long text must never make
     /// the list of the whole group answer 500.
