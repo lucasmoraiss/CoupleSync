@@ -1318,6 +1318,210 @@ public sealed class RecurringRoutesTests
         Assert.Equal(39.90m, later.GetProperty("monthlyTotal").GetDecimal());
     }
 
+    // ---------------------------------------------------------------- review round 4
+
+    /// <summary>
+    /// Two monthly items of the same establishment: the school fee (R$ 1.200, a fixed bill) and a class of R$ 150 (a
+    /// subscription), which the person said is not recurring. Answers the ids of the two items and of the charges of
+    /// the class.
+    /// </summary>
+    private static async Task<(Guid Fee, Guid Class, List<Guid> ChargesOfTheClass)> SeedSchoolAsync(Member ana, MovingClock clock)
+    {
+        var chargesOfTheClass = new List<Guid>();
+        foreach (var month in new[] { 5, 6, 7, 8, 9, 10 })
+            await ChargeAsync(ana.Client, "Escola Exemplo", 1200m, Day(month, 5), "OUTROS");
+        foreach (var month in new[] { 4, 5, 6, 7, 8, 9 })
+            chargesOfTheClass.Add(await ChargeAsync(ana.Client, "Escola Exemplo", 150m, Day(month, 20), "OUTROS"));
+        clock.UtcNow = Now.AddMinutes(1);
+
+        var list = await ListAsync(ana.Client);
+        var fee = Assert.Single(list.GetProperty("fixedBills").EnumerateArray());
+        var @class = Assert.Single(list.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal(1200m, fee.GetProperty("amount").GetDecimal());
+        Assert.Equal(150m, @class.GetProperty("amount").GetDecimal());
+        Assert.Equal(1350m, list.GetProperty("monthlyTotal").GetDecimal());
+
+        var classId = @class.GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, classId, "NotRecurring")).StatusCode);
+        clock.UtcNow = Now.AddMinutes(2);
+        Assert.Equal(1200m, (await ListAsync(ana.Client)).GetProperty("monthlyTotal").GetDecimal());
+        return (fee.GetProperty("id").GetGuid(), classId, chargesOfTheClass);
+    }
+
+    /// <summary>After a recalculation: the fee is the same item, active and alone in the total; the class is the same item, still "not recurring".</summary>
+    private static async Task AssertTheCorrectionStayedOnTheClassAsync(
+        ChatWebApplicationFactory factory, Member ana, Guid feeId, Guid classId, List<Guid> chargesOfTheClass, DateTime calculatedAt)
+    {
+        var list = await ListAsync(ana.Client);
+        Assert.Equal(calculatedAt, DetectedAt(list));
+
+        var fee = Assert.Single(list.GetProperty("fixedBills").EnumerateArray());
+        Assert.Equal(feeId, fee.GetProperty("id").GetGuid());
+        Assert.Equal(1200m, fee.GetProperty("amount").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, fee.GetProperty("override").ValueKind);
+        Assert.Equal(0, list.GetProperty("subscriptions").GetArrayLength());
+        Assert.Equal(0, list.GetProperty("possible").GetArrayLength());
+
+        var hidden = Assert.Single(list.GetProperty("hidden").EnumerateArray());
+        Assert.Equal(classId, hidden.GetProperty("id").GetGuid());
+        Assert.Equal("NotRecurring", hidden.GetProperty("override").GetString());
+        Assert.Equal("FixedBill", hidden.GetProperty("kind").GetString());
+
+        Assert.Equal(1200m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(14400m, list.GetProperty("annualTotal").GetDecimal());
+
+        // Each row kept its own charges.
+        var ofTheClass = await ana.Client.GetFromJsonAsync<JsonElement>($"{Recurring}/{classId}/transactions");
+        Assert.Equal(
+            chargesOfTheClass.Order(),
+            ofTheClass.GetProperty("transactions").EnumerateArray().Select(c => c.GetProperty("transactionId").GetGuid()).Order());
+        Assert.Equal(2, factory.Scalar<long>("SELECT count(*) FROM recurring_streams"));
+    }
+
+    /// <summary>
+    /// Review 4, I1 — the amount of the class goes over what a subscription costs (150 → 210 in its last two
+    /// charges), so the detector now calls it a fixed bill, like the fee. What the person said stays on the class:
+    /// the fee is not "marked as not recurring" by nobody, and the total is the fee.
+    /// </summary>
+    [Fact]
+    public async Task NotRecurring_StaysOnItsItem_WhenThatItemChangesKind_ByItsAmount_NextToAnotherItemOfTheSameEstablishment()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        var (feeId, classId, chargesOfTheClass) = await SeedSchoolAsync(ana, clock);
+
+        foreach (var transactionId in chargesOfTheClass.TakeLast(2))
+        {
+            var patched = await ana.Client.PatchAsync($"{Transactions}/{transactionId}", JsonContent.Create(new { Amount = 210m }));
+            Assert.True(patched.StatusCode == HttpStatusCode.OK, await patched.Content.ReadAsStringAsync());
+        }
+
+        clock.UtcNow = Now.AddMinutes(3);
+        await AssertTheCorrectionStayedOnTheClassAsync(factory, ana, feeId, classId, chargesOfTheClass, clock.UtcNow);
+    }
+
+    /// <summary>Review 4, I1 — the other way a kind changes: the charges of the class are moved to another category.</summary>
+    [Fact]
+    public async Task NotRecurring_StaysOnItsItem_WhenThatItemChangesKind_ByItsCategory_NextToAnotherItemOfTheSameEstablishment()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        var (feeId, classId, chargesOfTheClass) = await SeedSchoolAsync(ana, clock);
+
+        foreach (var transactionId in chargesOfTheClass)
+        {
+            var recategorized = await ana.Client.PatchAsync($"{Transactions}/{transactionId}/category", JsonContent.Create(new { Category = "SAUDE" }));
+            Assert.True(recategorized.StatusCode == HttpStatusCode.OK, await recategorized.Content.ReadAsStringAsync());
+        }
+
+        clock.UtcNow = Now.AddMinutes(3);
+        await AssertTheCorrectionStayedOnTheClassAsync(factory, ana, feeId, classId, chargesOfTheClass, clock.UtcNow);
+    }
+
+    /// <summary>
+    /// Review 4, I1 — a stored item follows the charges it holds: a new, cheaper series that shows up in the same
+    /// establishment is a new item, and does not take the row (and the correction) of the one that was there.
+    /// </summary>
+    [Fact]
+    public async Task NotRecurring_StaysOnItsItem_WhenACheaperSeriesShowsUpInTheSameEstablishment()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        foreach (var month in new[] { 5, 6, 7, 8, 9, 10 })
+            await ChargeAsync(ana.Client, "Escola Exemplo", 1200m, Day(month, 5), "OUTROS");
+        clock.UtcNow = Now.AddMinutes(1);
+        var feeId = Assert.Single((await ListAsync(ana.Client)).GetProperty("fixedBills").EnumerateArray()).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, feeId, "NotRecurring")).StatusCode);
+
+        foreach (var month in new[] { 4, 5, 6, 7, 8, 9 })
+            await ChargeAsync(ana.Client, "Escola Exemplo", 150m, Day(month, 20), "OUTROS");
+        clock.UtcNow = Now.AddMinutes(2);
+        var list = await ListAsync(ana.Client);
+
+        Assert.Equal(clock.UtcNow, DetectedAt(list));
+        var hidden = Assert.Single(list.GetProperty("hidden").EnumerateArray());
+        Assert.Equal(feeId, hidden.GetProperty("id").GetGuid());
+        Assert.Equal(1200m, hidden.GetProperty("amount").GetDecimal());
+        Assert.Equal("NotRecurring", hidden.GetProperty("override").GetString());
+        var @class = Assert.Single(list.GetProperty("subscriptions").EnumerateArray());
+        Assert.NotEqual(feeId, @class.GetProperty("id").GetGuid());
+        Assert.Equal(150m, @class.GetProperty("amount").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, @class.GetProperty("override").ValueKind);
+        Assert.Equal(150m, list.GetProperty("monthlyTotal").GetDecimal());
+    }
+
+    /// <summary>
+    /// Review 4, I2 — "1/3" written with digits that are not 0 to 9 (full width, Arabic-Indic), in the establishment
+    /// or in the description of a transaction, does not take the list of the group down: it answers 200, with what
+    /// the group pays, on every request.
+    /// </summary>
+    [Theory]
+    [InlineData("１/３")]
+    [InlineData("١/٣")]
+    public async Task ATransactionWhoseTextHasAMarkInDigitsOfAnotherScript_DoesNotTakeTheListDown(string mark)
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        foreach (var month in new[] { 8, 9, 10 })
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, Day(month, 5), "LAZER");
+        await ChargeAsync(ana.Client, $"Loja Exemplo {mark}", 90m, Day(10, 6), "COMPRAS");
+        await ChargeAsync(ana.Client, null, 70m, Day(10, 7), "COMPRAS", description: $"compra {mark}");
+        clock.UtcNow = Now.AddMinutes(1);
+
+        var response = await ana.Client.GetAsync(Recurring);
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var list = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Streaming Exemplo", Assert.Single(list.GetProperty("subscriptions").EnumerateArray()).GetProperty("name").GetString());
+        Assert.Equal(0, list.GetProperty("installments").GetArrayLength());
+        Assert.Equal(39.90m, list.GetProperty("monthlyTotal").GetDecimal());
+        clock.UtcNow = Now.AddHours(7);
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.GetAsync(Recurring)).StatusCode);
+    }
+
+    /// <summary>
+    /// Review 4, I3 — the days are the ones of Brasília. The request comes at 01:00 UTC of the 1st of November,
+    /// which is 22:00 of the 31st of October there: "this month" is October. And a charge at 02:00 UTC of the 1st
+    /// of a month was made at 23:00 of the last day of the month before.
+    /// </summary>
+    [Fact]
+    public async Task TheDayOfAChargeAndToday_AreTheOnesOfBrasilia_NotTheUtcOnes()
+    {
+        var clock = new MovingClock(new DateTime(2026, 11, 1, 1, 0, 0, DateTimeKind.Utc));
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        foreach (var month in new[] { 8, 9, 10 })
+            await ChargeAsync(ana.Client, "Streaming Exemplo", 39.90m, new DateTime(2026, month, 1, 2, 0, 0, DateTimeKind.Utc), "LAZER");
+        // Parts 2 and 3 of 6, the last one at 00:30 UTC of the 1st of November: 21:30 of the 31st of October.
+        await ChargeAsync(ana.Client, "Loja Exemplo 02/06", 150m, new DateTime(2026, 10, 1, 0, 30, 0, DateTimeKind.Utc), "COMPRAS");
+        await ChargeAsync(ana.Client, "Loja Exemplo 03/06", 150m, new DateTime(2026, 11, 1, 0, 30, 0, DateTimeKind.Utc), "COMPRAS");
+
+        var list = await ListAsync(ana.Client);
+
+        var subscription = Assert.Single(list.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal("2026-07-31", subscription.GetProperty("firstSeen").GetString());
+        Assert.Equal("2026-09-30", subscription.GetProperty("lastSeen").GetString());
+        Assert.Equal("2026-10-30", subscription.GetProperty("nextExpected").GetString());
+
+        var plan = Assert.Single(list.GetProperty("installments").EnumerateArray());
+        Assert.Equal("2026-09-30", plan.GetProperty("firstSeen").GetString());
+        Assert.Equal("2026-10-31", plan.GetProperty("lastSeen").GetString());
+        Assert.Equal(3, plan.GetProperty("installment").GetProperty("number").GetInt32());
+        // The plan started in August (part 2 in September), so it ends in January.
+        Assert.Equal("2027-01", plan.GetProperty("installment").GetProperty("endMonth").GetString());
+
+        // The 12 months start at the month of today in Brasília (October), whose part was already charged.
+        var byMonth = list.GetProperty("installmentsByMonth").EnumerateArray().ToList();
+        Assert.Equal(("2026-10", 0m), (byMonth[0].GetProperty("month").GetString(), byMonth[0].GetProperty("amount").GetDecimal()));
+        Assert.Equal(("2026-11", 150m), (byMonth[1].GetProperty("month").GetString(), byMonth[1].GetProperty("amount").GetDecimal()));
+        Assert.Equal(("2027-01", 150m), (byMonth[3].GetProperty("month").GetString(), byMonth[3].GetProperty("amount").GetDecimal()));
+        Assert.Equal(("2027-02", 0m), (byMonth[4].GetProperty("month").GetString(), byMonth[4].GetProperty("amount").GetDecimal()));
+    }
+
     private sealed record Member(HttpClient Client, Guid UserId, Guid CoupleId);
 
     private sealed record ErrorDto(string Code, string Message);
