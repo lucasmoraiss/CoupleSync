@@ -161,20 +161,25 @@ o texto pesa; rapidez e cota primeiro onde há volume.
 - **A decisão "ao menos um fallback" está atendida hoje só entre modelos do Gemini** (mesmo provedor, cotas
   separadas). Isso cobre cota esgotada e modelo retirado; **não cobre** queda do Google nem bloqueio da chave —
   nesses casos vale o princípio 2 (resumo automático). **Um segundo provedor está pendente de chave** (decisão em
-  aberto 15; padrão: entregar a fase 1 sem ele e ligar quando a chave existir).
-- **Segundo provedor: pronto e desligado.** O `OpenAiCompatibleLlmProvider` (2.3) é entregue na fase 1, testado
+  aberto 15; padrão: entregar a fase 1 sem ele e ligar quando a chave existir). *(Substituído por 2.2, "Groq
+  ligado": a chave existe desde 08/10/2026 e o Groq está ligado como reserva.)*
+- **Segundo provedor: pronto e desligado.** *(Substituído por 2.2, "Groq ligado", abaixo: o Groq está ligado como
+  reserva desde 08/10/2026; a lista de candidatos continua valendo para um provedor futuro.)* O
+  `OpenAiCompatibleLlmProvider` (2.3) é entregue na fase 1, testado
   contra servidor HTTP falso, e fica fora de todas as cadeias enquanto não houver chave. Candidatos, na ordem de
   preferência, com os limites verificados [externo, seção 1]:
 
   | Candidato | Limite gratuito | Observação |
   | --- | --- | --- |
-  | Groq (primeira escolha) | 30 RPM, 1.000 RPD, 8k TPM, 200k TPD por modelo (`openai/gpt-oss-120b`, `gpt-oss-20b`, `qwen/qwen3.8-27b`) [oficial] | Não treina com os dados [oficial]; sem cartão [terceiro]; `json_schema` strict. Cadastro e login falharam em 08/10/2026. |
+  | Groq (primeira escolha) | 30 RPM, 1.000 RPD, 8k TPM, 200k TPD por modelo (`openai/gpt-oss-120b`, `gpt-oss-20b`, `qwen/qwen3.8-27b`) [oficial] | Não treina com os dados [oficial]; sem cartão [terceiro]; `json_schema` strict. Cadastro e login falharam em 08/10/2026 de manhã; a chave foi criada mais tarde no mesmo dia. |
   | OpenRouter `:free` | 20 RPM; 50 pedidos/dia sem compra [oficial] | Lista de modelos muda sem aviso; treino depende do provedor de cada modelo. Só como reserva de emergência. |
   | Mistral (Experiment) | 1 req/s, 500k tokens/min, 1 bilhão de tokens/mês por modelo [terceiro; página oficial deu 404] | Pede telefone; treina por padrão, com opt-out [terceiro]. |
   | SambaNova | 20 RPM, 20 pedidos/dia, 200k tokens/dia por modelo [oficial] | Só `json_object` (sem esquema estrito); política de treino não verificada. |
   | Cerebras | 5 RPM, 30k TPM, 1M tokens/dia [oficial] | **Exige cartão** [oficial]: fora pelo princípio 3. |
   | Cloudflare Workers AI | 10.000 neurons/dia ≈ 50k tokens de saída/dia num 70B [oficial] | Não treina [oficial]; não usa o mesmo formato sem adaptação — pediria adaptador próprio. |
 
+  *(Parágrafo substituído por 2.2, "Groq ligado", abaixo: o Groq entrou como RESERVA em todas as cadeias, inclusive
+  a da categorização; subir para primeiro só depois de comparar a qualidade em português.)*
   **Quando o Groq for ligado**: vira o principal da categorização em lote (não treina com as linhas do extrato,
   fatos-externos 4.2, item 4) e a última reserva das demais cadeias. Na API é só configuração (chave no Render e
   elos nas cadeias); antes disso o texto de privacidade ganha o provedor e a versão do aceite de IA sobe (7.3),
@@ -1297,7 +1302,7 @@ trabalho assíncrono preso a `getSessionEpoch`.
 - Chaves: `GEMINI_API_KEY` (no `render.yaml`, `sync: false`; **com valor em produção desde 08/10/2026**),
   `INTERNAL_JOBS_SECRET` (**já criado**, igual no Render e nos segredos do GitHub Actions) e `GROQ_API_KEY`
   (declarada no `render.yaml`, `sync: false`, **sem valor**: é a chave do segundo provedor, pendente — decisão em
-  aberto 15; outro provedor compatível usaria variável própria). Sem chave de nenhum provedor:
+  aberto 15; *substituído: a chave foi gravada no Render em 08/10/2026, ver 2.2, "Groq ligado"*; outro provedor compatível usaria variável própria). Sem chave de nenhum provedor:
   `available=false`, fatos e resumo automático seguem funcionando.
 - Logs nunca registram prompt, resposta, pacote, estabelecimento nem segredo; só uso, desfecho e tempo.
 - Isolamento: toda consulta filtra pelo grupo do token; tabelas sem filtro global têm teste próprio; job sempre
@@ -1376,7 +1381,7 @@ Itens manuais do dono (nada além disto):
    `couplesync-api` do Render, posta pelo controlador pela API do Render.
 2. **Feito em 08/10/2026.** `INTERNAL_JOBS_SECRET` criado pelo controlador e posto, com o mesmo valor, no Render
    (API do Render) e nos segredos do GitHub Actions do repositório.
-3. **Pendente e opcional.** Criar a conta e a chave gratuita de um segundo provedor (Groq, em console.groq.com,
+3. **Feito em 08/10/2026 (mais tarde); ver 2.2, "Groq ligado".** *(Texto original: "Pendente e opcional.")* Criar a conta e a chave gratuita de um segundo provedor (Groq, em console.groq.com,
    como primeira escolha; alternativas em 2.2) e entregá-la ao controlador. Sem ela a fase 1 sai do mesmo jeito
    (decisão em aberto 15).
 4. Opcional: anotar a cota diária dos modelos Gemini mostrada em aistudio.google.com/rate-limit. Sem isso a
@@ -1418,7 +1423,7 @@ A fase que depende de cada decisão usa o padrão se o dono não responder antes
 padrão recomendado**.
 
 Resolvidas no texto (técnicas): categorização em lote vai ao `gemini-flash-latest` e, quando o Groq for ligado,
-primeiro a ele (2.2); transferências a pessoas vão
+primeiro a ele (2.2) *(substituído por 2.2, "Groq ligado": o Groq entrou como reserva, não como primeiro)*; transferências a pessoas vão
 só como "transferência" (3.8); o dia do orçamento do grupo é o de Brasília (2.5).
 
 ## 15. Histórico de revisão
