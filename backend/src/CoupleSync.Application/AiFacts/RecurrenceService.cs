@@ -295,9 +295,11 @@ public sealed class RecurrenceService
         }
 
         var existing = await _repository.GetForUpdateAsync(coupleId, ct);
-        // What the person said is recurring is confirmed whatever its proof: the detector is told its charges.
+        // What the person said is recurring is confirmed whatever its proof: the detector is told its charges. "I
+        // cancelled it" says the same of the past — it was a commitment — so that a charge that comes afterwards
+        // is told as "charged again" whatever the other purchases of the establishment.
         var saidRecurring = existing
-            .Where(e => e.IsSaidRecurring)
+            .Where(e => e.IsSaidRecurring || e.UserOverride == RecurringOverrides.Cancelled)
             .Select(e => (IReadOnlyCollection<Guid>)e.Items.Select(i => i.TransactionId).ToList())
             .ToList();
         var result = RecurrenceDetector.Detect(rows, today, _options, saidRecurring);
@@ -387,7 +389,8 @@ public sealed class RecurrenceService
                 copy => Math.Abs(charge.LocalDate.DayNumber - copy.LocalDate.DayNumber) <= Math.Max(0, _options.SameChargeWithinDays));
             var chargedAgain = similar.Any(c => c.TimestampUtc > stream.OverrideAtUtc!.Value
                                                 && (!ownerOfCharge.TryGetValue(c.TransactionId, out var owner) || (owner == stream.Id && !SeenBefore(c))));
-            // "Charged again" is said of what was a commitment: a possible recurrence was never one.
+            // "Charged again" is said of a commitment only (what the person cancelled is confirmed by their word,
+            // above): a row left with low confidence is not one.
             stream.SetChargedAfterCancel(chargedAgain && stream.Confidence != RecurringConfidences.Low);
 
             // A charge that came back too late to continue the series (after two missed ones) is in no series. It is

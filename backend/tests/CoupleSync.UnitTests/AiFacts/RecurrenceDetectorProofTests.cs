@@ -319,6 +319,66 @@ public sealed class RecurrenceDetectorProofTests
         Assert.True(result.ItemsInTotal == 0, $"{result.Label}: {result.ItemsInTotal} item(s) in the total in {result.WithItemInTotal} of {result.Histories} histories.");
     }
 
+    /// <summary>
+    /// Review 3, I1 — the place of a weekly habit. Fuel every Saturday (R$ 100, twelve weeks) is a habit, out of the
+    /// total; three bigger purchases near the 5th are loose purchases of a busy place, not "all the place charges".
+    /// The charges of a habit are still movement of the place.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheLoosePurchasesOfAPlaceWithAWeeklyHabit_AreNotAFixedBill(bool everySaturday)
+    {
+        var today = new DateOnly(2026, 10, 12);
+        var lastSaturday = new DateOnly(2026, 10, 10);
+        var fuel = Enumerable.Range(0, 12).Select(i => Row("Posto Exemplo", 100m, lastSaturday.AddDays(-(everySaturday ? 7 : 10) * i), "TRANSPORTE"));
+        var bigger = new[] { (8, 5, 220m), (9, 7, 250m), (10, 6, 200m) }.Select(v => Row("Posto Exemplo", v.Item3, new DateOnly(2026, v.Item1, v.Item2), "TRANSPORTE"));
+
+        var streams = RecurrenceDetector.Detect(fuel.Concat(bigger).ToList(), today, Options).Streams;
+
+        Assert.DoesNotContain(streams, InTotal);
+        Assert.DoesNotContain(streams, s => s.Cadence == RecurringCadences.Monthly && IsConfirmed(s));
+        if (everySaturday)
+        {
+            var habit = Assert.Single(streams, s => s.Cadence == RecurringCadences.Weekly);
+            Assert.Equal(RecurringKinds.Habit, habit.Facts.Kind);
+            Assert.Equal(12, habit.Facts.Occurrences);
+        }
+    }
+
+    /// <summary>
+    /// Review 3, m3 — the movement of the place is counted up to today, not only up to the last charge: three
+    /// monthly visits followed by five visits in two weeks are not "a place that only charges that" any more.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void PurchasesAfterTheLastCharge_AreMovementOfThePlaceToo(bool visitsAfterwards, bool confirmed)
+    {
+        var today = new DateOnly(2026, 10, 20);
+        var rows = On("Clinica Exemplo", 120m, "OUTROS", (8, 5), (9, 5), (10, 5));
+        if (visitsAfterwards)
+            rows.AddRange(new[] { (7, 35m), (9, 180m), (12, 62m), (15, 240m), (18, 95m) }.Select(v => Row("Clinica Exemplo", v.Item2, new DateOnly(2026, 10, v.Item1), "OUTROS")));
+
+        var streams = RecurrenceDetector.Detect(rows, today, Options).Streams;
+
+        Assert.Equal(confirmed, streams.Any(InTotal));
+        var stream = Assert.Single(streams);
+        Assert.Equal(120m, stream.Facts.MedianAmount);
+        Assert.Equal(confirmed ? RecurringConfidences.High : RecurringConfidences.Low, stream.Facts.Confidence);
+    }
+
+    /// <summary>The same in 100 made-up histories (the generator of the bench): with or without the weekly rhythm, nothing in the total.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void APlaceWithAWeeklyHabitAndLoosePurchases_PutsNothingInTheTotal(bool everySaturday)
+    {
+        var result = RecurrenceProofBench.MeasureWeeklyHabit(39_600_000, 100, everySaturday, Options);
+
+        Assert.True(result.ItemsInTotal == 0, $"{result.Label}: {result.ItemsInTotal} item(s) in the total in {result.WithItemInTotal} of {result.Histories} histories.");
+    }
+
     // ---------------------------------------------------------------- what is truly recurring is confirmed
 
     /// <summary>Forty made-up histories of each kind of true recurrence, alone in its establishment: nearly all in the total (a bill whose day moves three days is sometimes out of the monthly rhythm, and is not found).</summary>

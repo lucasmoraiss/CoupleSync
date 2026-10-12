@@ -216,8 +216,8 @@ public static class RecurrenceDetector
     private sealed record Series(List<Keyed> Rows, List<Keyed> Echoes);
 
     /// <param name="saidRecurring">
-    /// The charges of each stream the person said is recurring ("it is a subscription", "it is a fixed bill"): the
-    /// series that holds most of the charges of one of them is confirmed without any other proof.
+    /// The charges of each stream the person said is a commitment ("it is a subscription", "it is a fixed bill",
+    /// "I cancelled it"): the series that holds most of the charges of one of them is confirmed without any other proof.
     /// </param>
     public static DetectionResult Detect(
         IReadOnlyList<RecurrenceRow> rows, DateOnly today, RecurrenceOptions options, IReadOnlyCollection<IReadOnlyCollection<Guid>>? saidRecurring = null)
@@ -520,16 +520,25 @@ public static class RecurrenceDetector
             .ToList();
 
         var chosen = new List<Chain>();
-        // The charges of the streams chosen so far, with their copies: they form no other stream, and for another
-        // series of the establishment they are not "other purchases".
+        // The charges of the streams chosen so far, with their copies: they form no other stream.
         var used = new HashSet<Guid>();
+        // The charges of the commitments confirmed so far (monthly and yearly streams, with their copies): for
+        // another series of the establishment they are not "other purchases". The charges of a weekly series are
+        // not here: it is a habit, and its purchases are the very movement of the establishment.
+        var committed = new HashSet<Guid>();
 
         Proof Judge(Chain candidate)
-            => IsSaidRecurring(candidate, everything, pinned) ? Proof.Confirmed : ProofOf(candidate, everything, used, knownName, o);
+            => IsSaidRecurring(candidate, everything, pinned) ? Proof.Confirmed : ProofOf(candidate, everything, committed, knownName, today, o);
 
         void Choose(Chain candidate, Proof proof)
         {
-            foreach (var r in candidate.Rows.Concat(candidate.Echoes)) used.Add(r.Row.Id);
+            var commitment = proof == Proof.Confirmed && candidate.Cadence.Name != RecurringCadences.Weekly;
+            foreach (var r in candidate.Rows.Concat(candidate.Echoes))
+            {
+                used.Add(r.Row.Id);
+                if (commitment) committed.Add(r.Row.Id);
+            }
+
             chosen.Add(candidate with { Proof = proof });
         }
 
@@ -546,10 +555,9 @@ public static class RecurrenceDetector
             }
         }
 
-        var confirmed = used.ToHashSet();
         foreach (var candidate in ordered)
         {
-            if (candidate.Rows.Any(r => used.Contains(r.Row.Id)) || ProofOf(candidate, everything, confirmed, knownName, o) != Proof.Possible) continue;
+            if (candidate.Rows.Any(r => used.Contains(r.Row.Id)) || ProofOf(candidate, everything, committed, knownName, today, o) != Proof.Possible) continue;
             Choose(candidate, Proof.Possible);
         }
 
@@ -588,8 +596,9 @@ public static class RecurrenceDetector
     /// Yearly: confirmed when the establishment only charges that, at one price, one year apart; possible when it
     /// only charges that. Weekly: always a habit, listed apart and never in the total.
     /// </summary>
-    /// <param name="taken">The charges of the streams already chosen: they are not "other purchases" of this series.</param>
-    private static Proof ProofOf(Chain chain, List<Keyed> everything, HashSet<Guid> taken, bool knownName, RecurrenceOptions o)
+    /// <param name="taken">The charges of the commitments already confirmed (never the ones of a weekly habit): they are not "other purchases" of this series.</param>
+    /// <param name="today">The movement of the establishment is counted from the first charge of the series up to today: what was bought there after its last charge counts too.</param>
+    private static Proof ProofOf(Chain chain, List<Keyed> everything, HashSet<Guid> taken, bool knownName, DateOnly today, RecurrenceOptions o)
     {
         if (chain.Cadence.Name == RecurringCadences.Weekly) return Proof.Confirmed;
 
@@ -615,7 +624,7 @@ public static class RecurrenceDetector
         var purchases = everything
             .Where(r => ofSeries.Contains(r.Row.Id) || (!taken.Contains(r.Row.Id) && chain.Siblings?.Contains(r.Row.Id) != true && !LeftOutByTheRhythm(r)))
             .ToList();
-        var otherDays = OtherDays(rows, purchases, within, o);
+        var otherDays = OtherDays(rows, purchases, within, o, today);
         var onlyChargesThat = charges >= o.ExclusiveShare * (charges + otherDays);
 
         if (chain.Cadence.Name == RecurringCadences.Yearly)
@@ -633,7 +642,7 @@ public static class RecurrenceDetector
         if (onlyChargesThat && (onItsDay || knownName)) return Proof.Confirmed;
 
         // The price of the series is (almost) only seen on the day of the series.
-        var priceOnlyOnItsDay = charges >= o.ExclusiveShare * (charges + OtherDays(rows, purchases.Where(SamePriceAsSeries).ToList(), within, o));
+        var priceOnlyOnItsDay = charges >= o.ExclusiveShare * (charges + OtherDays(rows, purchases.Where(SamePriceAsSeries).ToList(), within, o, today));
         if (OnePriceWithOneStep(rows, o.SamePriceTolerance) && onItsDay && priceOnlyOnItsDay)
         {
             var busy = o.BusyPlaceRatio > 0 && otherDays > o.BusyPlaceRatio * charges;
@@ -1185,11 +1194,13 @@ public static class RecurrenceDetector
     /// a day of the chain is the same occurrence, and a charge of the chain seen twice (<see cref="SameCharge"/>)
     /// is not another day.
     /// </summary>
-    private static int OtherDays(List<Keyed> chain, List<Keyed> cluster, int within, RecurrenceOptions o)
+    /// <param name="until">The end of the period, when it is not the last charge of the chain (the proof of a series looks up to today).</param>
+    private static int OtherDays(List<Keyed> chain, List<Keyed> cluster, int within, RecurrenceOptions o, DateOnly? until = null)
     {
         var days = chain.Select(r => r.Date).ToHashSet();
+        var end = until is { } later && later > chain[^1].Date ? later : chain[^1].Date;
         return cluster
-            .Where(r => r.Date >= chain[0].Date && r.Date <= chain[^1].Date && !days.Contains(r.Date) && !Near(r, chain, within, o))
+            .Where(r => r.Date >= chain[0].Date && r.Date <= end && !days.Contains(r.Date) && !Near(r, chain, within, o))
             .Select(r => r.Date).Distinct().Count();
     }
 

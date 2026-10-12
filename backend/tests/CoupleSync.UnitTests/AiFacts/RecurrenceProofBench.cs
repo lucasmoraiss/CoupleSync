@@ -306,6 +306,54 @@ internal static class RecurrenceProofBench
         return new ProfileResult(Profiles[profile].Label, histories, anyTotal, anyPossible, itemsTotal, itemsPossible, money / histories);
     }
 
+    /// <summary>
+    /// The place a person goes to every week (fuel every Saturday, R$ 100) and where, once a month on any day, they
+    /// also make a bigger purchase (R$ 190 to 250). The weekly series is a habit; the bigger purchases are loose.
+    /// </summary>
+    /// <param name="onTheSameWeekday">False: the same purchases, each up to three days away from its Saturday (no weekly rhythm).</param>
+    public static List<RecurrenceRow> WeeklyHabitWithLoosePurchases(Random rng, bool onTheSameWeekday)
+    {
+        const string name = "Posto Semanal Exemplo";
+        var rows = new List<RecurrenceRow>();
+        var saturday = Today;
+        while (saturday.DayOfWeek != DayOfWeek.Saturday) saturday = saturday.AddDays(-1);
+        for (var date = saturday; date >= From; date = date.AddDays(-7))
+        {
+            var day = onTheSameWeekday ? date : date.AddDays(rng.Next(-3, 4));
+            if (day <= Today) rows.Add(Row(rng, name, 100m, day, "TRANSPORTE", Ana));
+        }
+
+        for (var month = new DateOnly(From.Year, From.Month, 1); month <= Today; month = month.AddMonths(1))
+        {
+            var date = new DateOnly(month.Year, month.Month, rng.Next(1, DateTime.DaysInMonth(month.Year, month.Month) + 1));
+            var amount = Uniform(rng, 190, 250);
+            if (date >= From && date <= Today) rows.Add(Row(rng, name, amount, date, "TRANSPORTE", Ana));
+        }
+
+        return rows;
+    }
+
+    /// <summary>The same measure as <see cref="MeasureProfile"/>, for <see cref="WeeklyHabitWithLoosePurchases"/>.</summary>
+    public static ProfileResult MeasureWeeklyHabit(int seedBase, int histories, bool onTheSameWeekday, RecurrenceOptions options)
+    {
+        int anyTotal = 0, anyPossible = 0, itemsTotal = 0, itemsPossible = 0;
+        var money = 0m;
+        for (var i = 0; i < histories; i++)
+        {
+            var items = Detect(WeeklyHabitWithLoosePurchases(new Random(seedBase + i), onTheSameWeekday), options).Where(x => x.Visible).ToList();
+            var counted = items.Where(x => x.InTotal).ToList();
+            var possible = items.Count(x => x.Possible);
+            if (counted.Count > 0) anyTotal++;
+            if (possible > 0) anyPossible++;
+            itemsTotal += counted.Count;
+            itemsPossible += possible;
+            money += counted.Sum(x => x.Monthly);
+        }
+
+        var label = onTheSameWeekday ? "hábito semanal (todo sábado) + 1 compra maior por mês" : "as mesmas compras sem ritmo semanal + 1 compra maior por mês";
+        return new ProfileResult(label, histories, anyTotal, anyPossible, itemsTotal, itemsPossible, money / histories);
+    }
+
     /// <summary>Of <paramref name="Histories"/> histories of one true recurrence: confirmed (in the total), possible, listed only as a habit, not found.</summary>
     public sealed record ScenarioResult(string Label, int Histories, int Confirmed, int Possible, int HabitOnly, int NotFound, int ExtraInTotal, int ExtraPossible);
 

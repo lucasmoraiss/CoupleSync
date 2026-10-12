@@ -1172,9 +1172,44 @@ public sealed class RecurringRoutesTests
         Assert.Equal(0m, list.GetProperty("monthlyTotal").GetDecimal());
     }
 
-    /// <summary>"Charged again after cancelled" is said of what was a commitment: a possible recurrence was never one.</summary>
+    /// <summary>
+    /// Review 3, m5 — "it is recurring" does not hold the item in the total for ever: when the charges stop, it
+    /// goes to the hidden ones as stopped, with what the person said still on it, and leaves the total.
+    /// </summary>
     [Fact]
-    public async Task APossibleOneThePersonCancelled_IsNotMarkedAsChargedAgain_WhenItsNextChargeComes()
+    public async Task AStreamSaidRecurring_ThatStopsBeingCharged_LeavesTheTotal_AndIsHiddenAsStopped()
+    {
+        var clock = new MovingClock(Now);
+        await using var factory = NewFactory(clock);
+        var ana = (await OwnerAsync(factory, "Ana Exemplo")).Member;
+        await SeedPossibleAsync(ana.Client);
+        clock.UtcNow = Now.AddMinutes(1);
+        var id = Assert.Single((await ListAsync(ana.Client)).GetProperty("possible").EnumerateArray()).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, id, "Subscription")).StatusCode);
+        clock.UtcNow = Now.AddMinutes(2);
+        Assert.Equal(19.90m, (await ListAsync(ana.Client)).GetProperty("monthlyTotal").GetDecimal());
+
+        // Three months without a charge (the last one was on 5 October).
+        clock.UtcNow = new DateTime(2027, 1, 10, 15, 0, 0, DateTimeKind.Utc);
+        var list = await ListAsync(ana.Client);
+
+        Assert.Equal(0, list.GetProperty("subscriptions").GetArrayLength());
+        Assert.Equal(0, list.GetProperty("possible").GetArrayLength());
+        var hidden = Assert.Single(list.GetProperty("hidden").EnumerateArray());
+        Assert.Equal(id, hidden.GetProperty("id").GetGuid());
+        Assert.Equal("Stopped", hidden.GetProperty("status").GetString());
+        Assert.Equal("Subscription", hidden.GetProperty("override").GetString());
+        Assert.Equal(0m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(0m, list.GetProperty("annualTotal").GetDecimal());
+    }
+
+    /// <summary>
+    /// "I cancelled it" is the person saying it was a commitment: as with "it is recurring", the series is confirmed
+    /// by their word. So when it is charged again the item comes back marked — the warning the person asked for —
+    /// also when, by the movement of the shop alone, it would only be a possible recurrence.
+    /// </summary>
+    [Fact]
+    public async Task APossibleOneThePersonCancelled_IsACommitmentByTheirWord_AndComesBackMarkedWhenChargedAgain()
     {
         var clock = new MovingClock(Now);
         await using var factory = NewFactory(clock);
@@ -1191,14 +1226,23 @@ public sealed class RecurringRoutesTests
         clock.UtcNow = clock.UtcNow.AddMinutes(1);
         var list = await ListAsync(ana.Client);
 
-        var hidden = Assert.Single(list.GetProperty("hidden").EnumerateArray());
-        Assert.Equal(id, hidden.GetProperty("id").GetGuid());
-        Assert.Equal(4, hidden.GetProperty("occurrences").GetInt32());
-        Assert.Equal("Low", hidden.GetProperty("confidence").GetString());
-        Assert.DoesNotContain("ChargedAfterCancel", Flags(hidden));
+        var item = Assert.Single(list.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal(id, item.GetProperty("id").GetGuid());
+        Assert.Equal(4, item.GetProperty("occurrences").GetInt32());
+        Assert.Equal("High", item.GetProperty("confidence").GetString());
+        Assert.Equal("Cancelled", item.GetProperty("override").GetString());
+        Assert.Contains("ChargedAfterCancel", Flags(item));
         Assert.Equal(0, list.GetProperty("possible").GetArrayLength());
-        Assert.Equal(0, list.GetProperty("subscriptions").GetArrayLength());
-        Assert.Equal(0m, list.GetProperty("monthlyTotal").GetDecimal());
+        Assert.Equal(0, list.GetProperty("hidden").GetArrayLength());
+        Assert.Equal(19.90m, list.GetProperty("monthlyTotal").GetDecimal());
+
+        // Taking "cancelled" back: without the word of the person it is a possible recurrence again.
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, id, null)).StatusCode);
+        clock.UtcNow = clock.UtcNow.AddMinutes(1);
+        var back = await ListAsync(ana.Client);
+        Assert.Equal(id, Assert.Single(back.GetProperty("possible").EnumerateArray()).GetProperty("id").GetGuid());
+        Assert.Equal(0m, back.GetProperty("monthlyTotal").GetDecimal());
     }
 
     /// <summary>
