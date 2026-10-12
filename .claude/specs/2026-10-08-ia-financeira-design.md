@@ -497,14 +497,22 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
    confiança "média").
 4. **Cobrança faltante**: um intervalo de ~2× a cadência (ex.: 56–62 dias no mensal) entre duas cobranças da
    banda **não quebra** a série; conta como "mês sem cobrança". Dois intervalos faltantes seguidos quebram.
-5. **Duas trilhas de valor**:
-   - **Assinatura e compra**: ±15% da mediana (a banda da #29).
-   - **Conta fixa variável**: categoria `MORADIA`/`SAUDE` ou chave em `UtilityMerchantHints` (concessionárias de
-     luz, água, gás, internet e telefonia; lista estática trancada por teste), cadência mensal, valor dentro de
-     **±40%** da mediana. Rótulo na tela: "conta fixa variável". Previsão pela mediana das 3 últimas.
+5. **Faixas de valor** (onde se procura uma série; quem decide se ela vale é a prova, item 12):
+   - **Assinatura e compra**: ±15% da mediana (a banda da #29). Também se procura com o **mesmo preço** (±5%),
+     para achar a assinatura de uma loja onde há compras avulsas de valor parecido.
+   - **Conta fixa variável**: cadência mensal, valor dentro de **±40%** da mediana. Rótulo na tela: "valor
+     variável". Previsão pela mediana das 3 últimas. Onde a categoria é `MORADIA`/`SAUDE` ou a chave está em
+     `UtilityMerchantHints` (concessionárias de luz, água, gás, internet e telefonia; lista estática trancada por
+     teste) esta faixa é olhada primeiro. **Mudou na retomada da #39:** a faixa vale para **qualquer categoria**
+     quando o valor de fato varia — o que separa conta de hábito de compra passou a ser o movimento do lugar
+     (item 12), não a categoria. O critério original "180/230/150 em `LAZER` não formam série" deixou de valer
+     (decisão do dono): num lugar que só cobra aquilo, no seu dia, é conta fixa de valor variável.
 6. **Reajuste** (trilha de assinatura): um único degrau acima da banda seguido de valor estável = mesmo item,
    com `previous_amount` e marca `PriceIncrease`. Na fase 3: vale também dentro da banda (mudou mais de 5% e
    ficou estável por 2 cobranças); a marca fica enquanto o preço novo tem até 3 cobranças, `previous_amount` fica.
+   **Dois preços em faixas diferentes só se juntam quando um dos lados já é série por conta própria** (3
+   cobranças no ritmo, cobrindo o período): dois pares de compras (R$ 80, R$ 82, depois R$ 140, R$ 138) não
+   são "a mesma conta que ficou mais cara" (achado I2 da revisão 2).
 7. **Primeira cobrança**: marca `New` enquanto a **primeira cobrança conhecida do item** tem até **90 dias**
    (dias de Brasília; `Recurrence:NewWithinDays`). O texto original dizia 35 dias, e o dono pediu 60; com
    qualquer um dos dois a marca quase nunca aparecia em assinatura mensal, porque a série só existe na 3ª
@@ -526,6 +534,75 @@ metas (`Goal.cs`: título, alvo, atual, prazo; sem categoria) [código]. Fontes 
     valor nesse tempo **e** (mediana ≤ R$ 60 **ou** chave em `SubscriptionMerchantHints`). N = 6 e R$ 60
     configuráveis. O app não sabe se a pessoa usa: tela e texto sempre "talvez esquecida — vocês ainda usam?".
 11. Custo anualizado por item (mensal × 12, semanal × 52, anual × 1).
+12. **Prova proporcional ao movimento** (retomada da issue #39; `RecurrenceDetector.ProofOf`). Achar três compras
+    parecidas em dias parecidos não basta: num mercado, posto ou restaurante isso acontece por acaso. Toda série
+    achada pelos itens 2–6 recebe um de três níveis, e **só soma no total o que tem prova**:
+    - **Confirmada** (entra no total; só ela recebe "talvez esquecida", "ficou mais cara", "nova" e "cobrou de
+      novo"):
+      - **(a) o lugar praticamente só cobra aquilo e a cobrança cai "no seu dia"** — vale com valor variável e em
+        qualquer categoria. "Só cobra aquilo": a série é pelo menos **80%** dos dias com compra no lugar, no
+        período dela (`Recurrence:ExclusiveShare`). "No seu dia": todas as cobranças cabem numa **janela de 7
+        dias** do mês (`Recurrence:OwnDayWindowDays`); o fim do mês é um dia só (31, 30 e 28 de fevereiro), e a
+        janela pode atravessar a virada (dia 30 e dia 1º). Com nome das listas de assinatura ou de utilidade, o
+        lugar que só cobra aquilo confirma mesmo com o dia variando;
+      - **(b) lugar que também tem compras avulsas**: **mesmo preço** (±5%, aceitando um reajuste), no seu dia,
+        esse preço (quase) só aparece nesse dia, por **5 cobranças** (`Recurrence:SamePriceMinCharges`). Em lugar
+        **muito movimentado** — mais de 2 outros dias de compra para cada cobrança da série
+        (`Recurrence:BusyPlaceRatio`) — pede **6** (`BusyPlaceExtraCharges`);
+      - **(c) parcelas "n/N" consecutivas** (3.4), como sempre;
+      - **(d) o que a pessoa marcou como recorrente** (`Subscription`/`FixedBill`): confirmada sem outra prova. O
+        serviço entrega ao detector as cobranças dos itens marcados, e a série que contém a maioria delas é
+        confirmada; o total também conta o item marcado enquanto a linha gravada ainda está com confiança baixa.
+        Marcar ou desfazer pede novo cálculo no pedido seguinte da lista.
+      - Anual: lugar que só cobra aquilo, mesmo valor (±5%), a um ano (± 15 dias, `YearlyAnniversaryDays`) uma da
+        outra.
+    - **Possível** (`confidence = Low`; seção "Possíveis recorrências", **fora do total**, sem marcas, com as
+      ações "É recorrente" e "Não é"): o caso (b) com 3 ou 4 cobranças (em lugar muito movimentado, só a partir de
+      4: `BusyPlacePossibleMinCharges`); o lugar que só cobra aquilo mas em dia irregular; a anual de lugar
+      exclusivo com valor ou data fora do critério.
+    - **Hábito de compra**: todo o resto. Não vira item. (O "pequeno gasto frequente" de 3.2 e a cadência semanal
+      continuam listados à parte, em "Pequenos gastos frequentes", fora do total.)
+    Compras que já pertencem a um item confirmado do mesmo lugar, a série "irmã" de mesmo valor (o plano da outra
+    pessoa) e a cobrança da própria série que o ritmo deixou de fora (35 dias de intervalo) não contam como
+    "outras compras".
+    **Não precisou de coluna nova:** "possível" é `confidence = Low` em item que não é parcela (parcela com `Low`
+    continua sendo "parcela provável").
+    **Números medidos** (bancada sintética `RecurrenceProofBench`, detector real; grupo de 12 recorrências
+    verdadeiras + 13 lugares de compra, ~930 transações em 13 meses, 50 grupos por conjunto de sementes):
+
+    | | regra anterior | regra nova, sementes do estudo | regra nova, 3 conjuntos de sementes nunca olhadas | idem, gerador mais realista (fim de semana, início do mês, valores redondos, 26 meses) |
+    | --- | --- | --- | --- | --- |
+    | itens falsos no total, por grupo | 9,34 | 0,04 | 0,04 – 0,06 | 0,04 – 0,06 |
+    | grupos com o total 100% limpo (de 50) | 0 | 48 | 47 – 48 | 47 – 48 |
+    | verdadeiros confirmados (de 12) | 12,00 | 11,96 | 11,94 – 11,98 | 11,96 – 12,00 |
+    | itens em "possíveis", por grupo | – | 1,06 | 0,68 – 1,00 | 0,94 – 1,10 |
+
+    Metas com que a regra foi aceita: falsos no total ≤ 0,3 por grupo; ≥ 80% dos grupos com o total limpo;
+    verdadeiros confirmados ≥ 11,5 de 12; "possíveis" ≤ 3 por grupo. Os limites da regra foram ajustados nas
+    sementes do estudo e conferidos, sem novo ajuste, nas sementes novas. Por perfil de lugar de compra (300
+    históricos cada, sementes novas): mercado, restaurante e padaria 0,0–0,3% com algum item no total; posto
+    0,3–0,7%; farmácia 0,0–1,0%; app de transporte 0,3–0,7%. `RecurrenceProofBenchTests` guarda as metas.
+    **Limites conhecidos, ditos com franqueza** (tudo isto é dado sintético; nada foi visto em dado real):
+    - **Serviço de preço fixo uma vez por mês em dia qualquer** (barbeiro, banho do cachorro): entra no total em
+      cerca de **9–10%** dos casos, quando três idas seguidas caem por acaso na mesma semana do mês. O valor
+      mostrado é o que a pessoa gasta por mês ali; o rótulo "assinatura" é que está errado. É o ponto mais fraco
+      da regra, e o grupo "largo" da bancada (que inclui esse serviço) tem 0,06–0,22 falsos por grupo e 80–94%
+      dos grupos limpos, em boa parte por causa dele.
+    - **Assinatura em loja onde também se compra avulso** fica em "possíveis" até a **5ª cobrança** (6ª em loja
+      muito movimentada): cerca de 92% confirmadas, 7% possíveis no histórico de até 13 meses; a assinatura
+      **nova** nesse tipo de loja (3 cobranças) espera em "possíveis" em ~85% dos casos e não é achada em ~5%.
+      Grupo recém-criado, com poucos meses de histórico, quase não terá nada confirmado nesse tipo de loja.
+    - **Conta paga em dia irregular** (± 8 dias): confirmada só em 22–41% dos casos, possível em 4–20%, não
+      achada em mais da metade — a maior parte por causa do ritmo mensal do item 3 (25–34 dias), que já existia.
+      É piora em relação à regra anterior para conta de utilidade (era ~68%).
+    - **Duas assinaturas na mesma loja com compras avulsas**: a medida não é achada em 6–9% dos casos.
+    - **Plano semanal de valor fixo** continua sendo "pequeno gasto frequente", fora do total (a alternativa de
+      contá-lo foi estudada e deixada de fora).
+    - O gerador não representa: vários boletos pagos por um intermediário (um nome só), o mesmo lugar com nomes
+      diferentes, meses sem captura, conta bimestral ou trimestral, marketplace com assinatura própria e dezenas
+      de pedidos por mês.
+    - A pessoa conserta qualquer um destes pela tela: "É recorrente" numa possível, "Não é recorrente" numa
+      confirmada errada — e as duas respostas sobrevivem ao recálculo.
 
 Materializado em `recurring_streams` (seção 9) por upsert pela chave (grupo, merchant_key, tipo, cadência):
 roda quando o último cálculo tem mais de 6 horas ou entrou transação depois dele. A correção do usuário
@@ -553,7 +630,18 @@ Como ficou na fase 3 (issue #39):
   continuar a série (não entra em série nenhuma) **aparece no item**: entra na lista de cobranças dele e passa
   a ser a data e o valor da última cobrança; uma vez lá, fica enquanto a transação existir.
 - Fora da lista ativa (`hidden`): `NotRecurring`, `Cancelled` sem cobrança nova e o que parou (`Stopped`).
-- Tipo de série de valor fixo que não é assinatura nem `MORADIA`/`SAUDE`: `FixedBill`, e entra no total.
+- Tipo de série de valor fixo que não é assinatura nem `MORADIA`/`SAUDE`: `FixedBill`; entra no total **quando
+  confirmada** (item 12).
+- **Total** (`RecurringStreamRepository.GetTotalsAsync`, somado no banco): só o que está na lista ativa, é
+  compromisso (não é `Habit`) e está **confirmado** — `confidence` diferente de `Low`, ou item que a pessoa
+  marcou como `Subscription`/`FixedBill` (menos parcela provável, que não vira compromisso por correção).
+- **Possível que a pessoa cancelou** ("Cancelei" pela rota, a tela não oferece): fica oculta e **não** ganha
+  `ChargedAfterCancel` quando cobra de novo — "cobrou de novo" é dito só do que era compromisso.
+- **Parcela registrada duas vezes** (mesmo número, mesmo valor ± 5%, outra pessoa ou outra origem) conta uma vez
+  em "Parcela n de N", "falta R$" e no total; mesma pessoa e mesma origem continuam sendo duas compras do mesmo
+  plano, somadas.
+- **A correção (`PATCH`) entra na fila do cálculo do grupo** (o mesmo semáforo): um cálculo em andamento não
+  decide mais com a correção antiga nem apaga a linha recém-corrigida.
 - Pequeno gasto frequente (3.2) é gravado com `cadence = Irregular`.
 
 ### 3.4 Parcelamentos
@@ -1251,7 +1339,7 @@ campo `aiChat` do registro local fica sem uso (não é apagado, para não mexer 
 
 | Método e rota | Pedido | Resposta | Erros |
 | --- | --- | --- | --- |
-| `GET /api/v1/ai/recurring` | — | `monthlyTotal`, `annualTotal`, `detectedAtUtc`, `subscriptions[]`, `fixedBills[]`, `installments[]`, `habits[]`, `hidden[]`; item: `id, name, kind, variableAmount, cadence, amount, previousAmount?, annualCost, occurrences, firstSeen, lastSeen, nextExpected, status, flags[], category, person? {userId, name}, installment? {number, total, remainingAmount, endMonth}, override?`. Acrescentados na fase 3: no item `lastAmount`, `missedCount`, `confidence` (`High`/`Medium`/`Low` = parcela provável) e o valor `Irregular` em `cadence`; na lista `installmentsByMonth[] {month, amount}` (12 meses a partir do atual; ainda sem leitor no app, fica para a previsão da fase 7). `name_source` não sai na rota | — |
+| `GET /api/v1/ai/recurring` | — | `monthlyTotal`, `annualTotal`, `detectedAtUtc`, `subscriptions[]`, `fixedBills[]`, `installments[]`, `habits[]`, `hidden[]`, `possible[]` (retomada da #39: o que tem padrão mas não tem prova — fora dos totais e das outras listas; "É recorrente" = `PATCH` com o `kind` do item, "Não é" = `NotRecurring`); item: `id, name, kind, variableAmount, cadence, amount, previousAmount?, annualCost, occurrences, firstSeen, lastSeen, nextExpected, status, flags[], category, person? {userId, name}, installment? {number, total, remainingAmount, endMonth}, override?`. Acrescentados na fase 3: no item `lastAmount`, `missedCount`, `confidence` (`High`/`Medium`/`Low` = parcela provável ou possível recorrência) e o valor `Irregular` em `cadence`; na lista `installmentsByMonth[] {month, amount}` (12 meses a partir do atual; ainda sem leitor no app, fica para a previsão da fase 7). `name_source` não sai na rota | — |
 | `GET /api/v1/ai/recurring/{id}/transactions` | — | cobranças (data, valor, estabelecimento) | `404 RECURRENCE_NOT_FOUND` |
 | `PATCH /api/v1/ai/recurring/{id}` | `{override: "NotRecurring"\|"Cancelled"\|"Subscription"\|"FixedBill"\|null}` | item | `404 RECURRENCE_NOT_FOUND`; `400 INVALID_OVERRIDE` |
 
@@ -1328,7 +1416,7 @@ trabalho assíncrono preso a `getSessionEpoch`.
 | `(main)/settings/ai.tsx` | 2 | Estado, quem ativou, ativar/desligar, consumo; apagar histórico (5b); e-mail semanal (6) | indisponível; carregando; erro |
 | `(main)/settings/index.tsx`, `settings/privacy.tsx` (mudam) | 2 | Entrada "Inteligência artificial"; texto de 7.3 | — |
 | `(main)/index.tsx` Painel (muda) | 2, 3, 5b, 7, 9 | Botão Assistente no cabeçalho e cartão "Ativar IA" (2); "Recorrências: R$ X/mês" (3); seção Insights com último semanal (5b) e item do dia (7); "Seu dinheiro guardado" (9) | cada bloco some sozinho em erro — **menos o cartão das recorrências** (decisão do dono na #39): ele nunca some; sem recorrência explica o que vai aparecer, em erro mostra "Tentar de novo" |
-| `(main)/recurring/index.tsx` | 3 | Duas entradas: o cartão do Painel e Configurações > "Assinaturas e contas fixas". "Assinaturas e recorrências": total mensal e anual; Assinaturas (marcas "talvez esquecida — vocês ainda usam?", "ficou mais cara", "nova"), Contas fixas (com "valor variável"), Parcelamentos (n/N, falta R$, termina em), Pequenos gastos frequentes, Ocultas; ações "Não é recorrente", "Cancelei", "É assinatura", "É conta fixa"; toque abre as cobranças | vazio ("Ainda não há histórico suficiente: precisamos de 3 cobranças parecidas"); carregando; erro |
+| `(main)/recurring/index.tsx` | 3 | Duas entradas: o cartão do Painel e Configurações > "Assinaturas e contas fixas". "Assinaturas e recorrências": total mensal e anual; Assinaturas (marcas "talvez esquecida — vocês ainda usam?", "ficou mais cara", "nova"), Contas fixas (com "valor variável"), Parcelamentos (n/N, falta R$, termina em), **Possíveis recorrências** (logo abaixo das confirmadas: "Parece se repetir, mas ainda não temos certeza. Não entra no total."; pergunta "É recorrente?" com as ações "É recorrente" e "Não é"; sem marcas), Pequenos gastos frequentes, Ocultas; ações "Não é recorrente", "Cancelei", "É assinatura", "É conta fixa"; toque abre as cobranças. O total e o cartão do Painel somam só o confirmado; o cartão diz "+N possíveis" quando há | vazio ("Ainda não há histórico suficiente: precisamos de 3 cobranças parecidas"); carregando; erro |
 | `(main)/insights/index.tsx`, `insights/detail.tsx` | 5b | 4.5 | vazio ("O primeiro resumo semanal sai na segunda-feira"); carregando; erro |
 | `(main)/cashflow/index.tsx` (muda) | 7 | Faixa do saldo do fim do mês, "contas que ainda vão cair este mês", método usado | sem `forecast` → tela de hoje |
 | `(main)/invest/index.tsx`, `invest/profile.tsx` | 9 | 5.6 e 5.2 | sem perfil; sem mercado; resumo automático |
@@ -1557,3 +1645,17 @@ modelo) e configurou os segredos; os fatos (`fatos-chave-real.md`) derrubaram du
   trava que ignora provedor configurado fora da lista coberta pelo aceite vigente (2.2, 2.4); sintoma de alias
   apontando para o mesmo modelo registrado como risco (seção 13); a gravação das variáveis no Render ficou
   descrita como feita a pedido do dono em 08/10/2026, sem permissão permanente (seção 13 e item (d) acima).
+
+**Retomada da issue #39 (12/10/2026) — regra de prova do detector de recorrências:**
+
+- A revisão 2 da fase 3 mediu que o detector lia lugar de compra frequente como "conta fixa" (9,3 itens falsos
+  por grupo ao lado de 12 verdadeiros). O dono escolheu a regra "prova proporcional ao movimento" (3.3, item
+  12): só soma o que tem prova; o que tem só padrão vai para "Possíveis recorrências", fora do total; hábito de
+  compra não aparece.
+- Mudou um critério de aceite da issue, com o "sim" do dono: "180/230/150 em `LAZER` não formam série" — num
+  lugar que só cobra aquilo, no seu dia, formam uma conta fixa de valor variável (3.3, item 5).
+- Fusão por degrau de preço só quando um dos lados já é série (3.3, item 6; achado I2).
+- Rota: `possible[]` na lista (10.3). Tela: seção "Possíveis recorrências" e "+N possíveis" no cartão (10.11).
+  Sem coluna nem migration nova.
+- Conferida em três conjuntos de sementes nunca olhadas e num gerador mais realista, sem novo ajuste de limite
+  (números e limites conhecidos em 3.3, item 12).
