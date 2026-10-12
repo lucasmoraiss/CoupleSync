@@ -17,6 +17,10 @@ public class PdfPigTextExtractor : IPdfTextExtractor
     /// </summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>Text of PDF_TIMEOUT, for the reader inside the API and for the child process alike (same as the app's).</summary>
+    public const string TimeoutMessage =
+        "A leitura do extrato demorou demais e foi interrompida. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.";
+
     private readonly int _maxPages;
     private readonly TimeSpan _timeout;
 
@@ -53,7 +57,7 @@ public class PdfPigTextExtractor : IPdfTextExtractor
             worker.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
             throw new OcrException(
                 "PDF_TIMEOUT",
-                "A leitura do PDF demorou demais e foi interrompida. Envie um extrato menor ou exporte o PDF novamente.");
+                TimeoutMessage);
         }
 
         try

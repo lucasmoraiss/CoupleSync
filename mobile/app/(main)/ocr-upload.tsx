@@ -26,7 +26,7 @@ import { ocrApiClient } from '@/services/apiClient';
 import { colors } from '@/theme';
 import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
-import { JOB_FAILURE_ACTION_LABEL, ocrFailureMessage } from '@/modules/ocr/failureMessage';
+import { JOB_FAILURE_ACTION_LABEL, ocrFailureMessage, uploadErrorRetryLabel } from '@/modules/ocr/failureMessage';
 import { buildDiscardRestRequest, openImportSummary } from '@/modules/ocr/confirmRequest';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -49,7 +49,8 @@ type ScreenState =
   | { phase: 'idle' }
   | { phase: 'uploading' }
   | { phase: 'polling'; uploadId: string; jobStatus?: string }
-  | { phase: 'error'; message: string; fromJob?: boolean };
+  // retryLabel: só quando repetir o mesmo arquivo não resolve (o botão volta para a escolha do arquivo).
+  | { phase: 'error'; message: string; retryLabel?: string };
 
 export default function OcrUploadScreen() {
   const [state, setState] = useState<ScreenState>({ phase: 'idle' });
@@ -143,7 +144,7 @@ export default function OcrUploadScreen() {
           if (!isMounted.current) return;
           if (__DEV__) console.log('[OCR] Failed:', { errorCode, status });
           const errorMessage = ocrFailureMessage(errorCode, quotaResetDate);
-          setState({ phase: 'error', message: errorMessage, fromJob: true });
+          setState({ phase: 'error', message: errorMessage, retryLabel: JOB_FAILURE_ACTION_LABEL });
           return;
         }
 
@@ -179,7 +180,7 @@ export default function OcrUploadScreen() {
         await ensureFileReadable(uri);
       } catch {
         if (isMounted.current) {
-          setState({ phase: 'error', message: PDF_READABILITY_ERROR });
+          setState({ phase: 'error', message: PDF_READABILITY_ERROR, retryLabel: JOB_FAILURE_ACTION_LABEL });
         }
         return;
       }
@@ -218,7 +219,7 @@ export default function OcrUploadScreen() {
           return;
         }
         const message = getApiErrorMessage(err, 'Falha ao enviar o arquivo. Tente novamente.');
-        setState({ phase: 'error', message });
+        setState({ phase: 'error', message, retryLabel: uploadErrorRetryLabel(err) });
       }
     },
     [ensureFileReadable, pollStatus]
@@ -236,7 +237,7 @@ export default function OcrUploadScreen() {
     const isPdf =
       asset.mimeType === PDF_MIME_TYPE || asset.name.toLowerCase().endsWith('.pdf');
     if (!isPdf) {
-      setState({ phase: 'error', message: NOT_PDF_ERROR });
+      setState({ phase: 'error', message: NOT_PDF_ERROR, retryLabel: JOB_FAILURE_ACTION_LABEL });
       return;
     }
     await uploadFile(asset.uri, asset.name);
@@ -357,7 +358,7 @@ export default function OcrUploadScreen() {
         <ErrorState
           message={state.message}
           onRetry={handleRetry}
-          retryLabel={state.fromJob ? JOB_FAILURE_ACTION_LABEL : undefined}
+          retryLabel={state.retryLabel}
         />
       )}
     </SafeAreaView>

@@ -100,6 +100,7 @@ builder.Services.AddScoped<GetNotificationSettingsQueryHandler>();
 builder.Services.AddScoped<IAlertPolicyService, AlertPolicyService>();
 builder.Services.AddScoped<BudgetService>();
 builder.Services.AddScoped<IncomeService>();
+builder.Services.AddOptions<ImportQueueOptions>().Bind(builder.Configuration.GetSection(ImportQueueOptions.SectionName));
 builder.Services.AddScoped<ImportJobService>();
 builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<OpenFinanceService>();
@@ -112,6 +113,7 @@ builder.Services.AddScoped<AppVersionService>();
 builder.Services.AddScoped<ChatContextService>();
 builder.Services.AddScoped<AssistantChatService>();
 builder.Services.AddScoped<CoupleSync.Application.Ai.AiActivationService>();
+builder.Services.AddScoped<CoupleSync.Application.AiFacts.RecurrenceService>();
 
 ValidationLocalization.Configure();
 builder.Services.AddControllers(ValidationLocalization.ConfigureModelBinding)

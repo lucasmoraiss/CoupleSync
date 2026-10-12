@@ -1314,6 +1314,198 @@ namespace CoupleSync.Infrastructure.Migrations
                     b.ToTable("notification_settings", (string)null);
                 });
 
+            modelBuilder.Entity("CoupleSync.Domain.Entities.RecurringStream", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("AnnualCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("annual_cost");
+
+                    b.Property<string>("Cadence")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("cadence");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("category");
+
+                    b.Property<string>("Confidence")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("confidence");
+
+                    b.Property<Guid>("CoupleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("couple_id");
+
+                    b.Property<DateTime>("DetectedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("detected_at_utc");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("display_name");
+
+                    b.Property<string>("EndMonth")
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)")
+                        .HasColumnName("end_month");
+
+                    b.Property<DateOnly>("FirstSeenLocal")
+                        .HasColumnType("date")
+                        .HasColumnName("first_seen_local");
+
+                    b.Property<string>("Flags")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("flags");
+
+                    b.Property<int?>("InstallmentNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("installment_number");
+
+                    b.Property<int?>("InstallmentTotal")
+                        .HasColumnType("integer")
+                        .HasColumnName("installment_total");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("kind");
+
+                    b.Property<decimal>("LastAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("last_amount");
+
+                    b.Property<DateOnly>("LastSeenLocal")
+                        .HasColumnType("date")
+                        .HasColumnName("last_seen_local");
+
+                    b.Property<decimal>("MedianAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("median_amount");
+
+                    b.Property<string>("MerchantKey")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)")
+                        .HasColumnName("merchant_key");
+
+                    b.Property<int>("MissedCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("missed_count");
+
+                    b.Property<string>("NameSource")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("name_source");
+
+                    b.Property<DateOnly?>("NextExpectedLocal")
+                        .HasColumnType("date")
+                        .HasColumnName("next_expected_local");
+
+                    b.Property<int>("Occurrences")
+                        .HasColumnType("integer")
+                        .HasColumnName("occurrences");
+
+                    b.Property<DateTime?>("OverrideAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("override_at_utc");
+
+                    b.Property<Guid?>("OverrideByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("override_by_user_id");
+
+                    b.Property<decimal?>("PreviousAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("previous_amount");
+
+                    b.Property<decimal?>("RemainingAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("remaining_amount");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("UserOverride")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("user_override");
+
+                    b.Property<bool>("VariableAmount")
+                        .HasColumnType("boolean")
+                        .HasColumnName("variable_amount");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CoupleId", "Status");
+
+                    b.HasIndex("CoupleId", "MerchantKey", "Kind", "Cadence")
+                        .IsUnique();
+
+                    b.ToTable("recurring_streams", (string)null);
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.RecurringStreamItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CoupleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("couple_id");
+
+                    b.Property<Guid>("StreamId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stream_id");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transaction_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CoupleId");
+
+                    b.HasIndex("TransactionId");
+
+                    b.HasIndex("StreamId", "TransactionId")
+                        .IsUnique();
+
+                    b.ToTable("recurring_stream_items", (string)null);
+                });
+
             modelBuilder.Entity("CoupleSync.Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1940,6 +2132,36 @@ namespace CoupleSync.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("CoupleSync.Domain.Entities.RecurringStream", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.RecurringStreamItem", b =>
+                {
+                    b.HasOne("CoupleSync.Domain.Entities.Couple", null)
+                        .WithMany()
+                        .HasForeignKey("CoupleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.RecurringStream", null)
+                        .WithMany("Items")
+                        .HasForeignKey("StreamId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CoupleSync.Domain.Entities.Transaction", null)
+                        .WithMany()
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("CoupleSync.Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("CoupleSync.Domain.Entities.User", "User")
@@ -2023,6 +2245,11 @@ namespace CoupleSync.Infrastructure.Migrations
             modelBuilder.Entity("CoupleSync.Domain.Entities.Couple", b =>
                 {
                     b.Navigation("Members");
+                });
+
+            modelBuilder.Entity("CoupleSync.Domain.Entities.RecurringStream", b =>
+                {
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }
