@@ -110,6 +110,73 @@ public sealed class GitHubLatestReleaseClientTests
         Assert.Null(await Client().GetLatestTagAsync(CancellationToken.None));
     }
 
+    // A Release only counts as the latest version when the APK of the fixed link is there and uploaded.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("[]")]
+    [InlineData("[{\"name\":\"outro.apk\",\"state\":\"uploaded\"}]")]
+    [InlineData("[{\"name\":\"couplesync.apk\",\"state\":\"starter\"}]")]
+    [InlineData("[{\"name\":\"couplesync.apk\",\"state\":\"open\"}]")]
+    [InlineData("[{\"name\":\"couplesync.apk\"}]")]
+    [InlineData("[{\"name\":\"CoupleSync.apk\",\"state\":\"uploaded\"}]")]
+    [InlineData("[{\"name\":\"couplesync.apk.zip\",\"state\":\"uploaded\"}]")]
+    // Wrong types: no exception, just no version.
+    [InlineData("\"couplesync.apk\"")]
+    [InlineData("{\"name\":\"couplesync.apk\",\"state\":\"uploaded\"}")]
+    [InlineData("42")]
+    [InlineData("null")]
+    [InlineData("[null,42,\"x\",[]]")]
+    [InlineData("[{\"name\":42,\"state\":\"uploaded\"}]")]
+    [InlineData("[{\"name\":\"couplesync.apk\",\"state\":7}]")]
+    public async Task AReleaseWithoutTheUploadedApk_IsNotALatestVersion(string? assets)
+    {
+        _gitHub.AssetsJson = assets;
+
+        Assert.Null(await Client().GetLatestTagAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AReleaseWithTheUploadedApkAmongOtherFiles_IsTheLatestVersion()
+    {
+        _gitHub.TagName = "v1.2.0";
+        _gitHub.AssetsJson = "[{\"name\":\"notes.txt\",\"state\":\"uploaded\"},{\"name\":\"couplesync.apk\",\"state\":\"uploaded\"}]";
+
+        Assert.Equal("v1.2.0", await Client().GetLatestTagAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AReleaseWithoutTheApkAfterAGoodAnswer_KeepsTheLastGoodTag_AndIsLoggedOncePerWindow()
+    {
+        var logger = new RecordingLogger<GitHubLatestReleaseClient>();
+        using var client = new GitHubLatestReleaseClient(
+            new SingleHandlerFactory(_gitHub), _cache, Options.Create(new AppUpdateOptions { LatestReleaseUrl = FakeGitHubReleases.LatestReleaseUrl }), logger);
+        Assert.Equal("v1.1.0", await client.GetLatestTagAsync(CancellationToken.None));
+
+        // The hour is over and the newest Release has no file yet.
+        _clock.UtcNow += TimeSpan.FromMinutes(61);
+        _gitHub.TagName = "v1.2.0";
+        _gitHub.AssetsJson = "[]";
+        for (var request = 0; request < 20; request++) Assert.Equal("v1.1.0", await client.GetLatestTagAsync(CancellationToken.None));
+
+        Assert.Equal(2, _gitHub.Calls);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Warning, entry.Level);
+        Assert.Contains("v1.2.0", entry.Message);
+        Assert.Contains("couplesync.apk", entry.Message);
+
+        // The file shows up: the new version is announced.
+        _clock.UtcNow += TimeSpan.FromMinutes(6);
+        _gitHub.AssetsJson = "[{\"name\":\"couplesync.apk\",\"state\":\"uploaded\"}]";
+        Assert.Equal("v1.2.0", await client.GetLatestTagAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public void TheFixedDownloadLink_IsBuiltFromTheNameOfTheExpectedFile()
+    {
+        Assert.Equal("couplesync.apk", AppUpdateOptions.ApkFileName);
+        Assert.EndsWith("/" + AppUpdateOptions.ApkFileName, AppUpdateOptions.DownloadUrl);
+    }
+
     [Fact]
     public async Task NetworkDownOrTimeout_IsNull_NotAnException()
     {
