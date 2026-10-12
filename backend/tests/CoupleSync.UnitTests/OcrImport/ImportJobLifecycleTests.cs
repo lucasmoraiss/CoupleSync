@@ -37,7 +37,9 @@ public sealed class ImportJobLifecycleTests
 
         Assert.Equal(ImportJobStatus.Failed, read!.Status);
         Assert.Equal("PROCESSING_TIMEOUT", read.ErrorCode);
-        Assert.Contains("Envie o arquivo novamente", read.ErrorMessage);
+        Assert.Equal(
+            "A leitura foi interrompida antes de terminar. Envie o arquivo de novo; se acontecer outra vez, exporte um período menor (por exemplo, um mês).",
+            read.ErrorMessage);
         Assert.Equal(1, storage.Deletes);
     }
 
@@ -457,6 +459,9 @@ public sealed class ImportJobLifecycleTests
 
         public Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<ImportJob>>([]);
+
+        public Task<int> CountUnfinishedAsync(Guid coupleId, DateTime processingSinceUtc, CancellationToken ct)
+            => Task.FromResult(0);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

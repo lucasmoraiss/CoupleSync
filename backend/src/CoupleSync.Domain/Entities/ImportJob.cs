@@ -132,6 +132,16 @@ public sealed class ImportJob : ICoupleScoped
     }
 
     /// <summary>
+    /// Gives the job back to the queue without spending an attempt (RetryCount untouched, no error recorded).
+    /// Used when the worker could not even start reading it, e.g. the file lives on another instance's disk.
+    /// </summary>
+    public void ReturnToPending(DateTime nowUtc)
+    {
+        Status = ImportJobStatus.Pending;
+        UpdatedAtUtc = NormalizeUtc(nowUtc);
+    }
+
+    /// <summary>
     /// Resets the job to Pending for retry after a transient failure.
     /// Increments the retry counter.
     /// </summary>
