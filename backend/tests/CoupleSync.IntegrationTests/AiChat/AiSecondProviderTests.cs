@@ -149,6 +149,47 @@ public sealed class AiSecondProviderTests
     }
 
     [Fact]
+    public async Task AnsweringNotNow_EndsOnlyTheOldAcceptanceOfWhoAnswered_NotTheOtherMembersNorAnotherGroups()
+    {
+        await using var factory = new ChatWebApplicationFactory(enabled: true);
+        var (ana, bruno) = await GroupThatAcceptedTheOldVersionAsync(factory);
+        var group = Assert.Single(factory.CoupleIds());
+
+        // Bruno of the same group also has an active acceptance of version 1; so does Carla, of ANOTHER group.
+        var (carla, _) = await OwnerAsync(factory, "Carla Exemplo");
+        var otherGroup = Assert.Single(factory.CoupleIds(), id => id != group);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AiConsents.Add(AiConsent.Accept(group, bruno.UserId, version: 1, DateTime.UtcNow.AddHours(-2)));
+            db.AiConsents.Add(AiConsent.Accept(otherGroup, carla.UserId, version: 1, DateTime.UtcNow.AddHours(-2)));
+            await db.SaveChangesAsync();
+        }
+
+        Assert.True((await StatusOf(bruno.Client)).GetProperty("onboardingPending").GetBoolean());
+
+        var notNow = await ana.Client.PatchAsync(Preferences, JsonContent.Create(new { OnboardingAnswered = true }));
+        Assert.Equal(HttpStatusCode.OK, notNow.StatusCode);
+
+        long Revoked(Guid userId, bool revoked) => factory.Scalar<long>(
+            $"SELECT count(*) FROM ai_consents WHERE version = 1 AND upper(user_id) = '{userId.ToString().ToUpperInvariant()}' "
+            + $"AND revoked_at_utc IS {(revoked ? "NOT NULL" : "NULL")}");
+
+        // Only her own row is over.
+        Assert.Equal(1, Revoked(ana.UserId, revoked: true));
+        Assert.Equal(0, Revoked(ana.UserId, revoked: false));
+        // Bruno (same group) and Carla (another group) keep theirs.
+        Assert.Equal(1, Revoked(bruno.UserId, revoked: false));
+        Assert.Equal(0, Revoked(bruno.UserId, revoked: true));
+        Assert.Equal(1, Revoked(carla.UserId, revoked: false));
+        Assert.Equal(0, Revoked(carla.UserId, revoked: true));
+
+        // And Bruno is still asked, with the new text.
+        Assert.True((await StatusOf(bruno.Client)).GetProperty("onboardingPending").GetBoolean());
+        Assert.False((await StatusOf(ana.Client)).GetProperty("onboardingPending").GetBoolean());
+    }
+
+    [Fact]
     public async Task SwitchingItOffForTheGroup_AlsoEndsAnOldAcceptance()
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
