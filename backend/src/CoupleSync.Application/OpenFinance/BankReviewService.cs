@@ -1,3 +1,4 @@
+using CoupleSync.Application.AiFacts;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
@@ -41,6 +42,7 @@ public sealed class BankReviewService
     private readonly IDateTimeProvider _clock;
     private readonly IAlertPolicyService _alertPolicyService;
     private readonly INotificationEventRepository _notificationEvents;
+    private readonly RecurrenceRunLog _recurrenceRuns;
     private readonly ILogger<BankReviewService> _logger;
 
     public BankReviewService(
@@ -51,6 +53,7 @@ public sealed class BankReviewService
         IDateTimeProvider clock,
         IAlertPolicyService alertPolicyService,
         INotificationEventRepository notificationEvents,
+        RecurrenceRunLog recurrenceRuns,
         ILogger<BankReviewService> logger)
     {
         _sync = sync;
@@ -60,6 +63,7 @@ public sealed class BankReviewService
         _clock = clock;
         _alertPolicyService = alertPolicyService;
         _notificationEvents = notificationEvents;
+        _recurrenceRuns = recurrenceRuns;
         _logger = logger;
     }
 
@@ -297,7 +301,7 @@ public sealed class BankReviewService
             discarded.Add(id);
         }
 
-        var (reconciled, taken) = await ReconcileAsync(coupleId, reconcileIds.Select(id => rows[id]).ToList(), names, now, ct);
+        var (reconciled, taken, filledIn) = await ReconcileAsync(coupleId, reconcileIds.Select(id => rows[id]).ToList(), names, now, ct);
 
         try
         {
@@ -321,6 +325,11 @@ public sealed class BankReviewService
             // went away with the person who left the group. Nothing of this request was stored.
             throw new ConflictException(ConflictCode, "A revisão mudou enquanto era confirmada. Atualize e tente de novo.");
         }
+
+        // "Assinaturas e recorrências" is calculated again in its next request: filling in the establishment or the
+        // category changes the key and the kind of a series, and leaves no other trace (the count does not move).
+        // Only after the save: a refused request changed nothing.
+        if (filledIn) _recurrenceRuns.TransactionEdited(coupleId);
 
         await RaiseAlertsAsync(coupleId, transactions, ct);
 
@@ -369,13 +378,15 @@ public sealed class BankReviewService
     /// saved here (the caller saves everything together). A line reconciled before answers what it answered then.
     /// Every other line of the group that pointed to a transaction taken here is judged again in the same save: it
     /// points to another transaction that looks like it, or waits as an ordinary expense. Also answers which
-    /// transaction was taken here by which line, for the save (<see cref="IBankSyncRepository.SaveLinkingAsync"/>).
+    /// transaction was taken here by which line, for the save (<see cref="IBankSyncRepository.SaveLinkingAsync"/>), and
+    /// whether some transaction was changed (the caller tells the recurrences once the save is done).
     /// </summary>
-    private async Task<(List<BankReviewReconciledDto> Reconciled, Dictionary<Guid, Guid> Taken)> ReconcileAsync(
+    private async Task<(List<BankReviewReconciledDto> Reconciled, Dictionary<Guid, Guid> Taken, bool FilledIn)> ReconcileAsync(
         Guid coupleId, IReadOnlyList<BankTransaction> lines, IReadOnlyDictionary<Guid, BankAccountNames> names, DateTime now, CancellationToken ct)
     {
         var reconciled = new List<BankReviewReconciledDto>();
         var taken = new Dictionary<Guid, Guid>(); // transaction → the line it is linked to here
+        var filledIn = false; // some transaction took the merchant or the category of the bank
 
         foreach (var row in lines)
         {
@@ -399,7 +410,8 @@ public sealed class BankReviewService
             if (!taken.TryAdd(transaction.Id, row.Id) || await _sync.FindByLinkedTransactionAsync(transaction.Id, coupleId, ct) is not null)
                 throw new ConflictException(MatchTakenCode, MatchTakenMessage);
 
-            transaction.FillMissing(row.MerchantName ?? row.Description ?? row.DescriptionRaw, row.SuggestedCategory);
+            if (transaction.FillMissing(row.MerchantName ?? row.Description ?? row.DescriptionRaw, row.SuggestedCategory))
+                filledIn = true;
             row.Reconcile(transaction.Id, now);
             reconciled.Add(new BankReviewReconciledDto(row.Id, transaction.Id));
         }
@@ -412,7 +424,7 @@ public sealed class BankReviewService
                 _sync, coupleId, pointing, BankSuspicionJudge.ConnectorNameBy(names), leavingLineIds: [], taken.Keys, now, ct);
         }
 
-        return (reconciled, taken);
+        return (reconciled, taken, filledIn);
     }
 
     /// <summary>

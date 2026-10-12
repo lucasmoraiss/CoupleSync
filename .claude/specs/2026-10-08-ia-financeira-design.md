@@ -659,6 +659,9 @@ Como ficou na fase 3 (issue #39):
 - "Entrou transação" inclui excluir e **editar** (valor, data, estabelecimento, descrição, categoria): o próximo
   pedido da lista recalcula. A exclusão é vista pela contagem e a edição por um contador, os dois na memória do
   processo; depois de um reinício valem as 6 horas.
+  Quem edita sem passar pelos dois PATCH de transação também avisa: o "É a mesma" da Revisão do banco (#26), quando
+  a transação ganha o estabelecimento ou a categoria do banco, marca o grupo depois do save (nada muda na
+  contagem, e os dois entram na chave e no tipo da série). Corrigir uma recorrência também marca.
 - **Anual**: para a cadência anual a janela lida é de **26 meses** (para as demais, 13). Assim a assinatura
   anual aparece já no primeiro cálculo, mesmo renovada meses antes (cobranças há 14 e há 2 meses → item hoje),
   e continua sendo achada até a renovação seguinte. Renovação atrasada (mais de 395 dias da última cobrança):
