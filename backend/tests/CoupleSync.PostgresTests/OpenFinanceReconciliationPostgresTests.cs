@@ -929,7 +929,7 @@ public sealed class OpenFinanceReconciliationPostgresTests
     // ---------------------------------------------------------------- the lines that already waited are judged at every reading (review 11)
 
     [PostgresFact]
-    public async Task TheLinesThatAlreadyWaited_AreJudgedAgainByTheReadingOfTheirAccount_OnlyOnTheDaysItCovers_OnlyOfTheGroup_NeverTheOnesOfThePerson()
+    public async Task TheLinesThatAlreadyWaited_AreJudgedAgainByTheReadingOfTheirAccount_WhateverTheirAge_OnlyOfTheGroup_NeverTheOnesOfThePerson()
     {
         await using var database = await _server.CreateDatabaseAsync();
         await using var factory = new PostgresApiFactory(database);
@@ -943,7 +943,8 @@ public sealed class OpenFinanceReconciliationPostgresTests
         var firstDayAsked = Today.AddDays(-14);
         // 23:00 in Brasília of the day before: 02:00 UTC of the first day asked. The bank lists it.
         var eveningBefore = firstDayAsked.AddHours(2);
-        var older = Today.AddDays(-16).AddHours(15);
+        // Two months old: long before the days the next reading asks the bank for.
+        var older = Today.AddDays(-60).AddHours(15);
         var existedBefore = await ManualAsync(ana, 26.00m, Noon(), "Já estava no app");
         pluggy.Transactions[Checking] =
         [
@@ -968,7 +969,7 @@ public sealed class OpenFinanceReconciliationPostgresTests
         var typed = await ManualAsync(ana, 25.00m, Noon(), "Digitada depois");
         await ManualAsync(ana, 27.00m, Noon(), "Igual à restaurada");
         var typedEvening = await ManualAsync(ana, 28.00m, eveningBefore, "Na noite anterior");
-        await ManualAsync(ana, 29.00m, older, "Antiga");
+        var typedOlder = await ManualAsync(ana, 29.00m, older, "Antiga");
         var typedCard = await ManualAsync(ana, 31.00m, Noon(), "No cartão");
         var typedByCarla = await ManualAsync(carla, 25.00m, Noon(), "De outro grupo");
 
@@ -985,8 +986,8 @@ public sealed class OpenFinanceReconciliationPostgresTests
         Assert.Equal(("Pending", null, typedEvening), await StateAsync(database, "t26-evening-before"));
         // The other account of the same connection is read, and judged, too.
         Assert.Equal(("Pending", null, typedCard), await StateAsync(database, "t26-card"));
-        // Before the days the reading covers: left as it was.
-        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-older"));
+        // Long before the days the bank was asked for: judged all the same (every line of the account that waits).
+        Assert.Equal(("Pending", null, typedOlder), await StateAsync(database, "t26-older"));
         // The person brought it back: no synchronisation decides about it.
         Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-restored"));
         Assert.NotNull(await database.ScalarAsync<DateTime?>("SELECT person_decided_at_utc FROM bank_transactions WHERE pluggy_transaction_id = 't26-restored'"));
@@ -994,7 +995,7 @@ public sealed class OpenFinanceReconciliationPostgresTests
         Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-carla"));
         var selected = await SelectAllAsync(ana, Noon(), eveningBefore.AddDays(-1), older, Noon(3));
         Assert.Equal(
-            new[] { await LineAsync(database, "t26-last"), await LineAsync(database, "t26-older"), restored }.Order(),
+            new[] { await LineAsync(database, "t26-last"), restored }.Order(),
             selected.Order());
 
         // Carla's own reading marks her line, with her own transaction.

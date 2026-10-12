@@ -275,12 +275,10 @@ public sealed class SyncConnectionService
                 var arrived = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
                 // What the bank no longer lists leaves in the same save as the line that replaces it.
                 var leaving = await RemoveVanishedAsync(account, transactions, from, window.To, ct);
-                // The lines of the account that already waited, on the days this reading asked for: they are judged
-                // again as suspected duplicates (what the app has may have changed since they arrived). One day
-                // earlier in Brazil: Pluggy cuts the days in UTC, and the first hours of its first day are the
-                // evening before here.
-                var waiting = await _sync.GetWaitingOpenToRulesForJobAsync(
-                    connection.CoupleId, account.Id, from.AddDays(-1), window.To, ct);
+                // Every line of the account that already waited, of any age (not only the days this reading asked
+                // for): they are judged again as suspected duplicates. What the app has may have changed since they
+                // arrived, and the history stored before these rules existed was never judged.
+                var waiting = await _sync.GetWaitingOpenToRulesForJobAsync(connection.CoupleId, account.Id, ct);
                 // Before anyone sees them: transfers between accounts of the group, bill payments and suspected duplicates.
                 Task DecideAsync(CancellationToken token)
                     => _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, waiting, leaving, token);

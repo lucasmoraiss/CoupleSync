@@ -2311,23 +2311,71 @@ public sealed class OpenFinanceReconciliationTests
     }
 
     [Fact]
-    public async Task ALineOlderThanTheDaysTheReadingAsksFor_IsNotJudgedAgain()
+    public async Task ALineOfSixMonthsAgo_StoredBeforeTheRulesExisted_IsMarkedByOneSynchronisation_ThoughTheBankIsOnlyAskedForTheLastDays()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana Exemplo Souza");
+        var connection = await ConnectWithBankAsync(ana, historyMonths: 12);
+        // The history the first synchronisation of phase 2 brought: a purchase of six months ago the app already had.
+        var sixMonthsAgo = Today.AddDays(-180).AddHours(15);
+        var twoMonthsAgo = Today.AddDays(-60).AddHours(15);
+        var alreadyInTheApp = await ManualAsync(ana, 44.00m, sixMonthsAgo, "Mercado de seis meses atrás");
+        Bank(factory, Checking, Debit("t26-six-months", sixMonthsAgo, 44.00m), Debit("t26-two-months", twoMonthsAgo, 46.00m), Debit("t26-recent", Noon(), 45.00m));
+        await DoneAsync(factory, ana, connection);
+        await AsPhase2StoredItAsync(factory, "t26-six-months");
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-six-months"));
+        Assert.Equal(new[] { await LineIdAsync(factory, "t26-six-months") }, await SelectAllOfAsync(factory, ana, "t26-six-months"));
+        // And one typed only now, for a line of two months ago.
+        var typedAfter = await ManualAsync(ana, 46.00m, twoMonthsAgo, "Antiga, digitada depois");
+
+        // ONE synchronisation. The bank is asked for the last days only: it says nothing about the old lines.
+        await DoneAsync(factory, ana, connection);
+
+        var asked = factory.Pluggy.WindowsAsked(Checking)[^1];
+        Assert.True(string.CompareOrdinal(asked.From, Day(twoMonthsAgo)) > 0, $"asked from {asked.From}");
+        Assert.Equal(("Pending", null, Sql(alreadyInTheApp)), await StateAsync(factory, "t26-six-months"));
+        Assert.Equal(("Pending", null, Sql(typedAfter)), await StateAsync(factory, "t26-two-months"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-recent"));
+        Assert.Equal(
+            new[] { await LineIdAsync(factory, "t26-recent") },
+            await SelectAllOfAsync(factory, ana, "t26-six-months", "t26-two-months", "t26-recent"));
+        Assert.Equal(2, await TransactionCountAsync(factory));
+    }
+
+    [Fact]
+    public async Task ATransactionEditedAfterTheLineArrived_MarksTheLineWhenItComesToLookLikeIt_AndTheMarkGoesWhenItNoLongerDoes()
     {
         await using var factory = NewFactory();
         var (ana, connection) = await AnaAsync(factory);
-        var old = Today.AddDays(-50).AddHours(15);
-        Bank(factory, Checking, Debit("t26-old", old, 44.00m), Debit("t26-recent", Noon(), 45.00m));
+        var typed = await ManualAsync(ana, 40.00m, Noon(), "Padaria");
+        Bank(factory, Checking, Debit("t26-padaria", Noon(), 25.00m));
         await DoneAsync(factory, ana, connection);
-        await ManualAsync(ana, 44.00m, old, "Antiga, digitada depois");
-        var recent = await ManualAsync(ana, 45.00m, Noon(), "Recente, digitada depois");
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-padaria"));
 
-        await DoneAsync(factory, ana, connection);
+        async Task EditAsync(object body)
+        {
+            var edited = await ana.Client.PatchAsJsonAsync($"/api/v1/transactions/{typed}", body);
+            Assert.True(edited.IsSuccessStatusCode, await edited.Content.ReadAsStringAsync());
+            await DoneAsync(factory, ana, connection);
+        }
 
-        // The second reading asks the bank for the last days only, and judges again only what waits on those days.
-        var asked = factory.Pluggy.WindowsAsked(Checking)[^1];
-        Assert.True(string.CompareOrdinal(asked.From, Day(old)) > 0, $"asked from {asked.From}");
-        Assert.Equal(("Pending", null, Sql(recent)), await StateAsync(factory, "t26-recent"));
-        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-old"));
+        // The value is corrected to the one of the line.
+        await EditAsync(new { amount = 25.00m });
+        Assert.Equal(("Pending", null, Sql(typed)), await StateAsync(factory, "t26-padaria"));
+        Assert.Empty(await SelectAllOfAsync(factory, ana, "t26-padaria"));
+
+        // The day is moved four days away: it no longer looks like the line.
+        await EditAsync(new { eventTimestampUtc = Noon(4) });
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-padaria"));
+
+        // And back to the day next to the line's.
+        await EditAsync(new { eventTimestampUtc = Noon(1) });
+        Assert.Equal(("Pending", null, Sql(typed)), await StateAsync(factory, "t26-padaria"));
+
+        // Another value again: the mark goes.
+        await EditAsync(new { amount = 26.00m });
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-padaria"));
+        Assert.Equal(1, await TransactionCountAsync(factory));
     }
 
     // ================================================================ deleting a transaction: the second save (review 11)

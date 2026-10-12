@@ -23,7 +23,7 @@ public sealed record ArrivedBankLine(BankTransaction Row, string? PayerName)
 /// line judged again keeps the transaction it pointed to, the same day wins over the day next to it).</item>
 /// </list>
 /// Rules 1 to 3 decide only when a line arrives or is settled at the bank. Rule 4 is asked again at every reading,
-/// also of the lines of the account that already waited (inside the days the reading covers): a line stored before
+/// also of every line of the account that already waited, whatever its age: a line stored before
 /// this rule existed, a transaction typed, captured, imported or edited after the line arrived, a settled line the
 /// bank corrects later.
 /// Only lines <see cref="BankTransaction.OpenToAutomaticRules"/>, in reais and with a value. What is ignored was

@@ -20,8 +20,8 @@ namespace CoupleSync.Application.OpenFinance;
 /// </para>
 /// <para>
 /// A transaction typed, captured, imported or edited after the line arrived does not ask it: the line is judged at
-/// the next synchronisation of its account, which asks it of every line that already waited on the days it reads
-/// and that no person brought back to the review. Older lines, and the ones a person brought back, wait as they are.
+/// the next synchronisation of its account, which asks it of every line of the account that already waited and
+/// that no person brought back to the review. The ones a person brought back wait as they are.
 /// </para>
 /// </summary>
 public static class BankSuspicionJudge

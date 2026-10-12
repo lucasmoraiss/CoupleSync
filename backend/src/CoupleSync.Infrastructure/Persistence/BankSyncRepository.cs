@@ -145,11 +145,10 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .ThenBy(t => t.PluggyTransactionId, StringComparer.Ordinal)
             .ToList();
 
-    public async Task<IReadOnlyList<BankTransaction>> GetWaitingOpenToRulesForJobAsync(
-        Guid coupleId, Guid bankAccountId, DateOnly fromDay, DateOnly toDay, CancellationToken ct)
+    public async Task<IReadOnlyList<BankTransaction>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct)
     {
-        // Ids only: nearly every one of these lines was listed by the bank in this very reading and is already
-        // here, whole. Reading them again would bring what Pluggy sent for each (raw_json) a second time.
+        // Ids only: the lines the bank listed in this very reading are already here, whole, and reading them again
+        // would bring what Pluggy sent for each (raw_json) a second time.
         var ids = await _dbContext.BankTransactions
             .IgnoreQueryFilters()
             .AsNoTracking()
@@ -157,8 +156,7 @@ public sealed class BankSyncRepository : IBankSyncRepository
                         && t.BankAccountId == bankAccountId
                         && t.ReviewState == BankTransactionReviewState.Pending
                         && t.PersonDecidedAtUtc == null
-                        && t.LocalDate >= fromDay
-                        && t.LocalDate <= toDay)
+                        && (t.Type == BankTransactionType.Debit || t.MatchedTransactionId != null))
             .Select(t => t.Id)
             .ToListAsync(ct);
         if (ids.Count == 0) return [];
