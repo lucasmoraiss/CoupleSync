@@ -316,16 +316,43 @@ public sealed class RecurrenceService
 
         foreach (var group in result.Streams.GroupBy(d => (d.MerchantKey, d.Cadence)))
         {
-            foreach (var detected in group.OrderBy(d => d.Facts.MedianAmount))
+            var series = group.OrderBy(d => d.Facts.MedianAmount).ToList();
+            var stored = unmatched
+                .Where(e => e.Cadence == group.Key.Cadence && BaseKey(e.MerchantKey) == group.Key.MerchantKey)
+                .ToList();
+
+            // A stored stream follows the charges it already holds: what the person said about it was said of those
+            // charges. So, before anything else, each series takes the row that holds most of its charges — the
+            // pairs with most charges in common first. The kind only breaks a tie: a series changes kind (its amount
+            // goes over what a subscription costs, its charges move to another category) and is still the same item,
+            // next to another item of the same establishment.
+            var holderOf = new RecurringStream?[series.Count];
+            var held = series
+                .SelectMany((detected, index) => stored.Select(e => (
+                    Index: index,
+                    Detected: detected,
+                    Stored: e,
+                    Common: detected.TransactionIds.Count(chargesBefore[e.Id].Contains))))
+                .Where(pair => pair.Common > 0)
+                .OrderByDescending(pair => pair.Common)
+                .ThenBy(pair => pair.Stored.Kind == pair.Detected.Facts.Kind ? 0 : 1)
+                .ThenBy(pair => Math.Abs(pair.Stored.MedianAmount - pair.Detected.Facts.MedianAmount))
+                .ThenBy(pair => pair.Stored.MerchantKey, StringComparer.Ordinal)
+                .ThenBy(pair => pair.Index);
+            foreach (var pair in held)
             {
-                // The stored stream of this establishment and cadence that is closest: the same kind first, then the
-                // one that already holds most of these charges (two streams of the same amount — the same plan of
-                // each person — must not swap what was said about them), then the amount.
-                var charges = detected.TransactionIds.ToHashSet();
-                var match = unmatched
+                if (holderOf[pair.Index] is not null || !unmatched.Remove(pair.Stored)) continue;
+                holderOf[pair.Index] = pair.Stored;
+            }
+
+            for (var index = 0; index < series.Count; index++)
+            {
+                var detected = series[index];
+                // A series none of whose charges was in a stored stream (its transactions were registered again, or
+                // it is new) takes, of the rows no series holds, the closest: the same kind first, then the amount.
+                var match = holderOf[index] ?? unmatched
                     .Where(e => e.Cadence == detected.Cadence && BaseKey(e.MerchantKey) == detected.MerchantKey)
                     .OrderBy(e => e.Kind == detected.Facts.Kind ? 0 : 1)
-                    .ThenByDescending(e => e.Items.Count(i => charges.Contains(i.TransactionId)))
                     .ThenBy(e => Math.Abs(e.MedianAmount - detected.Facts.MedianAmount))
                     .ThenBy(e => e.MerchantKey, StringComparer.Ordinal)
                     .FirstOrDefault();

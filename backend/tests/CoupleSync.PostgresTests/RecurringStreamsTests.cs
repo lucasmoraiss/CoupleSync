@@ -445,6 +445,61 @@ public sealed class RecurringStreamsTests
         Assert.Equal("2026-08-05", item.GetProperty("firstSeen").GetString());
     }
 
+    /// <summary>
+    /// Review 4, I1 — two monthly items of the same establishment, a fixed bill and a subscription; the subscription,
+    /// which the person said is not recurring, becomes a fixed bill too (its amount goes over what a subscription
+    /// costs). On PostgreSQL, with the unique index of (group, key, kind, cadence): each row keeps its key (the
+    /// second of an establishment has "~2"), so two rows of the same kind do not collide; the list answers, each
+    /// item is the same row with the same charges, and what the person said stays where it was said.
+    /// </summary>
+    [PostgresFact]
+    public async Task AnItemThatChangesKind_NextToAnotherOfTheSameEstablishment_KeepsItsRowAndItsCorrection_UnderTheUniqueIndex()
+    {
+        var clock = new MovingClock(Now);
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        await using var host = WithTheClock(factory, clock);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        await SeedMonthlyAsync(ana.Client, "Escola Exemplo", 1200m, [5, 6, 7, 8, 9, 10], "OUTROS");
+        var chargesOfTheClass = new List<Guid>();
+        foreach (var month in new[] { 4, 5, 6, 7, 8, 9 })
+            chargesOfTheClass.Add(await ChargeAsync(ana.Client, "Escola Exemplo", 150m, Day(month, 20), "OUTROS"));
+        clock.UtcNow = Now.AddMinutes(1);
+        var first = await ListAsync(ana.Client);
+        var feeId = Assert.Single(first.GetProperty("fixedBills").EnumerateArray()).GetProperty("id").GetGuid();
+        var classId = Assert.Single(first.GetProperty("subscriptions").EnumerateArray()).GetProperty("id").GetGuid();
+        var keyOf = (await database.RowsAsync("SELECT id, merchant_key FROM recurring_streams")).ToDictionary(r => (Guid)r[0]!, r => (string)r[1]!);
+        Assert.Equal(["escola exemplo", "escola exemplo~2"], keyOf.Values.Order(StringComparer.Ordinal));
+        var patched = await ana.Client.PatchAsync($"{Recurring}/{classId}", JsonContent.Create(new Dictionary<string, string?> { ["override"] = "NotRecurring" }));
+        Assert.Equal(HttpStatusCode.OK, patched.StatusCode);
+
+        foreach (var transactionId in chargesOfTheClass.TakeLast(2))
+        {
+            var edited = await ana.Client.PatchAsync($"/api/v1/transactions/{transactionId}", JsonContent.Create(new { Amount = 210m }));
+            Assert.True(edited.StatusCode == HttpStatusCode.OK, await edited.Content.ReadAsStringAsync());
+        }
+
+        clock.UtcNow = Now.AddMinutes(2);
+        var later = await ListAsync(ana.Client);
+
+        Assert.Equal(clock.UtcNow, later.GetProperty("detectedAtUtc").GetDateTime().ToUniversalTime());
+        Assert.Equal(feeId, Assert.Single(later.GetProperty("fixedBills").EnumerateArray()).GetProperty("id").GetGuid());
+        var hidden = Assert.Single(later.GetProperty("hidden").EnumerateArray());
+        Assert.Equal(classId, hidden.GetProperty("id").GetGuid());
+        Assert.Equal("NotRecurring", hidden.GetProperty("override").GetString());
+        Assert.Equal(1200m, later.GetProperty("monthlyTotal").GetDecimal());
+
+        var rows = await database.RowsAsync("SELECT id, merchant_key, kind, cadence, user_override FROM recurring_streams ORDER BY merchant_key");
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, r => Assert.Equal(("FixedBill", "Monthly"), ((string)r[2]!, (string)r[3]!)));
+        Assert.All(rows, r => Assert.Equal(keyOf[(Guid)r[0]!], (string)r[1]!));
+        Assert.Equal("NotRecurring", rows.Single(r => (Guid)r[0]! == classId)[4] as string);
+        Assert.Null(rows.Single(r => (Guid)r[0]! == feeId)[4] as string);
+        Assert.Equal(
+            chargesOfTheClass.Order(),
+            (await database.RowsAsync("SELECT transaction_id FROM recurring_stream_items WHERE stream_id = @id", ("id", classId))).Select(r => (Guid)r[0]!).Order());
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /// <summary>The same API with the clock stopped at <see cref="Now"/>: "today" never comes from the machine.</summary>
