@@ -152,7 +152,7 @@ public static class AiConfiguration
 
 /// <summary>
 /// The API refuses to start with the fake provider on when (a) a real provider key has a value — GEMINI_API_KEY,
-/// which has one in production, or the key of any configured compatible provider — or (b) the RENDER variable
+/// which has one in production, or the key of any compatible provider (Groq counts even with no configuration: it is built in) — or (b) the RENDER variable
 /// exists (Render sets RENDER=true on every service, in every runtime). It does not look at ASPNETCORE_ENVIRONMENT:
 /// "App E2E" runs the image as Production. On Render a mistaken Ai__UseFakeProvider makes the new version fail at
 /// start-up, the deploy is marked as failed and the previous version stays up: the fake never answers real users.
