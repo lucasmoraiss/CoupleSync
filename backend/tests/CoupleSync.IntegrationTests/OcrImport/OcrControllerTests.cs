@@ -136,6 +136,27 @@ public sealed class OcrControllerTests
     }
 
     [Fact]
+    public async Task Upload_TheConfiguredQueueLimit_ChangesHowManyUnfinishedImportsAreAccepted()
+    {
+        var configuration = new Dictionary<string, string?> { ["OcrImport:MaxUnfinishedJobsPerCouple"] = "1" };
+        await using var factory = new OcrWebApplicationFactory(configuration);
+        using var client = factory.CreateClient();
+        var token = await RegisterWithCoupleAndGetTokenAsync(client, $"upload-config-{Guid.NewGuid():N}@example.com");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/v1/ocr/upload", BuildMultipartContent(JpegBytes, "a.jpg"))).StatusCode);
+        var response = await client.PostAsync("/api/v1/ocr/upload", BuildMultipartContent(JpegBytes, "b.jpg"));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("IMPORT_QUEUE_FULL", body.GetProperty("code").GetString());
+        Assert.Equal("Já há 1 extrato sendo lido. Espere ele terminar para enviar outro.", body.GetProperty("message").GetString());
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(1, await db.ImportJobs.IgnoreQueryFilters().CountAsync());
+    }
+
+    [Fact]
     public async Task Upload_UnsupportedFile_Returns415()
     {
         await using var factory = new OcrWebApplicationFactory();
@@ -438,8 +459,11 @@ internal sealed class OcrWebApplicationFactory : TestApiFactory
 
     private SqliteConnection? _keepAliveConnection;
 
-    public OcrWebApplicationFactory()
+    private readonly IReadOnlyDictionary<string, string?>? _extraConfiguration;
+
+    public OcrWebApplicationFactory(IReadOnlyDictionary<string, string?>? extraConfiguration = null)
     {
+        _extraConfiguration = extraConfiguration;
         Environment.SetEnvironmentVariable("JWT__SECRET", JwtSecret);
         Environment.SetEnvironmentVariable("JWT__ISSUER", JwtIssuer);
         Environment.SetEnvironmentVariable("JWT__AUDIENCE", JwtAudience);
@@ -463,6 +487,7 @@ internal sealed class OcrWebApplicationFactory : TestApiFactory
                 ["Jwt:Audience"] = JwtAudience
             };
             configBuilder.AddInMemoryCollection(config);
+            if (_extraConfiguration is not null) configBuilder.AddInMemoryCollection(_extraConfiguration);
         });
 
         builder.ConfigureTestServices(services =>

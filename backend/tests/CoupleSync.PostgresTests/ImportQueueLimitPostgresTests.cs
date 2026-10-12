@@ -56,7 +56,7 @@ public sealed class ImportQueueLimitPostgresTests
     }
 
     [PostgresFact]
-    public async Task AFinishedJobFreesASlot_AndOnlyPendingAndProcessingCount()
+    public async Task AFailedAndAReadyJobFreeTheirSlots_AndAPendingJobKeepsCounting()
     {
         await using var database = await _server.CreateDatabaseAsync();
         await using var factory = new PostgresApiFactory(database);
@@ -77,6 +77,40 @@ public sealed class ImportQueueLimitPostgresTests
         // 1 left (Pending): room for two more
         Assert.Equal(HttpStatusCode.OK, (await UploadAsync(ana.Client)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await UploadAsync(ana.Client)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await UploadAsync(ana.Client)).StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task AProcessingJobCountsWhileRecent_AndStopsCountingOnceItIsOlderThanTenMinutes()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var ana = await factory.RegisterAsync("Ana");
+        for (var i = 0; i < 3; i++) Assert.Equal(HttpStatusCode.OK, (await UploadAsync(ana.Client)).StatusCode);
+
+        // 2 Pending + 1 Processing started just now: the group is still full.
+        Guid processingId;
+        await using (var db = factory.NewContext())
+        {
+            var job = await db.ImportJobs.IgnoreQueryFilters().Where(j => j.CoupleId == ana.CoupleId).OrderBy(j => j.CreatedAtUtc).FirstAsync();
+            job.MarkProcessing(DateTime.UtcNow);
+            processingId = job.Id;
+            await db.SaveChangesAsync();
+        }
+        var refused = await UploadAsync(ana.Client);
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("IMPORT_QUEUE_FULL", body.GetProperty("code").GetString());
+
+        // The same job, untouched for 11 minutes (the reader died on it): it no longer holds a slot.
+        await using (var db = factory.NewContext())
+        {
+            var job = await db.ImportJobs.IgnoreQueryFilters().SingleAsync(j => j.Id == processingId);
+            job.MarkProcessing(DateTime.UtcNow.AddMinutes(-11));
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.OK, (await UploadAsync(ana.Client)).StatusCode);
+        // 2 Pending + the new Pending = full again, and the abandoned Processing job is still not counted.
         Assert.Equal(HttpStatusCode.Conflict, (await UploadAsync(ana.Client)).StatusCode);
     }
 }

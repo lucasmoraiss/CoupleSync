@@ -119,6 +119,22 @@ public sealed class ImportQueueLimitTests
         Assert.Equal(message, ex.Message);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public async Task ALimitBelowOne_BecomesOne_SoTheFirstUploadIsAcceptedAndTheSecondRefused(int configured)
+    {
+        var jobs = new FakeImportJobRepository();
+        var svc = Build(jobs, new FakeStorageAdapter(), configured);
+
+        await Upload(svc);
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => Upload(svc));
+
+        Assert.Equal("IMPORT_QUEUE_FULL", ex.Code);
+        Assert.Equal("Já há 1 extrato sendo lido. Espere ele terminar para enviar outro.", ex.Message);
+        Assert.Single(jobs.Jobs);
+    }
+
     [Fact]
     public async Task SimultaneousUploadsOfOneGroup_NeverPassTheLimit()
     {
