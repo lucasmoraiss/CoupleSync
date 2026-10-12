@@ -3,7 +3,9 @@
 // categoria. Lançamento que o banco ainda não efetivou, sem valor ou em outra moeda aparece em cinza e sem caixa.
 //
 // Conciliação: a linha que parece uma transação que o app já tinha não tem caixa nem entra em "Selecionar tudo";
-// ela mostra "Parece a mesma de: ..." e os botões "É a mesma" e "É outra". O que o servidor ignorou sozinho
+// ela mostra "Parece a mesma de: ..." e os botões "É a mesma" e "É outra". O servidor confere de novo ao confirmar:
+// a linha que ele segurar (parece uma compra já registrada) não é contada como registrada, o aviso diz quantas
+// esperam a resposta e a lista recarregada as traz marcadas. O que o servidor ignorou sozinho
 // (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas, recolhida, com "restaurar"
 // em toda linha: nas saídas e nas entradas.
 //
@@ -44,6 +46,7 @@ import {
   answerDuplicateRequest,
   buildConfirmBatches,
   canAnswerDuplicate,
+  chosenOfHeld,
   confirmInBatches,
   dayLabel,
   duplicateNoticeText,
@@ -149,7 +152,7 @@ function BankReviewScreen() {
       if (outcome.kind === 'stale') return;
       if (outcome.kind === 'done') {
         setSelected(new Set());
-        setChosen({});
+        setChosen((current) => chosenOfHeld(current, outcome.heldIds));
       }
       setNotice({ text: outcome.text, error: outcome.kind === 'failed' });
     } finally {

@@ -5,7 +5,9 @@
 // linha e, quando a pessoa trocou, a categoria.
 //
 // Conciliação: a linha que parece uma transação que o app já tinha (possível duplicada) não entra em "Selecionar
-// tudo" nem tem caixa; a pessoa responde "É a mesma" (nada é criado) ou "É outra" (vira despesa nova). O que o
+// tudo" nem tem caixa; a pessoa responde "É a mesma" (nada é criado) ou "É outra" (vira despesa nova). O servidor
+// confere de novo na hora de confirmar: a linha que passou a parecer uma compra já registrada não é confirmada, volta
+// na resposta como segurada e fica na lista, marcada, esperando a resposta. O que o
 // servidor ignorou sozinho (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas,
 // saídas e entradas, cada uma com "restaurar".
 import { getApiErrorMessage } from '@/services/apiError';
@@ -91,7 +93,9 @@ export function selectedTotalBrl(lines: readonly BankReviewLineResponse[], selec
 
 /**
  * Os corpos de POST review/confirm para as linhas selecionadas, na ordem da tela, em lotes. A categoria vai só
- * quando a pessoa escolheu outra que não a sugerida (sem ela o servidor usa a sugerida).
+ * quando a pessoa escolheu outra que não a sugerida (sem ela o servidor usa a sugerida). Todo lote diz ao servidor
+ * que ninguém respondeu sobre duplicadas nessas linhas (`holdPossibleDuplicates`): a que tiver ou ganhar possível
+ * duplicada é segurada, não confirmada.
  */
 export function buildConfirmBatches(
   lines: readonly BankReviewLineResponse[],
@@ -109,7 +113,7 @@ export function buildConfirmBatches(
   const size = Math.max(1, Math.floor(batchSize));
   const batches: ConfirmBankReviewRequest[] = [];
   for (let start = 0; start < expenses.length; start += size) {
-    batches.push({ expenses: expenses.slice(start, start + size) });
+    batches.push({ expenses: expenses.slice(start, start + size), holdPossibleDuplicates: true });
   }
   return batches;
 }
@@ -124,11 +128,48 @@ export interface ConfirmInBatchesDeps {
 /**
  * `done`: todos os lotes entraram. `failed`: um lote falhou e os seguintes não foram enviados (o que já entrou
  * fica; reenviar é seguro, o servidor não registra duas vezes). `stale`: a sessão mudou no meio; nada a mostrar.
+ * `heldIds` (só quando há alguma): as linhas que o servidor segurou por parecerem uma compra já registrada; não
+ * foram confirmadas e continuam na revisão.
  */
 export type ConfirmInBatchesOutcome =
-  | { readonly kind: 'done'; readonly text: string }
-  | { readonly kind: 'failed'; readonly text: string }
+  | { readonly kind: 'done'; readonly text: string; readonly heldIds?: readonly string[] }
+  | { readonly kind: 'failed'; readonly text: string; readonly heldIds?: readonly string[] }
   | { readonly kind: 'stale' };
+
+/**
+ * Aviso das linhas que o servidor segurou ao confirmar: parecem compras já registradas e esperam "É a mesma" ou
+ * "É outra". null: nenhuma.
+ */
+export function heldDuplicatesText(count: number): string | null {
+  if (!(count > 0)) return null;
+  return count === 1
+    ? '1 lançamento parece uma compra que você já registrou. Responda nele: é a mesma ou é outra?'
+    : `${count} lançamentos parecem compras que você já registrou. Responda em cada um: é a mesma ou é outra?`;
+}
+
+/** As categorias escolhidas que continuam valendo depois de confirmar: só as das linhas seguradas (elas ficam na lista). */
+export function chosenOfHeld(
+  chosen: Readonly<Record<string, string>>,
+  heldIds: readonly string[] | null | undefined,
+): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const id of heldIds ?? []) {
+    if (chosen[id]) kept[id] = chosen[id];
+  }
+  return kept;
+}
+
+/**
+ * O aviso do que uma confirmação fez. As seguradas não são despesas registradas: são contadas à parte, no fim. Só
+ * seguradas: só o aviso delas.
+ */
+function confirmOutcomeText(created: number, already: number, skipped: number, otherCurrency: number, held: number): string {
+  const heldText = heldDuplicatesText(held);
+  if (!heldText) return confirmResultMessage(created, already, skipped, otherCurrency);
+  return created + already + skipped > 0
+    ? `${confirmResultMessage(created, already, skipped, otherCurrency)} ${heldText}`
+    : heldText;
+}
 
 /**
  * "Confirmar selecionadas": um lote por vez, na ordem. Cada chamada é tudo ou nada no servidor. Para no primeiro
@@ -142,6 +183,8 @@ export async function confirmInBatches(
   let already = 0;
   let skipped = 0;
   let otherCurrency = 0;
+  const held: string[] = [];
+  const heldIds = () => (held.length > 0 ? { heldIds: held } : {});
   try {
     for (const batch of batches) {
       const result = await deps.confirm(batch);
@@ -150,6 +193,7 @@ export async function confirmInBatches(
       already += result.alreadyConfirmed;
       skipped += result.skipped?.length ?? 0;
       otherCurrency += result.skippedOtherCurrency?.length ?? 0;
+      held.push(...(result.heldAsPossibleDuplicates ?? []));
     }
   } catch (err) {
     if (!deps.isCurrent()) return { kind: 'stale' };
@@ -157,12 +201,13 @@ export async function confirmInBatches(
     return {
       kind: 'failed',
       text:
-        created + already > 0
-          ? `${confirmResultMessage(created, already, skipped, otherCurrency)} O restante não entrou: ${reason}`
+        created + already + held.length > 0
+          ? `${confirmOutcomeText(created, already, skipped, otherCurrency, held.length)} O restante não entrou: ${reason}`
           : reason,
+      ...heldIds(),
     };
   }
-  return { kind: 'done', text: confirmResultMessage(created, already, skipped, otherCurrency) };
+  return { kind: 'done', text: confirmOutcomeText(created, already, skipped, otherCurrency, held.length), ...heldIds() };
 }
 
 // ---------------------------------------------------------------- possíveis duplicadas
@@ -242,11 +287,13 @@ export function answerDuplicateResultMessage(answer: DuplicateAnswer, result: Co
       ? 'Marcada como a mesma: nenhuma despesa nova foi criada.'
       : 'Nada foi alterado.';
   }
-  return confirmResultMessage(
+  // "É outra" com outra categoria vai como despesa comum: se a marca tinha sumido e o servidor a achou de novo, ele segura.
+  return confirmOutcomeText(
     result.created.length,
     result.alreadyConfirmed,
     result.skipped?.length ?? 0,
     result.skippedOtherCurrency?.length ?? 0,
+    result.heldAsPossibleDuplicates?.length ?? 0,
   );
 }
 

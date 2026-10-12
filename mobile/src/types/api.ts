@@ -670,6 +670,11 @@ export interface ConfirmBankReviewRequest {
   readonly reconcile?: ReadonlyArray<{ readonly id: string }>;
   /** "É outra": a linha com possível duplicada vira uma despesa nova, com a categoria sugerida. */
   readonly asNew?: readonly string[];
+  /**
+   * "Confirmar selecionadas": ninguém respondeu sobre duplicadas nas linhas de `expenses`. O servidor então também
+   * segura a linha que já tinha possível duplicada (marcada depois de a tela carregar). Servidor anterior ignora.
+   */
+  readonly holdPossibleDuplicates?: boolean;
 }
 
 export interface ConfirmBankReviewResponse {
@@ -682,6 +687,11 @@ export interface ConfirmBankReviewResponse {
   readonly skippedOtherCurrency?: readonly string[];
   /** Linhas marcadas como a mesma de uma transação que já existia, e essa transação. */
   readonly reconciled?: ReadonlyArray<{ readonly id: string; readonly transactionId: string }>;
+  /**
+   * Linhas enviadas para confirmar que o servidor, conferindo na hora, viu que parecem uma transação que o app já
+   * tinha: nada foi criado para elas; continuam na revisão, agora com `match`. Ausente em servidor anterior.
+   */
+  readonly heldAsPossibleDuplicates?: readonly string[];
 }
 
 export interface RestoreBankReviewResponse {

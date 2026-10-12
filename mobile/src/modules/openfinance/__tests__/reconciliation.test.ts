@@ -14,8 +14,11 @@ import {
   autoReasonText,
   buildConfirmBatches,
   canAnswerDuplicate,
+  chosenOfHeld,
+  confirmInBatches,
   duplicateNoticeText,
   hasSuspectedDuplicate,
+  heldDuplicatesText,
   ignoredLineText,
   isSelectable,
   matchText,
@@ -27,7 +30,12 @@ import {
   suspectedDuplicateCount,
   toggleSelected,
 } from '../review';
-import type { BankReviewLineResponse, BankReviewMatchResponse, ConfirmBankReviewResponse } from '@/types/api';
+import type {
+  BankReviewLineResponse,
+  BankReviewMatchResponse,
+  ConfirmBankReviewRequest,
+  ConfirmBankReviewResponse,
+} from '@/types/api';
 
 const line = (over: Partial<BankReviewLineResponse>): BankReviewLineResponse => ({
   id: 'l-1',
@@ -100,7 +108,7 @@ describe('Selecionar tudo e possíveis duplicadas', () => {
 
   it('a duplicada nunca vai num lote de "Confirmar selecionadas" nem entra no total, mesmo com o id na seleção', () => {
     const selected = new Set(['a', 'd', 'b']);
-    expect(buildConfirmBatches(lines, selected, {})).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }] }]);
+    expect(buildConfirmBatches(lines, selected, {})).toEqual([{ expenses: [{ id: 'a' }, { id: 'b' }], holdPossibleDuplicates: true }]);
     expect(selectedTotalBrl(lines, selected)).toBeCloseTo(92.5, 2);
   });
 
@@ -354,5 +362,176 @@ describe('a tela: os botões de possível duplicada', () => {
 
   it('a revisão abre no mês das ignoradas quando nada espera (as duas listas vão para initialReviewMonth)', () => {
     expect(screen).toContain('setMonth(initialReviewMonth(data.pendingByMonth, data.month, data.ignoredByMonth));');
+  });
+});
+
+// Revisão 13: o servidor confere de novo na hora de confirmar. A linha que passou a parecer uma compra já registrada
+// não é confirmada: volta na resposta em `heldAsPossibleDuplicates` e fica na revisão, marcada, esperando a resposta.
+describe('linhas seguradas na hora de confirmar (possível duplicada descoberta pelo servidor)', () => {
+  const batch = (...ids: string[]): ConfirmBankReviewRequest => ({ expenses: ids.map((id) => ({ id })), holdPossibleDuplicates: true });
+  const createdFor = (...ids: string[]) => ids.map((id) => ({ id, transactionId: `t-${id}` }));
+
+  it('o aviso, no singular e no plural; sem nenhuma, sem aviso', () => {
+    expect(heldDuplicatesText(0)).toBeNull();
+    expect(heldDuplicatesText(1)).toBe(
+      '1 lançamento parece uma compra que você já registrou. Responda nele: é a mesma ou é outra?',
+    );
+    expect(heldDuplicatesText(2)).toBe(
+      '2 lançamentos parecem compras que você já registrou. Responda em cada um: é a mesma ou é outra?',
+    );
+  });
+
+  it('"Confirmar selecionadas" avisa o servidor, em todo lote, que ninguém respondeu sobre duplicadas', () => {
+    const many = Array.from({ length: 5 }, (_, i) => line({ id: `m-${i}`, amount: 10 + i }));
+    const batches = buildConfirmBatches(many, new Set(many.map((l) => l.id)), {}, 2);
+    expect(batches).toHaveLength(3);
+    expect(batches.every((b) => b.holdPossibleDuplicates === true)).toBe(true);
+  });
+
+  it('"É outra" e "É a mesma" são a resposta da pessoa: nunca pedem para segurar', () => {
+    expect(answerDuplicateRequest('other', duplicate, {})).toEqual({ asNew: ['d'] });
+    expect(answerDuplicateRequest('other', duplicate, { d: 'LAZER' })).toEqual({ expenses: [{ id: 'd', category: 'LAZER' }] });
+    expect(answerDuplicateRequest('same', duplicate, {})).toEqual({ reconcile: [{ id: 'd' }] });
+  });
+
+  it('as seguradas não contam como registradas: o aviso diz quantas entraram e quantas esperam a resposta', async () => {
+    const outcome = await confirmInBatches([batch('a', 'b', 'x', 'y')], {
+      confirm: async () => response({ created: createdFor('a', 'b'), heldAsPossibleDuplicates: ['x', 'y'] }),
+      isCurrent: () => true,
+    });
+
+    expect(outcome).toEqual({
+      kind: 'done',
+      text:
+        '2 despesas registradas. 2 lançamentos parecem compras que você já registrou. Responda em cada um: é a mesma ou é outra?',
+      heldIds: ['x', 'y'],
+    });
+  });
+
+  it('soma as seguradas de todos os lotes', async () => {
+    const answers = [
+      response({ created: createdFor('a'), heldAsPossibleDuplicates: ['x'] }),
+      response({ created: createdFor('b'), heldAsPossibleDuplicates: ['y', 'z'] }),
+    ];
+    let calls = 0;
+
+    const outcome = await confirmInBatches([batch('a', 'x'), batch('b', 'y', 'z')], {
+      confirm: async () => answers[calls++],
+      isCurrent: () => true,
+    });
+
+    expect(outcome).toEqual({
+      kind: 'done',
+      text:
+        '2 despesas registradas. 3 lançamentos parecem compras que você já registrou. Responda em cada um: é a mesma ou é outra?',
+      heldIds: ['x', 'y', 'z'],
+    });
+  });
+
+  it('todas seguradas: só o aviso delas, sem "Nada a registrar."', async () => {
+    const outcome = await confirmInBatches([batch('x')], {
+      confirm: async () => response({ heldAsPossibleDuplicates: ['x'] }),
+      isCurrent: () => true,
+    });
+
+    expect(outcome).toEqual({
+      kind: 'done',
+      text: '1 lançamento parece uma compra que você já registrou. Responda nele: é a mesma ou é outra?',
+      heldIds: ['x'],
+    });
+  });
+
+  it('servidor que ainda não confere (sem o campo): o aviso de sempre, nada segurado', async () => {
+    const old: ConfirmBankReviewResponse = { created: createdFor('a'), discarded: [], alreadyConfirmed: 0 };
+
+    const outcome = await confirmInBatches([batch('a')], { confirm: async () => old, isCurrent: () => true });
+
+    expect(outcome).toEqual({ kind: 'done', text: '1 despesa registrada.' });
+    expect(outcome).not.toHaveProperty('heldIds');
+  });
+
+  it('erro num lote depois de um que segurou linhas: diz o que entrou, o que espera resposta e o motivo', async () => {
+    let calls = 0;
+    const failing = async () => {
+      calls += 1;
+      if (calls === 2) throw { response: { status: 500 } };
+      return response({ created: createdFor('a'), heldAsPossibleDuplicates: ['x'] });
+    };
+
+    expect(await confirmInBatches([batch('a', 'x'), batch('b')], { confirm: failing, isCurrent: () => true })).toEqual({
+      kind: 'failed',
+      text:
+        '1 despesa registrada. 1 lançamento parece uma compra que você já registrou. Responda nele: é a mesma ou é outra? O restante não entrou: Servidor com problemas. Tente novamente mais tarde.',
+      heldIds: ['x'],
+    });
+
+    // Só seguradas antes do erro: nada entrou, mas elas esperam a resposta do mesmo jeito.
+    calls = 0;
+    const onlyHeld = async () => {
+      calls += 1;
+      if (calls === 2) throw { response: { status: 500 } };
+      return response({ heldAsPossibleDuplicates: ['x'] });
+    };
+    expect(await confirmInBatches([batch('x'), batch('b')], { confirm: onlyHeld, isCurrent: () => true })).toEqual({
+      kind: 'failed',
+      text:
+        '1 lançamento parece uma compra que você já registrou. Responda nele: é a mesma ou é outra? O restante não entrou: Servidor com problemas. Tente novamente mais tarde.',
+      heldIds: ['x'],
+    });
+  });
+
+  it('sessão trocada enquanto o servidor respondia: nada a mostrar, nem as seguradas', async () => {
+    let current = true;
+
+    const outcome = await confirmInBatches([batch('x')], {
+      confirm: async () => {
+        current = false;
+        return response({ heldAsPossibleDuplicates: ['x'] });
+      },
+      isCurrent: () => current,
+    });
+
+    expect(outcome).toEqual({ kind: 'stale' });
+  });
+
+  it('a categoria escolhida numa linha segurada continua escolhida; as das linhas que entraram saem', () => {
+    expect(chosenOfHeld({ a: 'LAZER', x: 'MERCADO', y: 'SAUDE' }, ['x', 'z'])).toEqual({ x: 'MERCADO' });
+    expect(chosenOfHeld({ a: 'LAZER' }, [])).toEqual({});
+    expect(chosenOfHeld({ a: 'LAZER' }, undefined)).toEqual({});
+  });
+
+  it('"É outra" com categoria numa linha que o servidor segurou de novo: o aviso é o das seguradas, não "Nada a registrar."', () => {
+    expect(answerDuplicateResultMessage('other', response({ heldAsPossibleDuplicates: ['d'] }))).toBe(
+      '1 lançamento parece uma compra que você já registrou. Responda nele: é a mesma ou é outra?',
+    );
+    expect(answerDuplicateResultMessage('other', response({ created: createdFor('d') }))).toBe('1 despesa registrada.');
+  });
+});
+
+describe('a tela: "Confirmar selecionadas" com linhas seguradas', () => {
+  const screen = fs.readFileSync(path.resolve(__dirname, '../../../../app/(main)/openfinance/review.tsx'), 'utf8');
+  const handler = screen.slice(screen.indexOf('const handleConfirm = async'), screen.indexOf('const handleDiscard = async'));
+
+  it('o trecho foi encontrado no código da tela', () => {
+    expect(handler.length).toBeGreaterThan(200);
+  });
+
+  it('os lotes vêm de buildConfirmBatches (que pede para segurar) e o aviso de confirmInBatches (que conta as seguradas à parte)', () => {
+    expect(handler).toContain('const batches = buildConfirmBatches(expenses, selected, chosen);');
+    expect(handler).toContain('const outcome = await confirmInBatches(batches, {');
+    expect(handler).toContain("setNotice({ text: outcome.text, error: outcome.kind === 'failed' });");
+  });
+
+  it('nada é mostrado nem alterado se a sessão mudou; senão a seleção sai e só a categoria das seguradas fica', () => {
+    expect(handler).toContain('const epoch = getSessionEpoch();');
+    expect(handler).toContain('isCurrent: () => getSessionEpoch() === epoch,');
+    expect(handler).toMatch(
+      /if \(outcome\.kind === 'stale'\) return;\s+if \(outcome\.kind === 'done'\) \{\s+setSelected\(new Set\(\)\);\s+setChosen\(\(current\) => chosenOfHeld\(current, outcome\.heldIds\)\);\s+\}/,
+    );
+  });
+
+  it('a lista é recarregada depois, só na mesma sessão: as seguradas voltam marcadas', () => {
+    expect(handler).toMatch(/finally \{\s+if \(getSessionEpoch\(\) === epoch\) \{\s+setBusy\(null\);\s+invalidateEverything\(\);\s+\}\s+\}/);
+    expect(screen).toMatch(/const invalidateEverything = \(\) => \{\s+void queryClient\.invalidateQueries\(\{ queryKey: BANK_REVIEW_KEY \}\);/);
   });
 });
