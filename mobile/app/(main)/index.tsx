@@ -24,9 +24,10 @@ import { LoadingState } from '@/components/LoadingState';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
+import { AppUpdateBanner } from '@/components/AppUpdateBanner';
 import { GroupSwitcher } from '@/components/GroupSwitcher';
 import { spokenBRL } from '@/utils/a11y';
-import { AI_STATUS_NOTICE_TEXT, aiStatusNotice, isAssistantVisible, shouldShowActivationCard } from '@/modules/ai/aiStatus';
+import { aiStatusNoticeView, isAssistantVisible, shouldShowActivationCard } from '@/modules/ai/aiStatus';
 import { openWelcomeIfDue } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
 import { isCaptureConsentAhead } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
@@ -152,7 +153,7 @@ export default function DashboardScreen() {
   const aiStatus = ai.status;
   // Sem status nenhum (nem o guardado no aparelho): o Painel diz o que está acontecendo com a IA, em vez de
   // simplesmente não mostrar nada dela.
-  const aiNotice = aiStatusNotice(aiStatus, ai.loadFailed, ai.retrying);
+  const aiNotice = aiStatusNoticeView(aiStatus, ai.loadFailed, ai.retrying, ai.refresh);
 
   // Assinaturas e recorrências (sem IA, vale para qualquer grupo): o cartão está sempre no Painel — com o total,
   // com o vazio que explica o que vai aparecer, carregando, ou em erro com "tentar de novo". O Painel fica montado
@@ -216,6 +217,8 @@ export default function DashboardScreen() {
 
         <EmailVerificationBanner />
 
+        <AppUpdateBanner />
+
         {/* Enquanto o grupo não ativou a análise com IA (os números do Painel continuam iguais). */}
         {shouldShowActivationCard(aiStatus) && (
           <TouchableOpacity
@@ -231,15 +234,15 @@ export default function DashboardScreen() {
         )}
 
         {/* O status da IA ainda não chegou e não há valor guardado: verificando, tentando de novo ou falhou. */}
-        {aiNotice !== 'none' && (
+        {aiNotice !== null && (
           <View style={styles.aiCard}>
-            <Ionicons name={aiNotice === 'checking' ? 'sparkles-outline' : 'cloud-offline-outline'} size={20} color={colors.textMuted} />
-            <Text style={styles.aiNoticeText} accessibilityLiveRegion="polite">{AI_STATUS_NOTICE_TEXT[aiNotice]}</Text>
-            {aiNotice !== 'checking' && (
+            <Ionicons name={aiNotice.icon} size={20} color={colors.textMuted} />
+            <Text style={styles.aiNoticeText} accessibilityLiveRegion="polite">{aiNotice.text}</Text>
+            {aiNotice.checkNow !== null && (
               <TouchableOpacity
                 accessibilityRole="button"
                 style={styles.aiNoticeBtn}
-                onPress={() => void ai.refresh()}
+                onPress={aiNotice.checkNow}
                 accessibilityLabel="Verificar a análise com IA agora"
               >
                 <Text style={styles.aiCardAction}>Verificar agora</Text>

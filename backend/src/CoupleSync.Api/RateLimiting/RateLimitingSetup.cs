@@ -25,6 +25,7 @@ public static class RateLimitPolicies
     public const string OpenFinanceCredentials = "openfinance-credentials";
     public const string OpenFinanceItems = "openfinance-items";
     public const string OpenFinanceSync = "openfinance-sync";
+    public const string AppVersion = "app-version";
 }
 
 /// <summary>Bound to the <c>RateLimiting</c> configuration section (env: <c>RATELIMITING__AUTH__PERMITLIMIT</c> etc.).</summary>
@@ -51,6 +52,12 @@ public sealed class RateLimitingOptions
     /// numbers, each with a budget of its own.
     /// </summary>
     public FixedWindowSettings OpenFinance { get; set; } = new();
+
+    /// <summary>
+    /// GET /app/version — per client IP. Anonymous and asked by every installed app when it opens (several phones
+    /// may share one address); the answer comes from memory, so the ceiling only stops someone hammering the route.
+    /// </summary>
+    public FixedWindowSettings AppVersion { get; set; } = new() { PermitLimit = 30 };
 }
 
 public sealed class FixedWindowSettings
@@ -118,6 +125,9 @@ public static class RateLimitingSetup
 
             limiter.AddPolicy(RateLimitPolicies.OpenFinanceSync, context =>
                 CreatePartition($"openfinance-sync:{UserOrIpKey(context)}", GetOptions(context).OpenFinance));
+
+            limiter.AddPolicy(RateLimitPolicies.AppVersion, context =>
+                CreatePartition($"app-version:ip:{GetClientIp(context)}", GetOptions(context).AppVersion));
 
             limiter.AddPolicy(RateLimitPolicies.CoupleJoin, context =>
             {

@@ -177,7 +177,9 @@ describe('voltar das abas ocultas (M-I2)', () => {
   });
 
   it('Open Finance: o pedido silencioso ao abrir o app é ligado no layout principal, só com sessão e grupo', () => {
-    expect(layout).toMatch(/useAutoSyncOnOpen\(gate === 'app'\);/);
+    // "appOpen": com sessão e grupo e sem o bloqueio por versão mínima (issue #3), que troca as abas por uma tela.
+    expect(layout).toMatch(/const appOpen = gate === 'app' && !blocked && !update.waitingForMemory;/);
+    expect(layout).toMatch(/useAutoSyncOnOpen\(appOpen\);/);
     const hook = read('../src/modules/openfinance/useAutoSync.ts');
     expect(hook).toMatch(/registerUserDataCleaner\(/);
     expect(hook).toMatch(/getEpoch: getSessionEpoch/);

@@ -24,9 +24,10 @@ public sealed class MigrationTests
         return new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(database.ConnectionString).Options);
     }
 
-    internal static async Task MigrateAsync(TestDatabase database, string? target = null)
+    internal static async Task MigrateAsync(TestDatabase database, string? target = null, TimeSpan? commandTimeout = null)
     {
         await using var db = Context(database);
+        if (commandTimeout is not null) db.Database.SetCommandTimeout(commandTimeout.Value);
         await db.GetService<IMigrator>().MigrateAsync(target);
     }
 
@@ -72,12 +73,14 @@ public sealed class MigrationTests
                 await lockCommand.ExecuteNonQueryAsync();
             }
 
-            var started = DateTime.UtcNow;
-            var failure = await Assert.ThrowsAnyAsync<Exception>(() => MigrateAsync(database));
+            // "Fast" is not measured with this machine's clock (a suspended machine would stretch it): the lock
+            // is held until the migration gives up, and the migration's own lock_timeout has to be what ends the
+            // wait — before the 30 s the client allows each command. Without a short lock_timeout the client
+            // gives up first, and the error is no longer 55P03.
+            var failure = await Assert.ThrowsAnyAsync<Exception>(() => MigrateAsync(database, commandTimeout: TimeSpan.FromSeconds(30)));
             var postgres = failure as Npgsql.PostgresException ?? failure.InnerException as Npgsql.PostgresException;
             Assert.NotNull(postgres);
             Assert.Equal("55P03", postgres!.SqlState); // lock_not_available
-            Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(30));
             await transaction.RollbackAsync();
         }
 

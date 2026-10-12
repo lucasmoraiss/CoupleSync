@@ -52,6 +52,14 @@ jobs:
           cache: 'npm'
           cache-dependency-path: mobile/package-lock.json
 
+      # The app compares its installed versionName (expo.version) with the newest Release tag, so the tag has to be
+      # exactly v<expo.version> of this commit. Runs right after Node is set up (the script needs node), before npm ci and anything that costs a build.
+      - name: Check that the tag matches expo.version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: bash scripts/check-tag-version.sh "${TAG_NAME}" mobile/app.json
+
       - name: Install mobile dependencies
         working-directory: mobile
         run: npm ci

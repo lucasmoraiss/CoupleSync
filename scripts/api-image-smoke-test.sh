@@ -93,6 +93,7 @@ docker run --detach --name "$API" --network "$NETWORK" --publish 127.0.0.1::8080
   --env "DATABASE_URL=Host=$DB;Port=5432;Database=couplesync_smoke;Username=postgres;Password=$DB_PASSWORD" \
   --env "JWT__SECRET=$JWT_SECRET" \
   --env ASPNETCORE_ENVIRONMENT=Production \
+  --env AppUpdate__LatestReleaseUrl= \
   "${EXTRA_ENV[@]}" \
   "$IMAGE" >/dev/null
 PORT="$(docker port "$API" 8080/tcp | head -n 1 | sed 's/.*://')"
@@ -113,6 +114,12 @@ echo "/health/ready -> $ready"
 
 echo "== culture and time-zone data inside the container"
 docker exec "$API" sh -c 'echo "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=$DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"; ls /usr/share/zoneinfo/America/Sao_Paulo; ls /usr/lib | grep -c libicu'
+
+# The installed app asks this signed in or not. The address of the latest release is empty in this run (no call to
+# GitHub from a test): the route still answers 200, "unknown" is null, and nobody is blocked.
+TOKEN=""
+response="$(request GET /api/v1/app/version)"
+expect "app version without a token" 200 "$response" '"latestVersion":null,"minimumVersion":null,"downloadUrl":"https://github.com/lucasmoraiss/CoupleSync/releases/latest/download/couplesync.apk"'
 
 # Accented text travels in the request bodies as JSON \u escapes ("Alimentação" is "Alimentação"):
 # the server receives the same characters, and the bytes sent do not depend on the code page of this shell.

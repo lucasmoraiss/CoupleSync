@@ -13,6 +13,9 @@ import { registerPushToken } from '@/services/pushTokenService';
 // Carregado com o app (e não só ao abrir o wizard): é o módulo que registra a limpeza do progresso ao sair da conta.
 import '@/modules/openfinance/wizardStore';
 import { useAutoSyncOnOpen } from '@/modules/openfinance/useAutoSync';
+import { blocksApp } from '@/modules/appUpdate/appUpdate';
+import { useAppUpdate } from '@/modules/appUpdate/useAppUpdate';
+import { AppUpdateRequiredScreen } from '@/components/AppUpdateRequiredScreen';
 import { colors } from '@/theme';
 
 
@@ -37,6 +40,7 @@ export default function MainLayout() {
   // Muda a cada troca de grupo: todas as telas são remontadas e buscam os dados do grupo novo.
   const groupEpoch = useGroupEpoch((s) => s.epoch);
   const [hydrated, setHydrated] = useState(false);
+  const update = useAppUpdate();
 
   useEffect(() => {
     // Wait one tick after root layout has hydrated the session store
@@ -54,25 +58,41 @@ export default function MainLayout() {
     }
   }, [gate]);
 
+  // Ordem dos portões: sessão e grupo ativo primeiro (os dois saem desta área na hora, sem montar aba), depois a
+  // versão mínima. O app nunca espera a rede para abrir: o aparelho lembra a última resposta do servidor
+  // (rememberedAnswerStore.ts), e quem já se soube bloqueado abre direto no bloqueio. Só a leitura dessa lembrança
+  // (local) é esperada, com o indicador abaixo. Bloqueado ou esperando, nenhuma aba é montada (e com elas as
+  // perguntas da IA e do Open Finance, que moram no Painel) e o que este layout dispara sozinho fica parado.
+  // Se o bloqueio é descoberto com o app aberto (resposta nova do servidor), a tela de bloqueio troca as abas.
+  const blocked = gate === 'app' && blocksApp(update);
+  const appOpen = gate === 'app' && !blocked && !update.waitingForMemory;
+
   // Captura de notificações só com o aceite do usuário (consentimento por usuário; ver useCaptureConsentSync).
-  useCaptureConsentSync();
+  // Sob o bloqueio a tela de consentimento não tem onde abrir: a pergunta (que só é feita uma vez) fica para depois.
+  useCaptureConsentSync(!blocked && !update.waitingForMemory);
 
   // Open Finance: ao abrir o app, pede em silêncio a sincronização da minha conexão se a última tem mais de 6 horas.
-  useAutoSyncOnOpen(gate === 'app');
+  useAutoSyncOnOpen(appOpen);
 
   // AC-007: Register FCM device token once authenticated
   useEffect(() => {
-    if (gate === 'app') {
+    if (appOpen) {
       registerPushToken();
     }
-  }, [gate]);
+  }, [appOpen]);
 
-  if (gate !== 'app') {
+  if (gate !== 'app' || update.waitingForMemory) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator />
       </View>
     );
+  }
+
+  // Versão instalada abaixo da mínima aceita: a tela de bloqueio entra no lugar das abas. Nenhuma aba é montada,
+  // então nenhuma consulta de dados do grupo sai enquanto o bloqueio vale.
+  if (blocked) {
+    return <AppUpdateRequiredScreen update={update} />;
   }
 
   return (
