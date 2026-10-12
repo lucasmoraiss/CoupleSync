@@ -144,6 +144,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           sparse-checkout: scripts
+          persist-credentials: false
 
       - name: Download APK artifact
         uses: actions/download-artifact@v4
@@ -153,8 +154,11 @@ jobs:
       # What to do depends on the Release of this tag (scripts/release-action.sh):
       #   criar     -> does not exist: created together with the asset, as the latest.
       #   nada      -> published with couplesync.apk uploaded: untouched (a re-run must not take the fixed link down).
-      #   completar -> left as a draft or without the file: sends what is missing and publishes it. Which Release is
-      #                the "latest" is the owner's decision, so --latest is not passed here.
+      #   completar -> the first run of this tag died halfway (draft, or no file): sends what is missing and publishes it
+      #                as the latest, the same end state as a first run that succeeds (--draft=false --latest).
+      # In every path the step then READS from GitHub which Release is the latest and writes that fact in the summary.
+      # criar/completar fail if it is not this tag (or cannot be read); nada only reports it, because the owner may
+      # have chosen another Release as the latest on purpose.
       - name: Create or complete the Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -171,11 +175,8 @@ jobs:
               echo "::error::Could not read the Release ${TAG}. Nothing was changed."
               exit 1
             fi
-            # A draft is not found by tag: look for it in the list before deciding that there is none.
-            gh release list --limit 100 --json tagName,isDraft > "${RUNNER_TEMP}/release-list.json"
-            if node -e "const l = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); process.exit(l.some(r => r.tagName === process.env.TAG && r.isDraft === true) ? 0 : 1)" "${RUNNER_TEMP}/release-list.json"; then
-              echo '{"isDraft":true,"assets":[]}' > "${VIEW}"
-            fi
+            # `gh release view <tag>` also finds a draft, so "not found" means there is no Release for the tag. If one
+            # exists anyway, `gh release create` below fails closed because the Release already exists.
           fi
 
           ACTION=$(bash scripts/release-action.sh "${VIEW}")
@@ -198,8 +199,8 @@ jobs:
               if [ "${NEEDS_FILE}" = "sim" ]; then
                 gh release upload "${TAG}" couplesync.apk --clobber
               fi
-              gh release edit "${TAG}" --draft=false
-              RESULT="Release que estava incompleta foi completada e publicada (a escolha da mais recente nao foi alterada)."
+              gh release edit "${TAG}" --draft=false --latest
+              RESULT="Release que estava incompleta foi completada e publicada como a mais recente."
               ;;
             *)
               echo "::error::Unexpected decision '${ACTION}'."
@@ -207,10 +208,35 @@ jobs:
               ;;
           esac
 
+          # What GitHub says is the latest Release now (read, not assumed).
+          LATEST_OK=1
+          LATEST=$(gh api "repos/${GH_REPO}/releases/latest" --jq .tag_name) || LATEST_OK=0
+          if [ "${LATEST_OK}" = "1" ]; then
+            LATEST_FACT="Release mais recente no GitHub: ${LATEST}."
+          else
+            LATEST_FACT="Nao foi possivel ler qual e a Release mais recente no GitHub."
+          fi
+
           {
             echo "## APK publicado"
             echo ""
             echo "- ${RESULT}"
+            echo "- ${LATEST_FACT}"
             echo "- Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
             echo "- Link fixo (sempre o mais novo): ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/latest/download/couplesync.apk"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${ACTION}" != "nada" ]; then
+            if [ "${LATEST_OK}" != "1" ]; then
+              echo "::error::Release ${TAG} publicada, mas nao foi possivel ler qual e a mais recente. Confira em ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases."
+              exit 1
+            fi
+            if [ "${LATEST}" != "${TAG}" ]; then
+              echo "::error::Release ${TAG} publicada, mas a mais recente no GitHub e '${LATEST}'. O link fixo e o aviso de atualizacao nao apontam para ${TAG}."
+              exit 1
+            fi
+          elif [ "${LATEST_OK}" != "1" ]; then
+            echo "::warning::Nao foi possivel ler qual e a Release mais recente."
+          elif [ "${LATEST}" != "${TAG}" ]; then
+            echo "::warning::A Release ${TAG} ja estava publicada; a mais recente no GitHub e '${LATEST}'. Nada foi alterado."
+          fi
