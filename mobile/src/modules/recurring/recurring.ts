@@ -71,10 +71,10 @@ export function recurringCardLabel(list: CardList): string {
 
 /**
  * Possível recorrência: o servidor achou um padrão sem prova (confiança baixa), não é parcela, e a pessoa ainda não
- * disse que é recorrente. Fica na seção própria e fora do total.
+ * disse nada sobre o item (com qualquer resposta dada ele sai da pergunta). Fica na seção própria e fora do total.
  */
 export function isPossibleItem(item: RecurringItemResponse): boolean {
-  return item.confidence === 'Low' && item.kind !== 'Installment' && item.override !== 'Subscription' && item.override !== 'FixedBill';
+  return item.confidence === 'Low' && item.kind !== 'Installment' && (item.override ?? null) === null;
 }
 
 /** Há possíveis e nada confirmado (nem assinatura, nem conta fixa, nem parcelamento): o total zerado pede explicação. */

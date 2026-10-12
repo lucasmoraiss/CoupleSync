@@ -231,6 +231,9 @@ describe('possíveis recorrências (padrão sem prova: fora do total, à espera 
     expect(isPossibleItem(possible({ kind: 'Installment' }))).toBe(false);
     expect(isPossibleItem(possible({ override: 'Subscription' }))).toBe(false);
     expect(isPossibleItem(possible({ override: 'FixedBill' }))).toBe(false);
+    // Com qualquer resposta já dada (está em Ocultas), o item deixa de ser pergunta em aberto.
+    expect(isPossibleItem(possible({ override: 'NotRecurring' }))).toBe(false);
+    expect(isPossibleItem(possible({ override: 'Cancelled' }))).toBe(false);
     expect(isPossibleItem(item())).toBe(false);
     expect(isPossibleItem(item({ confidence: undefined }))).toBe(false);
   });
@@ -246,6 +249,14 @@ describe('possíveis recorrências (padrão sem prova: fora do total, à espera 
       { override: 'NotRecurring', label: 'Não é', spoken: 'Não, não é recorrente' },
     ]);
     expect(itemActions(possible({ kind: 'FixedBill' })).map((a) => a.override)).toEqual(['FixedBill', 'NotRecurring']);
+  });
+
+  it('a possível que a pessoa já disse que não é (está em Ocultas) pode ser desfeita, como qualquer correção', () => {
+    const answered = possible({ override: 'NotRecurring' });
+    expect(itemActions(answered)[0]).toEqual({ override: null, label: 'Desfazer a correção' });
+    expect(itemActions(answered).map((a) => a.override)).not.toContain('NotRecurring');
+    expect(itemBadges(answered)).toEqual(['marcada como não recorrente']);
+    expect(itemLabel(answered)).toBe('Loja Exemplo, 39 reais e 90 centavos por mês. marcada como não recorrente. Ver cobranças e opções');
   });
 
   it('o rótulo acessível da linha diz que é possível e que está fora do total', () => {
