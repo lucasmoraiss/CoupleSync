@@ -218,6 +218,13 @@ public sealed class SyncConnectionService
         if (items.Count == 0)
             throw new SyncStoppedException(NoBankCode, NoBankMessage);
 
+        // Before anything is asked of the bank: every line of the group that waits, in every account, is judged as a
+        // suspected duplicate against what the app has now. The accounts this run will not read (synchronisation
+        // turned off, a bank asking for the login again, another connection of the group, also a disconnected one)
+        // are judged only here; and a run that fails further on has judged all the same.
+        Task<bool> JudgeGroupAsync(CancellationToken token) => _preclassification.JudgeWaitingOfGroupAsync(connection.CoupleId, token);
+        if (await JudgeGroupAsync(ct)) await SaveAsync(connection, ct, JudgeGroupAsync);
+
         var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret, connection.ClientSecretEncrypted!);
         var window = SyncWindow.For(connection, _clock.UtcNow);
         var ai = new AiBudget(run.AiCategorizationConsent ? MaxAiSuggestionsPerRun : 0, AiTimeBudget);

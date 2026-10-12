@@ -77,6 +77,16 @@ public interface IBankSyncRepository
     /// </summary>
     Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct);
 
+    /// <summary>
+    /// The same as <see cref="GetWaitingOpenToRulesForJobAsync"/>, for every account of the group
+    /// <paramref name="coupleId"/>: also the accounts no run reads (synchronisation turned off, a connection
+    /// disconnected or whose bank asks for the login again, another connection of the group).
+    /// </summary>
+    Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesOfGroupForJobAsync(Guid coupleId, CancellationToken ct);
+
+    /// <summary>For the job: account id → the name of its bank, for every account of the group.</summary>
+    Task<IReadOnlyDictionary<Guid, string>> GetConnectorNamesForJobAsync(Guid coupleId, CancellationToken ct);
+
     /// <summary>For the job, tracked: the lines of the group <paramref name="coupleId"/> with these ids.</summary>
     Task<IReadOnlyList<BankTransaction>> FindByIdsForJobAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct);
 
@@ -178,7 +188,8 @@ public sealed record WaitingBankLine(
     decimal Amount,
     BankTransactionType Type,
     string Currency,
-    Guid? MatchedTransactionId);
+    Guid? MatchedTransactionId,
+    Guid BankAccountId);
 
 public sealed record PendingBankExpense(DateOnly Day, BankTransactionStatus Status, decimal Amount, string Currency);
 

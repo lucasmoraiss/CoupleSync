@@ -2727,4 +2727,201 @@ public sealed class OpenFinanceReconciliationTests
         Assert.Empty(Held(body));
         Assert.Equal(3, await TransactionCountAsync(factory));
     }
+
+    // ================================================================ every run judges the whole group first (review 13)
+
+    [Theory]
+    [InlineData("syncOff")] // the account is no longer read; the card of the same bank is
+    [InlineData("loginError")] // the bank asks for the login again: the run fails, and has judged before failing
+    public async Task ProbeF_ALineOfAnAccountTheRunDoesNotRead_IsMarkedAtTheStartOfTheRun_BeforeAnyoneConfirms(string how)
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        Bank(factory, Checking, Debit("t26-old", Noon(), 25.00m), Debit("t26-other", Noon().AddHours(1), 40.00m));
+        await DoneAsync(factory, ana, connection);
+        await StopReadingTheCheckingAccountAsync(factory, ana, connection, how);
+        var typed = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        var windowsAsked = factory.Pluggy.WindowsAsked(Checking).Count;
+
+        var run = await SyncAsync(factory, ana, connection);
+
+        Assert.Equal(how == "loginError" ? "Failed" : "Done", run["status"]);
+        Assert.Equal(windowsAsked, factory.Pluggy.WindowsAsked(Checking).Count); // the account was not read
+        Assert.Equal(("Pending", null, Sql(typed)), await StateAsync(factory, "t26-old"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-other"));
+        Assert.Equal(new[] { await LineIdAsync(factory, "t26-other") }, await SelectAllOfAsync(factory, ana, "t26-old", "t26-other"));
+    }
+
+    [Theory]
+    [InlineData("disconnected")]
+    [InlineData("loginError")]
+    public async Task ProbeF_ALineOfAConnectionThatNoLongerRuns_IsMarkedByTheRunOfAnotherConnectionOfTheGroup_NeverByATransactionOfAnotherGroup(string how)
+    {
+        await using var factory = NewFactory();
+        var (ana, anaConnection) = await AnaAsync(factory);
+        var (bruno, brunoConnection) = await WithOtherBankAsync(factory, "Bruno Silva", ana.JoinCode);
+        var carla = await factory.RegisterAsync("Carla Modelo");
+        Bank(factory, Checking,
+            Debit("t26-old", Noon(), 25.00m),
+            Debit("t26-restored", Noon(), 70.00m),
+            Debit("t26-bill", Noon(), 300.00m),
+            Debit("t26-forty", Noon(), 40.00m));
+        await DoneAsync(factory, ana, anaConnection);
+        // What only the person may decide about, and what the rules of ignoring never touch after the fact.
+        var restored = await LineIdAsync(factory, "t26-restored");
+        await OkAsync(ConfirmAsync(ana, new { discard = new[] { restored } }));
+        await OkAsync(ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { restored }));
+        await factory.ExecuteAsync("UPDATE bank_transactions SET description_raw = 'PAGAMENTO DE FATURA' WHERE pluggy_transaction_id = 't26-bill'");
+        await StopReadingTheCheckingAccountAsync(factory, ana, anaConnection, how);
+        var typed = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        await ManualAsync(ana, 70.00m, Noon(), "Igual à restaurada");
+        // The same value on the same day, typed in another group: nobody's here.
+        await ManualAsync(carla, 40.00m, Noon(), "De outro grupo");
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-old"));
+        var asked = factory.Pluggy.WindowsAsked(Checking).Count;
+
+        // Bruno's bank is read; nothing of Ana's is.
+        await DoneAsync(factory, bruno, brunoConnection);
+
+        Assert.Equal(asked, factory.Pluggy.WindowsAsked(Checking).Count);
+        Assert.Equal(("Pending", null, Sql(typed)), await StateAsync(factory, "t26-old"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-restored"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-bill"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-forty"));
+        Assert.Empty(await SelectAllOfAsync(factory, bruno, "t26-old"));
+    }
+
+    [Fact]
+    public async Task TheJudgementOfTheGroupAtTheStartOfARun_ClearsTheMarkThatNoLongerHolds_AndTouchesNothingAlreadyDecided()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var typed = await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        var lunch = await ManualAsync(ana, 30.00m, Noon(), "Almoço");
+        Bank(factory, Checking,
+            Debit("t26-padaria", Noon(), 25.00m),
+            Debit("t26-lunch", Noon(), 30.00m),
+            Debit("t26-confirmed", Noon(), 80.00m),
+            Debit("t26-discarded", Noon(), 81.00m));
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(typed)), await StateAsync(factory, "t26-padaria"));
+        await OkAsync(ConfirmAsync(ana, new
+        {
+            reconcile = new[] { new { id = await LineIdAsync(factory, "t26-lunch") } },
+            expenses = new[] { new { id = await LineIdAsync(factory, "t26-confirmed") } },
+            discard = new[] { await LineIdAsync(factory, "t26-discarded") },
+        }));
+        await StopReadingTheCheckingAccountAsync(factory, ana, connection, "syncOff");
+        // The purchase typed by hand is corrected: nothing looks like the line any more. And transactions that look
+        // like the lines already decided are typed.
+        var edited = await ana.Client.PatchAsJsonAsync($"/api/v1/transactions/{typed}", new { amount = 27.00m });
+        Assert.True(edited.IsSuccessStatusCode, await edited.Content.ReadAsStringAsync());
+        await ManualAsync(ana, 80.00m, Noon(), "Igual à confirmada");
+        await ManualAsync(ana, 81.00m, Noon(), "Igual à descartada");
+        const string decided = "SELECT pluggy_transaction_id, review_state, linked_transaction_id, matched_transaction_id, auto_reason, reviewed_at_utc, person_decided_at_utc FROM bank_transactions WHERE review_state <> 'Pending' ORDER BY pluggy_transaction_id";
+        var before = (await factory.RowsAsync(decided)).Select(r => string.Join("|", r.Values)).ToList();
+        Assert.Equal(3, before.Count);
+
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-padaria"));
+        Assert.Equal(before, (await factory.RowsAsync(decided)).Select(r => string.Join("|", r.Values)).ToList());
+        Assert.Equal(("Reconciled", null, null), await StateAsync(factory, "t26-lunch"));
+    }
+
+    [Fact]
+    public async Task ALineOfAnAccountNotRead_AnsweredWhileTheRunSavesTheJudgementOfTheGroup_KeepsTheAnswer_TheOthersAreJudgedAgain_AndTheRunEndsWell()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        var bruno = await factory.RegisterAsync("Bruno Silva", ana.JoinCode);
+        Bank(factory, Checking, Debit("t26-answered", Noon(), 25.00m), Debit("t26-waiting", Noon(), 30.00m));
+        await DoneAsync(factory, ana, connection);
+        await StopReadingTheCheckingAccountAsync(factory, ana, connection, "syncOff");
+        await ManualAsync(ana, 25.00m, Noon(), "Padaria");
+        var lunch = await ManualAsync(ana, 30.00m, Noon(), "Almoço");
+        var answered = await LineIdAsync(factory, "t26-answered");
+        var run = await EnqueueAsync(factory, ana, connection);
+        // The first save of the run only says it started. The next one stores the judgement of the group: right
+        // before it, someone discards one of the lines it marked.
+        var happened = 0;
+        Func<Task> meanwhile = null!;
+        meanwhile = async () =>
+        {
+            var status = (string)Assert.Single(await factory.RowsAsync($"SELECT status FROM sync_runs WHERE id = '{Sql(run)}'"))["status"]!;
+            if (status != "Running")
+            {
+                factory.BeforeNextSave = meanwhile;
+                return;
+            }
+
+            happened++;
+            var discarded = await ConfirmAsync(bruno, new { discard = new[] { answered } });
+            Assert.True(HttpStatusCode.OK == discarded.StatusCode, await discarded.Content.ReadAsStringAsync());
+        };
+        factory.BeforeNextSave = meanwhile;
+
+        Assert.Equal("Done", (await WaitForRunAsync(factory, run))["status"]);
+
+        Assert.Equal(1, happened);
+        Assert.Equal(("Discarded", null, null), await StateAsync(factory, "t26-answered"));
+        Assert.Equal(("Pending", null, Sql(lunch)), await StateAsync(factory, "t26-waiting"));
+    }
+
+    // ================================================================ review 13, missing test 2: the run refused for a line it did not read from the bank
+
+    [Theory]
+    [InlineData("discard")]
+    [InlineData("asNew")]
+    public async Task E2_ALineTheRunDidNotReadFromTheBank_AnsweredWhileTheRunSaves_KeepsTheAnswer_TheRunEndsWell_AndNoMarkIsWrong(string answer)
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana Exemplo Souza");
+        var bruno = await factory.RegisterAsync("Bruno Silva", ana.JoinCode);
+        var connection = await ConnectWithBankAsync(ana, historyMonths: 12);
+        // Two lines of two months ago (the next readings ask the bank for the last days only) and a recent one.
+        var twoMonthsAgo = Today.AddDays(-60).AddHours(15);
+        Bank(factory, Checking,
+            Debit("t26-old-answered", twoMonthsAgo, 46.00m),
+            Debit("t26-old-waiting", twoMonthsAgo.AddHours(1), 47.00m),
+            Debit("t26-recent", Noon(), 45.00m));
+        await DoneAsync(factory, ana, connection);
+        var answered = await LineIdAsync(factory, "t26-old-answered");
+        Guid typedForTheOther = default;
+        // While the run reads the account (after it judged the group at its start), the purchases are typed by
+        // hand: the reading of the account is what finds them. Right before it saves, the person answers one line.
+        var happened = BeforeTheRunSaves(factory, Checking, async () =>
+        {
+            var reviewed = await ConfirmAsync(bruno, answer == "discard" ? new { discard = new[] { answered } } : new { asNew = new[] { answered } });
+            Assert.True(HttpStatusCode.OK == reviewed.StatusCode, await reviewed.Content.ReadAsStringAsync());
+        });
+        var arm = factory.Pluggy.BeforeAnswer!;
+        var typedOnce = 0;
+        factory.Pluggy.BeforeAnswer = async request =>
+        {
+            if (request.Path == "/transactions" && request.Query.Contains(Checking, StringComparison.Ordinal)
+                && Interlocked.Exchange(ref typedOnce, 1) == 0)
+            {
+                await ManualAsync(ana, 46.00m, twoMonthsAgo, "Antiga, digitada durante a run");
+                typedForTheOther = await ManualAsync(ana, 47.00m, twoMonthsAgo, "Outra antiga, digitada durante a run");
+            }
+
+            await arm(request);
+        };
+
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(1, happened.Value);
+        var asked = factory.Pluggy.WindowsAsked(Checking)[^1];
+        Assert.True(string.CompareOrdinal(asked.From, Day(twoMonthsAgo)) > 0, $"asked from {asked.From}");
+        // The answer of the person is whole: the run wrote nothing over it.
+        var row = await MirrorRowAsync(factory, "t26-old-answered");
+        Assert.Equal(answer == "discard" ? "Discarded" : "Confirmed", row["review_state"]);
+        Assert.Null(row["matched_transaction_id"]);
+        Assert.Equal(answer == "asNew", row["linked_transaction_id"] is not null);
+        // The line nobody touched was judged again over what is stored now, and marked.
+        Assert.Equal(("Pending", null, Sql(typedForTheOther)), await StateAsync(factory, "t26-old-waiting"));
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-recent"));
+        Assert.Equal(answer == "asNew" ? 3 : 2, await TransactionCountAsync(factory));
+    }
 }

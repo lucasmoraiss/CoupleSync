@@ -19,9 +19,12 @@ namespace CoupleSync.Application.OpenFinance;
 /// lines together with what made them be judged (the deletion saves them right after itself).
 /// </para>
 /// <para>
-/// A transaction typed, captured, imported or edited after the line arrived does not ask it: the line is judged at
-/// the next synchronisation of its account, which asks it of every line of the account that already waited and
-/// that no person brought back to the review. The ones a person brought back wait as they are.
+/// A transaction typed, captured, imported or edited after the line arrived does not ask it. Two things do, later:
+/// every synchronisation of a connection of the group asks it, before reading the bank, of every line of the group
+/// that already waited and that no person brought back to the review (and again of the lines of each account it
+/// reads); and confirming a line as an ordinary expense asks it of that line at that moment, whoever brought it to
+/// the review (<see cref="BankReviewService.ConfirmAsync"/>): the line that looks like a transaction of the app is
+/// held, not confirmed.
 /// </para>
 /// </summary>
 public static class BankSuspicionJudge

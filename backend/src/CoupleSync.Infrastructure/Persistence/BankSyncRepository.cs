@@ -145,19 +145,37 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .ThenBy(t => t.PluggyTransactionId, StringComparer.Ordinal)
             .ToList();
 
-    public async Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct)
-        // A few narrow columns: never what Pluggy sent for each line (raw_json), however many months wait.
-        => await _dbContext.BankTransactions
+    public Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct)
+        => GetWaitingOpenToRulesAsync(coupleId, bankAccountId, ct);
+
+    public Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesOfGroupForJobAsync(Guid coupleId, CancellationToken ct)
+        => GetWaitingOpenToRulesAsync(coupleId, bankAccountId: null, ct);
+
+    private async Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesAsync(Guid coupleId, Guid? bankAccountId, CancellationToken ct)
+    {
+        var waiting = _dbContext.BankTransactions
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(t => t.CoupleId == coupleId
-                        && t.BankAccountId == bankAccountId
                         && t.ReviewState == BankTransactionReviewState.Pending
                         && t.PersonDecidedAtUtc == null
-                        && (t.Type == BankTransactionType.Debit || t.MatchedTransactionId != null))
+                        && (t.Type == BankTransactionType.Debit || t.MatchedTransactionId != null));
+        if (bankAccountId is { } account) waiting = waiting.Where(t => t.BankAccountId == account);
+
+        // A few narrow columns: never what Pluggy sent for each line (raw_json), however many months wait.
+        return await waiting
             .Select(t => new WaitingBankLine(
-                t.Id, t.PluggyTransactionId, t.Date, t.LocalDate, t.Amount, t.Type, t.Currency, t.MatchedTransactionId))
+                t.Id, t.PluggyTransactionId, t.Date, t.LocalDate, t.Amount, t.Type, t.Currency, t.MatchedTransactionId, t.BankAccountId))
             .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, string>> GetConnectorNamesForJobAsync(Guid coupleId, CancellationToken ct)
+        => await (
+                from account in _dbContext.BankAccounts.IgnoreQueryFilters().AsNoTracking()
+                join item in _dbContext.BankItems on account.ItemId equals item.Id
+                where account.CoupleId == coupleId && item.CoupleId == coupleId
+                select new { account.Id, item.ConnectorName })
+            .ToDictionaryAsync(a => a.Id, a => a.ConnectorName, ct);
 
     public async Task<IReadOnlyList<BankTransaction>> FindByIdsForJobAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct)
     {

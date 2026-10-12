@@ -1169,4 +1169,55 @@ public sealed class OpenFinanceReconciliationPostgresTests
             Assert.Equal(1, await database.ScalarAsync<long>($"SELECT count(*) FROM bank_transactions WHERE linked_transaction_id = '{existing[i]}'"));
         }
     }
+
+    // ---------------------------------------------------------------- every run judges the whole group first (review 13)
+
+    [PostgresFact]
+    public async Task ARun_JudgesFirstEveryWaitingLineOfTheGroup_AlsoOfTheAccountsItDoesNotRead_ByTheDayInBrazil_OnlyOfTheGroup_NeverTheOnesOfThePerson()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyPluggy();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana Exemplo Souza");
+        var bruno = await OpenFinanceTests.RegisterAsync(factory, host, "Bruno Silva", ana.JoinCode);
+        var carla = await OpenFinanceTests.RegisterAsync(factory, host, "Carla Modelo");
+        var anaConnection = await ConnectWithBankAsync(ana);
+        var day = Today.AddDays(-10);
+        pluggy.Transactions[Checking] =
+        [
+            // 20:00 in Brasília of the day (23:00 UTC of the same date).
+            Debit("t26-evening", day.AddHours(23), 28.00m),
+            // 23:00 in Brasília of the day BEFORE (02:00 UTC of the day).
+            Debit("t26-night-before", day.AddHours(2), 29.00m),
+            Debit("t26-restored", day.AddHours(15), 27.00m),
+            Debit("t26-forty", day.AddHours(15), 40.00m),
+        ];
+        pluggy.Transactions[Card] = [Debit("t26-card", day.AddHours(15), 31.00m)];
+        Assert.Equal("Done", (await SyncAsync(ana, anaConnection)).GetProperty("status").GetString());
+        var restored = await LineAsync(database, "t26-restored");
+        await OkAsync(ana, new { discard = new[] { restored } });
+        (await ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { restored })).EnsureSuccessStatusCode();
+        // The checking account is no longer read; the card is.
+        var checkingAccount = await database.ScalarAsync<Guid>("SELECT id FROM bank_accounts WHERE pluggy_account_id = @id", ("id", Checking));
+        var off = await ana.Client.PatchAsJsonAsync($"{Base}/accounts/{checkingAccount}", new { syncEnabled = false });
+        Assert.True(HttpStatusCode.OK == off.StatusCode, await off.Content.ReadAsStringAsync());
+        // Typed after. 22:00 in Brasília of the NEXT day: one day apart in Brazil, two dates apart in UTC.
+        var typedNextEvening = await ManualAsync(bruno, 28.00m, day.AddDays(2).AddHours(1), "No dia seguinte, à noite");
+        // Noon of the next day: two days after the line of the night before in Brazil, one date apart in UTC.
+        await ManualAsync(ana, 29.00m, day.AddDays(1).AddHours(15), "Dois dias depois");
+        await ManualAsync(ana, 27.00m, day.AddHours(15), "Igual à restaurada");
+        await ManualAsync(carla, 40.00m, day.AddHours(15), "De outro grupo");
+        var typedCard = await ManualAsync(ana, 31.00m, day.AddHours(15), "No cartão");
+        var asked = pluggy.WindowsAsked(Checking).Count;
+
+        await DoneAsync(database, ana, anaConnection);
+
+        Assert.Equal(asked, pluggy.WindowsAsked(Checking).Count);
+        Assert.Equal(("Pending", null, typedNextEvening), await StateAsync(database, "t26-evening"));
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-night-before"));
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-restored"));
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-forty"));
+        Assert.Equal(("Pending", null, typedCard), await StateAsync(database, "t26-card"));
+    }
 }

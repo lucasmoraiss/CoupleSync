@@ -117,6 +117,45 @@ public sealed class BankPreclassificationService
             if (waiting.TryGetValue(line.Id, out var row)) BankSuspicionJudge.Apply(row, suspect, now);
     }
 
+    /// <summary>
+    /// Judges, as suspected duplicates only, every line of the group <paramref name="coupleId"/> that waits for the
+    /// review and is still open to the automatic rules, in every account: also the ones no run reads any more
+    /// (synchronisation turned off, a connection disconnected or whose bank asks for the login again). Nothing is
+    /// asked of the bank and nothing is ignored here (rules 1 to 3 are for what arrives); a line a person brought
+    /// back to the review is left as it is. The lines are judged as the store has them and only the ones whose
+    /// suspicion changes are read whole. Answers whether any changed (the caller saves).
+    /// </summary>
+    public async Task<bool> JudgeWaitingOfGroupAsync(Guid coupleId, CancellationToken ct)
+    {
+        var stored = await _sync.GetWaitingOpenToRulesOfGroupForJobAsync(coupleId, ct);
+        if (stored.Count == 0) return false;
+
+        var connectors = await _sync.GetConnectorNamesForJobAsync(coupleId, ct);
+        var answers = await BankSuspicionJudge.AnswerAsync(
+            _sync,
+            coupleId,
+            stored.Select(l => JudgedLine.Of(l, l.BankAccountId, connectors.GetValueOrDefault(l.BankAccountId))),
+            leavingLineIds: [],
+            takenTransactionIds: [],
+            ct);
+
+        var changed = answers
+            .Where(a => a.Suspect != a.Line.MatchedTransactionId)
+            .ToDictionary(a => a.Line.Id, a => a.Suspect);
+        if (changed.Count == 0) return false;
+
+        var now = _clock.UtcNow;
+        var any = false;
+        foreach (var row in await _sync.FindByIdsForJobAsync(changed.Keys.ToList(), coupleId, ct))
+        {
+            if (!row.OpenToAutomaticRules) continue;
+            BankSuspicionJudge.Apply(row, changed[row.Id], now);
+            any = true;
+        }
+
+        return any;
+    }
+
     /// <summary>Rules 1 to 3, over the lines the bank has settled: what it has not may still change or vanish.</summary>
     private async Task IgnoreWhatIsNoExpenseNorIncomeAsync(
         Guid coupleId, BankAccount account, IReadOnlyList<ArrivedBankLine> open, DateTime now, CancellationToken ct)
