@@ -231,6 +231,84 @@ public sealed class GroqSecondProviderTests : IDisposable
         Assert.Equal(2, _kit.Rows().Count(r => r.Provider == Groq && r.Outcome == "RateLimitedMinute"));
     }
 
+    // ---------------------------------------------------------------- a request bigger than the minute of the link
+
+    /// <summary>A request whose estimate (system prompt + messages + room for the answer) is exactly <paramref name="tokens"/>.</summary>
+    private static LlmRequest RequestEstimatedAt(int tokens, string feature = LlmFeatures.Chat)
+    {
+        var length = 1;
+        while (true)
+        {
+            var request = LlmGatewayTestKit.Request(feature, new string('a', length));
+            var estimate = PromptText.EstimateTokens(request);
+            if (estimate == tokens) return request;
+            Assert.True(estimate < tokens, $"no question length gives exactly {tokens} tokens");
+            length++;
+        }
+    }
+
+    // 90% of the 8,000 tokens per minute that Groq publishes (AiOptions.Usable).
+    private const int GroqUsablePerMinute = 7_200;
+
+    private Task<LlmGatewayResult<TestAnswer>> AskWith(LlmRequest request, LlmCallMode mode = LlmCallMode.Interactive)
+        => _kit.Gateway().GenerateAsync<TestAnswer>(_couple, request, mode, CancellationToken.None);
+
+    [Fact]
+    public async Task ARequestOverNinetyPercentOfTheMinuteOfGroq_SkipsTheGroqLink_NothingIsSentAndNothingIsRecorded()
+    {
+        var gemini = new ScriptedProvider(Gemini, "gemini-flash-latest", ScriptedProvider.Result(LlmOutcome.Error));
+        var groq = new ScriptedProvider(Groq, GroqModel);
+        _kit.Chain(AiChains.Assistant, gemini, groq);
+
+        var result = await AskWith(RequestEstimatedAt(GroqUsablePerMinute + 1));
+
+        Assert.Equal(LlmGatewayOutcome.AllProvidersFailed, result.Outcome);
+        Assert.Equal((1, 0), (gemini.Calls, groq.Calls));
+        Assert.DoesNotContain(_kit.Rows(), r => r.Provider == Groq);
+        Assert.Empty(_kit.Waits);
+    }
+
+    [Fact]
+    public async Task ARequestOverNinetyPercentOfTheMinuteOfGroq_InAJob_SkipsTheLinkWithoutWaiting()
+    {
+        var gemini = new ScriptedProvider(Gemini, "gemini-flash-latest", ScriptedProvider.Result(LlmOutcome.Error));
+        var groq = new ScriptedProvider(Groq, GroqModel);
+        _kit.Chain(AiChains.Weekly, gemini, groq);
+
+        var result = await AskWith(RequestEstimatedAt(GroqUsablePerMinute + 1, LlmFeatures.InsightWeekly), LlmCallMode.Job);
+
+        Assert.Equal(LlmGatewayOutcome.AllProvidersFailed, result.Outcome);
+        Assert.Equal((1, 0), (gemini.Calls, groq.Calls));
+        Assert.Empty(_kit.Waits);
+        Assert.DoesNotContain(_kit.Rows(), r => r.Provider == Groq);
+    }
+
+    [Fact]
+    public async Task ARequestExactlyAtNinetyPercentOfTheMinuteOfGroq_StillGoesToGroq()
+    {
+        var groq = new ScriptedProvider(Groq, GroqModel);
+        _kit.Chain(AiChains.Assistant, groq);
+
+        var result = await AskWith(RequestEstimatedAt(GroqUsablePerMinute));
+
+        Assert.Equal((LlmGatewayOutcome.Ok, Groq), (result.Outcome, result.Provider));
+        Assert.Equal(1, groq.Calls);
+    }
+
+    [Fact]
+    public async Task ABigRequest_GoesOnToALinkWithoutATokensPerMinuteLimit()
+    {
+        var gemini = new ScriptedProvider(Gemini, "gemini-flash-latest");
+        var groq = new ScriptedProvider(Groq, GroqModel);
+        _kit.Chain(AiChains.Assistant, gemini, groq);
+        Assert.Null(_kit.Options.LimitFor(Gemini, "gemini-flash-latest").Tpm);
+
+        var result = await AskWith(RequestEstimatedAt(30_000));
+
+        Assert.Equal((LlmGatewayOutcome.Ok, Gemini), (result.Outcome, result.Provider));
+        Assert.Equal((1, 0), (gemini.Calls, groq.Calls));
+    }
+
     [Fact]
     public async Task TheBudgetOfTheGroup_CountsTheCallsOfBothProvidersTogether()
     {
