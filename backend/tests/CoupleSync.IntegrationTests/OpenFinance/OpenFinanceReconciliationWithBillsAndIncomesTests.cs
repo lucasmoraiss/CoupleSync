@@ -177,12 +177,16 @@ public sealed class OpenFinanceReconciliationWithBillsAndIncomesTests
         var (ana, connection) = await AnaAsync(factory);
         var typed = await ManualAsync(ana, 1500.25m, Noon(), "Cartão");
         var due = DateOnly.FromDateTime(Noon(3));
-        factory.Pluggy.Bills[Card] = [new FakeBill("bill-2627", due, 1500.25m) { ClosingDate = due.AddDays(-7) }];
         Bank(factory, Checking, Debit("t2627-pays", Noon(), 1500.25m, "Débito automático"));
 
+        // No bill yet (the order the accounts of a bank are read in is not fixed, so the bill comes in a run of its
+        // own): the debit looks like the transaction of the app and is suspected of repeating it.
         await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null, Sql(typed)), await StateAsync(factory, "t2627-pays"));
 
-        // The bill wins over the suspicion: the line is no expense, and points to nothing.
+        // The bill arrives: the bill wins over the suspicion. The line is no expense, and points to nothing.
+        factory.Pluggy.Bills[Card] = [new FakeBill("bill-2627", due, 1500.25m) { ClosingDate = due.AddDays(-7) }];
+        await DoneAsync(factory, ana, connection);
         Assert.Equal(("Ignored", "BillPayment", null), await StateAsync(factory, "t2627-pays"));
 
         // The judgement of the whole group, at the start of the next run, leaves the ignored line alone; another debit
