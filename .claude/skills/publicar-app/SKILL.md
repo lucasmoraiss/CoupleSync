@@ -87,7 +87,7 @@ ponha o roteiro de teste na issue de checkpoint do dono (passo 14 da skill `entr
    `https://github.com/lucasmoraiss/CoupleSync/releases/latest/download/couplesync.apk`
 7. Falhou depois da tag criada: não apague a tag. Reexecute o workflow uma vez
    (`ghp run rerun <id> --failed`); falhou de novo → PARADA. Nunca reexecute sem necessidade: com a Release
-   completa o workflow não mexe em nada, e uma Release incompleta ele só completa e publica.
+   completa o workflow não mexe em nada, e uma Release incompleta ele só completa e publica como a mais recente.
 
 Regras do APK que não mudam:
 - **Release que não seja de APK nunca é criada como a mais recente** (`--latest=false`). A API anuncia a "última

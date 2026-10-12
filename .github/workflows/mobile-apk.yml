@@ -159,6 +159,8 @@ jobs:
       # In every path the step then READS from GitHub which Release is the latest and writes that fact in the summary.
       # criar/completar fail if it is not this tag (or cannot be read); nada only reports it, because the owner may
       # have chosen another Release as the latest on purpose.
+      # Known limit: re-running an old, incomplete tag would demote a newer version already published as the latest
+      # (--latest). The publicar-app skill forbids re-running without need.
       - name: Create or complete the Release
         env:
           GH_TOKEN: ${{ github.token }}
