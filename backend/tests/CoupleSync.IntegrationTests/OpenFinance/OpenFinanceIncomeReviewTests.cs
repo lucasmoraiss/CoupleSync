@@ -304,6 +304,27 @@ public sealed class OpenFinanceIncomeReviewTests
     }
 
     [Fact]
+    public async Task AnEntryWithANegativeSign_AsACardCreditComes_IsAnIncomeOfItsAbsoluteValue()
+    {
+        await using var factory = NewFactory();
+        // A refund on a card is a CREDIT with a negative amount in the convention of the card.
+        var (ana, _) = await SyncedAsync(factory, Credit("t27-refund", Noon(), -250.40m, "Estorno Loja Exemplo"));
+        var line = await LineIdAsync(factory, "t27-refund");
+        Assert.Equal(-250.40m, Money((await MirrorRowAsync(factory, "t27-refund"))["amount"]));
+
+        // The review shows the value without sign, and the entry can be registered (it has a value).
+        var shown = (await ReviewAsync(ana, Noon())).GetProperty("incomes").EnumerateArray().Single(l => l.GetProperty("id").GetGuid() == line);
+        Assert.Equal(250.40m, shown.GetProperty("amount").GetDecimal());
+        var result = await OkAsync(ConfirmAsync(ana, new { incomes = new[] { new { id = line } } }));
+
+        Assert.Equal(new[] { line }, result.GetProperty("incomes").EnumerateArray().Select(i => i.GetProperty("id").GetGuid()));
+        Assert.Empty(result.GetProperty("skipped").EnumerateArray());
+        var income = Assert.Single(await IncomesAsync(factory));
+        Assert.Equal(250.40m, Money(income["amount"]));
+        Assert.Equal("Estorno Loja Exemplo", income["name"]);
+    }
+
+    [Fact]
     public async Task ConfirmingTheSameEntryTwice_CreatesOneIncomeOnly()
     {
         await using var factory = NewFactory();
