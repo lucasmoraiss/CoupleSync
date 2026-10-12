@@ -383,7 +383,11 @@ export function canRegisterIncome(line: Confirmability): boolean {
 /** O nome com que a renda nasce se a pessoa não digitar outro: o que o banco diz da entrada, no tamanho de um nome. */
 export function defaultIncomeName(line: Pick<BankReviewLineResponse, 'description' | 'merchant'>): string {
   const text = line.description?.trim() || line.merchant?.trim() || FALLBACK_INCOME_NAME;
-  return text.length > INCOME_NAME_MAX ? text.slice(0, INCOME_NAME_MAX).trim() : text;
+  if (text.length <= INCOME_NAME_MAX) return text;
+  // O corte é em caractere inteiro: um emoji (duas unidades) que ficaria pela metade sai por completo, como no servidor.
+  const last = text.charCodeAt(INCOME_NAME_MAX - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? INCOME_NAME_MAX - 1 : INCOME_NAME_MAX;
+  return text.slice(0, end).trim();
 }
 
 /** null: o nome digitado serve (vazio também: vale a descrição da entrada). */

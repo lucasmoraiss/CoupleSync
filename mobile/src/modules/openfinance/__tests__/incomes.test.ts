@@ -87,6 +87,19 @@ describe('o nome da renda', () => {
     expect(defaultIncomeName(entry({ description: long })).length).toBeLessThanOrEqual(64);
   });
 
+  it('o corte nunca parte um caractere em dois (emoji no limite): sai o caractere inteiro', () => {
+    const emoji = String.fromCodePoint(0x1f600); // duas unidades UTF-16
+    const atTheCut = `${'x'.repeat(63)}${emoji}resto da descrição`;
+    const name = defaultIncomeName(entry({ description: atTheCut }));
+    expect(name).toBe('x'.repeat(63));
+    // Nenhuma unidade solta: o nome vai a um servidor que o grava em UTF-8.
+    expect(name.charCodeAt(name.length - 1)).toBeLessThan(0xd800);
+    // O emoji que cabe inteiro fica.
+    const fits = `${'y'.repeat(62)}${emoji}resto`;
+    expect(defaultIncomeName(entry({ description: fits }))).toBe(`${'y'.repeat(62)}${emoji}`);
+    expect(defaultIncomeName(entry({ description: fits })).length).toBe(64);
+  });
+
   it('nome digitado longo demais é erro; vazio não (vale a descrição)', () => {
     expect(incomeNameError('Salário')).toBeNull();
     expect(incomeNameError('')).toBeNull();

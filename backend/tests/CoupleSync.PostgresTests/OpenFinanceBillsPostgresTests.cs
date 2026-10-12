@@ -560,6 +560,102 @@ public sealed class OpenFinanceBillsPostgresTests
             (await database.RowsAsync("SELECT name FROM income_sources ORDER BY name")).Select(r => (string)r[0]!));
     }
 
+    /// <summary>One character outside the basic plane: two UTF-16 units (a surrogate pair).</summary>
+    private const string Emoji = "\U0001F600";
+
+    [PostgresFact]
+    public async Task TheSuggestedNameOfAnIncome_IsCutBetweenWholeCharacters_AnEmojiAtTheCutNeverBreaksTheRequest()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyBanks();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connection = await ConnectWithBankAsync(ana);
+        // The name of an income has at most 64 characters (UTF-16 units). The emoji is two units: in the first
+        // description it starts at the last unit kept (index 63), in the other two at index 59, where the
+        // " (2)" of a repeated name cuts (64 - 4 = 60).
+        var atTheCut = new string('x', 63) + Emoji + "tail of the description";
+        var beforeTheSuffixCut = new string('y', 59) + Emoji + new string('z', 10);
+        Assert.True(char.IsHighSurrogate(atTheCut[63]) && char.IsHighSurrogate(beforeTheSuffixCut[59]));
+        pluggy.Transactions[Checking] =
+        [
+            new FakeTransaction("t27-emoji-cut", Noon(), 11.00m) { Type = "CREDIT", Description = atTheCut },
+            new FakeTransaction("t27-emoji-twice-1", Noon(), 21.00m) { Type = "CREDIT", Description = beforeTheSuffixCut },
+            new FakeTransaction("t27-emoji-twice-2", Noon().AddHours(1), 22.00m) { Type = "CREDIT", Description = beforeTheSuffixCut },
+        ];
+        await DoneAsync(database, ana, connection);
+
+        var answer = await OkAsync(ana.Client.PostAsJsonAsync($"{Base}/review/confirm", new
+        {
+            incomes = new[]
+            {
+                new { id = await LineAsync(database, "t27-emoji-cut") },
+                new { id = await LineAsync(database, "t27-emoji-twice-1") },
+                new { id = await LineAsync(database, "t27-emoji-twice-2") },
+            },
+        }));
+
+        Assert.Equal(3, answer.GetProperty("incomes").GetArrayLength());
+        var names = (await database.RowsAsync("SELECT amount, name FROM income_sources ORDER BY amount")).ToDictionary(r => (decimal)r[0]!, r => (string)r[1]!);
+        // The character that does not fit is left out whole, never half of it.
+        Assert.Equal(new string('x', 63), names[11.00m]);
+        Assert.Equal(new string('y', 59) + Emoji + "zzz", names[21.00m]);
+        Assert.Equal(new string('y', 59) + " (2)", names[22.00m]);
+        Assert.All(names.Values, name => Assert.True(name.Length <= 64 && !char.IsHighSurrogate(name[^1])));
+        Assert.Equal("Confirmed:", await StateAsync(database, "t27-emoji-cut"));
+    }
+
+    [PostgresFact]
+    public async Task OneRequestWithIncomesAndReconcile_StoresBoth_AndTheSameRequestAgainCreatesNothingMore()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyBanks();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connection = await ConnectWithBankAsync(ana);
+        var typed = await ana.Client.PostAsJsonAsync("/api/v1/transactions", new
+        {
+            amount = 25.00m,
+            currency = "BRL",
+            description = "Padaria",
+            category = "OUTROS",
+            eventTimestampUtc = Noon(),
+        });
+        Assert.True(typed.IsSuccessStatusCode, await typed.Content.ReadAsStringAsync());
+        var typedId = (await typed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        pluggy.Transactions[Checking] =
+        [
+            new FakeTransaction("t27-both-debit", Noon(), -25.00m) { Description = "Padaria" },
+            new FakeTransaction("t27-both-salary", Noon(), 3500.00m) { Type = "CREDIT", Description = "Pagamento Empresa Exemplo" },
+        ];
+        await DoneAsync(database, ana, connection);
+        var debit = await LineAsync(database, "t27-both-debit");
+        var salary = await LineAsync(database, "t27-both-salary");
+        Assert.Equal(typedId, await database.ScalarAsync<Guid>("SELECT matched_transaction_id FROM bank_transactions WHERE id = @id", ("id", debit)));
+        var body = new { reconcile = new[] { new { id = debit } }, incomes = new[] { new { id = salary } } };
+
+        var first = await OkAsync(ana.Client.PostAsJsonAsync($"{Base}/review/confirm", body));
+
+        var reconciled = Assert.Single(first.GetProperty("reconciled").EnumerateArray());
+        Assert.Equal((debit, typedId), (reconciled.GetProperty("id").GetGuid(), reconciled.GetProperty("transactionId").GetGuid()));
+        Assert.Equal(salary, Assert.Single(first.GetProperty("incomes").EnumerateArray()).GetProperty("id").GetGuid());
+        Assert.Equal("Reconciled:", await StateAsync(database, "t27-both-debit"));
+        Assert.Equal("Confirmed:", await StateAsync(database, "t27-both-salary"));
+        Assert.Equal(typedId, await database.ScalarAsync<Guid>("SELECT linked_transaction_id FROM bank_transactions WHERE id = @id", ("id", debit)));
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM income_sources WHERE amount = 3500.00 AND name = 'Pagamento Empresa Exemplo'"));
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM transactions"));
+
+        var second = await OkAsync(ana.Client.PostAsJsonAsync($"{Base}/review/confirm", body));
+
+        Assert.Empty(second.GetProperty("incomes").EnumerateArray());
+        Assert.Equal(1, second.GetProperty("alreadyConfirmed").GetInt32());
+        Assert.Equal(typedId, Assert.Single(second.GetProperty("reconciled").EnumerateArray()).GetProperty("transactionId").GetGuid());
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM income_sources"));
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM transactions"));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static async Task<Guid> SeedCardAsync(TestDatabase database, TestUser user, string suffix)

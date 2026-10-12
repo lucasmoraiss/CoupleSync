@@ -521,7 +521,17 @@ public sealed class BankReviewService
         }
     }
 
-    private static string Clip(string text, int maxLength) => text.Length > maxLength ? text[..maxLength].TrimEnd() : text;
+    /// <summary>
+    /// The text within <paramref name="maxLength"/> UTF-16 units, cut between whole characters: a character of two
+    /// units (an emoji) that would be left in half goes out whole, since half of it cannot be stored as text.
+    /// </summary>
+    private static string Clip(string text, int maxLength)
+    {
+        if (text.Length <= maxLength) return text;
+
+        var end = maxLength > 0 && char.IsHighSurrogate(text[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return text[..end].TrimEnd();
+    }
 
     /// <summary>
     /// "It is the same": each line points to the transaction it was suspected of repeating, and that transaction
