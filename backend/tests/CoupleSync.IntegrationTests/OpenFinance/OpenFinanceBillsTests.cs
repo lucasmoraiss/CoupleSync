@@ -480,6 +480,33 @@ public sealed class OpenFinanceBillsTests
     }
 
     [Fact]
+    public async Task ABillThatChangesAfterItWasPaid_DoesNotLetAnotherDebitOfTheSameValueBeItsPayment()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        Bills(factory, Card, ClosedBill("bill-27-changes", PaymentDay().AddDays(4), 610.00m));
+        var paid = Debit("t27-paid", Noon(), 610.00m) with { DescriptionRaw = "PAGAMENTO DE FATURA CARTAO" };
+        Bank(factory, Checking, paid);
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Ignored", "BillPayment"), await StateAsync(factory, "t27-paid"));
+
+        // Another real expense of the same value waits (the bill is paid, so it is nobody's payment).
+        var rent = Debit("t27-same-value-rent", Noon(1), 610.00m, "Aluguel");
+        Bank(factory, Checking, paid, rent);
+        await DoneAsync(factory, ana, connection);
+        Assert.Equal(("Pending", null), await StateAsync(factory, "t27-same-value-rent"));
+
+        // The bill changes (new due date): the debits that wait are looked at again against it. The one that already
+        // paid it is still its payment, so the other one is still an expense.
+        Bills(factory, Card, ClosedBill("bill-27-changes", PaymentDay().AddDays(5), 610.00m));
+        await DoneAsync(factory, ana, connection);
+
+        Assert.Equal(Day(PaymentDay().AddDays(5)), Assert.Single(await BillRowsAsync(factory))["due_date"]);
+        Assert.Equal(("Ignored", "BillPayment"), await StateAsync(factory, "t27-paid"));
+        Assert.Equal(("Pending", null), await StateAsync(factory, "t27-same-value-rent"));
+    }
+
+    [Fact]
     public async Task ABillPaidByMoneySentToTheCard_ATransfer_DoesNotIgnoreAnotherDebitOfTheSameValue()
     {
         await using var factory = NewFactory();
