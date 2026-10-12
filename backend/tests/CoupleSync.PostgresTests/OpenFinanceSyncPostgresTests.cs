@@ -859,7 +859,7 @@ public sealed class OpenFinanceSyncPostgresTests
     // ---------------------------------------------------------------- support
 
     /// <summary>The API with a server key, the Pluggy client pointed at the fake and the synchronisation job looking at its queue every 50 ms.</summary>
-    private static DerivedTestHost WithOpenFinanceSync(
+    internal static DerivedTestHost WithOpenFinanceSync(
         PostgresApiFactory factory, FakePluggyServer pluggy, TestDatabase? database = null, SaveHook? saves = null)
         => factory.WithTestHostBuilder(builder =>
         {
@@ -890,7 +890,7 @@ public sealed class OpenFinanceSyncPostgresTests
         });
 
     /// <summary>Runs once, right before the next save of the API.</summary>
-    private sealed class SaveHook : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    internal sealed class SaveHook : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
     {
         public Func<Task>? BeforeNextSave { get; set; }
 
@@ -906,7 +906,7 @@ public sealed class OpenFinanceSyncPostgresTests
         }
     }
 
-    private static async Task<Guid> ConnectWithBankAsync(TestUser user, int historyMonths = 3, string itemId = FakePluggyServer.ItemWithAccounts)
+    internal static async Task<Guid> ConnectWithBankAsync(TestUser user, int historyMonths = 3, string itemId = FakePluggyServer.ItemWithAccounts)
     {
         var created = await user.Client.PostAsJsonAsync($"{Base}/connections", new
         {
@@ -922,14 +922,14 @@ public sealed class OpenFinanceSyncPostgresTests
         return connectionId;
     }
 
-    private static async Task<JsonElement> SyncAsync(TestUser user, Guid connectionId)
+    internal static async Task<JsonElement> SyncAsync(TestUser user, Guid connectionId)
     {
         var accepted = await user.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null);
         Assert.True(HttpStatusCode.Accepted == accepted.StatusCode, await accepted.Content.ReadAsStringAsync());
         return await WaitAsync(user, (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid());
     }
 
-    private static async Task<JsonElement> WaitAsync(TestUser user, Guid runId)
+    internal static async Task<JsonElement> WaitAsync(TestUser user, Guid runId)
     {
         var deadline = DateTime.UtcNow.AddSeconds(30);
         while (true)
@@ -949,7 +949,7 @@ public sealed class OpenFinanceSyncPostgresTests
         return (connection, account);
     }
 
-    private static async Task<Guid> InsertRunAsync(TestDatabase database, TestUser user, Guid connection, string status)
+    internal static async Task<Guid> InsertRunAsync(TestDatabase database, TestUser user, Guid connection, string status)
     {
         var id = Guid.NewGuid();
         await database.ExecuteAsync(
@@ -970,14 +970,14 @@ public sealed class OpenFinanceSyncPostgresTests
             ("id", Guid.NewGuid()), ("couple", user.CoupleId!.Value), ("user", user.UserId), ("account", account), ("pluggy", pluggyId),
             ("date", date), ("day", DateOnly.FromDateTime(date)));
 
-    private static async Task<List<string>> ColumnsOfAsync(TestDatabase database, IReadOnlyCollection<string> tables)
+    internal static async Task<List<string>> ColumnsOfAsync(TestDatabase database, IReadOnlyCollection<string> tables)
     {
         var rows = await database.RowsAsync(
             "SELECT table_name, column_name, data_type, is_nullable, coalesce(column_default, '') FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, column_name");
         return rows.Where(r => tables.Contains((string)r[0]!)).Select(r => string.Join("|", r)).ToList();
     }
 
-    private static async Task<List<string>> ConstraintsOfAsync(TestDatabase database, IReadOnlyCollection<string> tables)
+    internal static async Task<List<string>> ConstraintsOfAsync(TestDatabase database, IReadOnlyCollection<string> tables)
     {
         var rows = await database.RowsAsync(
             "SELECT conrelid::regclass::text, conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace = 'public'::regnamespace ORDER BY 1, 2");

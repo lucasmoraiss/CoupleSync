@@ -24,7 +24,7 @@ namespace CoupleSync.PostgresTests;
 public sealed class RecurringStreamsTests
 {
     // Named on purpose (never "the last one"): another delivery adding a migration must not change what is compared here.
-    private const string MigrationBefore = "20261008185726_AddAiConsents";
+    private const string MigrationBefore = "20261008195546_AddOpenFinanceReconciliation";
     private const string ThisMigration = "20261008213746_AddRecurringStreams";
     private const string Recurring = "/api/v1/ai/recurring";
 

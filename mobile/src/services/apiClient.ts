@@ -506,11 +506,15 @@ export const openFinanceApiClient = {
   getReview: (month?: string): Promise<AxiosResponse<BankReviewResponse>> =>
     axiosInstance.get<BankReviewResponse>('/api/v1/openfinance/review', { params: month ? { month } : undefined }),
 
-  /** Confirma despesas (viram transações) e descarta outras. Tudo ou nada por chamada; linha sem valor ou em outra moeda é pulada (`skipped`). */
+  /**
+   * Confirma despesas (viram transações), descarta outras e responde às possíveis duplicadas: `reconcile` ("é a
+   * mesma", nada é criado) e `asNew` ("é outra"). Tudo ou nada por chamada; linha sem valor ou em outra moeda é
+   * pulada (`skipped`).
+   */
   confirmReview: (body: ConfirmBankReviewRequest): Promise<AxiosResponse<ConfirmBankReviewResponse>> =>
     axiosInstance.post<ConfirmBankReviewResponse>('/api/v1/openfinance/review/confirm', body),
 
-  /** Descartadas voltam a esperar a revisão. */
+  /** Descartadas e ignoradas automaticamente voltam a esperar a revisão (e não são mais ignoradas sozinhas). */
   restoreReview: (ids: readonly string[]): Promise<AxiosResponse<RestoreBankReviewResponse>> =>
     axiosInstance.post<RestoreBankReviewResponse>('/api/v1/openfinance/review/restore', ids),
 };

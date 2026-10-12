@@ -610,12 +610,37 @@ export interface BankReviewLineResponse {
   readonly accountName: string;
   readonly installmentNumber: number | null;
   readonly installmentTotal: number | null;
+  /** 'Debit' (saída) | 'Credit' (entrada). Ausente em servidor anterior à conciliação: é despesa. */
+  readonly type?: string;
+  /** Por que a linha foi ignorada automaticamente: 'Transfer' | 'BillPayment'. Só nas de `ignored`. */
+  readonly autoReason?: string | null;
+  /** A transação do app com que esta linha se parece (possível duplicada). Ausente ou null: nenhuma. */
+  readonly match?: BankReviewMatchResponse | null;
+}
+
+/** A transação que o app já tinha e que parece ser a mesma compra de uma linha do banco. */
+export interface BankReviewMatchResponse {
+  readonly transactionId: string;
+  /** Como ela entrou no app: 'Manual' | 'OcrImport' | 'Notification'. */
+  readonly source: string;
+  readonly description: string | null;
+  readonly merchant: string | null;
+  readonly amount: number;
+  readonly currency: string;
+  /** "AAAA-MM-DD": o dia dela no Brasil. */
+  readonly day: string;
 }
 
 export interface BankReviewMonthResponse {
   /** "AAAA-MM" */
   readonly month: string;
   readonly pending: number;
+}
+
+export interface BankReviewIgnoredMonthResponse {
+  /** "AAAA-MM" */
+  readonly month: string;
+  readonly ignored: number;
 }
 
 export interface BankReviewResponse {
@@ -628,11 +653,28 @@ export interface BankReviewResponse {
   readonly pendingAllMonths: number;
   /** Por mês, tudo o que espera na revisão (também o que só pode ser descartado). */
   readonly pendingByMonth: readonly BankReviewMonthResponse[];
+  /** Ignoradas automaticamente neste mês (transferência entre contas do grupo, pagamento de fatura), saídas e entradas. */
+  readonly ignored?: readonly BankReviewLineResponse[];
+  /** Quantas de `expenses` têm possível duplicada. */
+  readonly suspectedDuplicates?: number;
+  /** Quantas linhas estão ignoradas automaticamente, em todos os meses. Ausente em servidor anterior. */
+  readonly ignoredAllMonths?: number;
+  /** Por mês, quantas linhas estão ignoradas automaticamente (o mais recente primeiro). Ausente em servidor anterior. */
+  readonly ignoredByMonth?: readonly BankReviewIgnoredMonthResponse[];
 }
 
 export interface ConfirmBankReviewRequest {
   readonly expenses?: ReadonlyArray<{ readonly id: string; readonly category?: string; readonly description?: string }>;
   readonly discard?: readonly string[];
+  /** "É a mesma": a linha passa a apontar para a transação que já existia; nada é criado. */
+  readonly reconcile?: ReadonlyArray<{ readonly id: string }>;
+  /** "É outra": a linha com possível duplicada vira uma despesa nova, com a categoria sugerida. */
+  readonly asNew?: readonly string[];
+  /**
+   * "Confirmar selecionadas": ninguém respondeu sobre duplicadas nas linhas de `expenses`. O servidor então também
+   * segura a linha que já tinha possível duplicada (marcada depois de a tela carregar). Servidor anterior ignora.
+   */
+  readonly holdPossibleDuplicates?: boolean;
 }
 
 export interface ConfirmBankReviewResponse {
@@ -643,6 +685,13 @@ export interface ConfirmBankReviewResponse {
   readonly skipped?: readonly string[];
   /** As de `skipped` que foram puladas por estarem em outra moeda. */
   readonly skippedOtherCurrency?: readonly string[];
+  /** Linhas marcadas como a mesma de uma transação que já existia, e essa transação. */
+  readonly reconciled?: ReadonlyArray<{ readonly id: string; readonly transactionId: string }>;
+  /**
+   * Linhas enviadas para confirmar que o servidor, conferindo na hora, viu que parecem uma transação que o app já
+   * tinha: nada foi criado para elas; continuam na revisão, agora com `match`. Ausente em servidor anterior.
+   */
+  readonly heldAsPossibleDuplicates?: readonly string[];
 }
 
 export interface RestoreBankReviewResponse {

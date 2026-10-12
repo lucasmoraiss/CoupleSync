@@ -24,14 +24,24 @@ public enum BankTransactionReviewState
     /// <summary>Became a transaction (or an income) of the app.</summary>
     Confirmed,
 
-    /// <summary>Was the same as a record the app already had (phase 3).</summary>
+    /// <summary>The person said it is the same as a transaction the app already had: it points to that one, nothing was created.</summary>
     Reconciled,
 
     /// <summary>The person discarded it, or deleted the transaction created from it. Can be restored.</summary>
     Discarded,
 
-    /// <summary>Decided automatically (phase 3). Can be restored.</summary>
+    /// <summary>Decided automatically, with a reason (<see cref="BankTransactionAutoReasons"/>). Can be restored.</summary>
     Ignored
+}
+
+/// <summary>Why a line was ignored without anyone looking at it (stored in <c>auto_reason</c>).</summary>
+public static class BankTransactionAutoReasons
+{
+    /// <summary>Money moving between two accounts of the group.</summary>
+    public const string Transfer = "Transfer";
+
+    /// <summary>The payment of a credit card bill: the expenses are the purchases of the card.</summary>
+    public const string BillPayment = "BillPayment";
 }
 
 /// <summary>Everything Pluggy says about one transaction at a given moment.</summary>
@@ -57,8 +67,9 @@ public sealed record BankTransactionSnapshot(
 
 /// <summary>
 /// The mirror of one bank transaction as Pluggy delivers it (Open Finance). The review decides what becomes of it;
-/// nothing here is ever deleted by the review. A synchronisation refreshes only what comes from Pluggy, never
-/// <see cref="ReviewState"/> nor the links.
+/// nothing here is ever deleted by the review. A synchronisation refreshes what comes from Pluggy and decides, by
+/// the automatic rules, only about lines nobody reviewed (<see cref="OpenToAutomaticRules"/>); it never writes over
+/// a review of a person nor over the links.
 /// </summary>
 public sealed class BankTransaction : ICoupleScoped
 {
@@ -115,11 +126,22 @@ public sealed class BankTransaction : ICoupleScoped
     /// <summary>Phase 4 (incomes). Never written yet.</summary>
     public Guid? LinkedIncomeSourceId { get; private set; }
 
-    /// <summary>Phase 3 (suspected collision). Never written yet.</summary>
+    /// <summary>
+    /// The transaction of the app this line looks the same as (suspected duplicate). Only while the line waits: the
+    /// person says "the same" (<see cref="Reconcile"/>) or "another one" (<see cref="Confirm"/>). Several lines may
+    /// point to the same transaction; only one of them can be linked to it.
+    /// </summary>
     public Guid? MatchedTransactionId { get; private set; }
 
-    /// <summary>Phase 3 (<c>Transfer</c> / <c>BillPayment</c>). Never written yet.</summary>
+    /// <summary>One of <see cref="BankTransactionAutoReasons"/>, while the line is <c>Ignored</c>.</summary>
     public string? AutoReason { get; private set; }
+
+    /// <summary>
+    /// When the person brought the line back to the review. From then on no synchronisation decides about it again:
+    /// it is never ignored, and the suspicion it has is the one judged when it came back (or when the transaction
+    /// it pointed to was taken by another line or deleted).
+    /// </summary>
+    public DateTime? PersonDecidedAtUtc { get; private set; }
 
     /// <summary>A key of <see cref="TransactionCategories"/>, decided when the row first arrived.</summary>
     public string? SuggestedCategory { get; private set; }
@@ -204,31 +226,147 @@ public sealed class BankTransaction : ICoupleScoped
         UpdatedAtUtc = nowUtc;
     }
 
-    /// <summary>The row became a transaction of the app.</summary>
+    /// <summary>
+    /// True while an automatic rule may still decide about the line: it waits for the review and the person never
+    /// brought it back to the review.
+    /// </summary>
+    public bool OpenToAutomaticRules => ReviewState == BankTransactionReviewState.Pending && PersonDecidedAtUtc is null;
+
+    /// <summary>
+    /// True when the person said the line is the same as a transaction that is no longer there: it was deleted at the
+    /// very moment of the answer, and the store cleared the link. Nothing is left for the line to be the same as.
+    /// </summary>
+    public bool LostItsTransaction => ReviewState == BankTransactionReviewState.Reconciled && LinkedTransactionId is null;
+
+    /// <summary>
+    /// What the review treats as discarded (listed apart, can be restored): what the person discarded, and a line
+    /// that <see cref="LostItsTransaction"/>.
+    /// </summary>
+    public bool CountsAsDiscarded => ReviewState == BankTransactionReviewState.Discarded || LostItsTransaction;
+
+    /// <summary>
+    /// What an automatic rule decided about the line was not stored (the save was refused because someone reviewed
+    /// lines at that moment): the line waits again, as it arrived, for the rules to decide again. Never touches what
+    /// a person decided.
+    /// </summary>
+    public void ForgetAutomaticDecision()
+    {
+        if (PersonDecidedAtUtc is not null) return;
+        if (ReviewState is not (BankTransactionReviewState.Pending or BankTransactionReviewState.Ignored)) return;
+        ReviewState = BankTransactionReviewState.Pending;
+        AutoReason = null;
+        MatchedTransactionId = null;
+        ReviewedAtUtc = null;
+    }
+
+    /// <summary>The row became a transaction of the app (also the answer "it is another one" to a suspected duplicate).</summary>
     public void Confirm(Guid transactionId, DateTime nowUtc)
     {
         ReviewState = BankTransactionReviewState.Confirmed;
         LinkedTransactionId = transactionId;
+        MatchedTransactionId = null;
         ReviewedAtUtc = nowUtc;
         UpdatedAtUtc = nowUtc;
     }
 
-    /// <summary>Discarded by the person, or the transaction created from it was deleted: no link stays.</summary>
+    /// <summary>The person said the row is the transaction the app already had: it points to that one.</summary>
+    public void Reconcile(Guid existingTransactionId, DateTime nowUtc)
+    {
+        ReviewState = BankTransactionReviewState.Reconciled;
+        LinkedTransactionId = existingTransactionId;
+        MatchedTransactionId = null;
+        ReviewedAtUtc = nowUtc;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>Discarded by the person, or the transaction it pointed to was deleted: no link stays.</summary>
     public void Discard(DateTime nowUtc)
     {
         ReviewState = BankTransactionReviewState.Discarded;
         LinkedTransactionId = null;
+        MatchedTransactionId = null;
         ReviewedAtUtc = nowUtc;
         UpdatedAtUtc = nowUtc;
     }
 
-    /// <summary>Back to the review, as if it had just arrived.</summary>
+    /// <summary>
+    /// Back to the review by the person's hand, from discarded or ignored. It is the person's decision: no
+    /// automatic rule decides about this line again (<see cref="PersonDecidedAtUtc"/>).
+    /// </summary>
     public void Restore(DateTime nowUtc)
     {
         ReviewState = BankTransactionReviewState.Pending;
         LinkedTransactionId = null;
+        MatchedTransactionId = null;
+        AutoReason = null;
         ReviewedAtUtc = null;
+        PersonDecidedAtUtc = nowUtc;
         UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>
+    /// An automatic rule decided the line is neither an expense nor an income (<paramref name="reason"/> is one of
+    /// <see cref="BankTransactionAutoReasons"/>). Does nothing, and says so, when the line is not
+    /// <see cref="OpenToAutomaticRules"/>.
+    /// </summary>
+    public bool IgnoreAutomatically(string reason, DateTime nowUtc)
+    {
+        if (!OpenToAutomaticRules) return false;
+        ReviewState = BankTransactionReviewState.Ignored;
+        AutoReason = reason;
+        MatchedTransactionId = null;
+        ReviewedAtUtc = nowUtc;
+        UpdatedAtUtc = nowUtc;
+        return true;
+    }
+
+    /// <summary>
+    /// True while the line can still be one leg of a transfer between accounts of the group: it is open to the rules,
+    /// or it was ignored as a bill payment before its other leg (the credit on the card) arrived.
+    /// </summary>
+    public bool CanBePairedAsTransfer
+        => OpenToAutomaticRules
+           || (ReviewState == BankTransactionReviewState.Ignored && AutoReason == BankTransactionAutoReasons.BillPayment);
+
+    /// <summary>
+    /// The other leg of this line arrived: both are one transfer between accounts of the group. Does nothing, and
+    /// says so, when the line cannot be paired (<see cref="CanBePairedAsTransfer"/>).
+    /// </summary>
+    public bool PairAsTransfer(DateTime nowUtc)
+    {
+        if (!CanBePairedAsTransfer) return false;
+        ReviewState = BankTransactionReviewState.Ignored;
+        AutoReason = BankTransactionAutoReasons.Transfer;
+        MatchedTransactionId = null;
+        ReviewedAtUtc = nowUtc;
+        UpdatedAtUtc = nowUtc;
+        return true;
+    }
+
+    /// <summary>
+    /// The line stays waiting, pointing to the transaction it looks the same as. Does nothing, and says so, when the
+    /// line no longer waits for the review. (Which lines a synchronisation may judge is for the synchronisation to
+    /// say: <see cref="OpenToAutomaticRules"/>.)
+    /// </summary>
+    public bool MarkSuspectedDuplicate(Guid transactionId, DateTime nowUtc)
+    {
+        if (ReviewState != BankTransactionReviewState.Pending) return false;
+        MatchedTransactionId = transactionId;
+        UpdatedAtUtc = nowUtc;
+        return true;
+    }
+
+    /// <summary>
+    /// The line no longer looks like any transaction (the bank settled it with another value or on another day, or
+    /// the one it pointed to is now of another line): it waits as an ordinary expense. Does nothing, and says so,
+    /// when there is no suspicion to clear or the line no longer waits for the review.
+    /// </summary>
+    public bool ClearSuspectedDuplicate(DateTime nowUtc)
+    {
+        if (ReviewState != BankTransactionReviewState.Pending || MatchedTransactionId is null) return false;
+        MatchedTransactionId = null;
+        UpdatedAtUtc = nowUtc;
+        return true;
     }
 
     /// <summary>
