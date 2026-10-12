@@ -1868,6 +1868,35 @@ public sealed class OpenFinanceReconciliationTests
     }
 
     [Fact]
+    public async Task Restoring_WhileTheTransactionTheLineLooksLikeIsDeletedAtTheSameMoment_Answers409_TheLineStaysDiscarded_AndRestoringAgainWorks()
+    {
+        await using var factory = NewFactory();
+        var (ana, _, existing, line) = await WithDuplicateAsync(factory);
+        await OkAsync(ConfirmAsync(ana, new { discard = new[] { line } }));
+        Assert.Equal("Discarded", (await MirrorRowAsync(factory, "t26-padaria"))["review_state"]);
+        // The restore has judged the line against the transaction (it would come back pointing to it) when the
+        // transaction is deleted; the mark would then point to nothing.
+        factory.BeforeNextSave = async () =>
+        {
+            factory.BeforeNextSave = null;
+            Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"/api/v1/transactions/{existing}")).StatusCode);
+        };
+
+        var refused = await ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { line });
+
+        await AssertErrorAsync(refused, HttpStatusCode.Conflict, "BANK_REVIEW_CONFLICT", "A revisão mudou enquanto era alterada. Atualize e tente de novo.");
+        Assert.Null(factory.BeforeNextSave); // the deletion did happen in the middle
+        Assert.Empty(await factory.RowsAsync("SELECT id FROM transactions"));
+        Assert.Equal(("Discarded", null, null), await StateAsync(factory, "t26-padaria"));
+        Assert.NotNull(Find((await ReviewAsync(ana, Noon(1))).GetProperty("discarded"), line));
+
+        // Nothing is left to look like: the same request now comes back without a mark.
+        var restored = await OkAsync(ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { line }));
+        Assert.Equal(line, Assert.Single(restored.GetProperty("restored").EnumerateArray()).GetGuid());
+        Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-padaria"));
+    }
+
+    [Fact]
     public async Task ALineReconciledWithATransactionThatIsStillThere_IsNotListedAsDiscarded_NorRestored_NorDiscarded()
     {
         await using var factory = NewFactory();
@@ -2601,6 +2630,32 @@ public sealed class OpenFinanceReconciliationTests
         await DoneAsync(factory, ana, connection);
         Assert.Equal(("Pending", null, Sql(typed)), await StateAsync(factory, "t26-restored"));
         Assert.Equal(new[] { line }, Created(await OkAsync(ConfirmAsync(ana, new { asNew = new[] { line } }))));
+        Assert.Equal(2, await TransactionCountAsync(factory));
+    }
+
+    [Fact]
+    public async Task ALineWhoseTransactionIsAlreadyThere_IsNotCheckedWhenConfirmed_EvenIfAnotherTransactionLooksLikeIt()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection) = await AnaAsync(factory);
+        Bank(factory, Checking, Debit("t26-twice", Noon(), 70.00m));
+        await DoneAsync(factory, ana, connection);
+        var line = await LineIdAsync(factory, "t26-twice");
+        var first = await OkAsync(ConfirmAsync(ana, new { expenses = new[] { new { id = line } } }));
+        var transaction = Assert.Single(first.GetProperty("created").EnumerateArray()).GetProperty("transactionId").GetGuid();
+        // Later the person types a purchase of the same value and day, and the first answer is lost: the line is
+        // waiting again although its transaction is stored (the same request sent twice).
+        await ManualAsync(ana, 70.00m, Noon(), "Digitada depois");
+        await factory.ExecuteAsync($"UPDATE bank_transactions SET review_state = 'Pending', linked_transaction_id = NULL, matched_transaction_id = NULL WHERE id = '{Sql(line)}'");
+
+        var again = await OkAsync(ConfirmAsync(ana, new { expenses = new[] { new { id = line } } }));
+
+        // It is not held to be asked: its transaction exists, so the line only points to it again.
+        Assert.Empty(Held(again));
+        Assert.Empty(Created(again));
+        Assert.Equal(1, again.GetProperty("alreadyConfirmed").GetInt32());
+        var row = await MirrorRowAsync(factory, "t26-twice");
+        Assert.Equal(("Confirmed", Sql(transaction)), ((string)row["review_state"]!, (string?)row["linked_transaction_id"]));
         Assert.Equal(2, await TransactionCountAsync(factory));
     }
 

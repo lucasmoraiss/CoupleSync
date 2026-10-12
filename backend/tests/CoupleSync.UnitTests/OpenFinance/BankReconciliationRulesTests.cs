@@ -1,3 +1,4 @@
+using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.OpenFinance;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.ValueObjects;
@@ -786,5 +787,25 @@ public sealed class BankReconciliationRulesTests
         var longName = ManualTransaction(null, "LAZER");
         longName.FillMissing(new string('x', 600), null);
         Assert.Equal(512, longName.Merchant!.Length);
+    }
+
+    // ---------------------------------------------------------------- what carries a name never prints it
+
+    [Fact]
+    public void WhatCarriesTheNameOfAPerson_NeverPrintsIt()
+    {
+        var arrived = new ArrivedBankLine(NewRow(), "Pagador Exemplo Silva");
+        var holder = new BankAccountHolder(Guid.NewGuid(), Guid.NewGuid(), "Titular Exemplo Souza");
+
+        var arrivedText = arrived.ToString();
+        var holderText = holder.ToString();
+
+        Assert.Equal(nameof(ArrivedBankLine), arrivedText);
+        Assert.Equal(nameof(BankAccountHolder), holderText);
+        foreach (var text in new[] { arrivedText, holderText, $"{arrived}", $"{holder}" })
+        {
+            Assert.DoesNotContain("Exemplo", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Padaria", text, StringComparison.Ordinal);
+        }
     }
 }
