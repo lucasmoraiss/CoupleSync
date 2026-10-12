@@ -145,11 +145,9 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .ThenBy(t => t.PluggyTransactionId, StringComparer.Ordinal)
             .ToList();
 
-    public async Task<IReadOnlyList<BankTransaction>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct)
-    {
-        // Ids only: the lines the bank listed in this very reading are already here, whole, and reading them again
-        // would bring what Pluggy sent for each (raw_json) a second time.
-        var ids = await _dbContext.BankTransactions
+    public async Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct)
+        // A few narrow columns: never what Pluggy sent for each line (raw_json), however many months wait.
+        => await _dbContext.BankTransactions
             .IgnoreQueryFilters()
             .AsNoTracking()
             .Where(t => t.CoupleId == coupleId
@@ -157,29 +155,22 @@ public sealed class BankSyncRepository : IBankSyncRepository
                         && t.ReviewState == BankTransactionReviewState.Pending
                         && t.PersonDecidedAtUtc == null
                         && (t.Type == BankTransactionType.Debit || t.MatchedTransactionId != null))
-            .Select(t => t.Id)
+            .Select(t => new WaitingBankLine(
+                t.Id, t.PluggyTransactionId, t.Date, t.LocalDate, t.Amount, t.Type, t.Currency, t.MatchedTransactionId))
             .ToListAsync(ct);
-        if (ids.Count == 0) return [];
 
-        var held = _dbContext.ChangeTracker.Entries<BankTransaction>().ToDictionary(e => e.Entity.Id);
-        var waiting = new List<BankTransaction>(ids.Count);
-        var notHeld = new List<Guid>();
-        foreach (var id in ids)
+    public async Task<IReadOnlyList<BankTransaction>> FindByIdsForJobAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct)
+    {
+        var found = new List<BankTransaction>(ids.Count);
+        foreach (var chunk in ids.Chunk(ReviewLookupChunk))
         {
-            if (!held.TryGetValue(id, out var entry)) notHeld.Add(id);
-            // As the run holds it now: what it is taking out of the mirror, or no longer leaves open, is not judged.
-            else if (entry.State != EntityState.Deleted && entry.Entity.OpenToAutomaticRules) waiting.Add(entry.Entity);
-        }
-
-        foreach (var chunk in notHeld.Chunk(ReviewLookupChunk))
-        {
-            waiting.AddRange(await _dbContext.BankTransactions
+            found.AddRange(await _dbContext.BankTransactions
                 .IgnoreQueryFilters()
                 .Where(t => t.CoupleId == coupleId && chunk.Contains(t.Id))
                 .ToListAsync(ct));
         }
 
-        return waiting;
+        return found;
     }
 
     public async Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(

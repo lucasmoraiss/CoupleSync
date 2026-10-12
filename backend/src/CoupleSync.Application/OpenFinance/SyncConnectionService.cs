@@ -272,16 +272,15 @@ public sealed class SyncConnectionService
                 // could not be read (login error at the bank, another bank of the same connection going on alone).
                 var from = window.FromFor(await _sync.GetLastTransactionDayAsync(account.Id, ct));
                 var transactions = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
-                var arrived = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
+                var (arrived, readAgain) = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
                 // What the bank no longer lists leaves in the same save as the line that replaces it.
                 var leaving = await RemoveVanishedAsync(account, transactions, from, window.To, ct);
-                // Every line of the account that already waited, of any age (not only the days this reading asked
-                // for): they are judged again as suspected duplicates. What the app has may have changed since they
-                // arrived, and the history stored before these rules existed was never judged.
-                var waiting = await _sync.GetWaitingOpenToRulesForJobAsync(connection.CoupleId, account.Id, ct);
-                // Before anyone sees them: transfers between accounts of the group, bill payments and suspected duplicates.
+                // Before anyone sees them: transfers between accounts of the group, bill payments and suspected
+                // duplicates. The last one also for every line of the account that already waited, of any age: what
+                // the app has may have changed since they arrived, and the history stored before these rules existed
+                // was never judged.
                 Task DecideAsync(CancellationToken token)
-                    => _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, waiting, leaving, token);
+                    => _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, readAgain, leaving, token);
                 await DecideAsync(ct);
                 await SaveAsync(connection, ct, DecideAsync);
             }
@@ -336,10 +335,10 @@ public sealed class SyncConnectionService
     }
 
     /// <summary>
-    /// Returns the lines the automatic rules have not seen as settled yet: the new ones, and the ones the bank had
-    /// not settled the last time and has now.
+    /// Returns the lines the automatic rules have not seen as settled yet (the new ones, and the ones the bank had
+    /// not settled the last time and has now), and every line of the account the bank listed again, as it is now.
     /// </summary>
-    private async Task<IReadOnlyList<ArrivedBankLine>> UpsertTransactionsAsync(
+    private async Task<(IReadOnlyList<ArrivedBankLine> Arrived, IReadOnlyList<BankTransaction> ReadAgain)> UpsertTransactionsAsync(
         SyncRun run, BankConnection connection, BankAccount account, IReadOnlyList<PluggyTransaction> transactions, AiBudget ai, CancellationToken ct)
     {
         var incoming = transactions
@@ -350,6 +349,7 @@ public sealed class SyncConnectionService
         var added = 0;
         var updated = 0;
         var arrived = new List<ArrivedBankLine>();
+        var readAgain = new List<BankTransaction>();
 
         foreach (var chunk in incoming.Chunk(LookupChunk))
         {
@@ -366,6 +366,7 @@ public sealed class SyncConnectionService
                     if (row.BankAccountId != account.Id) continue;
                     var waitedForTheBank = row.Status == BankTransactionStatus.Pending;
                     row.Refresh(snapshot, run.Id, now);
+                    readAgain.Add(row);
                     updated++;
                     if (waitedForTheBank && row.Status == BankTransactionStatus.Posted)
                         arrived.Add(new ArrivedBankLine(row, transaction.PayerName));
@@ -386,7 +387,7 @@ public sealed class SyncConnectionService
         }
 
         run.AddCounts(added, updated);
-        return arrived;
+        return (arrived, readAgain);
     }
 
     /// <summary>

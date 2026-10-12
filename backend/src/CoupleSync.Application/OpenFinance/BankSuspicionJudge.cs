@@ -42,16 +42,33 @@ public static class BankSuspicionJudge
         DateTime nowUtc,
         CancellationToken ct)
     {
+        var waiting = lines.Where(l => l.ReviewState == BankTransactionReviewState.Pending).DistinctBy(l => l.Id).ToDictionary(l => l.Id);
+        var answers = await AnswerAsync(
+            sync, coupleId, waiting.Values.Select(l => JudgedLine.Of(l, connectorNameOf(l))), leavingLineIds, takenTransactionIds, ct);
+        foreach (var (line, suspect) in answers) Apply(waiting[line.Id], suspect, nowUtc);
+    }
+
+    /// <summary>
+    /// The answer for each of <paramref name="lines"/> (each one waiting for the review): the transaction it looks
+    /// like, or none. Nothing is changed here: <see cref="Apply"/> writes an answer on a line.
+    /// </summary>
+    public static async Task<IReadOnlyList<(JudgedLine Line, Guid? Suspect)>> AnswerAsync(
+        IBankSyncRepository sync,
+        Guid coupleId,
+        IEnumerable<JudgedLine> lines,
+        IReadOnlyCollection<Guid> leavingLineIds,
+        IReadOnlyCollection<Guid> takenTransactionIds,
+        CancellationToken ct)
+    {
         // Oldest first, so that the same data always gives the same answer.
         var waiting = lines
-            .Where(l => l.ReviewState == BankTransactionReviewState.Pending)
             .OrderBy(l => l.Date)
             .ThenBy(l => l.PluggyTransactionId, StringComparer.Ordinal)
             .ToList();
-        if (waiting.Count == 0) return;
+        if (waiting.Count == 0) return [];
 
         var questions = waiting
-            .Select(l => new SuspicionQuestion(BankPreclassificationService.FactsOf(l), l.MatchedTransactionId, connectorNameOf(l)))
+            .Select(l => new SuspicionQuestion(l.Facts, l.MatchedTransactionId, l.ConnectorName))
             .ToList();
 
         // Money that came in, another currency, no value: nothing to look for, and a suspicion it carried is cleared.
@@ -70,14 +87,41 @@ public static class BankSuspicionJudge
         }
 
         var suspects = BankReconciliationRules.AssignSuspectedDuplicates(questions, candidates);
-        for (var i = 0; i < waiting.Count; i++)
-        {
-            if (suspects[i] is not { } suspect) waiting[i].ClearSuspectedDuplicate(nowUtc);
-            else if (waiting[i].MatchedTransactionId != suspect.Id) waiting[i].MarkSuspectedDuplicate(suspect.Id, nowUtc);
-        }
+        return waiting.Select((line, i) => (line, suspects[i]?.Id)).ToList();
+    }
+
+    /// <summary>Writes the answer on the line: it keeps, takes or loses its suspicion (only while it waits for the review).</summary>
+    public static void Apply(BankTransaction line, Guid? suspect, DateTime nowUtc)
+    {
+        if (suspect is not { } transactionId) line.ClearSuspectedDuplicate(nowUtc);
+        else if (line.MatchedTransactionId != transactionId) line.MarkSuspectedDuplicate(transactionId, nowUtc);
     }
 
     /// <summary>The name of the bank of each line, by its account (<see cref="IBankSyncRepository.GetAccountNamesAsync"/>).</summary>
     public static Func<BankTransaction, string?> ConnectorNameBy(IReadOnlyDictionary<Guid, BankAccountNames> names)
         => line => names.TryGetValue(line.BankAccountId, out var account) ? account.BankName : null;
+}
+
+/// <summary>
+/// A line waiting for the review as the judgement sees it: in the hand of who asks (<see cref="Of(BankTransaction, string?)"/>)
+/// or as the store has it, without the whole line being read (<see cref="Of(WaitingBankLine, Guid, string?)"/>).
+/// </summary>
+public sealed record JudgedLine(
+    Guid Id, DateTime Date, string PluggyTransactionId, MoneyMovement Facts, Guid? MatchedTransactionId, string? ConnectorName)
+{
+    public static JudgedLine Of(BankTransaction line, string? connectorName) => new(
+        line.Id, line.Date, line.PluggyTransactionId, BankPreclassificationService.FactsOf(line), line.MatchedTransactionId, connectorName);
+
+    public static JudgedLine Of(WaitingBankLine line, Guid bankAccountId, string? connectorName) => new(
+        line.Id,
+        line.Date,
+        line.PluggyTransactionId,
+        new MoneyMovement(
+            Math.Abs(line.Amount),
+            line.Currency,
+            line.LocalDate,
+            line.Type == BankTransactionType.Debit ? MoneyDirection.Out : MoneyDirection.In,
+            bankAccountId),
+        line.MatchedTransactionId,
+        connectorName);
 }

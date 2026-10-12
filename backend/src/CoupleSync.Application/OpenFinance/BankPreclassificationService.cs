@@ -58,16 +58,19 @@ public sealed class BankPreclassificationService
     /// <paramref name="lines"/> judged before (a pending purchase settled under the same id) keeps the transaction it
     /// points to while that one is still there and still looks like it; otherwise it is judged as a new one, and
     /// loses the suspicion when nothing looks like it any more (also when it is no longer in reais or has no value).
-    /// <paramref name="waiting"/> are the lines of the same account that already waited for the review
-    /// (<see cref="IBankSyncRepository.GetWaitingOpenToRulesForJobAsync"/>): they are judged as suspected duplicates
-    /// in the same way, and never ignored here (rules 1 to 3 are only for <paramref name="lines"/>).
+    /// Every other line of the account that already waited for the review is judged as a suspected duplicate in the
+    /// same way, and never ignored here (rules 1 to 3 are only for <paramref name="lines"/>):
+    /// <paramref name="readAgain"/> are the ones this reading has in hand (the bank listed them again, maybe
+    /// corrected), judged as they are now; the others are judged as the store has them
+    /// (<see cref="IBankSyncRepository.GetWaitingOpenToRulesForJobAsync"/>), and only the ones whose suspicion
+    /// changes are read whole.
     /// </summary>
     public async Task ApplyAsync(
         Guid coupleId,
         BankAccount account,
         string? connectorName,
         IReadOnlyList<ArrivedBankLine> lines,
-        IReadOnlyCollection<BankTransaction> waiting,
+        IReadOnlyCollection<BankTransaction> readAgain,
         IReadOnlyCollection<BankTransaction> leaving,
         CancellationToken ct)
     {
@@ -81,15 +84,37 @@ public sealed class BankPreclassificationService
         if (open.Count > 0) await IgnoreWhatIsNoExpenseNorIncomeAsync(coupleId, account, open, now, ct);
 
         // What was not ignored: which transaction of the app each line looks like, asked of the store for each one.
-        await BankSuspicionJudge.JudgeAsync(
+        // The lines in hand are judged as they are now, whatever the store still says of them.
+        var inHand = lines.Select(l => l.Row).Concat(readAgain).Distinct().ToList();
+        var leavingIds = leaving.Select(l => l.Id).ToList();
+        var notFromTheStore = inHand.Select(l => l.Id).Concat(leavingIds).ToHashSet();
+        var waiting = inHand.Where(row => row.OpenToAutomaticRules).ToDictionary(row => row.Id);
+        var stored = (await _sync.GetWaitingOpenToRulesForJobAsync(coupleId, account.Id, ct))
+            .Where(l => !notFromTheStore.Contains(l.Id))
+            .ToList();
+
+        var answers = await BankSuspicionJudge.AnswerAsync(
             _sync,
             coupleId,
-            lines.Select(l => l.Row).Concat(waiting).Distinct().Where(row => row.OpenToAutomaticRules),
-            _ => connectorName,
-            leaving.Select(l => l.Id).ToList(),
+            waiting.Values.Select(row => JudgedLine.Of(row, connectorName))
+                .Concat(stored.Select(l => JudgedLine.Of(l, account.Id, connectorName))),
+            leavingIds,
             takenTransactionIds: [],
-            now,
             ct);
+
+        // Of the lines judged as the store has them, only the ones whose suspicion changes are read whole.
+        var changed = answers
+            .Where(a => !waiting.ContainsKey(a.Line.Id) && a.Suspect != a.Line.MatchedTransactionId)
+            .Select(a => a.Line.Id)
+            .ToList();
+        if (changed.Count > 0)
+        {
+            foreach (var row in await _sync.FindByIdsForJobAsync(changed, coupleId, ct))
+                if (row.OpenToAutomaticRules) waiting[row.Id] = row;
+        }
+
+        foreach (var (line, suspect) in answers)
+            if (waiting.TryGetValue(line.Id, out var row)) BankSuspicionJudge.Apply(row, suspect, now);
     }
 
     /// <summary>Rules 1 to 3, over the lines the bank has settled: what it has not may still change or vanish.</summary>

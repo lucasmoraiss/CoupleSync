@@ -69,14 +69,16 @@ public interface IBankSyncRepository
     Task<IReadOnlyList<BankTransaction>> GetTransferCandidatesForJobAsync(Guid coupleId, DateOnly fromDay, DateOnly toDay, CancellationToken ct);
 
     /// <summary>
-    /// For the job, tracked: the lines of the account <paramref name="bankAccountId"/> (of the group
+    /// For the job, nothing tracked: the lines of the account <paramref name="bankAccountId"/> (of the group
     /// <paramref name="coupleId"/>) that already wait for the review and are still open to the automatic rules (no
-    /// person brought them back to the review), of any age: the ones a reading judges again although they did not
-    /// arrive in it. Only what can carry a suspicion: money that left, or a line that still points to a transaction.
-    /// Only their ids are asked of the store: a line the run already holds is given as the run holds it (never one
-    /// it is taking out of the mirror), and only the others are read whole.
+    /// person brought them back to the review), of any age, as the store has them: the ones a reading judges again
+    /// although they did not arrive in it. Only what can carry a suspicion (money that left, or a line that still
+    /// points to a transaction), and only what the judgement looks at: never the whole line.
     /// </summary>
-    Task<IReadOnlyList<BankTransaction>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct);
+    Task<IReadOnlyList<WaitingBankLine>> GetWaitingOpenToRulesForJobAsync(Guid coupleId, Guid bankAccountId, CancellationToken ct);
+
+    /// <summary>For the job, tracked: the lines of the group <paramref name="coupleId"/> with these ids.</summary>
+    Task<IReadOnlyList<BankTransaction>> FindByIdsForJobAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct);
 
     /// <summary>
     /// The transactions a line of the bank may still look like: of the group <paramref name="coupleId"/> (named here,
@@ -166,6 +168,17 @@ public interface IBankSyncRepository
 }
 
 public sealed record BankAccountNames(string BankName, string AccountName);
+
+/// <summary>What the judgement of a suspected duplicate looks at in a line that waits, as the store has it.</summary>
+public sealed record WaitingBankLine(
+    Guid Id,
+    string PluggyTransactionId,
+    DateTime Date,
+    DateOnly LocalDate,
+    decimal Amount,
+    BankTransactionType Type,
+    string Currency,
+    Guid? MatchedTransactionId);
 
 public sealed record PendingBankExpense(DateOnly Day, BankTransactionStatus Status, decimal Amount, string Currency);
 
