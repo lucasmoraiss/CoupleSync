@@ -19,7 +19,7 @@ public sealed class ImportJobRecovery
     public const string ProcessingTimeoutCode = "PROCESSING_TIMEOUT";
 
     public const string ProcessingTimeoutMessage =
-        "O processamento do extrato foi interrompido. Envie o arquivo novamente.";
+        "A leitura foi interrompida antes de terminar. Envie o arquivo de novo; se acontecer outra vez, exporte um período menor (por exemplo, um mês).";
 
     private readonly IImportJobRepository _repository;
     private readonly IStorageAdapter _storage;
@@ -67,8 +67,9 @@ public sealed class ImportJobRecovery
 
     /// <summary>
     /// Fails every job in Processing for longer than <paramref name="timeout"/>. At API startup the caller passes
-    /// <see cref="TimeSpan.Zero"/>: the API is a single instance, so a job in Processing then belongs to a process
-    /// that no longer exists. Returns how many were recovered.
+    /// <see cref="TimeSpan.Zero"/>: the API normally runs as a single instance, so a job in Processing then belongs
+    /// to a process that no longer exists (a still-running old instance during a deploy
+    /// overlap is not covered). Returns how many were recovered.
     /// </summary>
     public async Task<int> RecoverAllAsync(CancellationToken ct, TimeSpan? timeout = null)
     {

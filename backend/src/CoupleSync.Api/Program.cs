@@ -100,6 +100,7 @@ builder.Services.AddScoped<GetNotificationSettingsQueryHandler>();
 builder.Services.AddScoped<IAlertPolicyService, AlertPolicyService>();
 builder.Services.AddScoped<BudgetService>();
 builder.Services.AddScoped<IncomeService>();
+builder.Services.AddOptions<ImportQueueOptions>().Bind(builder.Configuration.GetSection(ImportQueueOptions.SectionName));
 builder.Services.AddScoped<ImportJobService>();
 builder.Services.AddScoped<ReportsService>();
 builder.Services.AddScoped<OpenFinanceService>();

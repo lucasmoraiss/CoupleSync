@@ -17,4 +17,10 @@ public interface IImportJobRepository
     Task<IReadOnlyList<ImportJob>> GetReadyByCoupleAsync(Guid coupleId, int limit, CancellationToken ct);
 
     Task<IReadOnlyList<ImportJob>> GetStuckProcessingAsync(DateTime cutoffUtc, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// How many of the couple's jobs have not ended: Pending, plus Processing ones touched after
+    /// <paramref name="processingSinceUtc"/> (an older Processing job is abandoned, recovery fails it).
+    /// </summary>
+    Task<int> CountUnfinishedAsync(Guid coupleId, DateTime processingSinceUtc, CancellationToken ct);
 }

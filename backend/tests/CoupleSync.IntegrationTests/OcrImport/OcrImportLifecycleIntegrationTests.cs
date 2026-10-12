@@ -202,6 +202,42 @@ public sealed class OcrImportLifecycleIntegrationTests
     }
 
     [Fact]
+    public async Task ThePendingQueue_PutsAJobHandedBackToTheQueueBehindTheOnesNotTriedYet()
+    {
+        // Issue 56: a job whose file is not on this instance goes back to Pending; five of them must not keep a
+        // job that was never tried out of the batch of five the worker reads.
+        await using var factory = new OcrWebApplicationFactory();
+        using var client = factory.CreateClient();
+        await OcrConfirmIntegrationTests.AuthenticateWithCoupleAsync(client);
+        var seedId = await OcrConfirmIntegrationTests.UploadAndMarkReadyAsync(factory, client, [Debit(0, "Mercado", 80m)]);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var seed = await db.ImportJobs.FindAsync(seedId);
+        var start = DateTime.UtcNow.AddHours(-1);
+
+        var handedBack = Enumerable.Range(0, 5).Select(i =>
+        {
+            var job = CoupleSync.Domain.Entities.ImportJob.Create(
+                seed!.CoupleId, seed.UserId, $"couples/x/handed-back-{i}.pdf", "application/pdf", start.AddSeconds(i));
+            job.MarkProcessing(start.AddMinutes(1));
+            job.ReturnToPending(start.AddMinutes(1).AddSeconds(i));
+            return job;
+        }).ToList();
+        var neverTried = CoupleSync.Domain.Entities.ImportJob.Create(
+            seed!.CoupleId, seed.UserId, "couples/x/never-tried.pdf", "application/pdf", start.AddSeconds(30));
+        db.ImportJobs.AddRange(handedBack);
+        db.ImportJobs.Add(neverTried);
+        await db.SaveChangesAsync();
+
+        var batch = await new CoupleSync.Infrastructure.Persistence.ImportJobRepository(db).GetPendingAsync(5, CancellationToken.None);
+
+        Assert.Equal(5, batch.Count);
+        Assert.Equal(neverTried.Id, batch[0].Id);
+        Assert.Equal(handedBack.Take(4).Select(j => j.Id), batch.Skip(1).Select(j => j.Id));
+    }
+
+    [Fact]
     public async Task OpenImports_ListTheFileAndHowManyLinesArePending()
     {
         await using var factory = new OcrWebApplicationFactory();
