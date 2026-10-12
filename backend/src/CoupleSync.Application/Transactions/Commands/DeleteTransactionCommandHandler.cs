@@ -46,17 +46,19 @@ public sealed class DeleteTransactionCommandHandler
         await _repository.SaveChangesAsync(cancellationToken);
 
         if (lookedLikeIt.Count > 0)
-            await JudgeAgainAsync(command.CoupleId, lookedLikeIt, now, cancellationToken);
+            await JudgeAgainAsync(command.CoupleId, lookedLikeIt, now);
     }
 
     /// <summary>
     /// The transaction is gone. Each line that looked like it is judged again: it points to another transaction that
     /// looks like it, or waits as an ordinary expense. A second save, after the deletion (the same order of locks as
     /// "it is the same": the transaction first, then the lines). It never fails the deletion, which is stored: a
-    /// line answered at this very moment keeps that answer, and the others are tried once more.
+    /// line answered at this very moment keeps that answer, and the others are tried once more. Nor is it given up
+    /// when the request is: the deletion is stored, and a request cancelled now would leave the lines unjudged.
     /// </summary>
-    private async Task JudgeAgainAsync(Guid coupleId, IReadOnlyCollection<Guid> lineIds, DateTime now, CancellationToken ct)
+    private async Task JudgeAgainAsync(Guid coupleId, IReadOnlyCollection<Guid> lineIds, DateTime now)
     {
+        var ct = CancellationToken.None;
         for (var attempt = 1; attempt <= 2; attempt++)
         {
             try

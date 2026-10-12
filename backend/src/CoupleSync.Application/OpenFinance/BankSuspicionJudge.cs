@@ -19,8 +19,9 @@ namespace CoupleSync.Application.OpenFinance;
 /// lines together with what made them be judged (the deletion saves them right after itself).
 /// </para>
 /// <para>
-/// What does not ask it, and so may leave a line without a mark until it is judged again: a transaction typed,
-/// captured, imported or edited after the line arrived.
+/// A transaction typed, captured, imported or edited after the line arrived does not ask it: the line is judged at
+/// the next synchronisation of its account, which asks it of every line that already waited on the days it reads
+/// and that no person brought back to the review. Older lines, and the ones a person brought back, wait as they are.
 /// </para>
 /// </summary>
 public static class BankSuspicionJudge

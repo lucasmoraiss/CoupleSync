@@ -22,6 +22,10 @@ public sealed record ArrivedBankLine(BankTransaction Row, string? PayerName)
 /// (<see cref="BankSuspicionJudge"/>: every line that may be a duplicate is marked, whatever the other lines; a
 /// line judged again keeps the transaction it pointed to, the same day wins over the day next to it).</item>
 /// </list>
+/// Rules 1 to 3 decide only when a line arrives or is settled at the bank. Rule 4 is asked again at every reading,
+/// also of the lines of the account that already waited (inside the days the reading covers): a line stored before
+/// this rule existed, a transaction typed, captured, imported or edited after the line arrived, a settled line the
+/// bank corrects later.
 /// Only lines <see cref="BankTransaction.OpenToAutomaticRules"/>, in reais and with a value. What is ignored was
 /// settled at the bank: a line the bank may still change or drop is never ignored. A purchase on a credit card is
 /// never a leg of a transfer. Nothing is saved here: the run saves; when someone reviewed a line meanwhile, that
@@ -54,12 +58,16 @@ public sealed class BankPreclassificationService
     /// <paramref name="lines"/> judged before (a pending purchase settled under the same id) keeps the transaction it
     /// points to while that one is still there and still looks like it; otherwise it is judged as a new one, and
     /// loses the suspicion when nothing looks like it any more (also when it is no longer in reais or has no value).
+    /// <paramref name="waiting"/> are the lines of the same account that already waited for the review
+    /// (<see cref="IBankSyncRepository.GetWaitingOpenToRulesForJobAsync"/>): they are judged as suspected duplicates
+    /// in the same way, and never ignored here (rules 1 to 3 are only for <paramref name="lines"/>).
     /// </summary>
     public async Task ApplyAsync(
         Guid coupleId,
         BankAccount account,
         string? connectorName,
         IReadOnlyList<ArrivedBankLine> lines,
+        IReadOnlyCollection<BankTransaction> waiting,
         IReadOnlyCollection<BankTransaction> leaving,
         CancellationToken ct)
     {
@@ -76,7 +84,7 @@ public sealed class BankPreclassificationService
         await BankSuspicionJudge.JudgeAsync(
             _sync,
             coupleId,
-            lines.Select(l => l.Row).Where(row => row.OpenToAutomaticRules),
+            lines.Select(l => l.Row).Concat(waiting).Distinct().Where(row => row.OpenToAutomaticRules),
             _ => connectorName,
             leaving.Select(l => l.Id).ToList(),
             takenTransactionIds: [],

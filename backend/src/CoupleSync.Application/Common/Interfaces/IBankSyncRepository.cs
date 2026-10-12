@@ -69,6 +69,17 @@ public interface IBankSyncRepository
     Task<IReadOnlyList<BankTransaction>> GetTransferCandidatesForJobAsync(Guid coupleId, DateOnly fromDay, DateOnly toDay, CancellationToken ct);
 
     /// <summary>
+    /// For the job, tracked: the lines of the account <paramref name="bankAccountId"/> (of the group
+    /// <paramref name="coupleId"/>) that already wait for the review and are still open to the automatic rules (no
+    /// person brought them back to the review), with their day in Brazil in [<paramref name="fromDay"/>,
+    /// <paramref name="toDay"/>]: the ones a reading judges again although they did not arrive in it. Only their ids
+    /// are asked of the store: a line the run already holds is given as the run holds it (never one it is taking
+    /// out of the mirror), and only the others are read whole.
+    /// </summary>
+    Task<IReadOnlyList<BankTransaction>> GetWaitingOpenToRulesForJobAsync(
+        Guid coupleId, Guid bankAccountId, DateOnly fromDay, DateOnly toDay, CancellationToken ct);
+
+    /// <summary>
     /// The transactions a line of the bank may still look like: of the group <paramref name="coupleId"/> (named here,
     /// whoever asks: the job or a route), in reais, not come from the bank, whose instant is in
     /// [<paramref name="fromUtc"/>, <paramref name="toUtcExclusive"/>) and that NO line of the mirror is linked to

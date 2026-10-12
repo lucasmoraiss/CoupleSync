@@ -925,4 +925,81 @@ public sealed class OpenFinanceReconciliationPostgresTests
         // The one typed by hand got nothing from the bank.
         Assert.Null(await database.ScalarAsync<string?>("SELECT merchant FROM transactions WHERE id = @existing", ("existing", existing)));
     }
+
+    // ---------------------------------------------------------------- the lines that already waited are judged at every reading (review 11)
+
+    [PostgresFact]
+    public async Task TheLinesThatAlreadyWaited_AreJudgedAgainByTheReadingOfTheirAccount_OnlyOnTheDaysItCovers_OnlyOfTheGroup_NeverTheOnesOfThePerson()
+    {
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = EmptyPluggy();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana Exemplo Souza");
+        var carla = await OpenFinanceTests.RegisterAsync(factory, host, "Carla Modelo");
+        var anaConnection = await ConnectWithBankAsync(ana);
+        var carlaConnection = await ConnectWithBankAsync(carla, itemId: FakePluggyServer.OtherItemWithAccounts);
+        // The last line of the account is 7 days old: the next reading asks from 14 days ago on.
+        var firstDayAsked = Today.AddDays(-14);
+        // 23:00 in Brasília of the day before: 02:00 UTC of the first day asked. The bank lists it.
+        var eveningBefore = firstDayAsked.AddHours(2);
+        var older = Today.AddDays(-16).AddHours(15);
+        var existedBefore = await ManualAsync(ana, 26.00m, Noon(), "Já estava no app");
+        pluggy.Transactions[Checking] =
+        [
+            Debit("t26-waiting", Noon(), 25.00m),
+            Debit("t26-phase2", Noon(), 26.00m),
+            Debit("t26-restored", Noon(), 27.00m),
+            Debit("t26-evening-before", eveningBefore, 28.00m),
+            Debit("t26-older", older, 29.00m),
+            Debit("t26-last", Noon(3), 30.00m),
+        ];
+        pluggy.Transactions[Card] = [Debit("t26-card", Noon(), 31.00m)];
+        pluggy.Transactions[OtherChecking] = [Debit("t26-carla", Noon(), 25.00m)];
+        Assert.Equal("Done", (await SyncAsync(ana, anaConnection)).GetProperty("status").GetString());
+        Assert.Equal("Done", (await SyncAsync(carla, carlaConnection)).GetProperty("status").GetString());
+        Assert.Equal(("Pending", null, existedBefore), await StateAsync(database, "t26-phase2"));
+        // As phase 2 (issue #25) stored it: waiting, settled, judged by nothing.
+        await database.ExecuteAsync("UPDATE bank_transactions SET matched_transaction_id = NULL WHERE pluggy_transaction_id = 't26-phase2'");
+        var restored = await LineAsync(database, "t26-restored");
+        await OkAsync(ana, new { discard = new[] { restored } });
+        (await ana.Client.PostAsJsonAsync($"{Base}/review/restore", new[] { restored })).EnsureSuccessStatusCode();
+        // Typed after the lines arrived, one for each of them.
+        var typed = await ManualAsync(ana, 25.00m, Noon(), "Digitada depois");
+        await ManualAsync(ana, 27.00m, Noon(), "Igual à restaurada");
+        var typedEvening = await ManualAsync(ana, 28.00m, eveningBefore, "Na noite anterior");
+        await ManualAsync(ana, 29.00m, older, "Antiga");
+        var typedCard = await ManualAsync(ana, 31.00m, Noon(), "No cartão");
+        var typedByCarla = await ManualAsync(carla, 25.00m, Noon(), "De outro grupo");
+
+        // One reading of Ana's connection, in which the bank says nothing new about any of the lines.
+        await DoneAsync(database, ana, anaConnection);
+
+        Assert.Equal(firstDayAsked.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), pluggy.WindowsAsked(Checking)[^1].From);
+        Assert.Equal(("Pending", null, typed), await StateAsync(database, "t26-waiting"));
+        Assert.Equal(("Pending", null, existedBefore), await StateAsync(database, "t26-phase2"));
+        // Its day in Brazil is the day before the first day asked (date against date, not against the instant in UTC).
+        Assert.Equal(
+            firstDayAsked.AddDays(-1).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            await database.ScalarAsync<string>("SELECT local_date::text FROM bank_transactions WHERE pluggy_transaction_id = 't26-evening-before'"));
+        Assert.Equal(("Pending", null, typedEvening), await StateAsync(database, "t26-evening-before"));
+        // The other account of the same connection is read, and judged, too.
+        Assert.Equal(("Pending", null, typedCard), await StateAsync(database, "t26-card"));
+        // Before the days the reading covers: left as it was.
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-older"));
+        // The person brought it back: no synchronisation decides about it.
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-restored"));
+        Assert.NotNull(await database.ScalarAsync<DateTime?>("SELECT person_decided_at_utc FROM bank_transactions WHERE pluggy_transaction_id = 't26-restored'"));
+        // Another group: its line is not read by this run, and its transaction is nobody else's.
+        Assert.Equal(("Pending", null, null), await StateAsync(database, "t26-carla"));
+        var selected = await SelectAllAsync(ana, Noon(), eveningBefore.AddDays(-1), older, Noon(3));
+        Assert.Equal(
+            new[] { await LineAsync(database, "t26-last"), await LineAsync(database, "t26-older"), restored }.Order(),
+            selected.Order());
+
+        // Carla's own reading marks her line, with her own transaction.
+        await DoneAsync(database, carla, carlaConnection);
+        Assert.Equal(("Pending", null, typedByCarla), await StateAsync(database, "t26-carla"));
+        Assert.Equal(("Pending", null, typed), await StateAsync(database, "t26-waiting"));
+    }
 }

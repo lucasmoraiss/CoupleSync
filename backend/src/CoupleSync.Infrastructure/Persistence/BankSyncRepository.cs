@@ -145,6 +145,45 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .ThenBy(t => t.PluggyTransactionId, StringComparer.Ordinal)
             .ToList();
 
+    public async Task<IReadOnlyList<BankTransaction>> GetWaitingOpenToRulesForJobAsync(
+        Guid coupleId, Guid bankAccountId, DateOnly fromDay, DateOnly toDay, CancellationToken ct)
+    {
+        // Ids only: nearly every one of these lines was listed by the bank in this very reading and is already
+        // here, whole. Reading them again would bring what Pluggy sent for each (raw_json) a second time.
+        var ids = await _dbContext.BankTransactions
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(t => t.CoupleId == coupleId
+                        && t.BankAccountId == bankAccountId
+                        && t.ReviewState == BankTransactionReviewState.Pending
+                        && t.PersonDecidedAtUtc == null
+                        && t.LocalDate >= fromDay
+                        && t.LocalDate <= toDay)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+        if (ids.Count == 0) return [];
+
+        var held = _dbContext.ChangeTracker.Entries<BankTransaction>().ToDictionary(e => e.Entity.Id);
+        var waiting = new List<BankTransaction>(ids.Count);
+        var notHeld = new List<Guid>();
+        foreach (var id in ids)
+        {
+            if (!held.TryGetValue(id, out var entry)) notHeld.Add(id);
+            // As the run holds it now: what it is taking out of the mirror, or no longer leaves open, is not judged.
+            else if (entry.State != EntityState.Deleted && entry.Entity.OpenToAutomaticRules) waiting.Add(entry.Entity);
+        }
+
+        foreach (var chunk in notHeld.Chunk(ReviewLookupChunk))
+        {
+            waiting.AddRange(await _dbContext.BankTransactions
+                .IgnoreQueryFilters()
+                .Where(t => t.CoupleId == coupleId && chunk.Contains(t.Id))
+                .ToListAsync(ct));
+        }
+
+        return waiting;
+    }
+
     public async Task<IReadOnlyList<ExistingTransactionFacts>> GetDuplicateCandidatesForJobAsync(
         Guid coupleId, DateTime fromUtc, DateTime toUtcExclusive, IReadOnlyCollection<Guid> exceptLineIds, CancellationToken ct)
     {
