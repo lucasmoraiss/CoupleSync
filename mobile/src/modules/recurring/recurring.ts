@@ -13,6 +13,9 @@ export const RECURRING_TOTALS_NOTE =
 /** O texto da seção "Possíveis recorrências": o que é, que não soma, e o que fazer. */
 export const RECURRING_POSSIBLE_NOTE =
   'Parece se repetir, mas ainda não temos certeza. Não entra no total. Toque em um item e diga se é recorrente.';
+/** Por que um item muda de seção sem a pessoa ter feito nada, e o que o fixa. */
+export const RECURRING_POSSIBLE_MOVES_NOTE =
+  'Um item pode passar para cá, ou sair daqui, conforme as próximas cobranças e as outras compras no mesmo lugar. Se você disser que é recorrente, ele fica no total.';
 /** A pergunta acima das duas ações de um item possível. */
 export const RECURRING_POSSIBLE_QUESTION = 'É recorrente?';
 /** Só há possíveis: o total zerado não é defeito, é falta de confirmação. */
@@ -72,9 +75,10 @@ export function recurringCardLabel(list: CardList): string {
 /**
  * Possível recorrência: o servidor achou um padrão sem prova (confiança baixa), não é parcela, e a pessoa ainda não
  * disse nada sobre o item (com qualquer resposta dada ele sai da pergunta). Fica na seção própria e fora do total.
+ * O que parou de ser cobrado está em Ocultas e não é pergunta: dizer "é recorrente" não o traria para o total.
  */
 export function isPossibleItem(item: RecurringItemResponse): boolean {
-  return item.confidence === 'Low' && item.kind !== 'Installment' && (item.override ?? null) === null;
+  return item.confidence === 'Low' && item.kind !== 'Installment' && (item.override ?? null) === null && item.status !== 'Stopped';
 }
 
 /** Há possíveis e nada confirmado (nem assinatura, nem conta fixa, nem parcelamento): o total zerado pede explicação. */

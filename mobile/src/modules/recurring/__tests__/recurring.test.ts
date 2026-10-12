@@ -13,6 +13,7 @@ import {
   RECURRING_ENTRY_LABEL,
   RECURRING_NOT_LISTED_NOTE,
   RECURRING_ONLY_POSSIBLE_TEXT,
+  RECURRING_POSSIBLE_MOVES_NOTE,
   RECURRING_POSSIBLE_NOTE,
   RECURRING_POSSIBLE_QUESTION,
   RECURRING_QUERY_KEY,
@@ -234,6 +235,9 @@ describe('possíveis recorrências (padrão sem prova: fora do total, à espera 
     // Com qualquer resposta já dada (está em Ocultas), o item deixa de ser pergunta em aberto.
     expect(isPossibleItem(possible({ override: 'NotRecurring' }))).toBe(false);
     expect(isPossibleItem(possible({ override: 'Cancelled' }))).toBe(false);
+    // Parou de ser cobrada (está em Ocultas): dizer "é recorrente" não a põe no total, então não é mais pergunta.
+    expect(isPossibleItem(possible({ status: 'Stopped' }))).toBe(false);
+    expect(isPossibleItem(possible({ status: 'SuspectedDormant' }))).toBe(true);
     expect(isPossibleItem(item())).toBe(false);
     expect(isPossibleItem(item({ confidence: undefined }))).toBe(false);
   });
@@ -257,6 +261,21 @@ describe('possíveis recorrências (padrão sem prova: fora do total, à espera 
     expect(itemActions(answered).map((a) => a.override)).not.toContain('NotRecurring');
     expect(itemBadges(answered)).toEqual(['marcada como não recorrente']);
     expect(itemLabel(answered)).toBe('Loja Exemplo, 39 reais e 90 centavos por mês. marcada como não recorrente. Ver cobranças e opções');
+  });
+
+  it('a possível que parou de ser cobrada (em Ocultas) não promete "entra no total" (revisão 3, m1)', () => {
+    const stopped = possible({ status: 'Stopped' });
+    expect(itemActions(stopped).map((a) => a.label)).toEqual(['Não é recorrente', 'Cancelei', 'É conta fixa']);
+    expect(itemLabel(stopped)).toBe('Loja Exemplo, 39 reais e 90 centavos por mês. parou de ser cobrada. Ver cobranças e opções');
+    expect(overrideDoneMessage(stopped.name, 'FixedBill', isPossibleItem(stopped))).toBe('Loja Exemplo agora é conta fixa.');
+  });
+
+  it('a seção diz que um item pode entrar e sair dela sozinho, e como fixá-lo no total (revisão 3, m2)', () => {
+    expect(RECURRING_POSSIBLE_MOVES_NOTE).toBe(
+      'Um item pode passar para cá, ou sair daqui, conforme as próximas cobranças e as outras compras no mesmo lugar. Se você disser que é recorrente, ele fica no total.',
+    );
+    const screen = read('app/(main)/recurring/index.tsx');
+    expect(screen).toMatch(/section\.key === 'possible' && <Text style=\{styles\.sectionNote\}>\{RECURRING_POSSIBLE_MOVES_NOTE\}<\/Text>/);
   });
 
   it('o rótulo acessível da linha diz que é possível e que está fora do total', () => {

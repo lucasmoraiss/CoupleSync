@@ -25,6 +25,7 @@ import {
   RECURRING_HINT,
   RECURRING_NOT_LISTED_NOTE,
   RECURRING_ONLY_POSSIBLE_TEXT,
+  RECURRING_POSSIBLE_MOVES_NOTE,
   RECURRING_POSSIBLE_NOTE,
   RECURRING_POSSIBLE_QUESTION,
   RECURRING_QUERY_KEY,
@@ -176,6 +177,7 @@ function RecurringScreen() {
               <View key={section.key} style={styles.section}>
                 <Text style={styles.sectionTitle} accessibilityRole="header">{section.title}</Text>
                 {section.key === 'possible' && <Text style={styles.sectionNote}>{RECURRING_POSSIBLE_NOTE}</Text>}
+                {section.key === 'possible' && <Text style={styles.sectionNote}>{RECURRING_POSSIBLE_MOVES_NOTE}</Text>}
                 {section.items.map((item) => {
                   const open = openId === item.id;
                   const badges = itemBadges(item);
