@@ -1085,6 +1085,78 @@ public sealed class OpenFinanceSyncTests
         Assert.Equal(1, factory.Pluggy.Count("GET", "/transactions"));
     }
 
+    /// <summary>What PostgreSQL and its provider hand over when the database ends a save (the chain seen for real).</summary>
+    private static Exception EndedByTheDatabase(string sqlState, bool wrapped)
+    {
+        var save = new Microsoft.EntityFrameworkCore.DbUpdateException(
+            "An error occurred while saving the entity changes.", new Npgsql.PostgresException("made-up failure", "ERROR", "ERROR", sqlState));
+        return wrapped ? new InvalidOperationException("An exception has been raised that is likely due to a transient failure.", save) : save;
+    }
+
+    [Theory]
+    [InlineData("40P01", true)]
+    [InlineData("40P01", false)]
+    [InlineData("40001", true)]
+    [InlineData("40001", false)]
+    public async Task ASaveOfARunEndedByADeadlockOrASerializationFailure_FailsTheRunAsAnyFailure_NotAsAConnectionThatChanged_AndTheKeyIsKept(
+        string sqlState, bool wrapped)
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        var authCalls = factory.Pluggy.AuthCalls;
+        // The save that follows the first list of transactions of the next run is ended by the database.
+        var once = 0;
+        factory.Pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path == "/transactions" && Interlocked.Exchange(ref once, 1) == 0)
+                factory.BeforeNextSave = () => throw EndedByTheDatabase(sqlState, wrapped);
+            return Task.CompletedTask;
+        };
+
+        var run = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal(1, once);
+        Assert.Equal("Failed", run["status"]);
+        // Nothing says the connection changed: it is a failure of the store like any other.
+        Assert.Equal("SYNC_FAILED", run["error_code"]);
+        var connection = Assert.Single(await factory.RowsAsync("SELECT * FROM bank_connections"));
+        Assert.Equal("Active", connection["status"]);
+        Assert.Null(connection["last_error_code"]);
+        // The key of Pluggy is still good and is kept: the next run does not authenticate again.
+        factory.Pluggy.BeforeAnswer = null;
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        Assert.Equal(authCalls, factory.Pluggy.AuthCalls);
+    }
+
+    [Fact]
+    public async Task ASaveOfARunRefusedByAConcurrencyToken_ThatIsNotOfALine_StillStopsTheRunAsAConnectionThatChanged_AndTheKeyIsNotKept()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        var authCalls = factory.Pluggy.AuthCalls;
+        var once = 0;
+        factory.Pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path == "/transactions" && Interlocked.Exchange(ref once, 1) == 0)
+                factory.BeforeNextSave = () => throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("0 rows affected, expected 1");
+            return Task.CompletedTask;
+        };
+
+        var run = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal(1, once);
+        Assert.Equal("Failed", run["status"]);
+        Assert.Equal("BANK_CONNECTION_CHANGED", run["error_code"]);
+        // The key the run had is dropped: the next run authenticates again.
+        factory.Pluggy.BeforeAnswer = null;
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        Assert.Equal(authCalls + 1, factory.Pluggy.AuthCalls);
+    }
+
     [Fact]
     public async Task ConnectedAgainInTheMiddleOfARun_TheRunStops_AndNeitherMarksTheNewCredentialsNorKeepsItsKey()
     {

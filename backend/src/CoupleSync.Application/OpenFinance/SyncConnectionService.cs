@@ -64,6 +64,7 @@ public sealed class SyncConnectionService
     private readonly IPluggyClient _pluggy;
     private readonly ICredentialCipher _cipher;
     private readonly ICategoryClassifier _classifier;
+    private readonly BankPreclassificationService _preclassification;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<SyncConnectionService> _logger;
 
@@ -74,6 +75,7 @@ public sealed class SyncConnectionService
         IPluggyClient pluggy,
         ICredentialCipher cipher,
         ICategoryClassifier classifier,
+        BankPreclassificationService preclassification,
         IDateTimeProvider clock,
         ILogger<SyncConnectionService> logger)
     {
@@ -83,6 +85,7 @@ public sealed class SyncConnectionService
         _pluggy = pluggy;
         _cipher = cipher;
         _classifier = classifier;
+        _preclassification = preclassification;
         _clock = clock;
         _logger = logger;
     }
@@ -215,6 +218,13 @@ public sealed class SyncConnectionService
         if (items.Count == 0)
             throw new SyncStoppedException(NoBankCode, NoBankMessage);
 
+        // Before anything is asked of the bank: every line of the group that waits, in every account, is judged as a
+        // suspected duplicate against what the app has now. The accounts this run will not read (synchronisation
+        // turned off, a bank asking for the login again, another connection of the group, also a disconnected one)
+        // are judged only here; and a run that fails further on has judged all the same.
+        Task<bool> JudgeGroupAsync(CancellationToken token) => _preclassification.JudgeWaitingOfGroupAsync(connection.CoupleId, token);
+        if (await JudgeGroupAsync(ct)) await SaveAsync(connection, ct, JudgeGroupAsync);
+
         var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret, connection.ClientSecretEncrypted!);
         var window = SyncWindow.For(connection, _clock.UtcNow);
         var ai = new AiBudget(run.AiCategorizationConsent ? MaxAiSuggestionsPerRun : 0, AiTimeBudget);
@@ -269,9 +279,20 @@ public sealed class SyncConnectionService
                 // could not be read (login error at the bank, another bank of the same connection going on alone).
                 var from = window.FromFor(await _sync.GetLastTransactionDayAsync(account.Id, ct));
                 var transactions = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
-                await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
-                await RemoveVanishedAsync(account, transactions, from, window.To, ct);
-                await SaveAsync(connection, ct);
+                var (arrived, readAgain) = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
+                // What the bank no longer lists leaves in the same save as the line that replaces it.
+                var leaving = await RemoveVanishedAsync(account, transactions, from, window.To, ct);
+                // Before anyone sees them: transfers between accounts of the group, bill payments and suspected
+                // duplicates. The last one also for every line of the account that already waited, of any age: what
+                // the app has may have changed since they arrived, and the history stored before these rules existed
+                // was never judged.
+                Task DecideAsync(CancellationToken token)
+                    => _preclassification.ApplyAsync(connection.CoupleId, account, item.ConnectorName, arrived, readAgain, leaving, token);
+                await DecideAsync(ct);
+                await SaveAsync(connection, ct, DecideAsync);
+
+                if (BankReconciliationRules.IsCreditCard(account.Type))
+                    await SyncBillsAsync(connection, auth, account, ct);
             }
 
             return true;
@@ -323,7 +344,85 @@ public sealed class SyncConnectionService
         return stored;
     }
 
-    private async Task UpsertTransactionsAsync(
+    /// <summary>
+    /// The bills of a credit card: mirrored by their Pluggy id (synchronising again never duplicates; total, due date
+    /// and the rest take what Pluggy says now; a bill Pluggy no longer lists stays). Bills are an extra of the
+    /// synchronisation: when Pluggy does not give them (whatever the reason, also a refusal that for any other
+    /// reading would mean bad credentials), the run goes on and says nothing; if the credentials are really bad, the
+    /// next reading of the run says so. When a bill arrived or changed, the debits already in the mirror are looked
+    /// at again for its payment.
+    /// </summary>
+    private async Task SyncBillsAsync(BankConnection connection, PluggyAuth auth, BankAccount account, CancellationToken ct)
+    {
+        IReadOnlyList<PluggyBill> bills;
+        try
+        {
+            bills = await _pluggy.GetBillsAsync(auth, account.PluggyAccountId, ct);
+        }
+        catch (PluggyException ex)
+        {
+            _logger.LogWarning("Open Finance bills of an account could not be read ({Code}); the synchronisation goes on without them.", ex.Code);
+            return;
+        }
+
+        var changedDueDates = await UpsertBillsAsync(connection, account, bills, ct);
+        await SaveAsync(connection, ct);
+        if (changedDueDates.Count == 0) return;
+
+        Task DecideAsync(CancellationToken token) => _preclassification.ApplyBillPaymentsAsync(connection.CoupleId, changedDueDates, token);
+        await DecideAsync(ct);
+        await SaveAsync(connection, ct, DecideAsync);
+    }
+
+    /// <summary>Returns the due dates of the bills that arrived or changed in what the payment of a bill is recognised by.</summary>
+    private async Task<IReadOnlyCollection<DateOnly>> UpsertBillsAsync(
+        BankConnection connection, BankAccount account, IReadOnlyList<PluggyBill> bills, CancellationToken ct)
+    {
+        var incoming = bills
+            .Where(b => !string.IsNullOrWhiteSpace(b.Id) && b.Id.Trim().Length <= CreditCardBill.MaxPluggyIdLength)
+            .DistinctBy(b => b.Id.Trim())
+            .ToList();
+        var now = _clock.UtcNow;
+        var today = DateOnly.FromDateTime(BrazilTime.ToLocal(now));
+        var changed = new HashSet<DateOnly>();
+
+        foreach (var chunk in incoming.Chunk(LookupChunk))
+        {
+            var existing = (await _sync.FindBillsByPluggyIdsAsync(chunk.Select(b => b.Id.Trim()).ToList(), ct))
+                .ToDictionary(b => b.PluggyBillId, StringComparer.Ordinal);
+            var created = new List<CreditCardBill>();
+
+            foreach (var bill in chunk)
+            {
+                var snapshot = new CreditCardBillSnapshot(
+                    bill.DueDate, bill.ClosingDate, bill.TotalAmount, bill.CurrencyCode, bill.MinimumPayment, bill.RawJson);
+                if (existing.TryGetValue(bill.Id.Trim(), out var row))
+                {
+                    // The id is unique in the whole database: a bill of another account is not this account's to change.
+                    if (row.BankAccountId != account.Id) continue;
+                    var dueBefore = row.DueDate;
+                    if (!row.Refresh(snapshot, account.Currency, today, now)) continue;
+                    changed.Add(dueBefore);
+                    changed.Add(row.DueDate);
+                    continue;
+                }
+
+                var stored = CreditCardBill.Create(connection.CoupleId, account.Id, bill.Id, snapshot, account.Currency, today, now);
+                created.Add(stored);
+                changed.Add(stored.DueDate);
+            }
+
+            if (created.Count > 0) await _sync.AddBillsAsync(created, ct);
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Returns the lines the automatic rules have not seen as settled yet (the new ones, and the ones the bank had
+    /// not settled the last time and has now), and every line of the account the bank listed again, as it is now.
+    /// </summary>
+    private async Task<(IReadOnlyList<ArrivedBankLine> Arrived, IReadOnlyList<BankTransaction> ReadAgain)> UpsertTransactionsAsync(
         SyncRun run, BankConnection connection, BankAccount account, IReadOnlyList<PluggyTransaction> transactions, AiBudget ai, CancellationToken ct)
     {
         var incoming = transactions
@@ -333,6 +432,8 @@ public sealed class SyncConnectionService
         var now = _clock.UtcNow;
         var added = 0;
         var updated = 0;
+        var arrived = new List<ArrivedBankLine>();
+        var readAgain = new List<BankTransaction>();
 
         foreach (var chunk in incoming.Chunk(LookupChunk))
         {
@@ -347,16 +448,22 @@ public sealed class SyncConnectionService
                 {
                     // The id is unique in the whole database: a row of another account is not this account's to change.
                     if (row.BankAccountId != account.Id) continue;
+                    var waitedForTheBank = row.Status == BankTransactionStatus.Pending;
                     row.Refresh(snapshot, run.Id, now);
+                    readAgain.Add(row);
                     updated++;
+                    if (waitedForTheBank && row.Status == BankTransactionStatus.Posted)
+                        arrived.Add(new ArrivedBankLine(row, transaction.PayerName));
                     continue;
                 }
 
                 var suggested = BankTransaction.TypeOf(transaction.Type, transaction.Amount) == BankTransactionType.Debit
                     ? await SuggestCategoryAsync(transaction, ai, ct)
                     : null;
-                created.Add(BankTransaction.Create(
-                    connection.CoupleId, connection.UserId, account.Id, transaction.Id, snapshot, suggested, run.Id, now));
+                var line = BankTransaction.Create(
+                    connection.CoupleId, connection.UserId, account.Id, transaction.Id, snapshot, suggested, run.Id, now);
+                created.Add(line);
+                arrived.Add(new ArrivedBankLine(line, transaction.PayerName));
                 added++;
             }
 
@@ -364,25 +471,27 @@ public sealed class SyncConnectionService
         }
 
         run.AddCounts(added, updated);
+        return (arrived, readAgain);
     }
 
     /// <summary>
     /// What the bank had not settled and no longer lists is gone at the bank (a pre-authorisation that fell, a
     /// pending purchase that got another id when it was settled): the line leaves the mirror, so that it does not
     /// wait for a review that can never confirm it. Only lines still pending at the bank AND still waiting for the
-    /// review, on days this reading covered whole; a line someone confirmed or discarded is never touched.
+    /// review, on days this reading covered whole; a line someone confirmed or discarded is never touched. Returns
+    /// the lines that leave.
     /// </summary>
-    private async Task RemoveVanishedAsync(
+    private async Task<IReadOnlyList<BankTransaction>> RemoveVanishedAsync(
         BankAccount account, IReadOnlyList<PluggyTransaction> transactions, DateOnly from, DateOnly to, CancellationToken ct)
     {
         // The first day asked is left out: Pluggy cuts the days in UTC, and a transaction of that day could be
         // missing from the answer only because of where the day begins.
         var fromUtc = DateTime.SpecifyKind(from.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
         var toUtc = DateTime.SpecifyKind(to.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
-        if (fromUtc >= toUtc) return;
+        if (fromUtc >= toUtc) return [];
 
         var candidates = await _sync.GetUnsettledWaitingAsync(account.Id, fromUtc, toUtc, ct);
-        if (candidates.Count == 0) return;
+        if (candidates.Count == 0) return [];
 
         var listed = transactions
             .Where(t => !string.IsNullOrWhiteSpace(t.Id))
@@ -394,6 +503,7 @@ public sealed class SyncConnectionService
                           && !listed.Contains(row.PluggyTransactionId))
             .ToList();
         if (vanished.Count > 0) _sync.RemoveTransactions(vanished);
+        return vanished;
     }
 
     /// <summary>
@@ -425,11 +535,11 @@ public sealed class SyncConnectionService
         }
     }
 
-    private async Task SaveAsync(BankConnection connection, CancellationToken ct)
+    private async Task SaveAsync(BankConnection connection, CancellationToken ct, Func<CancellationToken, Task>? decideAgain = null)
     {
         try
         {
-            await _sync.SaveRunProgressAsync(connection, ct);
+            await _sync.SaveRunProgressAsync(connection, decideAgain, ct);
         }
         catch (DataStoreException ex) when (ex is ConcurrencyConflictException or ForeignKeyViolationException)
         {
@@ -469,7 +579,7 @@ public sealed class SyncConnectionService
             try
             {
                 if (connection is not null)
-                    await _sync.SaveRunProgressAsync(connection, ct);
+                    await _sync.SaveRunProgressAsync(connection, decideAgain: null, ct);
                 else
                     await _sync.SaveChangesAsync(ct);
                 return;

@@ -93,6 +93,7 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
             new ChildProcessPdfTextExtractor(Options()).ExtractText(new MemoryStream("conteudo-secreto-do-arquivo"u8.ToArray())));
 
         Assert.Equal("PDF_UNREADABLE", ex.Code);
+        Assert.Equal("Não conseguimos abrir este PDF. Baixe o extrato de novo no app ou no site do banco e envie.", ex.Message);
         Assert.DoesNotContain("secreto", ex.Message);
     }
 
@@ -160,6 +161,7 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
         var ex = Assert.Throws<OcrException>(() => new ChildProcessPdfTextExtractor(options).ExtractText(new MemoryStream(slow)));
 
         Assert.Equal("PDF_TIMEOUT", ex.Code);
+        Assert.Equal("A leitura do extrato demorou demais e foi interrompida. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.", ex.Message);
         Assert.True(IsGone(childId));
         Assert.Empty(Directory.GetFileSystemEntries(_tempDirectory));
     }
@@ -428,7 +430,7 @@ public sealed class ChildProcessPdfTextExtractorTests : IDisposable
         var ex = Assert.Throws<OcrException>(() => extractor.ExtractText(new MemoryStream([1, 2, 3])));
 
         Assert.Equal("PDF_WORKER_FAILED", ex.Code);
-        Assert.Equal("A leitura do PDF falhou de forma inesperada. Tente enviar o arquivo novamente.", ex.Message);
+        Assert.Equal("Não conseguimos ler este extrato. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.", ex.Message);
     }
 
     [Fact]

@@ -31,6 +31,18 @@ import { aiStatusNoticeView, isAssistantVisible, shouldShowActivationCard } from
 import { openWelcomeIfDue } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
 import { isCaptureConsentAhead } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
+import { upcomingBillsCard } from '@/modules/openfinance/accounts';
+import { useOnRefocus } from '@/navigation/resetOnFocus';
+import {
+  RECURRING_CARD_EMPTY_LABEL,
+  RECURRING_CARD_EMPTY_TEXT,
+  RECURRING_CARD_ERROR_LABEL,
+  RECURRING_CARD_ERROR_TEXT,
+  isRecurringEmpty,
+  recurringCardLabel,
+  recurringCardText,
+} from '@/modules/recurring/recurring';
+import { useRecurring } from '@/modules/recurring/useRecurring';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const BG = colors.background;
@@ -108,6 +120,31 @@ function CategoryBreakdown({ data }: { data: DashboardResponse }) {
   );
 }
 
+/**
+ * Open Finance: "Faturas a vencer nos próximos 30 dias", com o total do grupo (só reais). Só existe quando o
+ * servidor manda `upcomingBills` (alguém do grupo está conectado a um banco); abre a tela Contas.
+ */
+function UpcomingBillsCard({ data }: { data: DashboardResponse }) {
+  const bills = upcomingBillsCard(data.upcomingBills);
+  if (!bills) return null;
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      style={styles.billsCard}
+      onPress={() => router.push('/(main)/accounts' as any)}
+      accessibilityLabel={`Faturas a vencer nos próximos 30 dias: ${spokenBRL(bills.totalBrl)}. ${bills.countText}. Ver contas`}
+    >
+      <View style={styles.billsCardText}>
+        <Text style={styles.billsCardLabel}>Faturas a vencer nos próximos 30 dias</Text>
+        <Text style={styles.billsCardValue}>{bills.totalText}</Text>
+        <Text style={styles.cardHint}>{bills.countText}</Text>
+        {bills.otherCurrencyText ? <Text style={styles.cardHint}>{bills.otherCurrencyText}</Text> : null}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.primaryLight} />
+    </TouchableOpacity>
+  );
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function DashboardScreen() {
   const userId = useSessionStore((s) => s.userId);
@@ -144,11 +181,20 @@ export default function DashboardScreen() {
   // simplesmente não mostrar nada dela.
   const aiNotice = aiStatusNoticeView(aiStatus, ai.loadFailed, ai.retrying, ai.refresh);
 
+  // Assinaturas e recorrências (sem IA, vale para qualquer grupo): o cartão está sempre no Painel — com o total,
+  // com o vazio que explica o que vai aparecer, carregando, ou em erro com "tentar de novo". O Painel fica montado
+  // entre visitas, então pergunta de novo a cada volta.
+  const recurring = useRecurring();
+  useOnRefocus(() => void recurring.refetch({ cancelRefetch: false }));
+
   const [refreshing, setRefreshing] = React.useState(false);
   const handleRefresh = async () => {
     setRefreshing(true);
+    // As recorrências são pedidas junto e esperadas no fim (em erro o cartão mostra o próprio estado).
+    const recurringRefresh = recurring.refetch();
     // Puxar para atualizar também consulta o status da IA (não só os números do Painel).
     await Promise.all([refetch(), ai.refresh()]);
+    await recurringRefresh;
     setRefreshing(false);
   };
 
@@ -231,6 +277,38 @@ export default function DashboardScreen() {
           </View>
         )}
 
+        {/* Assinaturas e recorrências: quanto o grupo paga por mês no que se repete. Nunca some em silêncio. */}
+        {recurring.data ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.aiCard}
+            onPress={() => router.push('/(main)/recurring' as any)}
+            accessibilityLabel={isRecurringEmpty(recurring.data) ? RECURRING_CARD_EMPTY_LABEL : recurringCardLabel(recurring.data)}
+          >
+            <Ionicons name="repeat-outline" size={20} color={colors.primaryLight} />
+            <Text style={styles.aiCardText}>
+              {isRecurringEmpty(recurring.data) ? RECURRING_CARD_EMPTY_TEXT : recurringCardText(recurring.data)}
+            </Text>
+            <Text style={styles.aiCardAction}>Ver</Text>
+          </TouchableOpacity>
+        ) : recurring.isError ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.aiCard}
+            onPress={() => void recurring.refetch()}
+            accessibilityLabel={RECURRING_CARD_ERROR_LABEL}
+          >
+            <Ionicons name="alert-circle-outline" size={20} color={colors.warning} />
+            <Text style={styles.aiCardText}>{RECURRING_CARD_ERROR_TEXT}</Text>
+            <Text style={styles.aiCardAction}>Tentar de novo</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.aiCard} accessible accessibilityLabel="Carregando as recorrências">
+            <Ionicons name="repeat-outline" size={20} color={colors.textMuted} />
+            <Text style={styles.aiCardText}>Carregando as recorrências…</Text>
+          </View>
+        )}
+
         {/* Loading state */}
         {isLoading && <LoadingState />}
 
@@ -247,6 +325,7 @@ export default function DashboardScreen() {
           <>
             <TotalExpensesCard data={data} />
             <PartnerBreakdownRow data={data} currentUserId={userId} members={couple?.members} />
+            <UpcomingBillsCard data={data} />
             <CategoryBreakdown data={data} />
           </>
         )}
@@ -339,6 +418,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: BORDER,
   },
+  billsCard: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: CARD,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  billsCardText: { flex: 1 },
+  billsCardLabel: { fontSize: 13, color: MUTED, marginBottom: 4 },
+  billsCardValue: { fontSize: 22, fontWeight: '700', color: TEXT },
   cardLabel: { fontSize: 13, color: MUTED, marginBottom: 6 },
   cardValue: { fontSize: 34, fontWeight: '800', color: TEXT },
   cardHint: { fontSize: 12, color: MUTED, marginTop: 6 },

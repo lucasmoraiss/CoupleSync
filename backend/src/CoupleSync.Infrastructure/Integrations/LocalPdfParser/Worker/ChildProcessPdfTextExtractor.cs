@@ -126,7 +126,7 @@ public sealed class ChildProcessPdfTextExtractor : IPdfTextExtractor
                     _logger.LogWarning("PDF worker killed after the {TimeoutMs}ms limit.", (int)_options.Timeout.TotalMilliseconds);
                     throw new OcrException(
                         "PDF_TIMEOUT",
-                        "A leitura do PDF demorou demais e foi interrompida. Envie um extrato menor ou exporte o PDF novamente.");
+                        PdfPigTextExtractor.TimeoutMessage);
                 }
 
                 // The child has ended. Whatever it may have started goes now, before the pipes are waited for: a
@@ -293,5 +293,5 @@ public sealed class ChildProcessPdfTextExtractor : IPdfTextExtractor
 
     private static OcrException WorkerFailed() => new(
         PdfWorkerHost.WorkerFailedCode,
-        "A leitura do PDF falhou de forma inesperada. Tente enviar o arquivo novamente.");
+        "Não conseguimos ler este extrato. Se ele for grande, exporte um período menor (por exemplo, um mês) e envie de novo.");
 }

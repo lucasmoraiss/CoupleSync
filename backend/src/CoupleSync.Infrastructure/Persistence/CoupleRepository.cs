@@ -162,8 +162,13 @@ public sealed class CoupleRepository : ICoupleRepository
         // The mirror of the bank transactions of those accounts and the synchronisation runs of the connection go
         // first, in the transaction of this exit (the membership change the caller opened): the mirror can be
         // thousands of rows with the raw JSON of each, so it is deleted in the database instead of being loaded.
-        // Transactions already confirmed stay; their link lived in the mirror and goes with it.
+        // Transactions already confirmed stay; their link lived in the mirror and goes with it. The bills of the
+        // cards of those accounts go too (who leaves takes everything), before the accounts they point to.
         var accountIds = accounts.Select(a => a.Id).ToList();
+        await _dbContext.CreditCardBills
+            .IgnoreQueryFilters()
+            .Where(b => accountIds.Contains(b.BankAccountId))
+            .ExecuteDeleteAsync(cancellationToken);
         await _dbContext.BankTransactions
             .IgnoreQueryFilters()
             .Where(t => accountIds.Contains(t.BankAccountId))

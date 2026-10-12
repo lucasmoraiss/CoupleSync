@@ -26,13 +26,47 @@ public sealed class OpenFinanceController : ControllerBase
     private readonly OpenFinanceService _service;
     private readonly SyncRunService _syncRuns;
     private readonly BankReviewService _review;
+    private readonly BankAccountsService _accounts;
 
-    public OpenFinanceController(OpenFinanceService service, SyncRunService syncRuns, BankReviewService review)
+    public OpenFinanceController(OpenFinanceService service, SyncRunService syncRuns, BankReviewService review, BankAccountsService accounts)
     {
         _service = service;
         _syncRuns = syncRuns;
         _review = review;
+        _accounts = accounts;
     }
+
+    /// <summary>
+    /// The accounts and the credit cards the group connected, by person (who asks first): each account with its
+    /// balance and when the bank gave it; each card with its current bill, the next ones and the previous ones.
+    /// Everyone of the group reads all of it. Nothing is added up: every value is in its own currency.
+    /// </summary>
+    [HttpGet("accounts")]
+    [ProducesResponseType(typeof(BankAccountsOverviewResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<BankAccountsOverviewResponse>> GetAccounts(CancellationToken ct)
+    {
+        var overview = await _accounts.GetAsync(GetAuthenticatedCoupleId(), GetAuthenticatedUserId(), ct);
+        return Ok(new BankAccountsOverviewResponse(overview.People
+            .Select(p => new BankAccountsPersonResponse(
+                p.UserId,
+                p.UserName,
+                p.IsMe,
+                p.Accounts
+                    .Select(a => new BankBalanceAccountResponse(a.Id, a.BankName, a.Name, a.Type, a.Subtype, a.NumberMasked, a.Currency, a.Balance, a.BalanceAtUtc))
+                    .ToList(),
+                p.Cards
+                    .Select(c => new BankCardResponse(
+                        c.Id, c.BankName, c.Name, c.Brand, c.NumberMasked, c.Currency, c.Balance, c.BalanceAtUtc, c.CreditLimit,
+                        c.AvailableCreditLimit, c.CloseDate, c.DueDate, c.CurrentBill is { } current ? Map(current) : null,
+                        c.NextBills.Select(Map).ToList(), c.PreviousBills.Select(Map).ToList()))
+                    .ToList()))
+            .ToList()));
+    }
+
+    private static CardBillResponse Map(CardBillDto b)
+        => new(b.Id, b.DueDate, b.ClosingDate, b.TotalAmount, b.Currency, b.MinimumPayment, b.IsClosed);
 
     [HttpGet("status")]
     [ProducesResponseType(typeof(OpenFinanceStatusResponse), StatusCodes.Status200OK)]
@@ -157,7 +191,11 @@ public sealed class OpenFinanceController : ControllerBase
     public async Task<ActionResult<SyncRunResponse>> GetSyncRun(Guid id, CancellationToken ct)
         => Ok(Map(await _syncRuns.GetAsync(GetAuthenticatedCoupleId(), id, ct)));
 
-    /// <summary>The expenses of a month of Brazil (<c>month=AAAA-MM</c>; the current one when absent) waiting for the review, and the discarded ones apart.</summary>
+    /// <summary>
+    /// The expenses of a month of Brazil (<c>month=AAAA-MM</c>; the current one when absent) waiting for the review,
+    /// each with the transaction it looks the same as when there is one (<c>match</c>), and apart the discarded ones
+    /// and the ones ignored automatically, with the reason (<c>ignored</c>).
+    /// </summary>
     [HttpGet("review")]
     [ProducesResponseType(typeof(BankReviewResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -170,13 +208,32 @@ public sealed class OpenFinanceController : ControllerBase
             review.Discarded.Select(Map).ToList(),
             review.PendingTotalBrl,
             review.PendingAllMonths,
-            review.PendingByMonth.Select(m => new BankReviewMonthResponse(m.Month, m.Pending)).ToList()));
+            review.PendingByMonth.Select(m => new BankReviewMonthResponse(m.Month, m.Pending)).ToList(),
+            review.Ignored.Select(Map).ToList(),
+            review.SuspectedDuplicates,
+            review.IgnoredAllMonths,
+            review.IgnoredByMonth.Select(m => new BankReviewIgnoredMonthResponse(m.Month, m.Ignored)).ToList(),
+            review.Incomes.Select(Map).ToList(),
+            review.PendingIncomesAllMonths,
+            review.PendingIncomesByMonth.Select(m => new BankReviewMonthResponse(m.Month, m.Pending)).ToList()));
     }
 
     /// <summary>
     /// Turns the chosen expenses into transactions (of who connected the account) and discards the others. All or
     /// nothing. A line not settled at the bank yet answers 422 TRANSACTION_NOT_POSTED; a line of another group, 404.
     /// A line without a value, or in a currency that is not BRL, is not an error: it is left waiting and listed in <c>skipped</c>.
+    /// <c>reconcile</c> ("it is the same") creates nothing: the line points to the transaction the app already had,
+    /// which takes from the bank only the merchant and the category it did not have; 409
+    /// BANK_TRANSACTION_NOT_MATCHED when the line has no such transaction (any more), 409 MATCHED_TRANSACTION_TAKEN
+    /// when that transaction already is another line's. <c>asNew</c> ("it is another one") confirms like <c>expenses</c>.
+    /// <c>incomes</c> are entries (money that came in): each becomes an income of the month of its day in Brazil,
+    /// shared and not recurring, of who connected the account, named as informed or by the description of the line
+    /// (a name the person already has in that month gets " (2)"); an expense sent there answers 422, and so does the
+    /// limit of incomes of a person in a month (INCOME_SOURCE_LIMIT). Entries can be discarded like expenses.
+    /// A line of <c>expenses</c> without a suspicion that, checked at this moment, looks like a transaction the app
+    /// already has is not an error either: nothing is created for it, it stays in the review with the suspicion and
+    /// is listed in <c>heldAsPossibleDuplicates</c>. With <c>holdPossibleDuplicates: true</c> the same goes for a line
+    /// of <c>expenses</c> that already carried the suspicion.
     /// </summary>
     [HttpPost("review/confirm")]
     [ProducesResponseType(typeof(ConfirmBankReviewResponse), StatusCodes.Status200OK)]
@@ -186,20 +243,32 @@ public sealed class OpenFinanceController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<ConfirmBankReviewResponse>> ConfirmReview([FromBody] ConfirmBankReviewRequest request, CancellationToken ct)
     {
+        if ((request.Expenses is not null && request.Expenses.Any(e => e is null))
+            || (request.Reconcile is not null && request.Reconcile.Any(r => r is null))
+            || (request.Incomes is not null && request.Incomes.Any(i => i is null)))
+            throw new UnprocessableEntityException(BankReviewService.InvalidSelectionCode, "Há um lançamento inválido na lista.");
+
         var result = await _review.ConfirmAsync(
             GetAuthenticatedCoupleId(),
             request.Expenses?.Select(e => new ConfirmExpenseInput(e.Id, e.Category, e.Description)).ToList(),
             request.Discard,
+            request.Reconcile?.Select(r => r.Id).ToList(),
+            request.AsNew,
+            request.Incomes?.Select(i => new ConfirmIncomeInput(i.Id, i.Name)).ToList(),
+            request.HoldPossibleDuplicates == true,
             ct);
         return Ok(new ConfirmBankReviewResponse(
             result.Created.Select(c => new BankReviewCreatedResponse(c.Id, c.TransactionId)).ToList(),
             result.Discarded,
             result.AlreadyConfirmed,
             result.Skipped,
-            result.SkippedOtherCurrency));
+            result.SkippedOtherCurrency,
+            result.Reconciled.Select(r => new BankReviewReconciledResponse(r.Id, r.TransactionId)).ToList(),
+            result.Incomes.Select(i => new BankReviewIncomeResponse(i.Id, i.IncomeSourceId)).ToList(),
+            result.HeldAsPossibleDuplicates));
     }
 
-    /// <summary>Discarded lines go back to waiting for the review.</summary>
+    /// <summary>Discarded and automatically ignored lines go back to waiting for the review, and are never ignored automatically again.</summary>
     [HttpPost("review/restore")]
     [ProducesResponseType(typeof(RestoreBankReviewResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -215,7 +284,8 @@ public sealed class OpenFinanceController : ControllerBase
 
     private static BankReviewLineResponse Map(BankReviewLineDto l) => new(
         l.Id, l.Day, l.Merchant, l.Description, l.Amount, l.Currency, l.SuggestedCategory, l.BankStatus,
-        l.BankName, l.AccountName, l.InstallmentNumber, l.InstallmentTotal);
+        l.BankName, l.AccountName, l.InstallmentNumber, l.InstallmentTotal, l.Type, l.AutoReason,
+        l.Match is { } m ? new BankReviewMatchResponse(m.TransactionId, m.Source, m.Description, m.Merchant, m.Amount, m.Currency, m.Day) : null);
 
     private static BankConnectionResponse Map(BankConnectionDto c) => new(
         c.Id, c.Label, c.UserId, c.UserName, c.IsMine, c.Status, c.ClientIdHint, c.HistoryMonths,

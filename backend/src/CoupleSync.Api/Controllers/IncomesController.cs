@@ -110,7 +110,7 @@ public sealed class IncomesController : ControllerBase
     }
 
     private static IncomeSourceResponse MapSourceResponse(IncomeSourceDto dto)
-        => new(dto.Id, dto.UserId, dto.Name, dto.Amount, dto.Currency, dto.IsShared, dto.IsRecurring, dto.CreatedAtUtc, dto.UpdatedAtUtc);
+        => new(dto.Id, dto.UserId, dto.Name, dto.Amount, dto.Currency, dto.IsShared, dto.IsRecurring, dto.CreatedAtUtc, dto.UpdatedAtUtc, dto.FromBank);
 
     private static MonthlyIncomeResponse MapMonthlyResponse(MonthlyIncomeDto dto)
     {

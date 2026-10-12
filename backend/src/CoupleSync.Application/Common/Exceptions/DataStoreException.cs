@@ -44,4 +44,11 @@ public sealed class ConcurrencyConflictException : DataStoreException
         : base(message, innerException)
     {
     }
+
+    /// <summary>
+    /// True when no one changed the row: the data store itself ended the write because it ran into another one going
+    /// on at the same time (a deadlock, a serialization failure). Trying again is enough. Who reads a conflict as
+    /// "someone else decided about this row first" must not read this one so.
+    /// </summary>
+    public bool EndedByTheDatabase { get; init; }
 }

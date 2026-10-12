@@ -9,7 +9,9 @@ public sealed record IncomeSourceResponse(
     bool IsShared,
     bool IsRecurring,
     DateTime CreatedAtUtc,
-    DateTime UpdatedAtUtc);
+    DateTime UpdatedAtUtc,
+    // New, additive: true when the source was registered from an entry of the bank (Open Finance).
+    bool FromBank = false);
 
 public sealed record IncomeGroupResponse(
     Guid? UserId,

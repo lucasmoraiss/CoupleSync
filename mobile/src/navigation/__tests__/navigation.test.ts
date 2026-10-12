@@ -164,13 +164,40 @@ describe('voltar das abas ocultas (M-I2)', () => {
     expect(review).toMatch(/\{selectable \? \(\s*<TouchableOpacity[\s\S]{0,400}accessibilityRole="checkbox"/);
     expect(review).toContain('Selecionar tudo');
     expect(review).toContain('Confirmar selecionadas');
-    // O valor não é editável: a tela não tem campo de texto.
-    expect(review).not.toMatch(/<TextInput\b/);
+    // O valor não é editável: o único campo de texto da tela é o nome da renda de uma entrada.
+    expect(review.match(/<TextInput\b/g)).toHaveLength(1);
+    expect(review).toMatch(/<TextInput\s+style=\{styles\.input\}\s+value=\{incomeName\}\s+onChangeText=\{setIncomeName\}/);
+    // A entrada vira renda pelo corpo que review.ts monta (só o id e o nome), nunca por "Confirmar selecionadas".
+    expect(review).toMatch(/confirmReview\(incomeRequest\(line, incomeName\)\)/);
   });
 
-  it('Open Finance: o atalho da tela de Transações só é desenhado quando há algo do banco para revisar', () => {
+  it('Open Finance: Contas abre do Painel, volta para ele e é remontada a cada visita', () => {
+    expect(parentRouteOf('accounts/index')).toBe('/');
+    const accounts = read('(main)/accounts/index.tsx');
+    expect(accounts).toMatch(/export default resetOnFocus\(AccountsScreen\)/);
+    expect(accounts).toMatch(/goToParent\('accounts\/index'\)/);
+    // O agrupamento por pessoa e o "atualizado há" vêm de accounts.ts (regras testadas).
+    expect(accounts).toMatch(/const sections = peopleSections\(data\);/);
+    expect(accounts).toMatch(/updatedAgoText\(account\.balanceAtUtc, now\)/);
+    // Só leitura: nenhum campo de texto, e o saldo do cartão continua com o nome dele (não é a fatura).
+    expect(accounts).not.toMatch(/<TextInput\b/);
+    expect(accounts).toContain('Saldo do cartão');
+    expect(accounts).toContain('Fatura atual');
+
+    // O Painel só acrescenta o cartão, que some quando o servidor não manda as faturas (sem conexão).
+    const dashboard = read('(main)/index.tsx');
+    expect(dashboard).toMatch(/const bills = upcomingBillsCard\(data\.upcomingBills\);\s+if \(!bills\) return null;/);
+    expect(dashboard).toMatch(/router\.push\('\/\(main\)\/accounts'/);
+    expect(dashboard).toContain('Faturas a vencer nos próximos 30 dias');
+  });
+
+  it('Open Finance: o atalho da tela de Transações só é desenhado quando há algo do banco para revisar ou ignoradas a conferir', () => {
     const transactions = read('(main)/transactions/index.tsx');
-    expect(transactions).toMatch(/const bankReviewShortcut = reviewShortcutLabel\(bankReview\.pending\);/);
+    expect(transactions).toMatch(/const bankReviewShortcut = reviewShortcutLabel\(bankReview\.pending, bankReview\.ignored\);/);
+    // As duas contagens vêm da mesma resposta da revisão; servidor que não manda a das ignoradas conta zero.
+    const hook = read('../src/modules/openfinance/useBankReview.ts');
+    expect(hook).toMatch(/pending: pendingReviewCount\(review\), ignored: review\.ignoredAllMonths \?\? 0/);
+    expect(hook).toMatch(/catch \{\s*return NO_COUNTS;/);
     expect(transactions).toMatch(/\{bankReviewShortcut !== null && \(\s*<TouchableOpacity[\s\S]{0,200}router\.push\('\/\(main\)\/openfinance\/review'/);
     expect(transactions.match(/\(main\)\/openfinance\/review/g)).toHaveLength(1);
     expect(transactions).toMatch(/useOnRefocus\(\(\) => bankReview\.refetch\(\)\)/);
@@ -194,6 +221,18 @@ describe('voltar das abas ocultas (M-I2)', () => {
     expect(wizard).toContain('Conectar e sincronizar');
     expect(wizard).toMatch(/reviewDoneLabel\(toReview\)/);
     expect(wizard).toMatch(/router\.push\('\/\(main\)\/openfinance\/review'/);
+  });
+
+  it('Open Finance: na tela de gestão, com alguma conexão, há um acesso fixo à Revisão do banco (não depende de haver pendência)', () => {
+    const screen = read('(main)/settings/openfinance/index.tsx');
+    expect(screen).toMatch(/const reviewAccess = hasReviewAccess\(data\);/);
+    const access = /\{reviewAccess \? \(([\s\S]*?)\) : null\}/.exec(screen)?.[1] ?? '';
+    expect(access).toMatch(/<TouchableOpacity[\s\S]*?onPress=\{openReview\}[\s\S]*?accessibilityRole="button"/);
+    expect(access).toContain('Revisão do banco');
+    expect(access).toMatch(/ignorad/);
+    expect(screen).toMatch(/function openReview\(\) \{\s*router\.push\('\/\(main\)\/openfinance\/review' as any\);\s*\}/);
+    // Nenhuma contagem decide se o acesso aparece.
+    expect(access).not.toMatch(/pending|ignoredAllMonths/);
   });
 
   it('Open Finance: na tela de gestão, o texto de saldo e limite (com a data da leitura) vem da regra testada (accountBalanceText)', () => {

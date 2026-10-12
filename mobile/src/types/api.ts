@@ -153,6 +153,34 @@ export interface DashboardResponse {
   readonly periodStart: string;
   readonly periodEnd: string;
   readonly generatedAtUtc: string;
+  /**
+   * Open Finance: as faturas dos cartões do grupo que vencem de hoje a 30 dias. Ausente (servidor anterior) ou
+   * null (ninguém do grupo conectado): o Painel não mostra nada sobre faturas.
+   */
+  readonly upcomingBills?: UpcomingBillsResponse | null;
+}
+
+export interface UpcomingBillResponse {
+  readonly id: string;
+  readonly accountId: string;
+  readonly cardName: string;
+  readonly bankName: string;
+  readonly userId: string;
+  readonly userName: string | null;
+  /** "AAAA-MM-DD": dia de calendário, como o banco escreveu. */
+  readonly dueDate: string;
+  /** Na moeda de `currency`; nunca convertido. */
+  readonly totalAmount: number;
+  readonly currency: string;
+  readonly isClosed: boolean;
+}
+
+export interface UpcomingBillsResponse {
+  /** Soma só das faturas em reais com valor a pagar. */
+  readonly totalBrl: number;
+  readonly fromDay: string;
+  readonly toDay: string;
+  readonly bills: readonly UpcomingBillResponse[];
 }
 
 // Matches backend TransactionResponse
@@ -287,6 +315,8 @@ export interface IncomeSourceResponse {
   readonly isRecurring: boolean;
   readonly createdAtUtc: string;
   readonly updatedAtUtc: string;
+  /** A renda foi registrada a partir de uma entrada do banco (Open Finance). Ausente em servidor anterior. */
+  readonly fromBank?: boolean;
 }
 
 export interface IncomeGroupResponse {
@@ -610,12 +640,37 @@ export interface BankReviewLineResponse {
   readonly accountName: string;
   readonly installmentNumber: number | null;
   readonly installmentTotal: number | null;
+  /** 'Debit' (saída) | 'Credit' (entrada). Ausente em servidor anterior à conciliação: é despesa. */
+  readonly type?: string;
+  /** Por que a linha foi ignorada automaticamente: 'Transfer' | 'BillPayment'. Só nas de `ignored`. */
+  readonly autoReason?: string | null;
+  /** A transação do app com que esta linha se parece (possível duplicada). Ausente ou null: nenhuma. */
+  readonly match?: BankReviewMatchResponse | null;
+}
+
+/** A transação que o app já tinha e que parece ser a mesma compra de uma linha do banco. */
+export interface BankReviewMatchResponse {
+  readonly transactionId: string;
+  /** Como ela entrou no app: 'Manual' | 'OcrImport' | 'Notification'. */
+  readonly source: string;
+  readonly description: string | null;
+  readonly merchant: string | null;
+  readonly amount: number;
+  readonly currency: string;
+  /** "AAAA-MM-DD": o dia dela no Brasil. */
+  readonly day: string;
 }
 
 export interface BankReviewMonthResponse {
   /** "AAAA-MM" */
   readonly month: string;
   readonly pending: number;
+}
+
+export interface BankReviewIgnoredMonthResponse {
+  /** "AAAA-MM" */
+  readonly month: string;
+  readonly ignored: number;
 }
 
 export interface BankReviewResponse {
@@ -628,11 +683,36 @@ export interface BankReviewResponse {
   readonly pendingAllMonths: number;
   /** Por mês, tudo o que espera na revisão (também o que só pode ser descartado). */
   readonly pendingByMonth: readonly BankReviewMonthResponse[];
+  /** Ignoradas automaticamente neste mês (transferência entre contas do grupo, pagamento de fatura), saídas e entradas. */
+  readonly ignored?: readonly BankReviewLineResponse[];
+  /** Quantas de `expenses` têm possível duplicada. */
+  readonly suspectedDuplicates?: number;
+  /** As entradas (dinheiro que entrou) esperando neste mês. Ausente em servidor anterior às entradas. */
+  readonly incomes?: readonly BankReviewLineResponse[];
+  /** Quantas entradas podem virar renda, em todos os meses (sem as pendentes no banco, sem valor ou em outra moeda). */
+  readonly pendingIncomesAllMonths?: number;
+  /** Por mês, as entradas que esperam na revisão (também as que só podem ser descartadas). */
+  readonly pendingIncomesByMonth?: readonly BankReviewMonthResponse[];
+  /** Quantas linhas estão ignoradas automaticamente, em todos os meses. Ausente em servidor anterior. */
+  readonly ignoredAllMonths?: number;
+  /** Por mês, quantas linhas estão ignoradas automaticamente (o mais recente primeiro). Ausente em servidor anterior. */
+  readonly ignoredByMonth?: readonly BankReviewIgnoredMonthResponse[];
 }
 
 export interface ConfirmBankReviewRequest {
   readonly expenses?: ReadonlyArray<{ readonly id: string; readonly category?: string; readonly description?: string }>;
   readonly discard?: readonly string[];
+  /** "É a mesma": a linha passa a apontar para a transação que já existia; nada é criado. */
+  readonly reconcile?: ReadonlyArray<{ readonly id: string }>;
+  /** "É outra": a linha com possível duplicada vira uma despesa nova, com a categoria sugerida. */
+  readonly asNew?: readonly string[];
+  /** Entradas que viram renda do mês do dia delas (compartilhada, não recorrente). Sem `name`, a descrição da linha. */
+  readonly incomes?: ReadonlyArray<{ readonly id: string; readonly name?: string }>;
+  /**
+   * "Confirmar selecionadas": ninguém respondeu sobre duplicadas nas linhas de `expenses`. O servidor então também
+   * segura a linha que já tinha possível duplicada (marcada depois de a tela carregar). Servidor anterior ignora.
+   */
+  readonly holdPossibleDuplicates?: boolean;
 }
 
 export interface ConfirmBankReviewResponse {
@@ -643,8 +723,147 @@ export interface ConfirmBankReviewResponse {
   readonly skipped?: readonly string[];
   /** As de `skipped` que foram puladas por estarem em outra moeda. */
   readonly skippedOtherCurrency?: readonly string[];
+  /** Linhas marcadas como a mesma de uma transação que já existia, e essa transação. */
+  readonly reconciled?: ReadonlyArray<{ readonly id: string; readonly transactionId: string }>;
+  /** Entradas que este pedido registrou como renda, e a renda de cada uma. */
+  readonly incomes?: ReadonlyArray<{ readonly id: string; readonly incomeSourceId: string }>;
+  /**
+   * Linhas enviadas para confirmar que o servidor, conferindo na hora, viu que parecem uma transação que o app já
+   * tinha: nada foi criado para elas; continuam na revisão, agora com `match`. Ausente em servidor anterior.
+   */
+  readonly heldAsPossibleDuplicates?: readonly string[];
+}
+
+// --- Open Finance: contas e faturas (GET /openfinance/accounts) ---
+
+/** Uma fatura do cartão. Os valores estão em `currency`; nada é convertido. */
+export interface CardBillResponse {
+  readonly id: string;
+  /** "AAAA-MM-DD". */
+  readonly dueDate: string;
+  readonly closingDate: string | null;
+  readonly totalAmount: number;
+  readonly currency: string;
+  readonly minimumPayment: number | null;
+  /** O total não muda mais (a fatura fechou). */
+  readonly isClosed: boolean;
+}
+
+export interface BankBalanceAccountResponse {
+  readonly id: string;
+  readonly bankName: string;
+  readonly name: string;
+  readonly type: string;
+  /** 'CHECKING_ACCOUNT' | 'SAVINGS_ACCOUNT' | ... */
+  readonly subtype: string | null;
+  readonly numberMasked: string | null;
+  readonly currency: string;
+  readonly balance: number;
+  /** Quando o banco deu o saldo. */
+  readonly balanceAtUtc: string;
+}
+
+export interface BankCardResponse {
+  readonly id: string;
+  readonly bankName: string;
+  readonly name: string;
+  readonly brand: string | null;
+  readonly numberMasked: string | null;
+  readonly currency: string;
+  /** O "saldo do cartão" como o Pluggy manda: não é a fatura. */
+  readonly balance: number;
+  readonly balanceAtUtc: string;
+  readonly creditLimit: number | null;
+  readonly availableCreditLimit: number | null;
+  readonly closeDate: string | null;
+  readonly dueDate: string | null;
+  /** A primeira fatura que vence de hoje em diante; null se não há. */
+  readonly currentBill: CardBillResponse | null;
+  /** As que vencem depois da atual, da mais próxima para a mais distante. */
+  readonly nextBills: readonly CardBillResponse[];
+  /** As já vencidas, da mais recente para a mais antiga (até 12). */
+  readonly previousBills: readonly CardBillResponse[];
+}
+
+export interface BankAccountsPersonResponse {
+  readonly userId: string;
+  readonly userName: string;
+  readonly isMe: boolean;
+  readonly accounts: readonly BankBalanceAccountResponse[];
+  readonly cards: readonly BankCardResponse[];
+}
+
+/** Só conexões ainda conectadas; quem pergunta vem primeiro. */
+export interface BankAccountsOverviewResponse {
+  readonly people: readonly BankAccountsPersonResponse[];
 }
 
 export interface RestoreBankReviewResponse {
   readonly restored: readonly string[];
+}
+
+// ─── Assinaturas e recorrências (GET /api/v1/ai/recurring) ────────────────────
+export type RecurringKind = 'Subscription' | 'FixedBill' | 'Installment' | 'Habit';
+/** `Irregular`: pequeno gasto frequente (4 ou mais compras em 30 dias), sem intervalo fixo. */
+export type RecurringCadence = 'Weekly' | 'Monthly' | 'Yearly' | 'Irregular';
+export type RecurringStatus = 'Active' | 'SuspectedDormant' | 'Stopped';
+export type RecurringFlag = 'Forgotten' | 'PriceIncrease' | 'New' | 'ChargedAfterCancel';
+export type RecurringOverride = 'NotRecurring' | 'Cancelled' | 'Subscription' | 'FixedBill';
+
+export interface RecurringItemResponse {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: RecurringKind;
+  readonly variableAmount: boolean;
+  readonly cadence: RecurringCadence;
+  /** O valor típico de hoje (a mediana das 3 últimas cobranças quando o valor varia). */
+  readonly amount: number;
+  readonly lastAmount: number;
+  readonly previousAmount?: number | null;
+  readonly annualCost: number;
+  readonly occurrences: number;
+  readonly missedCount?: number;
+  /** Datas no calendário de Brasília, "AAAA-MM-DD". */
+  readonly firstSeen: string;
+  readonly lastSeen: string;
+  readonly nextExpected?: string | null;
+  readonly status: RecurringStatus;
+  readonly flags: readonly RecurringFlag[];
+  /** `Low`: parcela provável (uma marca "n/N" só) ou possível recorrência (padrão sem prova, fora do total). */
+  readonly confidence?: 'High' | 'Medium' | 'Low';
+  readonly category: string;
+  readonly person?: { readonly userId: string; readonly name: string } | null;
+  readonly installment?: {
+    readonly number: number;
+    readonly total: number;
+    readonly remainingAmount: number;
+    /** "AAAA-MM" da última parcela. */
+    readonly endMonth: string;
+  } | null;
+  readonly override?: RecurringOverride | null;
+}
+
+export interface RecurringListResponse {
+  readonly monthlyTotal: number;
+  readonly annualTotal: number;
+  readonly detectedAtUtc: string;
+  readonly subscriptions: readonly RecurringItemResponse[];
+  readonly fixedBills: readonly RecurringItemResponse[];
+  readonly installments: readonly RecurringItemResponse[];
+  readonly habits: readonly RecurringItemResponse[];
+  readonly hidden: readonly RecurringItemResponse[];
+  readonly installmentsByMonth?: readonly { readonly month: string; readonly amount: number }[];
+  /** O que parece se repetir mas ainda não tem prova: fora dos totais e das outras listas, à espera da pessoa. */
+  readonly possible?: readonly RecurringItemResponse[];
+}
+
+export interface RecurringChargeResponse {
+  readonly transactionId: string;
+  readonly date: string;
+  readonly amount: number;
+  readonly merchant: string;
+}
+
+export interface RecurringChargesResponse {
+  readonly transactions: readonly RecurringChargeResponse[];
 }

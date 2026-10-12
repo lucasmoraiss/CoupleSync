@@ -169,7 +169,8 @@ public sealed class PluggyHttpClient : IPluggyClient
                     card is { } billed ? Text(billed, "billId") : null,
                     Text(element, "status"),
                     Number(element, "balance"),
-                    element.GetRawText()));
+                    element.GetRawText(),
+                    payment is { } sent && Child(sent, "payer") is { } payer ? Text(payer, "name") : null));
             }
 
             var totalPages = Whole(root, "totalPages");
@@ -179,6 +180,61 @@ public sealed class PluggyHttpClient : IPluggyClient
         }
 
         return transactions;
+    }
+
+    /// <summary>The page size asked of GET /bills (Pluggy's own default).</summary>
+    public const int BillsPageSize = 500;
+
+    /// <summary>A ceiling for a listing of bills that never says it ended.</summary>
+    private const int MaxBillPages = 20;
+
+    public async Task<IReadOnlyList<PluggyBill>> GetBillsAsync(PluggyAuth auth, string accountId, CancellationToken ct)
+    {
+        var bills = new List<PluggyBill>();
+        var query = string.Create(CultureInfo.InvariantCulture, $"/bills?accountId={Uri.EscapeDataString(accountId)}&pageSize={BillsPageSize}");
+
+        for (var page = 1; page <= MaxBillPages; page++)
+        {
+            using var json = await SendAsync(
+                auth, HttpMethod.Get, "bills", string.Create(CultureInfo.InvariantCulture, $"{query}&page={page}"), notFoundMeansNoItem: true, ct);
+            var root = json.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("results", out var results)
+                || results.ValueKind != JsonValueKind.Array)
+            {
+                throw Unavailable("bills", "unexpected body");
+            }
+
+            var received = 0;
+            foreach (var element in results.EnumerateArray())
+            {
+                received++;
+                if (element.ValueKind != JsonValueKind.Object) continue;
+                var id = Text(element, "id");
+                // The day as the bank wrote it ("2026-10-27T00:00:00.000Z", "2026-10-27T00:00:00", "2026-10-27"):
+                // a due date is a calendar day, never an instant to convert.
+                var dueDate = Day(element, "dueDate");
+                var total = Number(element, "totalAmount");
+                // Without an id, a due date or a total there is nothing to mirror.
+                if (id is null || dueDate is null || total is null) continue;
+
+                bills.Add(new PluggyBill(
+                    id,
+                    dueDate.Value,
+                    Day(element, "billClosingDate"),
+                    total.Value,
+                    Text(element, "totalAmountCurrencyCode"),
+                    Number(element, "minimumPaymentAmount"),
+                    element.GetRawText()));
+            }
+
+            var totalPages = Whole(root, "totalPages");
+            if (received == 0 || (totalPages is { } last && page >= last)) break;
+            // No page count in the answer: a page that is not full is the last one.
+            if (totalPages is null && received < BillsPageSize) break;
+        }
+
+        return bills;
     }
 
     public async Task RequestItemUpdateAsync(PluggyAuth auth, string itemId, CancellationToken ct)

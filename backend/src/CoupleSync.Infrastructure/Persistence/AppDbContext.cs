@@ -61,11 +61,17 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<BankTransaction> BankTransactions => Set<BankTransaction>();
 
+    public DbSet<CreditCardBill> CreditCardBills => Set<CreditCardBill>();
+
     public DbSet<AiUsage> AiUsages => Set<AiUsage>();
 
     public DbSet<AiConsent> AiConsents => Set<AiConsent>();
 
     public DbSet<AiUserPreference> AiUserPreferences => Set<AiUserPreference>();
+
+    public DbSet<RecurringStream> RecurringStreams => Set<RecurringStream>();
+
+    public DbSet<RecurringStreamItem> RecurringStreamItems => Set<RecurringStreamItem>();
 
     // BudgetAllocation is NOT exposed as a top-level DbSet.
     // All allocation access must go through BudgetPlan.Allocations navigation
@@ -715,6 +721,7 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.LinkedIncomeSourceId).HasColumnName("linked_income_source_id");
             entity.Property(x => x.MatchedTransactionId).HasColumnName("matched_transaction_id");
             entity.Property(x => x.AutoReason).HasColumnName("auto_reason").HasMaxLength(BankTransaction.MaxAutoReasonLength);
+            entity.Property(x => x.PersonDecidedAtUtc).HasColumnName("person_decided_at_utc");
             entity.Property(x => x.SuggestedCategory).HasColumnName("suggested_category").HasMaxLength(BankTransaction.MaxSuggestedCategoryLength);
             entity.Property(x => x.ReviewedAtUtc).HasColumnName("reviewed_at_utc");
             // The transaction exactly as Pluggy sent it. Never logged, never returned by the API.
@@ -724,6 +731,9 @@ public sealed class AppDbContext : DbContext
             entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
             entity.Ignore(x => x.IsExpense);
             entity.Ignore(x => x.AbsoluteAmount);
+            entity.Ignore(x => x.OpenToAutomaticRules);
+            entity.Ignore(x => x.CanBePairedAsTransfer);
+            entity.Ignore(x => x.LostItsIncome);
 
             // A Pluggy transaction is mirrored once in the whole database: synchronising again never duplicates.
             entity.HasIndex(x => x.PluggyTransactionId).IsUnique();
@@ -733,6 +743,7 @@ public sealed class AppDbContext : DbContext
             entity.HasIndex(x => x.UserId);
             entity.HasIndex(x => x.LinkedTransactionId);
             entity.HasIndex(x => x.LinkedIncomeSourceId);
+            entity.HasIndex(x => x.MatchedTransactionId);
             entity.HasIndex(x => x.SyncRunId);
 
             entity.HasOne<Couple>()
@@ -757,6 +768,13 @@ public sealed class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.SetNull)
                 .IsRequired(false);
 
+            // The same for a suspected duplicate: without the transaction there is nothing left to suspect.
+            entity.HasOne<Transaction>()
+                .WithMany()
+                .HasForeignKey(x => x.MatchedTransactionId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
+
             entity.HasOne<IncomeSource>()
                 .WithMany()
                 .HasForeignKey(x => x.LinkedIncomeSourceId)
@@ -768,6 +786,41 @@ public sealed class AppDbContext : DbContext
                 .HasForeignKey(x => x.SyncRunId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .IsRequired(false);
+        });
+
+        modelBuilder.Entity<CreditCardBill>(entity =>
+        {
+            entity.ToTable("credit_card_bills");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.BankAccountId).HasColumnName("bank_account_id").IsRequired();
+            entity.Property(x => x.PluggyBillId).HasColumnName("pluggy_bill_id").HasMaxLength(CreditCardBill.MaxPluggyIdLength).IsRequired();
+            entity.Property(x => x.DueDate).HasColumnName("due_date").IsRequired();
+            entity.Property(x => x.ClosingDate).HasColumnName("closing_date");
+            entity.Property(x => x.TotalAmount).HasColumnName("total_amount").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(CreditCardBill.MaxCurrencyLength).IsRequired();
+            entity.Property(x => x.MinimumPayment).HasColumnName("minimum_payment").HasPrecision(18, 2);
+            entity.Property(x => x.IsClosed).HasColumnName("is_closed").IsRequired();
+            // The bill exactly as Pluggy sent it. Never logged, never returned by the API.
+            entity.Property(x => x.RawJson).HasColumnName("raw_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+
+            // A Pluggy bill is mirrored once in the whole database: synchronising again never duplicates.
+            entity.HasIndex(x => x.PluggyBillId).IsUnique();
+            entity.HasIndex(x => new { x.CoupleId, x.DueDate });
+            entity.HasIndex(x => x.BankAccountId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<BankAccount>()
+                .WithMany()
+                .HasForeignKey(x => x.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AiUsage>(entity =>
@@ -847,6 +900,90 @@ public sealed class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RecurringStream>(entity =>
+        {
+            // What the group pays again and again, as the detector found it. One row per (group, merchant_key, kind,
+            // cadence), recalculated in place: the id and what the person said about it stay.
+            entity.ToTable("recurring_streams");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.MerchantKey).HasColumnName("merchant_key").HasMaxLength(RecurringStream.MaxMerchantKeyLength).IsRequired();
+            entity.Property(x => x.DisplayName).HasColumnName("display_name").HasMaxLength(RecurringStream.MaxDisplayNameLength).IsRequired();
+            // "merchant" or "description": a name read from a description never goes to an AI provider.
+            entity.Property(x => x.NameSource).HasColumnName("name_source").HasMaxLength(RecurringStream.MaxNameSourceLength).IsRequired();
+            entity.Property(x => x.Kind).HasColumnName("kind").HasMaxLength(16).IsRequired();
+            entity.Property(x => x.VariableAmount).HasColumnName("variable_amount").IsRequired();
+            entity.Property(x => x.Cadence).HasColumnName("cadence").HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Category).HasColumnName("category").HasMaxLength(64).IsRequired();
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.MedianAmount).HasColumnName("median_amount").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.LastAmount).HasColumnName("last_amount").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.PreviousAmount).HasColumnName("previous_amount").HasPrecision(18, 2);
+            entity.Property(x => x.AnnualCost).HasColumnName("annual_cost").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.Occurrences).HasColumnName("occurrences").IsRequired();
+            entity.Property(x => x.MissedCount).HasColumnName("missed_count").IsRequired();
+            entity.Property(x => x.FirstSeenLocal).HasColumnName("first_seen_local").IsRequired();
+            entity.Property(x => x.LastSeenLocal).HasColumnName("last_seen_local").IsRequired();
+            entity.Property(x => x.NextExpectedLocal).HasColumnName("next_expected_local");
+            entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(24).IsRequired();
+            entity.Property(x => x.Flags).HasColumnName("flags").HasMaxLength(128).IsRequired();
+            entity.Property(x => x.Confidence).HasColumnName("confidence").HasMaxLength(16).IsRequired();
+            entity.Property(x => x.InstallmentNumber).HasColumnName("installment_number");
+            entity.Property(x => x.InstallmentTotal).HasColumnName("installment_total");
+            entity.Property(x => x.RemainingAmount).HasColumnName("remaining_amount").HasPrecision(18, 2);
+            entity.Property(x => x.EndMonth).HasColumnName("end_month").HasMaxLength(7);
+            entity.Property(x => x.UserOverride).HasColumnName("user_override").HasMaxLength(16);
+            entity.Property(x => x.OverrideByUserId).HasColumnName("override_by_user_id");
+            entity.Property(x => x.OverrideAtUtc).HasColumnName("override_at_utc");
+            entity.Property(x => x.DetectedAtUtc).HasColumnName("detected_at_utc").IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+            entity.Ignore(x => x.FlagList);
+            entity.Ignore(x => x.EffectiveKind);
+            entity.Ignore(x => x.IsHidden);
+
+            entity.HasIndex(x => new { x.CoupleId, x.MerchantKey, x.Kind, x.Cadence }).IsUnique();
+            entity.HasIndex(x => new { x.CoupleId, x.Status });
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.Items)
+                .WithOne()
+                .HasForeignKey(x => x.StreamId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.Navigation(x => x.Items).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+
+        modelBuilder.Entity<RecurringStreamItem>(entity =>
+        {
+            // One charge of a stream. It goes away with the stream and with the transaction: deleting a transaction
+            // is never held back by a recurrence.
+            entity.ToTable("recurring_stream_items");
+            entity.HasKey(x => x.Id);
+            // The id is given by the code: an item added to a stream that is already stored is a new row, not a change.
+            entity.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.StreamId).HasColumnName("stream_id").IsRequired();
+            entity.Property(x => x.TransactionId).HasColumnName("transaction_id").IsRequired();
+
+            entity.HasIndex(x => new { x.StreamId, x.TransactionId }).IsUnique();
+            entity.HasIndex(x => x.TransactionId);
+            entity.HasIndex(x => x.CoupleId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Transaction>()
+                .WithMany()
+                .HasForeignKey(x => x.TransactionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         ApplyCoupleQueryFilters(modelBuilder);

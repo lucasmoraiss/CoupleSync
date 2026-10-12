@@ -55,6 +55,10 @@ import type {
   OpenFinanceStatusResponse,
   AiStatusResponse,
   AiUsageResponse,
+  RecurringChargesResponse,
+  RecurringItemResponse,
+  RecurringListResponse,
+  RecurringOverride,
   BankConnectionResponse,
   BankItemResponse,
   BankAccountResponse,
@@ -62,6 +66,7 @@ import type {
   CreateBankConnectionRequest,
   SyncRunResponse,
   BankReviewResponse,
+  BankAccountsOverviewResponse,
   ConfirmBankReviewRequest,
   ConfirmBankReviewResponse,
   RestoreBankReviewResponse,
@@ -498,15 +503,23 @@ export const openFinanceApiClient = {
   getSyncRun: (runId: string): Promise<AxiosResponse<SyncRunResponse>> =>
     axiosInstance.get<SyncRunResponse>(`/api/v1/openfinance/sync-runs/${runId}`),
 
+  /** As contas e os cartões que o grupo conectou, por pessoa, com saldo e faturas. Todos do grupo leem. */
+  getAccounts: (): Promise<AxiosResponse<BankAccountsOverviewResponse>> =>
+    axiosInstance.get<BankAccountsOverviewResponse>('/api/v1/openfinance/accounts'),
+
   /** As despesas do banco esperando a revisão no mês ("AAAA-MM"; sem ele, o mês corrente) e as descartadas. */
   getReview: (month?: string): Promise<AxiosResponse<BankReviewResponse>> =>
     axiosInstance.get<BankReviewResponse>('/api/v1/openfinance/review', { params: month ? { month } : undefined }),
 
-  /** Confirma despesas (viram transações) e descarta outras. Tudo ou nada por chamada; linha sem valor ou em outra moeda é pulada (`skipped`). */
+  /**
+   * Confirma despesas (viram transações), descarta outras e responde às possíveis duplicadas: `reconcile` ("é a
+   * mesma", nada é criado) e `asNew` ("é outra"). Tudo ou nada por chamada; linha sem valor ou em outra moeda é
+   * pulada (`skipped`).
+   */
   confirmReview: (body: ConfirmBankReviewRequest): Promise<AxiosResponse<ConfirmBankReviewResponse>> =>
     axiosInstance.post<ConfirmBankReviewResponse>('/api/v1/openfinance/review/confirm', body),
 
-  /** Descartadas voltam a esperar a revisão. */
+  /** Descartadas e ignoradas automaticamente voltam a esperar a revisão (e não são mais ignoradas sozinhas). */
   restoreReview: (ids: readonly string[]): Promise<AxiosResponse<RestoreBankReviewResponse>> =>
     axiosInstance.post<RestoreBankReviewResponse>('/api/v1/openfinance/review/restore', ids),
 };
@@ -530,4 +543,19 @@ export const aiApiClient = {
 
   getUsage: (days = 30): Promise<AxiosResponse<AiUsageResponse>> =>
     axiosInstance.get<AiUsageResponse>(`/api/v1/ai/usage?days=${days}`),
+};
+
+// Assinaturas e recorrências (sem IA: vale para qualquer grupo).
+export const recurringApiClient = {
+  /** A lista; o servidor recalcula antes quando o último cálculo é antigo ou entrou transação depois dele. */
+  get: (): Promise<AxiosResponse<RecurringListResponse>> =>
+    axiosInstance.get<RecurringListResponse>('/api/v1/ai/recurring'),
+
+  /** As cobranças de um item. 404 RECURRENCE_NOT_FOUND. */
+  getTransactions: (id: string): Promise<AxiosResponse<RecurringChargesResponse>> =>
+    axiosInstance.get<RecurringChargesResponse>(`/api/v1/ai/recurring/${id}/transactions`),
+
+  /** A correção da pessoa (`null` desfaz). 400 INVALID_OVERRIDE; 404 RECURRENCE_NOT_FOUND. */
+  setOverride: (id: string, override: RecurringOverride | null): Promise<AxiosResponse<RecurringItemResponse>> =>
+    axiosInstance.patch<RecurringItemResponse>(`/api/v1/ai/recurring/${id}`, { override }),
 };

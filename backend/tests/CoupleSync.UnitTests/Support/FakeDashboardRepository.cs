@@ -8,6 +8,19 @@ public sealed class FakeDashboardRepository : IDashboardRepository
 {
     public List<Transaction> Transactions { get; } = new();
 
+    /// <summary>The bills of the cards of the group; null: nobody of the group is connected to a bank.</summary>
+    public List<UpcomingBill>? Bills { get; set; }
+
+    /// <summary>The (from, to) of every question about bills.</summary>
+    public List<(DateOnly From, DateOnly To)> BillWindowsAsked { get; } = new();
+
+    public Task<IReadOnlyList<UpcomingBill>?> GetUpcomingBillsAsync(Guid coupleId, DateOnly fromDue, DateOnly toDue, CancellationToken ct)
+    {
+        BillWindowsAsked.Add((fromDue, toDue));
+        IReadOnlyList<UpcomingBill>? found = Bills?.Where(b => b.DueDate >= fromDue && b.DueDate <= toDue).ToList();
+        return Task.FromResult(found);
+    }
+
     public Task<DashboardAggregates> GetAggregatesAsync(
         Guid coupleId,
         DateTime startDate,

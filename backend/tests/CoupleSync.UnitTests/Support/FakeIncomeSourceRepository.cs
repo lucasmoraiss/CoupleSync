@@ -31,6 +31,33 @@ public sealed class FakeIncomeSourceRepository : IIncomeSourceRepository
         return Task.FromResult(count);
     }
 
+    /// <summary>The sources a line of the bank points to (Open Finance), as the mirror would say.</summary>
+    public HashSet<Guid> CreatedFromBank { get; } = new();
+
+    /// <summary>The sources whose line of the bank was sent back to the review.</summary>
+    public List<Guid> Released { get; } = new();
+
+    public Task<IReadOnlyList<string>> GetNamesByUserAndMonthAsync(Guid userId, Guid coupleId, string month, CancellationToken ct)
+    {
+        IReadOnlyList<string> names = Sources
+            .Where(s => s.UserId == userId && s.CoupleId == coupleId && s.Month == month)
+            .Select(s => s.Name)
+            .ToList();
+        return Task.FromResult(names);
+    }
+
+    public Task<IReadOnlySet<Guid>> GetIdsCreatedFromBankAsync(Guid coupleId, IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        IReadOnlySet<Guid> found = ids.Where(CreatedFromBank.Contains).ToHashSet();
+        return Task.FromResult(found);
+    }
+
+    public Task ReleaseBankLinesAsync(Guid sourceId, Guid coupleId, DateTime nowUtc, CancellationToken ct)
+    {
+        Released.Add(sourceId);
+        return Task.CompletedTask;
+    }
+
     public Task AddAsync(IncomeSource source, CancellationToken ct)
     {
         Sources.Add(source);
