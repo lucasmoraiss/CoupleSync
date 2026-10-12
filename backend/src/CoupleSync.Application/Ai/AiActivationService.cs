@@ -369,8 +369,9 @@ public sealed class AiActivationService
     }
 
     /// <summary>
-    /// Each write is saved on its own, so that losing a race on one row never drops another change (the repository
-    /// forgets what it could not store).
+    /// Each answer is saved by one call of this method, so that losing a race on a row never drops another answer
+    /// (the repository forgets what it could not store). What belongs to the same answer goes in the same save: the
+    /// "not now" to a new text stores the preference and the revocation of the person's old acceptances together.
     /// </summary>
     private async Task SaveIgnoringTheSameAnswerTwiceAsync(CancellationToken ct)
     {
