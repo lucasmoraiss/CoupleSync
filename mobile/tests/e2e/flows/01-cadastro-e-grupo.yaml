@@ -18,14 +18,14 @@ name: 01 - Cadastro e grupo
 - assertTrue: ${maestro.copiedText.length == 8}
 - assertVisible: "Copiar código do grupo"
 
+# Direto ao Painel: a análise com IA já vem ligada para o grupo, sem pergunta no caminho.
 - tapOn: "Ir para o Painel"
-# No primeiro uso do grupo o app pergunta pela análise com IA antes do Painel.
-- runFlow: comum/responder-agora-nao-a-ia.yaml
 - extendedWaitUntil:
     visible: "Total de gastos"
     timeout: 60000
 - assertVisible: "0 transações"
-# O atalho fica no fim do Painel; com o aviso do e-mail e o cartão da análise com IA acima, pode estar abaixo da dobra.
+- assertNotVisible: "Quer que a IA analise as finanças do grupo\\?"
+# O atalho fica no fim do Painel; com o aviso do e-mail acima, pode estar abaixo da dobra.
 - scrollUntilVisible:
     element: "Ver todas as transações"
     direction: DOWN

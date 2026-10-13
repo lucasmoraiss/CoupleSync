@@ -1,7 +1,7 @@
 // Privacidade: o que o app coleta, onde fica, com quem é compartilhado e como pedir a exclusão.
 // Texto dentro do app (sem link externo). Mostra também as respostas de consentimento do usuário neste aparelho.
-// A análise com IA tem a seção própria, em destaque e separada do texto geral: o aceite dela é do grupo e fica no
-// servidor (Configurações > Inteligência artificial).
+// A análise com IA tem a seção própria, em destaque e separada do texto geral: é informação (o que vai e para
+// onde), não pergunta. Ela vem ligada para o grupo; desliga-se em Configurações > Inteligência artificial.
 import React from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
@@ -40,9 +40,9 @@ export default function PrivacyScreen() {
             style={styles.aiLink}
             onPress={() => router.push('/(main)/settings/ai' as any)}
             accessibilityRole="button"
-            accessibilityLabel="Abrir as configurações de inteligência artificial: ativar, desligar e ver o consumo"
+            accessibilityLabel="Abrir as configurações de inteligência artificial: ligar ou desligar e ver o consumo"
           >
-            <Text style={styles.aiLinkText}>Ativar, desligar e ver o consumo</Text>
+            <Text style={styles.aiLinkText}>Ligar ou desligar e ver o consumo</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.primaryLight} />
           </TouchableOpacity>
         </View>

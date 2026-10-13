@@ -1,19 +1,23 @@
 // Análise com IA: o que as telas decidem a partir de GET /api/v1/ai/status. Lógica pura (sem React Native),
 // coberta por __tests__/aiStatus.test.ts.
 //
-// Quem decide se a IA existe (`available`) e se o grupo a ativou (`enabled`) é o servidor: um aceite vale para o
-// grupo inteiro e fica registrado lá. O aceite antigo guardado no aparelho (campo `aiChat` do registro de
-// consentimento) não é mais consultado por ninguém.
+// A IA vem ligada para todo grupo: não há pergunta nem aceite. Quem decide se a IA existe (`available`) e se o
+// grupo a desligou de propósito (`enabled: false`) é o servidor. Os campos de aceite e de pergunta do status
+// (`acceptedBy`, `myAcceptance`, `onboardingPending`) continuam vindo, mas nenhuma tela decide nada por eles. O
+// aceite antigo guardado no aparelho (campo `aiChat` do registro de consentimento) também não é consultado.
 import { getApiErrorCode, getApiErrorMessage, getApiErrorStatus } from '@/services/apiError';
 import type { AiStatusResponse, AiUsageDayResponse, AiUsageProviderResponse } from '@/types/api';
 
-/** Versão do texto "Análise com IA" que este app mostra. A mesma do servidor (AiConsent.CurrentVersion). */
+/**
+ * Versão do texto "Análise com IA" que este app mostra, a mesma do servidor (AiConsent.CurrentVersion). Vai no
+ * pedido de ligar de novo (POST /ai/consent), que o servidor aceita em qualquer versão; a API anterior exigia esta.
+ */
 export const AI_CONSENT_VERSION = 2;
 
 /**
  * Os destinos que o texto da análise com IA deve citar: os que o servidor diz ter ligados AGORA. Sem status, ou com
  * um status guardado de antes da versão atual do texto (que não conhecia o destino novo), devolve null — e o texto
- * cita todos os que esta versão do aceite cobre (privacyContent). Ninguém aceita lendo menos do que pode acontecer.
+ * cita todos os que esta versão cobre (privacyContent). Ninguém lê menos do que pode acontecer.
  */
 export function aiDestinations(status: AiStatusResponse | null): AiStatusResponse['providers'] | null {
   if (!status || status.consentVersion !== AI_CONSENT_VERSION || status.providers.length === 0) return null;
@@ -25,78 +29,35 @@ export function isAssistantVisible(status: AiStatusResponse | null): boolean {
   return status?.available === true;
 }
 
-/** Cartão "Análise com IA desligada — Ativar" do Painel: há IA no servidor e o grupo ainda não ativou. */
-export function shouldShowActivationCard(status: AiStatusResponse | null): boolean {
-  return status?.available === true && !status.enabled;
-}
+/**
+ * `off-for-group`: há IA no servidor e alguém do grupo a desligou de propósito (ou, numa API anterior a esta
+ * entrega, o grupo ainda não tinha aceite: para a tela é o mesmo, e ligar de novo resolve os dois).
+ */
+export type AssistantGate = 'loading' | 'error' | 'unavailable' | 'off-for-group' | 'ready';
 
-export type AssistantGate = 'loading' | 'error' | 'unavailable' | 'needs-activation' | 'ready';
-
-/** O que a tela do Assistente mostra. Com um status já conhecido, uma falha ao atualizar não derruba a tela. */
+/**
+ * O que a tela do Assistente mostra: a conversa, direto, sempre que há IA e o grupo não a desligou. Com um status
+ * já conhecido, uma falha ao atualizar não derruba a tela.
+ */
 export function assistantGate(status: AiStatusResponse | null, loadFailed: boolean): AssistantGate {
   if (!status) return loadFailed ? 'error' : 'loading';
   if (!status.available) return 'unavailable';
-  return status.enabled ? 'ready' : 'needs-activation';
+  return status.enabled ? 'ready' : 'off-for-group';
 }
 
-/**
- * A tela de boas-vindas abre sozinha quando o servidor diz que a pergunta é devida a esta pessoa neste grupo —
- * e só uma vez por abertura do app: quem volta sem responder não é levado a ela de novo a cada foco do Painel.
- */
-export function shouldOpenWelcome(status: AiStatusResponse | null, alreadyShown: boolean): boolean {
-  return status?.available === true && status.onboardingPending && !alreadyShown;
+export type AiGroupState = 'unavailable' | 'off-for-group' | 'on';
+
+/** O estado que Configurações > Inteligência artificial mostra. Não depende de aceite de ninguém. */
+export function aiGroupState(status: AiStatusResponse): AiGroupState {
+  if (!status.available) return 'unavailable';
+  return status.enabled ? 'on' : 'off-for-group';
 }
 
-export type WelcomeView =
-  | { readonly kind: 'unavailable' }
-  /** A própria pessoa já ativou: nada a perguntar. */
-  | { readonly kind: 'done' }
-  | { readonly kind: 'ask' }
-  /** Outra pessoa do grupo já ativou: aviso, com "Entendi" e "Desligar para o grupo". */
-  | { readonly kind: 'activated-by-other'; readonly names: string };
-
-function firstName(name: string): string {
-  return name.trim().split(/\s+/)[0] ?? name;
-}
-
-function joinInPortuguese(items: readonly string[]): string {
-  if (items.length <= 1) return items.join('');
-  return `${items.slice(0, -1).join(', ')} e ${items[items.length - 1]}`;
-}
-
-export function welcomeView(status: AiStatusResponse, myUserId: string | null): WelcomeView {
-  if (!status.available) return { kind: 'unavailable' };
-  if (status.myAcceptance) return { kind: 'done' };
-  const others = status.acceptedBy.filter((acceptance) => acceptance.userId !== myUserId);
-  if (status.enabled && others.length > 0) {
-    return { kind: 'activated-by-other', names: joinInPortuguese(others.map((acceptance) => firstName(acceptance.name))) };
-  }
-  return { kind: 'ask' };
-}
-
-export interface LeaveWelcomeDeps {
-  /** A tela de boas-vindas está em foco agora? (Ela é aba oculta: fica montada, escondida, entre as visitas.) */
-  isFocused(): boolean;
-  leave(): void;
-}
-
-/**
- * A tela de boas-vindas sai sozinha para o Painel quando não tem o que perguntar (IA indisponível, a pessoa já
- * ativou, o status não carregou) e nenhuma resposta está sendo gravada — mas só a que está em foco: a instância
- * escondida não tira a pessoa da tela em que ela está quando o status muda.
- */
-export function leaveWelcomeIfDue(nothingToAsk: boolean, busy: boolean, deps: LeaveWelcomeDeps): boolean {
-  if (!nothingToAsk || busy || !deps.isFocused()) return false;
-  deps.leave();
-  return true;
-}
-
-/** "Ativada por Ana em 8 de outubro de 2026" / "Desligada" (Configurações > Inteligência artificial). */
-export function activationSummary(status: AiStatusResponse, formatDate: (iso: string | null) => string): string {
-  if (!status.available) return 'Indisponível no momento';
-  if (!status.enabled || status.acceptedBy.length === 0) return 'Desligada';
-  return `Ativada ${status.acceptedBy.map((acceptance) => `por ${acceptance.name} em ${formatDate(acceptance.acceptedAtUtc)}`).join(' e ')}`;
-}
+export const AI_GROUP_STATE_TEXT: Readonly<Record<AiGroupState, string>> = {
+  on: 'Ligada',
+  'off-for-group': 'Desligada para o grupo',
+  unavailable: 'Indisponível no momento',
+};
 
 // Frases por desfecho (o que o Assistente mostra). Fixas no app para não depender do texto do servidor.
 const CHAT_ERROR_MESSAGES: Readonly<Record<string, string>> = {
@@ -104,7 +65,8 @@ const CHAT_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   AI_GLOBAL_BUDGET_EXHAUSTED: 'A IA do app atingiu o limite de uso de hoje. Volta à meia-noite. Os números do app continuam atualizados.',
   AI_PROVIDER_FAILED: 'A IA não respondeu agora. Tente de novo em alguns minutos.',
   AI_CHAT_DISABLED: 'A análise com IA não está disponível no momento.',
-  AI_CONSENT_REQUIRED: 'A análise com IA está desligada para este grupo. Ative em Configurações > Inteligência artificial.',
+  // O servidor só responde isto para grupo que desligou a IA (a API anterior também respondia para grupo sem aceite).
+  AI_CONSENT_REQUIRED: 'A IA está desligada para este grupo. Para voltar a usar, ligue em Configurações > Inteligência artificial.',
 };
 
 export const CHAT_SEND_FALLBACK_MESSAGE = 'Erro ao enviar mensagem. Tente novamente.';
@@ -154,8 +116,8 @@ export function usageTotals(days: readonly AiUsageDayResponse[]): { readonly tod
 }
 
 /**
- * O campo de IA que vai junto com o extrato importado: as descrições só podem ir ao classificador quando a IA
- * existe e o grupo a ativou no servidor (que confere de novo ao processar).
+ * O campo de IA que vai junto com o extrato importado e com a sincronização do Open Finance: ligado sempre que a IA
+ * existe e o grupo não a desligou (o servidor confere de novo ao processar).
  */
 export function aiUploadConsent(status: AiStatusResponse | null): boolean {
   return status?.available === true && status.enabled;
@@ -249,18 +211,15 @@ export function parseStoredAiStatus(raw: string | null | undefined, coupleId: st
 // ─── Configurações > Inteligência artificial ─────────────────────────────────────────────────────────────────
 
 export interface AiSettingsActions {
-  /** "Ativar para o grupo" (leva ao texto e à pergunta). */
-  readonly activate: boolean;
-  /** "Desligar para o grupo": qualquer membro pode, com a análise ativada. */
+  /** "Ligar de novo": direto, sem tela de pergunta. Só quando há IA no servidor e o grupo a desligou. */
+  readonly turnOn: boolean;
+  /** "Desligar para o grupo": qualquer membro pode, com a IA ligada. */
   readonly turnOffForGroup: boolean;
-  /** "Retirar meu aceite": só quem aceitou. */
-  readonly withdrawMine: boolean;
 }
 
 export function aiSettingsActions(status: AiStatusResponse): AiSettingsActions {
   return {
-    activate: status.available && !status.enabled,
+    turnOn: status.available && !status.enabled,
     turnOffForGroup: status.enabled,
-    withdrawMine: status.enabled && status.myAcceptance !== null,
   };
 }

@@ -16,7 +16,7 @@ public enum LlmGatewayOutcome
 {
     Ok,
 
-    /// <summary>The group has not switched the AI on.</summary>
+    /// <summary>The group switched the AI off, or the call has no group.</summary>
     NotConsented,
 
     /// <summary>Emergency switch (<c>Ai__Disabled</c>).</summary>
@@ -61,8 +61,8 @@ public interface ILlmProviderCatalog
 }
 
 /// <summary>
-/// "Has this group switched the AI on?" Phase 1 has no consent table yet (the chat is still behind the acceptance
-/// stored on the device), so the registered implementation says yes; phase 2 replaces it.
+/// "May this group's data go to the AI?" The registered implementation (ServerAiConsentGate) says yes for every
+/// group that did not switch the AI off on purpose, and no for a call without a group.
 /// </summary>
 public interface IAiConsentGate
 {

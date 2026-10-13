@@ -65,6 +65,9 @@ public sealed class OpenFinanceSyncPostgresTests
         var columnsBefore = await ColumnsOfAsync(database, existingTables);
         var constraintsBefore = await ConstraintsOfAsync(database, existingTables);
 
+        // "Changes no existing column" is said of this migration: a later one adds couples.ai_disabled_at_utc.
+        await MigrationTests.MigrateAsync(database, "20261008150513_AddOpenFinanceSync");
+        Assert.Equal(columnsBefore, await ColumnsOfAsync(database, existingTables));
         await MigrationTests.MigrateAsync(database);
 
         foreach (var table in existingTables)
@@ -73,7 +76,6 @@ public sealed class OpenFinanceSyncPostgresTests
         Assert.Equal(
             sources.Select(r => $"{r[0]}:{r[1]}"),
             (await database.RowsAsync("SELECT source, count(*) FROM transactions GROUP BY source ORDER BY source")).Select(r => $"{r[0]}:{r[1]}"));
-        Assert.Equal(columnsBefore, await ColumnsOfAsync(database, existingTables));
         Assert.Equal(constraintsBefore, await ConstraintsOfAsync(database, existingTables));
 
         foreach (var table in NewTables)

@@ -102,10 +102,13 @@ describe('texto do passo "O que é"', () => {
     );
   });
 
-  it('conectar um banco não liga a IA: o aceite dela é outro, em Configurações > Inteligência artificial', () => {
-    expect(text).toContain('Conectar um banco não liga a IA nem muda o aceite dela.');
-    expect(text).toContain('A análise com IA tem aceite próprio; veja Configurações > Inteligência artificial.');
+  it('conectar um banco não muda nada na IA, que vem ligada para o grupo e se desliga em Configurações > Inteligência artificial', () => {
+    expect(text).toContain('Conectar um banco não muda nada na análise com IA.');
+    expect(text).toContain(
+      'A análise com IA vem ligada para o grupo e pode ser desligada; veja a seção "Análise com IA" e Configurações > Inteligência artificial.',
+    );
     expect(text).not.toMatch(/Chat IA/);
+    expect(text).not.toMatch(/aceite dela|aceite próprio|ativada para o grupo/);
   });
 
   it('diz que as transações do banco são copiadas para o servidor a cada sincronização, e que nada entra sem revisão (issue #25)', () => {
@@ -122,11 +125,11 @@ describe('texto do passo "O que é"', () => {
     expect(text).toContain('As transações do banco que ainda estavam na revisão são apagadas junto. As despesas que já tinham sido confirmadas ficam no grupo.');
   });
 
-  it('diz o que das despesas do banco vai à IA: nada sem a análise ativada para o grupo; com ela, só as confirmadas, nos totais por categoria (issues #25 e #38)', () => {
-    expect(text).toContain('Sem a análise com IA ativada para o grupo, nada do que vier do banco é enviado à IA.');
+  it('diz o que das despesas do banco vai à IA: com ela ligada, só as confirmadas, nos totais por categoria; nada se o grupo a desligar (issue #25)', () => {
     expect(text).toContain(
-      'Com ela ativada, as despesas do banco que alguém do grupo confirmou na revisão entram, como qualquer outra despesa, nos resumos calculados das finanças do grupo (totais por categoria).',
+      'Com ela ligada para o grupo, as despesas do banco que alguém do grupo confirmou na revisão entram, como qualquer outra despesa, nos resumos calculados das finanças do grupo (totais por categoria).',
     );
+    expect(text).toContain('Se o grupo desligar a análise com IA, nada do que vier do banco é enviado à IA.');
   });
 
   it('não promete o envio da descrição de uma despesa do banco para categorizar: a categorização por IA está desligada no servidor (issue #38)', () => {

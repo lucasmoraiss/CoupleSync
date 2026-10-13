@@ -547,7 +547,7 @@ export interface CreateBankConnectionRequest {
   readonly historyMonths?: number;
 }
 
-// --- Análise com IA: ativação do grupo e consumo (GET /api/v1/ai/status, /ai/usage) ---
+// --- Análise com IA: estado do grupo e consumo (GET /api/v1/ai/status, /ai/usage) ---
 export interface AiAcceptedByResponse {
   readonly userId: string;
   readonly name: string;
@@ -557,12 +557,13 @@ export interface AiAcceptedByResponse {
 export interface AiStatusResponse {
   /** A IA existe no servidor agora (não está desligada e há provedor configurado). */
   readonly available: boolean;
-  /** O grupo ativou: há ao menos um aceite em vigor de quem ainda é membro. */
+  /** Ligada para o grupo: verdadeiro sempre, sem aceite de ninguém, até alguém do grupo desligar de propósito. */
   readonly enabled: boolean;
   readonly consentVersion: number;
+  /** Os aceites que o servidor ainda guarda. As telas não decidem nada por eles; pode vir vazio com `enabled`. */
   readonly acceptedBy: readonly AiAcceptedByResponse[];
   readonly myAcceptance: { readonly acceptedAtUtc: string } | null;
-  /** A tela de boas-vindas da IA ainda é devida a esta pessoa neste grupo. */
+  /** Sempre falso no servidor de hoje. Mesmo vindo verdadeiro (API anterior), o app não abre pergunta nenhuma. */
   readonly onboardingPending: boolean;
   readonly weeklyEmailEnabled: boolean;
   readonly emailVerified: boolean;

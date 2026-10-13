@@ -524,17 +524,18 @@ export const openFinanceApiClient = {
     axiosInstance.post<RestoreBankReviewResponse>('/api/v1/openfinance/review/restore', ids),
 };
 
-// --- Análise com IA: ativação do grupo, preferências e consumo ---
-// Um aceite vale para o grupo inteiro e fica no servidor; todas as escritas devolvem o status já atualizado.
+// --- Análise com IA: estado do grupo, preferências e consumo ---
+// A IA vem ligada para todo grupo; desligar para o grupo e ligar de novo ficam no servidor. Todas as escritas
+// devolvem o status já atualizado.
 export const aiApiClient = {
   getStatus: (): Promise<AxiosResponse<AiStatusResponse>> =>
     axiosInstance.get<AiStatusResponse>('/api/v1/ai/status'),
 
-  /** Ativa para o grupo. 409 AI_CONSENT_VERSION_OUTDATED se o texto mudou; 503 AI_UNAVAILABLE sem IA no servidor. */
+  /** Liga de novo para o grupo. 503 AI_UNAVAILABLE sem IA no servidor. (A API anterior respondia 409 a outra versão.) */
   accept: (version: number): Promise<AxiosResponse<AiStatusResponse>> =>
     axiosInstance.post<AiStatusResponse>('/api/v1/ai/consent', { version }),
 
-  /** `mine` retira só o próprio aceite; `group` desliga para o grupo inteiro. */
+  /** `group` desliga para o grupo inteiro. `mine` (retirar só o próprio aceite) não é mais usado pelo app. */
   revoke: (scope: 'mine' | 'group'): Promise<AxiosResponse<AiStatusResponse>> =>
     axiosInstance.delete<AiStatusResponse>(`/api/v1/ai/consent?scope=${scope}`),
 

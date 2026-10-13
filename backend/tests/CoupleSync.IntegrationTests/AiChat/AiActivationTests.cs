@@ -9,10 +9,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace CoupleSync.IntegrationTests.AiChat;
 
 /// <summary>
-/// Issue #38 — switching the AI on for a group (design 7 and 10.2): one acceptance counts for the whole group and is
-/// stored on the server as "switched on by X"; any member switches it off; who leaves stops counting; the chat only
-/// answers a group that switched it on. Everything through HTTP, on SQLite, with stub providers; the rows are read
-/// with raw SQL.
+/// The AI of a group through HTTP, on SQLite, with stub providers; the rows are read with raw SQL. The AI is on for
+/// every group, with no question and no acceptance: only "off for the group", asked on purpose by a member, switches
+/// it off, and activating switches it back on. The acceptances of before are still stored and listed as they are —
+/// they switch nothing on or off — and the routes the installed app calls keep answering in the same format.
 /// </summary>
 [Trait("Category", "AiChat")]
 public sealed class AiActivationTests
@@ -28,15 +28,18 @@ public sealed class AiActivationTests
     // ---------------------------------------------------------------- switching on
 
     [Fact]
-    public async Task OneMemberAccepts_AndBothMembersSeeTheGroupEnabled_WithTheNameAndTheDateOfWhoSwitchedItOn()
+    public async Task AGroupIsEnabledWithNoAcceptance_AndWhoAcceptsIsListedWithTheNameAndTheDate_ForBothMembers()
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
         var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
 
+        // Nobody accepted anything: the group is on, and no acceptance is invented for anyone.
         var before = await StatusOf(bruno.Client);
         Assert.True(before.GetProperty("available").GetBoolean());
-        Assert.False(before.GetProperty("enabled").GetBoolean());
+        Assert.True(before.GetProperty("enabled").GetBoolean());
         Assert.Equal(0, before.GetProperty("acceptedBy").GetArrayLength());
+        Assert.Equal(JsonValueKind.Null, before.GetProperty("myAcceptance").ValueKind);
+        Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM ai_consents"));
 
         var askedAt = DateTime.UtcNow.AddSeconds(-5);
         var accepted = await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 });
@@ -65,6 +68,14 @@ public sealed class AiActivationTests
 
         var status = await StatusOf(ana.Client);
 
+        // Exactly the fields the installed app reads, none removed or renamed, in the order of always.
+        Assert.Equal(
+            [
+                "available", "enabled", "consentVersion", "acceptedBy", "myAcceptance", "onboardingPending", "weeklyEmailEnabled",
+                "emailVerified", "emailConfigured", "providers", "features", "budget",
+            ],
+            status.EnumerateObject().Select(p => p.Name).ToArray());
+
         foreach (var field in new[]
                  {
                      "available", "enabled", "consentVersion", "acceptedBy", "myAcceptance", "onboardingPending", "weeklyEmailEnabled",
@@ -85,9 +96,77 @@ public sealed class AiActivationTests
         Assert.Matches(@"^\d{4}-\d{2}-\d{2}T00:00:00$", status.GetProperty("budget").GetProperty("resetsAtLocal").GetString()!);
     }
 
-    /// <summary>Review 1 (M11): the acceptance of an account that was deactivated does not keep the group switched on.</summary>
+    /// <summary>
+    /// What the JavaScript already installed decides from the status (mobile/src/modules/ai/aiStatus.ts as published):
+    /// <c>shouldOpenWelcome</c> = available AND onboardingPending; <c>shouldShowActivationCard</c> = available AND NOT
+    /// enabled; <c>assistantGate</c> = "ready" when available AND enabled; <c>aiUploadConsent</c> = available AND
+    /// enabled; <c>parseStoredAiStatus</c> needs the booleans, the two lists, the two objects and myAcceptance null or
+    /// an object. With these exact values it means "on, no question" in every state a group can be in.
+    /// </summary>
+    [Theory]
+    [InlineData("new group")]
+    [InlineData("answered not now")]
+    [InlineData("acceptance of version 1")]
+    [InlineData("acceptance of version 2")]
+    [InlineData("acceptances revoked before")]
+    public async Task ForTheInstalledApp_TheStatusOfAnyGroupMeansOnWithoutAQuestion_AndTheChatAnswers(string state)
+    {
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
+        var group = Assert.Single(factory.CoupleIds());
+        var expectedAcceptances = 0;
+        switch (state)
+        {
+            case "answered not now":
+                Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, new { OnboardingAnswered = true })).StatusCode);
+                break;
+            case "acceptance of version 1":
+                factory.AddConsent(group, ana.UserId, version: 1, revoked: false);
+                break;
+            case "acceptance of version 2":
+                factory.AddConsent(group, ana.UserId, version: 2, revoked: false);
+                expectedAcceptances = 1;
+                break;
+            case "acceptances revoked before":
+                // As production has them: rows revoked by the old "off for the group" / "take my acceptance back".
+                factory.AddConsent(group, ana.UserId, version: 1, revoked: true);
+                factory.AddConsent(group, ana.UserId, version: 2, revoked: true);
+                factory.AddConsent(group, bruno.UserId, version: 2, revoked: true);
+                break;
+        }
+
+        var rowsBefore = factory.Scalar<long>("SELECT count(*) FROM ai_consents");
+
+        foreach (var member in new[] { ana, bruno })
+        {
+            var status = await StatusOf(member.Client);
+            Assert.True(status.GetProperty("available").GetBoolean());
+            Assert.True(status.GetProperty("enabled").GetBoolean());
+            Assert.False(status.GetProperty("onboardingPending").GetBoolean());
+            Assert.Equal(2, status.GetProperty("consentVersion").GetInt32());
+            Assert.Equal(JsonValueKind.Array, status.GetProperty("acceptedBy").ValueKind);
+            Assert.Equal(expectedAcceptances, status.GetProperty("acceptedBy").GetArrayLength());
+            Assert.Equal(JsonValueKind.Array, status.GetProperty("providers").ValueKind);
+            Assert.Equal(JsonValueKind.Object, status.GetProperty("features").ValueKind);
+            Assert.True(status.GetProperty("features").GetProperty("assistant").GetBoolean());
+            Assert.Equal(JsonValueKind.Object, status.GetProperty("budget").ValueKind);
+            // Nobody is given an acceptance they did not give.
+            var mine = status.GetProperty("myAcceptance").ValueKind;
+            Assert.Equal(member == ana && expectedAcceptances == 1 ? JsonValueKind.Object : JsonValueKind.Null, mine);
+
+            var chat = await member.Client.PostAsJsonAsync(Chat, Question());
+            Assert.Equal(HttpStatusCode.OK, chat.StatusCode);
+        }
+
+        Assert.Equal(2, provider.Calls);
+        // Reading the status and asking stored and erased no acceptance.
+        Assert.Equal(rowsBefore, factory.Scalar<long>("SELECT count(*) FROM ai_consents"));
+    }
+
+    /// <summary>The acceptance of a deactivated account is not listed; the group is on all the same.</summary>
     [Fact]
-    public async Task TheAcceptanceOfADeactivatedAccount_DoesNotCount()
+    public async Task TheAcceptanceOfADeactivatedAccount_IsNotListed_AndTheGroupStaysOn()
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
         var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
@@ -97,30 +176,40 @@ public sealed class AiActivationTests
         factory.Execute($"UPDATE users SET is_active = 0 WHERE upper(id) = '{ana.UserId.ToString().ToUpperInvariant()}'");
 
         var status = await StatusOf(bruno.Client);
-        Assert.False(status.GetProperty("enabled").GetBoolean());
+        Assert.True(status.GetProperty("enabled").GetBoolean());
         Assert.Equal(0, status.GetProperty("acceptedBy").GetArrayLength());
         var chat = await bruno.Client.PostAsJsonAsync("/api/v1/ai/chat", new { Message = "Quanto gastamos?", History = Array.Empty<object>() });
-        Assert.Equal(HttpStatusCode.Forbidden, chat.StatusCode);
-        Assert.Equal("AI_CONSENT_REQUIRED", (await ErrorOf(chat)).Code);
+        Assert.Equal(HttpStatusCode.OK, chat.StatusCode);
     }
 
+    /// <summary>
+    /// No version is refused any more (the 409 AI_CONSENT_VERSION_OUTDATED is gone): activating always answers 200
+    /// with the status and switches the group on. An acceptance is only written for the text in force — nobody is
+    /// recorded as having accepted a text of another version.
+    /// </summary>
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(3)]
-    public async Task AcceptingAVersionThatIsNotTheCurrentOne_Is409AiConsentVersionOutdated_AndNothingIsStored(int version)
+    [InlineData(0, 0)]
+    [InlineData(1, 0)]
+    [InlineData(2, 1)]
+    [InlineData(3, 0)]
+    [InlineData(99, 0)]
+    public async Task ActivatingWithAnyVersion_Is200_SwitchesTheGroupOn_AndOnlyTheVersionInForceIsStoredAsAnAcceptance(int version, int expectedRows)
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
         var ana = await MemberWithGroupAsync(factory, "Ana Exemplo");
+        // Off on purpose first, so that "switches the group on" is something this request did.
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.DeleteAsync($"{Consent}?scope=group")).StatusCode);
+        Assert.False((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
 
         var response = await ana.Client.PostAsJsonAsync(Consent, new { Version = version });
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var error = await ErrorOf(response);
-        Assert.Equal("AI_CONSENT_VERSION_OUTDATED", error.Code);
-        Assert.False(string.IsNullOrWhiteSpace(error.Message));
-        Assert.False((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
-        Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM ai_consents"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var answered = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(answered.GetProperty("enabled").GetBoolean());
+        Assert.False(answered.GetProperty("onboardingPending").GetBoolean());
+        Assert.True((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
+        Assert.Equal(expectedRows, factory.Scalar<long>("SELECT count(*) FROM ai_consents"));
+        Assert.Equal(expectedRows, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 2 AND revoked_at_utc IS NULL"));
     }
 
     [Fact]
@@ -149,11 +238,51 @@ public sealed class AiActivationTests
         var status = await StatusOf(ana.Client);
 
         Assert.True(status.GetProperty("available").GetBoolean());
-        Assert.True(status.GetProperty("onboardingPending").GetBoolean());
+        Assert.True(status.GetProperty("enabled").GetBoolean());
+        Assert.False(status.GetProperty("onboardingPending").GetBoolean());
         Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
     }
 
     // ---------------------------------------------------------------- switching off
+
+    [Fact]
+    public async Task ScopeGroup_InAGroupWithNoAcceptance_SwitchesItOffForEveryone_UntilSomeoneActivatesAgain()
+    {
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
+        var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Chat, Question())).StatusCode);
+        Assert.Equal(1, provider.Calls);
+
+        // "Desligar para o grupo" of the installed app, by a member who never accepted anything.
+        var off = await bruno.Client.DeleteAsync($"{Consent}?scope=group");
+
+        Assert.Equal(HttpStatusCode.OK, off.StatusCode);
+        Assert.False((await off.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("enabled").GetBoolean());
+        foreach (var member in new[] { ana, bruno })
+        {
+            var status = await StatusOf(member.Client);
+            Assert.True(status.GetProperty("available").GetBoolean());
+            Assert.False(status.GetProperty("enabled").GetBoolean());
+            Assert.False(status.GetProperty("onboardingPending").GetBoolean());
+
+            // The 403 the installed app already knows; here it is true: the group switched it off.
+            var chat = await member.Client.PostAsJsonAsync(Chat, Question());
+            Assert.Equal(HttpStatusCode.Forbidden, chat.StatusCode);
+            var error = await ErrorOf(chat);
+            Assert.Equal("AI_CONSENT_REQUIRED", error.Code);
+            Assert.Equal("A IA está desligada para este grupo. Para voltar a usar, ligue em Configurações > Inteligência artificial.", error.Message);
+        }
+
+        Assert.Equal(1, provider.Calls);
+        Assert.Single(factory.UsageRows());
+
+        // "Ativar" of the installed app (version 2), by the other member: on again for both.
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 })).StatusCode);
+        Assert.True((await StatusOf(bruno.Client)).GetProperty("enabled").GetBoolean());
+        Assert.Equal(HttpStatusCode.OK, (await bruno.Client.PostAsJsonAsync(Chat, Question())).StatusCode);
+        Assert.Equal(2, provider.Calls);
+    }
 
     [Fact]
     public async Task ScopeGroup_ByAnyMember_RevokesEveryAcceptance_AndRecordsWhoDidIt()
@@ -174,7 +303,7 @@ public sealed class AiActivationTests
     }
 
     [Fact]
-    public async Task ScopeMine_RevokesOnlyTheOwnAcceptance_AndTheGroupGoesOffWhenNoneIsLeft()
+    public async Task ScopeMine_RevokesOnlyTheOwnAcceptance_AndNeverSwitchesTheGroupOff()
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
         var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
@@ -188,9 +317,22 @@ public sealed class AiActivationTests
         Assert.Equal(bruno.UserId, Assert.Single(afterAna.GetProperty("acceptedBy").EnumerateArray()).GetProperty("userId").GetGuid());
         Assert.Equal(JsonValueKind.Null, afterAna.GetProperty("myAcceptance").ValueKind);
 
+        // The last acceptance taken back, and then "mine" by who has none: 200, and the group is still on.
         Assert.Equal(HttpStatusCode.OK, (await bruno.Client.DeleteAsync($"{Consent}?scope=mine")).StatusCode);
+        var again = await ana.Client.DeleteAsync($"{Consent}?scope=mine");
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        Assert.True((await again.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("enabled").GetBoolean());
 
-        Assert.False((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
+        foreach (var member in new[] { ana, bruno })
+        {
+            var status = await StatusOf(member.Client);
+            Assert.True(status.GetProperty("enabled").GetBoolean());
+            Assert.Equal(0, status.GetProperty("acceptedBy").GetArrayLength());
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Chat, Question())).StatusCode);
+        // Nothing erased: the two rows are there, revoked.
+        Assert.Equal(2, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE revoked_at_utc IS NOT NULL"));
     }
 
     [Theory]
@@ -259,7 +401,7 @@ public sealed class AiActivationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task TheMemberWhoLeavesOrIsRemoved_StopsCounting_GetsRevokedAt_LosesTheirPreferences_AndTheGroupGoesOff(bool removedByTheOwner)
+    public async Task TheMemberWhoLeavesOrIsRemoved_IsNoLongerListed_GetsRevokedAt_LosesTheirPreferences_AndTheGroupStaysOn(bool removedByTheOwner)
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
         var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
@@ -275,17 +417,17 @@ public sealed class AiActivationTests
         Assert.True(exit.IsSuccessStatusCode, $"the exit answered {(int)exit.StatusCode}");
 
         var status = await StatusOf(ana.Client);
-        Assert.False(status.GetProperty("enabled").GetBoolean());
+        Assert.True(status.GetProperty("enabled").GetBoolean());
         Assert.Equal(0, status.GetProperty("acceptedBy").GetArrayLength());
         Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_consents"));
         Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE revoked_at_utc IS NOT NULL"));
         Assert.Equal(0, factory.Scalar<long>($"SELECT count(*) FROM ai_user_preferences WHERE upper(user_id) = '{bruno.UserId.ToString().ToUpperInvariant()}'"));
         Assert.Equal(1, factory.Scalar<long>($"SELECT count(*) FROM ai_user_preferences WHERE upper(user_id) = '{ana.UserId.ToString().ToUpperInvariant()}'"));
 
-        // And the chat of who stayed is refused without reaching a provider.
+        // And the chat of who stayed is answered: the acceptance that left was not what kept the AI on.
         var chat = await ana.Client.PostAsJsonAsync(Chat, Question());
-        Assert.Equal(HttpStatusCode.Forbidden, chat.StatusCode);
-        Assert.Empty(factory.UsageRows());
+        Assert.Equal(HttpStatusCode.OK, chat.StatusCode);
+        Assert.Single(factory.UsageRows());
     }
 
     [Fact]
@@ -306,7 +448,7 @@ public sealed class AiActivationTests
     // ---------------------------------------------------------------- the chat
 
     [Fact]
-    public async Task TheChat_InAGroupThatDidNotAccept_Is403AiConsentRequired_AndNoProviderIsCalled()
+    public async Task TheChat_InAGroupThatNeverAccepted_IsAnswered_NotRefusedWithAiConsentRequired()
     {
         var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
         await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
@@ -314,10 +456,46 @@ public sealed class AiActivationTests
 
         var response = await ana.Client.PostAsJsonAsync(Chat, Question());
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        var error = await ErrorOf(response);
-        Assert.Equal("AI_CONSENT_REQUIRED", error.Code);
-        Assert.Contains("Inteligência artificial", error.Message);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, provider.Calls);
+        Assert.Single(factory.UsageRows());
+        Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM ai_consents"));
+    }
+
+    /// <summary>The limits are the same as before for a group that never accepted: the 25th call of the day is the last.</summary>
+    [Fact]
+    public async Task TheGroupBudget_StillStopsAGroupThatNeverAccepted_With429()
+    {
+        var now = DateTime.UtcNow;
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
+        await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider), frozenNow: now);
+        var ana = await MemberWithGroupAsync(factory, "Ana Exemplo");
+        factory.SeedUsage(25, Assert.Single(factory.CoupleIds()), "Ok", now);
+
+        var response = await ana.Client.PostAsJsonAsync(Chat, Question());
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal("AI_DAILY_BUDGET_EXHAUSTED", (await ErrorOf(response)).Code);
+        Assert.Equal(0, provider.Calls);
+    }
+
+    /// <summary>The emergency switch with a group that never accepted: not available, nothing sent — and the group is not "off".</summary>
+    [Fact]
+    public async Task WithAiDisabled_AGroupThatNeverAccepted_IsNotAvailable_AndNothingIsSent()
+    {
+        var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
+        await using var factory = new ChatWebApplicationFactory(enabled: false, catalog: new StubCatalog(provider));
+        var ana = await MemberWithGroupAsync(factory, "Ana Exemplo");
+
+        var status = await StatusOf(ana.Client);
+        Assert.False(status.GetProperty("available").GetBoolean());
+        Assert.True(status.GetProperty("enabled").GetBoolean());
+        Assert.False(status.GetProperty("onboardingPending").GetBoolean());
+        Assert.False(status.GetProperty("features").GetProperty("assistant").GetBoolean());
+
+        var response = await ana.Client.PostAsJsonAsync(Chat, Question());
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("AI_CHAT_DISABLED", (await ErrorOf(response)).Code);
         Assert.Equal(0, provider.Calls);
         Assert.Empty(factory.UsageRows());
     }
@@ -350,7 +528,7 @@ public sealed class AiActivationTests
     }
 
     [Fact]
-    public async Task AnAcceptanceRevokedBetweenTwoCalls_StopsTheSecondCallBeforeAnyProvider()
+    public async Task SwitchingItOffForTheGroupBetweenTwoCalls_StopsTheSecondCallBeforeAnyProvider()
     {
         var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
         await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
@@ -395,13 +573,15 @@ public sealed class AiActivationTests
     // ---------------------------------------------------------------- isolation
 
     [Fact]
-    public async Task TheAcceptanceOfOneGroup_DoesNotSwitchAnotherGroupOn_AndTheUsageOnlySumsTheGroupOfTheToken()
+    public async Task SwitchingOneGroupOffOrOn_DoesNotTouchAnotherGroup_AndTheUsageOnlySumsTheGroupOfTheToken()
     {
         var provider = new StubLlmProvider("gemini", "gemini-flash-lite-latest");
         await using var factory = new ChatWebApplicationFactory(enabled: true, catalog: new StubCatalog(provider));
         var ana = await MemberWithGroupAsync(factory, "Ana Exemplo");
         var carla = await MemberWithGroupAsync(factory, "Carla Exemplo");
 
+        // Carla's group switches itself off: Ana's is still on, and Ana's acceptance is not listed in Carla's.
+        Assert.Equal(HttpStatusCode.OK, (await carla.Client.DeleteAsync($"{Consent}?scope=group")).StatusCode);
         await AcceptAsync(ana.Client);
 
         Assert.True((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
@@ -409,6 +589,11 @@ public sealed class AiActivationTests
         Assert.False(other.GetProperty("enabled").GetBoolean());
         Assert.Equal(0, other.GetProperty("acceptedBy").GetArrayLength());
         Assert.Equal(HttpStatusCode.Forbidden, (await carla.Client.PostAsJsonAsync(Chat, Question())).StatusCode);
+
+        // Ana's group switches itself off and on again: Carla's stays off the whole time.
+        Assert.Equal(HttpStatusCode.OK, (await ana.Client.DeleteAsync($"{Consent}?scope=group")).StatusCode);
+        await AcceptAsync(ana.Client);
+        Assert.False((await StatusOf(carla.Client)).GetProperty("enabled").GetBoolean());
 
         // Two calls of Ana's group; then Carla's group switches on and makes one.
         for (var i = 0; i < 2; i++) Assert.Equal(HttpStatusCode.OK, (await ana.Client.PostAsJsonAsync(Chat, Question())).StatusCode);
@@ -511,31 +696,44 @@ public sealed class AiActivationTests
     // ---------------------------------------------------------------- preferences and the welcome screen
 
     [Fact]
-    public async Task TheWelcomeQuestion_IsPendingUntilAnswered_AndComesBackOnceWhenTheOtherMemberSwitchesTheAiOn()
+    public async Task TheWelcomeQuestion_IsNeverPending_ForAnyone_AndAnsweringItStillWorksAndSwitchesNothingOff()
     {
         var clock = new MovingClock(DateTime.UtcNow);
         await using var factory = new ChatWebApplicationFactory(enabled: true, configureServices: clock.Register);
         var (ana, bruno) = await TwoMembersAsync(factory, "Ana Exemplo", "Bruno Exemplo");
 
-        Assert.True((await StatusOf(ana.Client)).GetProperty("onboardingPending").GetBoolean());
-        Assert.True((await StatusOf(bruno.Client)).GetProperty("onboardingPending").GetBoolean());
+        async Task NobodyIsAskedAsync()
+        {
+            Assert.False((await StatusOf(ana.Client)).GetProperty("onboardingPending").GetBoolean());
+            Assert.False((await StatusOf(bruno.Client)).GetProperty("onboardingPending").GetBoolean());
+        }
 
-        // Bruno says "not now": the question does not come back to him (on any device: it is on the server).
+        // Nobody answered anything yet.
+        await NobodyIsAskedAsync();
+
+        // "Agora não" of an installed app that still shows the old screen: 200 in the format of always, stored, and
+        // the group is still on.
         var notNow = await PatchAsync(bruno.Client, new { OnboardingAnswered = true });
         Assert.Equal(HttpStatusCode.OK, notNow.StatusCode);
-        Assert.False((await notNow.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("onboardingPending").GetBoolean());
-        Assert.False((await StatusOf(bruno.Client)).GetProperty("onboardingPending").GetBoolean());
-        Assert.False((await StatusOf(bruno.Client)).GetProperty("enabled").GetBoolean());
+        var answered = await notNow.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(answered.GetProperty("onboardingPending").GetBoolean());
+        Assert.True(answered.GetProperty("enabled").GetBoolean());
+        Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_user_preferences WHERE onboarding_answered_at_utc IS NOT NULL"));
+        Assert.True((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
+        await NobodyIsAskedAsync();
 
-        // Ana switches it on later: she is done, and Bruno is told once ("Ana switched it on").
+        // Ana accepts after Bruno's answer (what used to bring the question back to him).
         clock.UtcNow = clock.UtcNow.AddHours(1);
         await AcceptAsync(ana.Client);
-        Assert.False((await StatusOf(ana.Client)).GetProperty("onboardingPending").GetBoolean());
-        Assert.True((await StatusOf(bruno.Client)).GetProperty("onboardingPending").GetBoolean());
+        await NobodyIsAskedAsync();
 
+        // Off for the group, and on again.
         clock.UtcNow = clock.UtcNow.AddHours(1);
-        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(bruno.Client, new { OnboardingAnswered = true })).StatusCode);
-        Assert.False((await StatusOf(bruno.Client)).GetProperty("onboardingPending").GetBoolean());
+        Assert.Equal(HttpStatusCode.OK, (await bruno.Client.DeleteAsync($"{Consent}?scope=group")).StatusCode);
+        await NobodyIsAskedAsync();
+        clock.UtcNow = clock.UtcNow.AddHours(1);
+        await AcceptAsync(ana.Client);
+        await NobodyIsAskedAsync();
         Assert.True((await StatusOf(bruno.Client)).GetProperty("enabled").GetBoolean());
     }
 
@@ -581,8 +779,9 @@ public sealed class AiActivationTests
         var after = await StatusOf(ana.Client);
         Assert.True(after.GetProperty("emailVerified").GetBoolean());
         Assert.True(after.GetProperty("weeklyEmailEnabled").GetBoolean());
-        // Only what was sent changes: the welcome question is still unanswered.
-        Assert.True(after.GetProperty("onboardingPending").GetBoolean());
+        // Only what was sent changes: the answer to the welcome question was not stored along.
+        Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_user_preferences WHERE onboarding_answered_at_utc IS NULL"));
+        Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM ai_user_preferences WHERE onboarding_answered_at_utc IS NOT NULL"));
 
         Assert.Equal(HttpStatusCode.OK, (await PatchAsync(ana.Client, new { WeeklyEmail = false })).StatusCode);
         Assert.False((await StatusOf(ana.Client)).GetProperty("weeklyEmailEnabled").GetBoolean());
@@ -655,7 +854,7 @@ public sealed class AiActivationTests
         return new Member(client, body.GetProperty("user").GetProperty("id").GetGuid());
     }
 
-    /// <summary>A person in a group of their own that has NOT switched the AI on.</summary>
+    /// <summary>A person in a group of their own; nobody accepted anything.</summary>
     private static async Task<Member> MemberWithGroupAsync(ChatWebApplicationFactory factory, string name)
         => (await OwnerAsync(factory, name)).Member;
 
@@ -669,7 +868,7 @@ public sealed class AiActivationTests
         return (member, body.GetProperty("joinCode").GetString()!);
     }
 
-    /// <summary>The owner and a second member of the same group; nobody switched the AI on.</summary>
+    /// <summary>The owner and a second member of the same group; nobody accepted anything.</summary>
     private static async Task<(Member Owner, Member Other)> TwoMembersAsync(ChatWebApplicationFactory factory, string ownerName, string otherName)
     {
         var (owner, joinCode) = await OwnerAsync(factory, ownerName);

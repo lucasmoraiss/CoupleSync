@@ -1,12 +1,17 @@
+using CoupleSync.Application.Ai;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Application.OcrImport;
 using CoupleSync.Domain.Entities;
 using CoupleSync.Domain.Interfaces;
+using CoupleSync.Domain.ValueObjects;
 using CoupleSync.Infrastructure.BackgroundJobs;
 using CoupleSync.Infrastructure.Integrations.Gemini;
 using CoupleSync.Infrastructure.Integrations.Storage;
+using CoupleSync.Infrastructure.Persistence;
+using CoupleSync.UnitTests.Ai;
 using CoupleSync.UnitTests.Support;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -300,6 +305,45 @@ public sealed class OcrBackgroundJobTests
         Assert.Equal(expectedDescriptions, classifier.Seen.Count);
         // The group is the one of the job, named explicitly: there is no token in background work.
         if (uploaderAsked) Assert.Equal([CoupleId], gate.Asked);
+    }
+
+    /// <summary>
+    /// The import with the gate the API registers (ServerAiConsentGate), on a real database (SQLite): the statement
+    /// of a group that never accepted anything goes to the classifier, and the one of a group that switched the AI
+    /// off for the group does not.
+    /// </summary>
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 0)]
+    public async Task WithTheRealGate_AGroupWithNoAcceptanceHasTheStatementClassified_AndAGroupThatSwitchedTheAiOffDoesNot(
+        bool switchedOff, int expectedDescriptions)
+    {
+        using var kit = new LlmGatewayTestKit();
+        Guid groupId;
+        using (var db = kit.NewContext())
+        {
+            var ana = User.Create(EmailAddress.From("ana@example.com"), "Ana Exemplo", "hash", FixedNow);
+            var couple = Couple.Create("ABCD1234", FixedNow);
+            couple.AddMember(ana, FixedNow);
+            db.AddRange(ana, couple);
+            db.SaveChanges();
+            groupId = couple.Id;
+            Assert.Empty(db.AiConsents.ToList());
+            // "Off for the group", as the route stores it.
+            if (switchedOff)
+                Assert.Equal(1, db.Database.ExecuteSqlInterpolated($"UPDATE couples SET ai_disabled_at_utc = {FixedNow} WHERE id = {groupId}"));
+        }
+
+        var classifier = new SpyClassifier();
+        var provider = new FixedOcrProvider(ValidStatementJson);
+        var (backgroundJob, jobs, _) = Build(provider, classifier, new ServerAiConsentGate(new AiActivationRepository(kit.NewContext())));
+        var job = ImportJob.Create(groupId, UserId, "couples/x/statement.pdf", "application/pdf", FixedNow, null, aiCategorizationConsent: true);
+        jobs.Jobs.Add(job);
+
+        await backgroundJob.ProcessPendingJobsAsync(CancellationToken.None);
+
+        Assert.Equal(ImportJobStatus.Ready, job.Status);
+        Assert.Equal(expectedDescriptions, classifier.Seen.Count);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

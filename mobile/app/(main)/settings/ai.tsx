@@ -1,7 +1,7 @@
-// Configurações > Inteligência artificial (aba oculta): se a análise com IA está ativada para o grupo e por quem,
-// ativar, desligar para o grupo, retirar o próprio aceite, o consumo (hoje e 30 dias; a cota de cada modelo quando
-// é conhecida; o orçamento do grupo) e o caminho para o texto de privacidade. Tudo vem do servidor e é consultado
-// de novo a cada visita.
+// Configurações > Inteligência artificial (aba oculta): o estado da análise com IA (ligada, desligada para o grupo
+// ou indisponível), desligar para o grupo, ligar de novo — direto, sem pergunta —, para onde os dados vão, o consumo
+// (hoje e 30 dias; a cota de cada modelo quando é conhecida; o orçamento do grupo) e o caminho para o texto de
+// privacidade. A IA vem ligada para todo grupo. Tudo vem do servidor e é consultado de novo a cada visita.
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
@@ -14,8 +14,16 @@ import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
 import { showToastGlobal } from '@/components/Toast/ToastProvider';
 import { goToParent, useOnRefocus } from '@/navigation/resetOnFocus';
-import { formatConsentDate } from '@/modules/privacy/consent';
-import { activationSummary, aiSettingsActions, groupBudgetText, modelQuotaText, usageTotals } from '@/modules/ai/aiStatus';
+import { aiAnalysisSummary } from '@/modules/privacy/privacyContent';
+import {
+  AI_GROUP_STATE_TEXT,
+  aiDestinations,
+  aiGroupState,
+  aiSettingsActions,
+  groupBudgetText,
+  modelQuotaText,
+  usageTotals,
+} from '@/modules/ai/aiStatus';
 import { useAiStatusStore } from '@/modules/ai/aiStatusStore';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
 import type { AiUsageResponse } from '@/types/api';
@@ -89,23 +97,25 @@ export default function AiSettingsScreen() {
   const confirmGroupOff = () => {
     Alert.alert(
       'Desligar para o grupo?',
-      'Nada mais será enviado à IA por ninguém do grupo. O Assistente para de responder; os números do app continuam iguais. Dá para ativar de novo quando quiserem.',
+      'Nada mais será enviado à IA por ninguém do grupo. O Assistente para de responder; os números do app continuam iguais. Dá para ligar de novo quando quiserem.',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Desligar',
           style: 'destructive',
-          onPress: () => void change(() => useAiStatusStore.getState().revoke('group'), 'Análise com IA desligada para o grupo.'),
+          onPress: () => void change(() => useAiStatusStore.getState().turnOffForGroup(), 'Análise com IA desligada para o grupo.'),
         },
       ],
     );
   };
 
   // O que esta pessoa pode fazer agora (regra em aiStatus.ts, testada).
-  const actions = status ? aiSettingsActions(status) : { activate: false, turnOffForGroup: false, withdrawMine: false };
+  const actions = status ? aiSettingsActions(status) : { turnOn: false, turnOffForGroup: false };
+  const state = status ? aiGroupState(status) : null;
 
-  const withdrawMine = () => {
-    void change(() => useAiStatusStore.getState().revoke('mine'), 'O seu aceite foi retirado.');
+  // Direto: a IA volta a valer para o grupo com um toque, sem texto a aceitar nem tela de pergunta.
+  const turnOn = () => {
+    void change(() => useAiStatusStore.getState().turnOn(), 'Análise com IA ligada para o grupo.');
   };
 
   return (
@@ -128,59 +138,55 @@ export default function AiSettingsScreen() {
           <ErrorState message="Não foi possível carregar. Verifique a internet e tente novamente." onRetry={() => void refresh()} />
         )}
 
-        {status && (
+        {status && state && (
           <>
             <View style={styles.box}>
               <Text style={styles.boxTitle} accessibilityRole="header">Análise com IA</Text>
-              <Text style={styles.state}>{activationSummary(status, formatConsentDate)}</Text>
+              <Text style={styles.state}>{AI_GROUP_STATE_TEXT[state]}</Text>
 
-              {!status.available && (
+              {state === 'unavailable' && (
                 <Text style={styles.muted}>A análise com IA não está disponível no momento. O restante do app funciona normalmente.</Text>
               )}
+              {state === 'on' && (
+                <Text style={styles.muted}>
+                  Vale para o grupo inteiro e já vem ligada. Qualquer pessoa do grupo pode desligar para todos e ligar de novo quando quiser.
+                </Text>
+              )}
+              {state === 'off-for-group' && (
+                <Text style={styles.muted}>
+                  Enquanto estiver desligada, nada do grupo é enviado à IA e o Assistente não responde. Qualquer pessoa do grupo pode ligar de novo.
+                </Text>
+              )}
 
-              {actions.activate && (
-                <>
-                  <Text style={styles.muted}>Uma pessoa ativa e vale para o grupo inteiro. Antes de ativar você vê o que é enviado e para onde.</Text>
-                  <TouchableOpacity
-                    style={styles.primaryBtn}
-                    onPress={() => router.push('/(main)/ai/welcome' as any)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Ativar a análise com IA: ver o que é enviado e decidir"
-                  >
-                    <Text style={styles.primaryText}>Ativar para o grupo</Text>
-                  </TouchableOpacity>
-                </>
+              {actions.turnOn && (
+                <TouchableOpacity
+                  style={[styles.primaryBtn, busy && styles.btnDisabled]}
+                  onPress={turnOn}
+                  disabled={busy}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ligar de novo a análise com IA para o grupo"
+                >
+                  <Text style={styles.primaryText}>Ligar de novo</Text>
+                </TouchableOpacity>
               )}
 
               {actions.turnOffForGroup && (
-                <>
-                  <TouchableOpacity
-                    style={[styles.dangerBtn, busy && styles.btnDisabled]}
-                    onPress={confirmGroupOff}
-                    disabled={busy}
-                    accessibilityRole="button"
-                    accessibilityLabel="Desligar a análise com IA para o grupo"
-                  >
-                    <Text style={styles.dangerText}>Desligar para o grupo</Text>
-                  </TouchableOpacity>
-                  {actions.withdrawMine && (
-                    <>
-                      <TouchableOpacity
-                        style={[styles.secondaryBtn, busy && styles.btnDisabled]}
-                        onPress={withdrawMine}
-                        disabled={busy}
-                        accessibilityRole="button"
-                        accessibilityLabel="Retirar o meu aceite da análise com IA"
-                      >
-                        <Text style={styles.secondaryText}>Retirar meu aceite</Text>
-                      </TouchableOpacity>
-                      <Text style={styles.muted}>
-                        Retirar o seu aceite só desliga a análise se ninguém mais do grupo tiver ativado.
-                      </Text>
-                    </>
-                  )}
-                </>
+                <TouchableOpacity
+                  style={[styles.dangerBtn, busy && styles.btnDisabled]}
+                  onPress={confirmGroupOff}
+                  disabled={busy}
+                  accessibilityRole="button"
+                  accessibilityLabel="Desligar a análise com IA para o grupo"
+                >
+                  <Text style={styles.dangerText}>Desligar para o grupo</Text>
+                </TouchableOpacity>
               )}
+            </View>
+
+            {/* Informação, não pergunta: o que vai e para onde, com os destinos que o servidor tem ligados agora. */}
+            <View style={styles.box}>
+              <Text style={styles.boxTitle} accessibilityRole="header">Para onde os dados vão</Text>
+              <Text style={styles.line}>{aiAnalysisSummary(aiDestinations(status))}</Text>
             </View>
 
             <UsageSection enabled={status.available} />
@@ -221,8 +227,6 @@ const styles = StyleSheet.create({
   primaryText: { color: colors.text, fontSize: 16, fontWeight: '600' },
   dangerBtn: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.error, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   dangerText: { color: colors.errorLight, fontSize: 16, fontWeight: '600' },
-  secondaryBtn: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
-  secondaryText: { color: colors.textSubtle, fontSize: 16, fontWeight: '600' },
   btnDisabled: { opacity: 0.6 },
   linkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48, paddingHorizontal: 4 },
   linkText: { fontSize: 15, color: colors.primaryLight, fontWeight: '600' },

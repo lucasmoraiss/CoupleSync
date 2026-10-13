@@ -1,7 +1,8 @@
-// Quem vem primeiro quando duas telas abrem sozinhas na chegada à área principal: o consentimento da captura
-// (useCaptureConsentSync, para quem já deu o "Acesso às notificações" no Android e nunca respondeu) e a pergunta da
-// análise com IA. A da captura vem primeiro; a da IA pergunta aqui antes de abrir e, se a da captura vai abrir (ou
-// está abrindo), espera a vez dela: abre na próxima volta ao Painel.
+// A tela de consentimento da captura (useCaptureConsentSync, para quem já deu o "Acesso às notificações" no Android
+// e nunca respondeu) abre sozinha na chegada à área principal. Aqui ficam a marca de que ela está abrindo e a
+// pergunta "ela vai abrir?", feita por outra tela que também abra sozinha, para esperar a vez dela. Quem perguntava
+// era a pergunta da análise com IA, que não existe mais (a IA vem ligada para todo grupo): hoje nenhuma tela
+// consulta `isCapturePromptAhead`.
 //
 // Lógica pura (quem chama passa as leituras reais), coberta por __tests__/capturePromptGate.test.ts.
 import type { ConsentRecord } from '@/modules/privacy/consent';
@@ -24,8 +25,8 @@ export function clearCapturePromptOpening(): void {
 
 /**
  * Para o `useFocusEffect` da tela de consentimento da captura: quando ela perde o foco, a marca é desfeita. Quem
- * sai pelo voltar do Android sem responder não deixa a marca de pé — a pergunta da IA abre na volta ao Painel,
- * sem ter de reabrir o app. (Com a tela da captura em foco a marca não faz falta: o Painel, fora de foco, não
+ * sai pelo voltar do Android sem responder não deixa a marca de pé — outra tela que espere por esta abre na volta
+ * ao Painel, sem ter de reabrir o app. (Com a tela da captura em foco a marca não faz falta: o Painel, fora de foco, não
  * abre tela nenhuma; e a tela da captura não abre sozinha uma segunda vez.)
  */
 export function captureConsentScreenFocusEffect(): () => void {
@@ -45,8 +46,8 @@ export interface CapturePromptProbe {
 
 /**
  * A tela de consentimento da captura vai abrir sozinha (ou está abrindo) para a pessoa logada? Na dúvida
- * (registro que não pôde ser lido, permissão que não pôde ser consultada) a resposta é não: a pergunta da IA
- * não fica presa por um defeito de outra parte do app.
+ * (registro que não pôde ser lido, permissão que não pôde ser consultada) a resposta é não: quem espera por esta
+ * tela não fica preso por um defeito de outra parte do app.
  */
 export async function isCapturePromptAhead(probe: CapturePromptProbe): Promise<boolean> {
   const userId = probe.sessionUserId;

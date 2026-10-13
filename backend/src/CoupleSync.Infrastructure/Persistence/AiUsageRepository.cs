@@ -133,8 +133,11 @@ public sealed class AiActivationRepository : IAiActivationRepository
             .ToList();
     }
 
-    public Task<bool> IsEnabledAsync(Guid coupleId, int version, CancellationToken ct)
-        => InForce(coupleId, version).AnyAsync(ct);
+    public Task<bool> IsEnabledAsync(Guid coupleId, CancellationToken ct)
+        => _dbContext.Couples.AsNoTracking().AnyAsync(c => c.Id == coupleId && c.AiDisabledAtUtc == null, ct);
+
+    public Task<Couple?> FindGroupAsync(Guid coupleId, CancellationToken ct)
+        => _dbContext.Couples.FirstOrDefaultAsync(c => c.Id == coupleId, ct);
 
     /// <summary>Of this version, not revoked, and of someone who is an active member of the group right now.</summary>
     private IQueryable<AiConsent> InForce(Guid coupleId, int version)
