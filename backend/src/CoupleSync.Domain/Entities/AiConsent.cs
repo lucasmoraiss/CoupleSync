@@ -4,15 +4,15 @@ namespace CoupleSync.Domain.Entities;
 
 /// <summary>
 /// One person's acceptance of the AI analysis for one group, for one version of the text: one row per
-/// (group, person, version). The group has the AI switched on while at least one acceptance of
-/// <see cref="CurrentVersion"/>, not revoked, belongs to someone who is still a member. Accepting again after a
-/// revocation updates this same row.
+/// (group, person, version). It is a record of who pressed "activate" and when — it does not decide whether the
+/// group has the AI: that is on for every group until a member switches it off for the group
+/// (<see cref="Couple.AiDisabledAtUtc"/>). Accepting again after a revocation updates this same row.
 /// </summary>
 public sealed class AiConsent : ICoupleScoped
 {
     /// <summary>
-    /// The version of the AI text in force. A relevant change of the text raises it: every group goes back to "off".
-    /// 1: only Google (Gemini). 2: Google (Gemini) and Groq, the second provider.
+    /// The version of the AI text in force, the one an acceptance is recorded for and the status reports. It switches
+    /// no group on or off. 1: only Google (Gemini). 2: Google (Gemini) and Groq, the second provider.
     /// </summary>
     public const int CurrentVersion = 2;
 

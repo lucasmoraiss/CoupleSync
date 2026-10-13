@@ -129,8 +129,8 @@ public sealed class OcrBackgroundJob : BackgroundService
 
                 var rawOcrJson = await ocrProvider.AnalyzeAsync(job.StoragePath, job.FileMimeType, ct);
 
-                // Descriptions only go to the AI classifier when the uploader asked for it AND the group has the AI
-                // analysis switched on at the server right now (switching it off stops the very next import).
+                // Descriptions only go to the AI classifier when the app sent the flag AND the group has not switched
+                // the AI off at the server (on for every group by default; switching it off stops the very next import).
                 var aiAllowed = job.AiCategorizationConsent
                     && await scope.ServiceProvider.GetRequiredService<IAiConsentGate>().IsEnabledAsync(job.CoupleId, ct);
                 var candidates = await ocrProcessingService.ParseAndDeduplicateAsync(job.CoupleId, rawOcrJson, ct, aiAllowed);

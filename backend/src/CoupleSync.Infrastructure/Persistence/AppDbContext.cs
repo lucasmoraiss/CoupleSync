@@ -121,6 +121,9 @@ public sealed class AppDbContext : DbContext
                 .HasMaxLength(16)
                 .IsRequired();
             entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at").IsRequired();
+            // "Off for the group", on purpose. Null (every row that existed before the column) is "on".
+            entity.Property(x => x.AiDisabledAtUtc).HasColumnName("ai_disabled_at_utc");
+            entity.Ignore(x => x.IsAiEnabled);
 
             entity.HasIndex(x => x.JoinCode).IsUnique();
 
@@ -849,8 +852,9 @@ public sealed class AppDbContext : DbContext
 
         modelBuilder.Entity<AiConsent>(entity =>
         {
-            // Who switched the AI on for the group, per version of the text. One row per (group, person, version):
-            // accepting again after a revocation updates it.
+            // Who pressed "activate" for the group, per version of the text (a record: whether the group has the AI is
+            // couples.ai_disabled_at_utc). One row per (group, person, version): accepting again after a revocation
+            // updates it.
             entity.ToTable("ai_consents");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasColumnName("id");

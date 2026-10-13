@@ -804,6 +804,16 @@ internal sealed class ChatWebApplicationFactory : TestApiFactory
         return db.Couples.AsNoTracking().ToList().OrderBy(c => c.CreatedAtUtc).Select(c => c.Id).ToList();
     }
 
+    /// <summary>A row of ai_consents as an earlier version of the API left it (no route writes an old or a revoked one).</summary>
+    public void AddConsent(Guid coupleId, Guid userId, int version, bool revoked)
+    {
+        using var db = NewContext();
+        var consent = AiConsent.Accept(coupleId, userId, version, DateTime.UtcNow.AddHours(-3));
+        if (revoked) consent.Revoke(DateTime.UtcNow.AddHours(-2), userId);
+        db.AiConsents.Add(consent);
+        db.SaveChanges();
+    }
+
     public void SeedUsage(int count, Guid coupleId, string outcome, DateTime atUtc, string model = "gemini-flash-lite-latest")
     {
         using var db = NewContext();

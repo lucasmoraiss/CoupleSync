@@ -88,7 +88,7 @@ public sealed class AssistantChatService
         IReadOnlyList<ChatMessage> history,
         CancellationToken ct)
     {
-        // In this order: is there an AI at all, did the group switch it on, and only then the limits.
+        // In this order: is there an AI at all, did the group switch it off, and only then the limits.
         if (!_availability.IsAvailable) throw Disabled();
         if (!await _consent.IsEnabledAsync(coupleId, ct)) throw ConsentRequired();
 
@@ -134,8 +134,12 @@ public sealed class AssistantChatService
     private static NotFoundException Disabled()
         => new("AI_CHAT_DISABLED", "O assistente de IA não está disponível.");
 
+    /// <summary>
+    /// The group switched the AI off on purpose (nothing else gets here: no acceptance is needed). The code is the one
+    /// the installed app already knows.
+    /// </summary>
     private static ForbiddenException ConsentRequired()
-        => new("AI_CONSENT_REQUIRED", "A análise com IA está desligada para este grupo. Ative em Configurações > Inteligência artificial.");
+        => new("AI_CONSENT_REQUIRED", "A IA está desligada para este grupo. Para voltar a usar, ligue em Configurações > Inteligência artificial.");
 
     /// <summary>
     /// Safe text, and only about people who exist: an answer that mentions the marker of nobody in the group (a

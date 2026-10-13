@@ -750,6 +750,10 @@ namespace CoupleSync.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<DateTime?>("AiDisabledAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ai_disabled_at_utc");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");

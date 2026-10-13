@@ -10,7 +10,7 @@ namespace CoupleSync.Application.Ai;
 
 /// <summary>
 /// "Can the AI be used at all?" (design 7.4): not switched off by <c>Ai__Disabled</c> and at least one provider
-/// with a key — or the fake provider on. It says nothing about the group: that is the consent.
+/// with a key — or the fake provider on. It says nothing about the group: a group may have switched it off.
 /// </summary>
 public sealed class AiAvailability
 {
@@ -26,7 +26,10 @@ public sealed class AiAvailability
     public bool IsAvailable => !_options.Disabled && _catalog.AnyAvailable;
 }
 
-/// <summary>The server's answer to "has this group switched the AI on?", read from ai_consents on every call.</summary>
+/// <summary>
+/// The server's answer to "may this group's data go to the AI?", read on every call: yes for every group, with no
+/// acceptance, unless a member switched the AI off for the group on purpose.
+/// </summary>
 public sealed class ServerAiConsentGate : IAiConsentGate
 {
     private readonly IAiActivationRepository _repository;
@@ -36,9 +39,9 @@ public sealed class ServerAiConsentGate : IAiConsentGate
         _repository = repository;
     }
 
-    /// <summary>A call without a group has nobody who could have accepted: nothing is sent.</summary>
+    /// <summary>A call without a group (background work that belongs to nobody) sends nothing.</summary>
     public Task<bool> IsEnabledAsync(Guid? coupleId, CancellationToken ct)
-        => coupleId is { } couple ? _repository.IsEnabledAsync(couple, AiConsent.CurrentVersion, ct) : Task.FromResult(false);
+        => coupleId is { } couple ? _repository.IsEnabledAsync(couple, ct) : Task.FromResult(false);
 }
 
 /// <param name="Name">How the text of privacy names the destination.</param>
@@ -83,9 +86,10 @@ public sealed record AiUsageReport(
     AiGroupBudget GroupBudget);
 
 /// <summary>
-/// Switching the AI on and off for a group, and what the app shows about it (design 7 and 10.2). One acceptance is
-/// enough and counts for the whole group; any member switches it off. Everything here is about the group of the
-/// token — the controller passes it — and ai_usage is always read with that group named.
+/// The AI of a group and what the app shows about it. The AI is on for every group, with no question and no
+/// acceptance; any member switches it off for the group on purpose, and any member switches it back on. The
+/// acceptances (ai_consents) are still recorded and listed, but decide nothing. Everything here is about the group
+/// of the token — the controller passes it — and ai_usage is always read with that group named.
 /// </summary>
 public sealed class AiActivationService
 {
@@ -98,7 +102,7 @@ public sealed class AiActivationService
     private static readonly AiProviderInfo Google = new("Google (Gemini)", "Estados Unidos", TrainsOnData: true);
 
     /// <summary>
-    /// The other providers the consent text covers, as the person is told about them. Groq LLC is in the United
+    /// The other providers the AI text covers, as the person is told about them. Groq LLC is in the United
     /// States and its terms forbid it to train on what is sent (Groq Services Agreement, 4.2, read on 2026-10-08).
     /// A provider is only named while it really receives data: see <see cref="ProvidersInUse"/>.
     /// </summary>
@@ -145,11 +149,14 @@ public sealed class AiActivationService
 
         return new AiStatus(
             available,
-            Enabled: acceptedBy.Count > 0,
+            // On unless a member switched it off for the group. The acceptances below are only what really is stored.
+            Enabled: await _repository.IsEnabledAsync(coupleId, ct),
             AiConsent.CurrentVersion,
             acceptedBy,
             mine is null ? null : new AiMyAcceptance(mine.AcceptedAtUtc),
-            OnboardingPending: available && IsOnboardingPending(preference, mine, acceptedBy, await HasOldAcceptanceAsync(coupleId, userId, ct)),
+            // Nobody is asked anything any more. The field stays for the app that is installed, which opens the old
+            // welcome screen when it is true.
+            OnboardingPending: false,
             WeeklyEmailEnabled: preference?.WeeklyEmailEnabled ?? false,
             EmailVerified: await _repository.IsEmailVerifiedAsync(userId, ct),
             EmailConfigured: _emailSender.IsConfigured,
@@ -181,54 +188,48 @@ public sealed class AiActivationService
         return providers;
     }
 
-    /// <summary>
-    /// The welcome screen is due when the person never answered it, when someone else switched the AI on after
-    /// their last answer — the other member is told inside the app and can switch it off (design 7.4, decision 10) —
-    /// or when the person had accepted an earlier version of the text: the text changed, so the question comes
-    /// back to who had said yes (design 7.1). An acceptance of an earlier version never counts as "switched on".
-    /// </summary>
-    private static bool IsOnboardingPending(AiUserPreference? preference, AiAcceptance? mine, IReadOnlyList<AiAcceptance> acceptedBy, bool hasOldAcceptance)
-    {
-        if (mine is not null) return false;
-        if (hasOldAcceptance) return true;
-        if (preference?.OnboardingAnsweredAtUtc is not { } answeredAt) return true;
-        return acceptedBy.Any(a => a.AcceptedAtUtc > answeredAt);
-    }
-
     /// <summary>The person's acceptances of this group that are not revoked and are of a version that is no longer in force.</summary>
     private async Task<IReadOnlyList<AiConsent>> OldAcceptancesAsync(Guid coupleId, Guid userId, CancellationToken ct)
         => (await _repository.GetActiveConsentsAsync(coupleId, ct))
             .Where(c => c.UserId == userId && c.Version != AiConsent.CurrentVersion)
             .ToList();
 
-    private async Task<bool> HasOldAcceptanceAsync(Guid coupleId, Guid userId, CancellationToken ct)
-        => (await OldAcceptancesAsync(coupleId, userId, ct)).Count > 0;
-
+    /// <summary>
+    /// "Activate" — the button of the app: switches the AI back on for a group that had switched it off (and changes
+    /// nothing in a group that is on). No version is refused. An acceptance is recorded only when the version sent is
+    /// the one in force: nobody is recorded as having accepted a text of another version.
+    /// </summary>
     public async Task<AiStatus> AcceptAsync(Guid coupleId, Guid userId, int version, CancellationToken ct)
     {
         if (!_availability.IsAvailable)
             throw new AppException("AI_UNAVAILABLE", "A análise com IA não está disponível no momento.", 503);
 
-        if (version != AiConsent.CurrentVersion)
+        var now = _clock.UtcNow;
+
+        // Saved by itself, before the acceptance: the save of an acceptance that loses a race on its row is dropped
+        // whole, and switching the group on must not go with it.
+        (await _repository.FindGroupAsync(coupleId, ct))?.SwitchAiOn();
+        await _repository.SaveChangesAsync(ct);
+
+        if (version == AiConsent.CurrentVersion)
         {
-            throw new ConflictException(
-                "AI_CONSENT_VERSION_OUTDATED",
-                "O texto sobre a análise com IA mudou. Feche o app e abra de novo para ver o texto novo antes de ativar.");
+            var consent = await _repository.FindConsentAsync(coupleId, userId, version, ct);
+            if (consent is null) await _repository.AddConsentAsync(AiConsent.Accept(coupleId, userId, version, now), ct);
+            else consent.AcceptAgain(now);
+            await SaveIgnoringTheSameAnswerTwiceAsync(ct);
         }
 
-        var now = _clock.UtcNow;
-        var consent = await _repository.FindConsentAsync(coupleId, userId, version, ct);
-        if (consent is null) await _repository.AddConsentAsync(AiConsent.Accept(coupleId, userId, version, now), ct);
-        else consent.AcceptAgain(now);
-        await SaveIgnoringTheSameAnswerTwiceAsync(ct);
-
-        // Who accepts has answered the welcome question: it does not come back on another device.
+        // Kept for the app that is installed: who activates has answered its welcome question.
         await AnswerOnboardingAsync(coupleId, userId, now, ct);
 
         return await GetStatusAsync(coupleId, userId, ct);
     }
 
-    /// <param name="scope">"mine": only the person's own acceptance. "group": every acceptance of the group.</param>
+    /// <param name="scope">
+    /// "group": switches the AI off for the group, on purpose — from then on nothing of the group is sent, until a
+    /// member activates again; the acceptances of the group are revoked too. "mine": only revokes the person's own
+    /// acceptance, and the group stays as it is.
+    /// </param>
     public async Task<AiStatus> RevokeAsync(Guid coupleId, Guid userId, string? scope, CancellationToken ct)
     {
         if (scope is not (ScopeMine or ScopeGroup))
@@ -240,9 +241,11 @@ public sealed class AiActivationService
             if (scope == ScopeGroup || consent.UserId == userId) consent.Revoke(now, userId);
         }
 
+        if (scope == ScopeGroup) (await _repository.FindGroupAsync(coupleId, ct))?.SwitchAiOff(now);
+
         await _repository.SaveChangesAsync(ct);
 
-        // Switching it off is also an answer to the welcome question.
+        // Kept for the app that is installed: switching it off is also an answer to its welcome question.
         await AnswerOnboardingAsync(coupleId, userId, now, ct);
 
         return await GetStatusAsync(coupleId, userId, ct);
@@ -266,8 +269,8 @@ public sealed class AiActivationService
             if (onboardingAnswered == true)
             {
                 preference.AnswerOnboarding(now);
-                // "Not now" to a new version of the text: the acceptance of the earlier one is over, by the person's
-                // own answer, and the question does not come back.
+                // "Not now" from an app that still shows the old question: the person's acceptance of an earlier
+                // version of the text is over, by their own answer. The group stays on: this is not "off for the group".
                 foreach (var old in await OldAcceptancesAsync(coupleId, userId, ct)) old.Revoke(now, userId);
             }
 
