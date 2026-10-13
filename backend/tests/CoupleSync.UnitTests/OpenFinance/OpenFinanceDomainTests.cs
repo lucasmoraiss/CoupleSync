@@ -208,7 +208,7 @@ public sealed class OpenFinanceDomainTests
         var codes = typeof(PluggyErrorCodes).GetFields().Select(f => (string)f.GetRawConstantValue()!).OrderBy(c => c, StringComparer.Ordinal).ToArray();
 
         Assert.Equal(
-            new[] { "PLUGGY_INVALID_CREDENTIALS", "PLUGGY_ITEM_NEEDS_ACTION", "PLUGGY_ITEM_NOT_FOUND", "PLUGGY_RATE_LIMITED", "PLUGGY_UNAVAILABLE" },
+            new[] { "PLUGGY_INVALID_CREDENTIALS", "PLUGGY_ITEM_NEEDS_ACTION", "PLUGGY_ITEM_NOT_FOUND", "PLUGGY_RATE_LIMITED", "PLUGGY_REFUSED", "PLUGGY_UNAVAILABLE" },
             codes);
         Assert.Throws<ArgumentOutOfRangeException>(() => new PluggyException("PLUGGY_SOMETHING_ELSE"));
     }

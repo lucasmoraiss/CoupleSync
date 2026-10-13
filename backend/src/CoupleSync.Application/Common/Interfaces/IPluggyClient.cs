@@ -16,10 +16,13 @@ public interface IPluggyClient
     Task<IReadOnlyList<PluggyAccount>> GetAccountsAsync(PluggyAuth auth, string itemId, CancellationToken ct);
 
     /// <summary>
-    /// GET /transactions?accountId=&amp;from=&amp;to=, every page until the last one. Both days are inclusive, as Pluggy
-    /// reads them (UTC calendar days).
+    /// GET /v2/transactions?accountId=&amp;dateFrom=&amp;dateTo=, following the cursor until Pluggy says there is no next
+    /// page. Both days are inclusive. A listing that had to stop before the end (a cursor Pluggy repeats, a next page
+    /// that cannot be read, the ceiling of pages) comes back with what was read and
+    /// <see cref="PluggyTransactionListing.Complete"/> false: nothing may be concluded from what is missing in it,
+    /// the days asked were not all read, and the synchronisation stores nothing of it.
     /// </summary>
-    Task<IReadOnlyList<PluggyTransaction>> GetTransactionsAsync(PluggyAuth auth, string accountId, DateOnly from, DateOnly to, CancellationToken ct);
+    Task<PluggyTransactionListing> GetTransactionsAsync(PluggyAuth auth, string accountId, DateOnly from, DateOnly to, CancellationToken ct);
 
     /// <summary>
     /// GET /bills?accountId=, every page until the last one: the bills of a credit card. What has no id, no due date
@@ -133,6 +136,15 @@ public sealed record PluggyTransaction(
     string? PayerName = null)
 {
     public override string ToString() => nameof(PluggyTransaction);
+}
+
+/// <summary>
+/// The transactions of one account in the days asked. <see cref="Complete"/> only when Pluggy itself said the listing
+/// ended. Prints nothing of its content.
+/// </summary>
+public sealed record PluggyTransactionListing(IReadOnlyList<PluggyTransaction> Transactions, bool Complete)
+{
+    public override string ToString() => nameof(PluggyTransactionListing);
 }
 
 /// <summary>

@@ -161,7 +161,9 @@ public sealed class OpenFinanceController : ControllerBase
     /// the category table does not know go to the AI classifier. <c>historyMonths</c> (3, 6 or 12), when given,
     /// becomes the period of the connection: how far back an account never read before goes. While a run of the
     /// connection is waiting or running: 409 SYNC_ALREADY_RUNNING. Otherwise one run per connection every 10 minutes
-    /// (409 SYNC_TOO_SOON, with <c>errors.nextSyncAtUtc</c>).
+    /// after a run that ended well (409 SYNC_TOO_SOON, with <c>errors.nextSyncAtUtc</c>). After a run that failed,
+    /// who connected may ask again 30 seconds later (the same 409 meanwhile, with a text that says the run failed);
+    /// the silent request of the app being opened still waits the 10 minutes.
     /// </summary>
     [HttpPost("connections/{id:guid}/sync")]
     [EnableRateLimiting(RateLimitPolicies.OpenFinanceSync)]

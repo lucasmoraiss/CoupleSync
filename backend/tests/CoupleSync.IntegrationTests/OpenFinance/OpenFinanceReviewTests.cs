@@ -244,7 +244,7 @@ public sealed class OpenFinanceReviewTests
         var connectionId = await ConnectWithBankAsync(ana);
         // Pluggy takes its time: the first run is still running when the second is asked for.
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        factory.Pluggy.BeforeAnswer = request => request.Path == "/transactions" ? release.Task : Task.CompletedTask;
+        factory.Pluggy.BeforeAnswer = request => request.Path == FakePluggyServer.TransactionsPath ? release.Task : Task.CompletedTask;
         var first = await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null);
         Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
         var firstId = (await JsonAsync(first)).GetProperty("id").GetGuid();
@@ -262,16 +262,71 @@ public sealed class OpenFinanceReviewTests
         await AssertErrorAsync(await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null), HttpStatusCode.Conflict, "SYNC_TOO_SOON");
     }
 
+    // Issue #77: this was "TheTenMinutes_CountFromAnyRun_AlsoAFailedOneAndOneOfTheScheduler", which held the person for
+    // ten minutes after a run that failed, with a text saying the connection "was synchronised". A failure no longer
+    // starts the ten minutes: only a short pause, said as what it is.
     [Fact]
-    public async Task TheTenMinutes_CountFromAnyRun_AlsoAFailedOneAndOneOfTheScheduler()
+    public async Task AfterARunThatFailed_WhoConnectedAsksAgainInHalfAMinute_AndWhatHoldsItMeanwhileSaysTheRunFailed()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        factory.Pluggy.TransactionsStatus = HttpStatusCode.ServiceUnavailable;
+        var failed = await SyncAsync(factory, ana, connectionId);
+        Assert.Equal("Failed", failed["status"]);
+        var askedAt = DateTime.SpecifyKind(
+            DateTime.Parse((string)failed["created_at_utc"]!, System.Globalization.CultureInfo.InvariantCulture), DateTimeKind.Utc);
+
+        // At once: a short pause against a loop of attempts, with a text that is true for it.
+        var atOnce = await AssertErrorAsync(
+            await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null),
+            HttpStatusCode.Conflict,
+            "SYNC_TOO_SOON",
+            "A última tentativa de sincronizar esta conexão acabou de falhar. Aguarde alguns segundos e tente de novo.");
+        Assert.Equal(
+            askedAt.AddSeconds(30).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture),
+            Assert.Single(atOnce.GetProperty("errors").GetProperty("nextSyncAtUtc").EnumerateArray()).GetString());
+        Assert.Single(await factory.RowsAsync("SELECT id FROM sync_runs"));
+
+        // Half a minute later (far less than the ten minutes): accepted.
+        factory.Clock.Advance(TimeSpan.FromSeconds(31));
+        var retry = await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync?force=true", null);
+        Assert.True(HttpStatusCode.Accepted == retry.StatusCode, await retry.Content.ReadAsStringAsync());
+        var retried = await WaitForRunAsync(factory, (await JsonAsync(retry)).GetProperty("id").GetGuid());
+        Assert.Equal("Failed", retried["status"]);
+        var retriedAt = DateTime.SpecifyKind(
+            DateTime.Parse((string)retried["created_at_utc"]!, System.Globalization.CultureInfo.InvariantCulture), DateTimeKind.Utc);
+
+        // The silent request of the app being opened keeps the ten minutes after a failure too (nobody is waiting for
+        // it, and it would try again at every opening), with the hour and without saying the connection was synchronised.
+        factory.Clock.Advance(TimeSpan.FromSeconds(31));
+        var silent = await AssertErrorAsync(
+            await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync?appOpen=true", null), HttpStatusCode.Conflict, "SYNC_TOO_SOON");
+        var local = BrazilTime.ToLocal(retriedAt.AddMinutes(10)).ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(
+            $"A última tentativa de sincronizar esta conexão falhou há pouco. A sincronização automática volta a ser pedida a partir das {local} (horário de Brasília).",
+            silent.GetProperty("message").GetString());
+
+        factory.Clock.Advance(TimeSpan.FromMinutes(10));
+        Assert.Equal(HttpStatusCode.Accepted, (await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync?appOpen=true", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task AfterARunThatEndedWell_TheTenMinutesStillHold_AlsoWhenAnEarlierOneFailed()
     {
         await using var factory = NewFactory();
         var ana = await factory.RegisterAsync("Ana");
         var connectionId = await ConnectWithBankAsync(ana);
         factory.Pluggy.TransactionsStatus = HttpStatusCode.ServiceUnavailable;
         Assert.Equal("Failed", (await SyncAsync(factory, ana, connectionId))["status"]);
+        factory.Pluggy.TransactionsStatus = null;
+        factory.Clock.Advance(TimeSpan.FromSeconds(31));
+        Assert.Equal("Done", (await SyncByRouteAsync(ana, connectionId)).GetProperty("status").GetString());
 
-        await AssertErrorAsync(await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null), HttpStatusCode.Conflict, "SYNC_TOO_SOON");
+        factory.Clock.Advance(TimeSpan.FromMinutes(5));
+        var error = await AssertErrorAsync(await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null), HttpStatusCode.Conflict, "SYNC_TOO_SOON");
+
+        Assert.StartsWith("Esta conexão foi sincronizada há pouco.", error.GetProperty("message").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

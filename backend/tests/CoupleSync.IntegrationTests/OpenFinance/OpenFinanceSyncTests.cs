@@ -704,7 +704,7 @@ public sealed class OpenFinanceSyncTests
         // Pluggy is slow today: each list of transactions takes 40 seconds (of the clock of the API) to arrive.
         factory.Pluggy.BeforeAnswer = request =>
         {
-            if (request.Path == "/transactions") factory.Clock.Advance(TimeSpan.FromSeconds(40));
+            if (request.Path == FakePluggyServer.TransactionsPath) factory.Clock.Advance(TimeSpan.FromSeconds(40));
             return Task.CompletedTask;
         };
         // The AI itself answers in 6 seconds.
@@ -736,7 +736,7 @@ public sealed class OpenFinanceSyncTests
         var once = 0;
         factory.Pluggy.BeforeAnswer = request =>
         {
-            if (request.Path != "/transactions"
+            if (request.Path != FakePluggyServer.TransactionsPath
                 || !request.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal)
                 || Interlocked.Exchange(ref once, 1) == 1)
             {
@@ -778,7 +778,7 @@ public sealed class OpenFinanceSyncTests
         var once = 0;
         factory.Pluggy.BeforeAnswer = request =>
         {
-            if (request.Path != "/transactions"
+            if (request.Path != FakePluggyServer.TransactionsPath
                 || !request.Query.Contains(FakePluggyServer.CreditCardAccountId, StringComparison.Ordinal)
                 || Interlocked.Exchange(ref once, 1) == 1)
             {
@@ -882,7 +882,7 @@ public sealed class OpenFinanceSyncTests
         var once = 0;
         factory.Pluggy.BeforeAnswer = request =>
         {
-            if (request.Path == "/transactions"
+            if (request.Path == FakePluggyServer.TransactionsPath
                 && request.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal)
                 && Interlocked.Exchange(ref once, 1) == 0)
             {
@@ -1065,7 +1065,7 @@ public sealed class OpenFinanceSyncTests
         var once = 0;
         factory.Pluggy.BeforeAnswer = async request =>
         {
-            if (request.Path != "/transactions" || Interlocked.Exchange(ref once, 1) == 1) return;
+            if (request.Path != FakePluggyServer.TransactionsPath || Interlocked.Exchange(ref once, 1) == 1) return;
             var disconnected = await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}");
             Assert.Equal(HttpStatusCode.NoContent, disconnected.StatusCode);
         };
@@ -1082,7 +1082,7 @@ public sealed class OpenFinanceSyncTests
         Assert.Null(connection["last_error_code"]);
         // Nothing read after the disconnection was stored, and Pluggy was not asked for anything else.
         Assert.Empty(await MirrorAsync(factory));
-        Assert.Equal(1, factory.Pluggy.Count("GET", "/transactions"));
+        Assert.Equal(1, factory.Pluggy.Count("GET", FakePluggyServer.TransactionsPath));
     }
 
     /// <summary>What PostgreSQL and its provider hand over when the database ends a save (the chain seen for real).</summary>
@@ -1110,7 +1110,7 @@ public sealed class OpenFinanceSyncTests
         var once = 0;
         factory.Pluggy.BeforeAnswer = request =>
         {
-            if (request.Path == "/transactions" && Interlocked.Exchange(ref once, 1) == 0)
+            if (request.Path == FakePluggyServer.TransactionsPath && Interlocked.Exchange(ref once, 1) == 0)
                 factory.BeforeNextSave = () => throw EndedByTheDatabase(sqlState, wrapped);
             return Task.CompletedTask;
         };
@@ -1141,7 +1141,7 @@ public sealed class OpenFinanceSyncTests
         var once = 0;
         factory.Pluggy.BeforeAnswer = request =>
         {
-            if (request.Path == "/transactions" && Interlocked.Exchange(ref once, 1) == 0)
+            if (request.Path == FakePluggyServer.TransactionsPath && Interlocked.Exchange(ref once, 1) == 0)
                 factory.BeforeNextSave = () => throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("0 rows affected, expected 1");
             return Task.CompletedTask;
         };
@@ -1166,7 +1166,7 @@ public sealed class OpenFinanceSyncTests
         var once = 0;
         factory.Pluggy.BeforeAnswer = async request =>
         {
-            if (request.Path != "/transactions" || Interlocked.Exchange(ref once, 1) == 1) return;
+            if (request.Path != FakePluggyServer.TransactionsPath || Interlocked.Exchange(ref once, 1) == 1) return;
             (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).EnsureSuccessStatusCode();
             await ConnectAsync(ana); // the same connection, with credentials stored again
         };
@@ -1199,7 +1199,7 @@ public sealed class OpenFinanceSyncTests
         factory.Pluggy.BeforeAnswer = async request =>
         {
             // After the first account was written: the mirror already has rows when the person leaves.
-            if (request.Path != "/transactions" || !request.Query.Contains(FakePluggyServer.CreditCardAccountId, StringComparison.Ordinal)
+            if (request.Path != FakePluggyServer.TransactionsPath || !request.Query.Contains(FakePluggyServer.CreditCardAccountId, StringComparison.Ordinal)
                 || Interlocked.Exchange(ref once, 1) == 1)
             {
                 return;
@@ -1385,7 +1385,7 @@ public sealed class OpenFinanceSyncTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         factory.Pluggy.BeforeAnswer = async request =>
         {
-            if (request.Path != "/transactions") return;
+            if (request.Path != FakePluggyServer.TransactionsPath) return;
             reading.TrySetResult();
             await release.Task;
         };

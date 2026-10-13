@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Domain.Entities;
@@ -11,6 +13,8 @@ namespace CoupleSync.Application.OpenFinance;
 /// them to the mirror (<c>bank_transactions</c>). Nothing becomes a transaction of the app here: that is the review.
 /// Every write checks that the credentials of the connection are still the ones the run read; when the person
 /// disconnected, connected again or left the group meanwhile, the run stops and never writes the connection back.
+/// Every run leaves one line in the log with how it ended (and a warning when it failed): only its id, codes, counts
+/// and times, never anything of a bank, of an account or of a transaction.
 /// </summary>
 public sealed class SyncConnectionService
 {
@@ -20,11 +24,16 @@ public sealed class SyncConnectionService
     public const string NoBankCode = "SYNC_NO_BANK";
     public const string TimedOutCode = "SYNC_TIMED_OUT";
 
+    /// <summary>Pluggy did not hand over the whole listing of some account: nothing of that listing is stored, the run is not a success.</summary>
+    public const string IncompleteCode = "SYNC_INCOMPLETE";
+
     public const string InterruptedMessage =
         "A sincronização foi interrompida porque o servidor reiniciou. Sincronize de novo.";
     public const string TimedOutMessage =
         "A sincronização demorou demais e foi encerrada. Sincronize de novo.";
     public const string FailedMessage = "Não foi possível sincronizar agora. Tente de novo em alguns minutos.";
+    public const string IncompleteMessage =
+        "O Pluggy não entregou a lista completa das transações desta vez, e nada dessa lista foi guardado. Tente sincronizar de novo.";
     public const string OwnerNotInGroupMessage =
         "Quem conectou estes bancos não faz mais parte do grupo. Nada foi sincronizado.";
     public const string ChangedMessage =
@@ -150,12 +159,16 @@ public sealed class SyncConnectionService
             return;
         }
 
+        var progress = new RunProgress();
+        var watch = Stopwatch.StartNew();
         try
         {
-            await RunAsync(run, ct);
+            await RunAsync(run, progress, ct);
+            LogEnd(run.Id, "Done", progress, watch);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            LogFailure(run.Id, InterruptedCode, progress, watch, pluggy: null);
             // The server is stopping. Another process may already be up (a deploy) and will not look at this run at
             // its start any more: the verdict is written now, in a few seconds of grace. If even that fails, the
             // pass of any process fails the run after RunTimeout.
@@ -173,27 +186,90 @@ public sealed class SyncConnectionService
         }
         catch (SyncStoppedException stop)
         {
-            await FailAsync(run.Id, stop.Code, stop.Message, markConnection: false, ct);
+            LogFailure(run.Id, stop.Code, progress, watch, pluggy: null);
+            await FailAsync(run.Id, stop.Code, stop.Message, markConnection: false, ct, stop.WhereItStopped);
         }
         catch (PluggyException ex)
         {
+            LogFailure(run.Id, ex.Code, progress, watch, ex);
             var refused = ex.Code == PluggyErrorCodes.InvalidCredentials;
             await FailAsync(
                 run.Id,
                 ex.Code,
                 refused ? OpenFinanceService.StoredCredentialsRefusedMessage : ex.Message,
                 markConnection: refused,
-                ct);
+                ct,
+                whereItStopped: WhereItStopped(ex));
         }
         catch (Exception ex)
         {
             // Only the kind of failure: a message of the data layer could carry what was being written.
             _logger.LogError("Open Finance run {RunId} failed with {ExceptionType}.", run.Id, ex.GetType().Name);
+            LogFailure(run.Id, FailedCode, progress, watch, pluggy: null);
             await FailAsync(run.Id, FailedCode, FailedMessage, markConnection: false, ct);
         }
     }
 
-    private async Task RunAsync(SyncRun run, CancellationToken ct)
+    /// <summary>One line per run, however it ended: what production has to tell what a synchronisation did.</summary>
+    private void LogEnd(Guid runId, string result, RunProgress progress, Stopwatch watch, string? stage = null)
+        => _logger.LogInformation(
+            "Open Finance run {RunId} ended: {Result}; stage {Stage}; accounts read {AccountsRead}; transactions new {TransactionsNew}, updated {TransactionsUpdated}; incomplete listings {IncompleteListings}; took {ElapsedMs} ms.",
+            runId,
+            result,
+            stage ?? progress.Stage,
+            progress.AccountsRead,
+            progress.TransactionsNew,
+            progress.TransactionsUpdated,
+            progress.IncompleteListings,
+            watch.ElapsedMilliseconds);
+
+    /// <summary>
+    /// A run that fails: a warning with the stage it stopped at and, when a call to Pluggy is the reason, which call,
+    /// the status and the codes of Pluggy's error body. Then the line every run has.
+    /// </summary>
+    private void LogFailure(Guid runId, string code, RunProgress progress, Stopwatch watch, PluggyException? pluggy)
+    {
+        var stage = pluggy?.CallKind ?? progress.Stage;
+        _logger.LogWarning(
+            "Open Finance run {RunId} failed at stage {Stage} with {ErrorCode}; Pluggy call {Kind} answered {StatusCode} ({PluggyCode}).",
+            runId,
+            stage,
+            code,
+            pluggy?.CallKind ?? "none",
+            pluggy is null ? "-" : pluggy.HttpStatus is { } status ? status.ToString(CultureInfo.InvariantCulture) : "no answer",
+            pluggy?.PluggyCode ?? "-");
+        LogEnd(runId, $"Failed ({code})", progress, watch, stage);
+    }
+
+    /// <summary>
+    /// What goes after the message of a run that a call to Pluggy failed, for the diary of the run (the app shows
+    /// it): the stage, the HTTP status and the codes of Pluggy's error body. Nothing else of the answer.
+    /// </summary>
+    private static string WhereItStopped(PluggyException ex)
+    {
+        if (ex.CallKind is not { } kind) return string.Empty;
+        var stage = kind switch
+        {
+            "auth" => "autenticação",
+            "item" => "banco",
+            "item-update" => "atualização do banco",
+            "accounts" => "contas",
+            "transactions" => "transações",
+            "bills" => "faturas",
+            _ => kind,
+        };
+        if (ex.HttpStatus is not { } status) return $" (Etapa: {stage}; sem resposta válida do Pluggy)";
+
+        // Pluggy's "code" is usually the HTTP status again ("410/ENDPOINT_DEPRECATED"): a person reads the number once.
+        var http = status.ToString(CultureInfo.InvariantCulture);
+        var pluggyCode = ex.PluggyCode;
+        if (pluggyCode == http) pluggyCode = null;
+        else if (pluggyCode is not null && pluggyCode.StartsWith(http + "/", StringComparison.Ordinal)) pluggyCode = pluggyCode[(http.Length + 1)..];
+        var codes = pluggyCode is null ? string.Empty : $", {pluggyCode}";
+        return $" (Etapa: {stage}; resposta do Pluggy: HTTP {http}{codes})";
+    }
+
+    private async Task RunAsync(SyncRun run, RunProgress progress, CancellationToken ct)
     {
         var connection = await _connections.FindConnectionAsync(run.ConnectionId, run.CoupleId, ct)
             ?? throw new SyncStoppedException(OpenFinanceService.ChangedCode, ChangedMessage);
@@ -233,11 +309,26 @@ public sealed class SyncConnectionService
         foreach (var item in items)
         {
             ct.ThrowIfCancellationRequested();
-            if (await SyncItemAsync(run, connection, auth, item, window, ai, ct)) itemsRead++;
+            if (await SyncItemAsync(run, connection, auth, item, window, ai, progress, ct)) itemsRead++;
         }
 
         if (itemsRead == 0)
+        {
+            progress.Stage = RunProgress.Finish;
             throw new SyncStoppedException(PluggyErrorCodes.ItemNeedsAction, NoBankReadableMessage);
+        }
+
+        // Some listing stopped before Pluggy said it ended, and nothing of it was stored. The accounts whose listing
+        // came whole are stored as always; but this is not a synchronisation that ended well: the run fails saying
+        // so, and the connection keeps the date of its last whole synchronisation. The account left out is as it was
+        // before this run, so the next run asks for the same days of it.
+        if (progress.IncompleteListings > 0)
+        {
+            progress.Stage = "transactions";
+            throw new SyncStoppedException(IncompleteCode, IncompleteMessage, " (Etapa: transações; listagem incompleta)");
+        }
+
+        progress.Stage = RunProgress.Finish;
 
         // Read again right before the verdict: a connection disconnected meanwhile is never written back.
         if (!await _sync.ConnectionStillHasCredentialsAsync(connection.Id, connection.ClientSecretEncrypted!, ct))
@@ -254,10 +345,11 @@ public sealed class SyncConnectionService
 
     /// <summary>True when the item was read; false when it needs the person at the bank (the run goes on with the others).</summary>
     private async Task<bool> SyncItemAsync(
-        SyncRun run, BankConnection connection, PluggyAuth auth, BankItem item, SyncWindow window, AiBudget ai, CancellationToken ct)
+        SyncRun run, BankConnection connection, PluggyAuth auth, BankItem item, SyncWindow window, AiBudget ai, RunProgress progress, CancellationToken ct)
     {
         try
         {
+            progress.Stage = "item";
             if (run.ForceItemUpdate)
                 await RequestUpdateAsync(auth, item, ct);
 
@@ -269,17 +361,35 @@ public sealed class SyncConnectionService
                 return false;
             }
 
+            progress.Stage = "accounts";
             var accounts = await UpsertAccountsAsync(connection, item, auth, ct);
             await SaveAsync(connection, ct);
 
             foreach (var account in accounts.Where(a => a.SyncEnabled))
             {
                 ct.ThrowIfCancellationRequested();
+                progress.Stage = "transactions";
                 // By account, not by connection: the connection may have synchronised many times while this bank
                 // could not be read (login error at the bank, another bank of the same connection going on alone).
                 var from = window.FromFor(await _sync.GetLastTransactionDayAsync(account.Id, ct));
-                var transactions = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
-                var (arrived, readAgain) = await UpsertTransactionsAsync(run, connection, account, transactions, ai, ct);
+                var listing = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
+                // A listing that stopped before Pluggy said it ended (a cursor that came back, a next page that could
+                // not be read, the ceiling of pages) is left out whole: nothing of it is stored and nothing is removed
+                // for it. Storing a part would move the last day the mirror has of the account, which is where the
+                // next reading starts from, and the days that did not come would never be asked for again. The other
+                // accounts are read all the same, and the run fails at its end (see RunAsync).
+                if (!listing.Complete)
+                {
+                    progress.IncompleteListings++;
+                    _logger.LogWarning(
+                        "Open Finance run {RunId}: the transactions of an account did not come whole from Pluggy; nothing of that listing is stored or removed, and the run will end as incomplete.",
+                        run.Id);
+                    continue;
+                }
+
+                progress.AccountsRead++;
+                var transactions = listing.Transactions;
+                var (arrived, readAgain) = await UpsertTransactionsAsync(run, connection, account, transactions, ai, progress, ct);
                 // What the bank no longer lists leaves in the same save as the line that replaces it.
                 var leaving = await RemoveVanishedAsync(account, transactions, from, window.To, ct);
                 // Before anyone sees them: transfers between accounts of the group, bill payments and suspected
@@ -292,7 +402,10 @@ public sealed class SyncConnectionService
                 await SaveAsync(connection, ct, DecideAsync);
 
                 if (BankReconciliationRules.IsCreditCard(account.Type))
+                {
+                    progress.Stage = "bills";
                     await SyncBillsAsync(connection, auth, account, ct);
+                }
             }
 
             return true;
@@ -423,7 +536,8 @@ public sealed class SyncConnectionService
     /// not settled the last time and has now), and every line of the account the bank listed again, as it is now.
     /// </summary>
     private async Task<(IReadOnlyList<ArrivedBankLine> Arrived, IReadOnlyList<BankTransaction> ReadAgain)> UpsertTransactionsAsync(
-        SyncRun run, BankConnection connection, BankAccount account, IReadOnlyList<PluggyTransaction> transactions, AiBudget ai, CancellationToken ct)
+        SyncRun run, BankConnection connection, BankAccount account, IReadOnlyList<PluggyTransaction> transactions, AiBudget ai, RunProgress progress,
+        CancellationToken ct)
     {
         var incoming = transactions
             .Where(t => !string.IsNullOrWhiteSpace(t.Id) && t.Id.Trim().Length <= BankTransaction.MaxPluggyIdLength)
@@ -471,6 +585,8 @@ public sealed class SyncConnectionService
         }
 
         run.AddCounts(added, updated);
+        progress.TransactionsNew += added;
+        progress.TransactionsUpdated += updated;
         return (arrived, readAgain);
     }
 
@@ -479,7 +595,7 @@ public sealed class SyncConnectionService
     /// pending purchase that got another id when it was settled): the line leaves the mirror, so that it does not
     /// wait for a review that can never confirm it. Only lines still pending at the bank AND still waiting for the
     /// review, on days this reading covered whole; a line someone confirmed or discarded is never touched. Returns
-    /// the lines that leave.
+    /// the lines that leave. Only to be called with a listing Pluggy said was complete.
     /// </summary>
     private async Task<IReadOnlyList<BankTransaction>> RemoveVanishedAsync(
         BankAccount account, IReadOnlyList<PluggyTransaction> transactions, DateOnly from, DateOnly to, CancellationToken ct)
@@ -487,7 +603,10 @@ public sealed class SyncConnectionService
         // The first day asked is left out: Pluggy cuts the days in UTC, and a transaction of that day could be
         // missing from the answer only because of where the day begins.
         var fromUtc = DateTime.SpecifyKind(from.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
-        var toUtc = DateTime.SpecifyKind(to.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+        // The last day asked is left out too. "dateTo" is documented as a day, inclusive, but typed as an instant:
+        // were it cut at 00:00 UTC, what happened during that day would be missing from the answer without being
+        // gone at the bank. That day is today (UTC): the reading of tomorrow covers it whole.
+        var toUtc = DateTime.SpecifyKind(to.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
         if (fromUtc >= toUtc) return [];
 
         var candidates = await _sync.GetUnsettledWaitingAsync(account.Id, fromUtc, toUtc, ct);
@@ -553,8 +672,10 @@ public sealed class SyncConnectionService
     /// <summary>
     /// Records the failure and nothing else: whatever the run had not saved is dropped. The connection is marked
     /// only when Pluggy refused its credentials, and only if they are still the ones stored.
+    /// <paramref name="whereItStopped"/> goes after the message in the diary of the run only (never on the connection).
     /// </summary>
-    private async Task FailAsync(Guid runId, string code, string message, bool markConnection, CancellationToken ct)
+    private async Task FailAsync(
+        Guid runId, string code, string message, bool markConnection, CancellationToken ct, string whereItStopped = "")
     {
         for (var attempt = 1; attempt <= 2; attempt++)
         {
@@ -564,7 +685,7 @@ public sealed class SyncConnectionService
             if (run is null || run.Status != SyncRunStatus.Running) return;
 
             var now = _clock.UtcNow;
-            run.MarkFailed(code, message, now);
+            run.MarkFailed(code, message + whereItStopped, now);
 
             BankConnection? connection = null;
             if (markConnection && attempt == 1)
@@ -616,9 +737,35 @@ public sealed class SyncConnectionService
     /// <summary>The run cannot go on, for a reason the person can read.</summary>
     private sealed class SyncStoppedException : Exception
     {
-        public SyncStoppedException(string code, string message) : base(message) => Code = code;
+        public SyncStoppedException(string code, string message, string whereItStopped = "") : base(message)
+        {
+            Code = code;
+            WhereItStopped = whereItStopped;
+        }
 
         public string Code { get; }
+
+        /// <summary>What goes after the message in the diary of the run (the stage), when there is something to say.</summary>
+        public string WhereItStopped { get; }
+    }
+
+    /// <summary>How far one run went, for its line in the log: where it is, and counts. Nothing of what it read.</summary>
+    private sealed class RunProgress
+    {
+        public const string Finish = "finish";
+
+        /// <summary>"prepare", then "item", "accounts", "transactions" and "bills" for each bank, then "finish".</summary>
+        public string Stage { get; set; } = "prepare";
+
+        /// <summary>Accounts whose listing of transactions came whole and was mirrored.</summary>
+        public int AccountsRead { get; set; }
+
+        public int TransactionsNew { get; set; }
+
+        public int TransactionsUpdated { get; set; }
+
+        /// <summary>Listings that stopped before Pluggy said they ended: nothing of them was stored.</summary>
+        public int IncompleteListings { get; set; }
     }
 
     /// <summary>
@@ -656,7 +803,8 @@ public sealed class SyncConnectionService
 /// <summary>
 /// The days a run asks Pluggy for. The first time: today (in Brazil) minus the months the person chose. After that:
 /// the day (in Brazil) of the last successful synchronisation minus <see cref="SyncConnectionService.OverlapDays"/>.
-/// The last day is today in UTC, which is never behind Brazil: a purchase of this evening is already inside.
+/// The last day is today in UTC, which is never behind Brazil: a purchase of this evening is already inside. Both
+/// days go to Pluggy as they are (<c>dateFrom</c> and <c>dateTo</c> of GET /v2/transactions are inclusive).
 /// </summary>
 public sealed record SyncWindow(DateOnly From, DateOnly HistoryFrom, DateOnly To)
 {
