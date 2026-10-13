@@ -121,8 +121,8 @@ public sealed class PluggyHttpClient : IPluggyClient
     /// GET /v2/transactions, page after page by the cursor of "next", until "next" is null. Only <c>accountId</c>,
     /// <c>dateFrom</c>, <c>dateTo</c> and <c>after</c> are ever sent: the listing refuses what it does not know
     /// (<c>page</c>, <c>pageSize</c>, <c>from</c>, <c>to</c>). The listing ends early, and says it is not complete,
-    /// when Pluggy gives a cursor already sent (it would go in circles), a "next" no cursor can be read from, or
-    /// more pages than <see cref="MaxTransactionPages"/>.
+    /// when Pluggy gives a cursor already sent (it would go in circles), a "next" that is there and that no cursor
+    /// can be read from, or more pages than <see cref="MaxTransactionPages"/>.
     /// </summary>
     public async Task<PluggyTransactionListing> GetTransactionsAsync(PluggyAuth auth, string accountId, DateOnly from, DateOnly to, CancellationToken ct)
     {
@@ -217,7 +217,7 @@ public sealed class PluggyHttpClient : IPluggyClient
 
     private enum NextPage
     {
-        /// <summary>"next" is null (or empty): Pluggy says the listing ended.</summary>
+        /// <summary>"next" is null, empty or not there: the listing ended.</summary>
         None,
 
         /// <summary>There is a next page and its cursor was read.</summary>
@@ -227,12 +227,17 @@ public sealed class PluggyHttpClient : IPluggyClient
         Unreadable,
     }
 
+    /// <summary>
+    /// Where the listing ends follows the loop of Pluggy's own SDK (pluggy-node, <c>fetchAllTransactions</c>:
+    /// <c>while (next !== null)</c>, then <c>if (!afterParam) break</c>): "next" null is the documented end, and an
+    /// answer without "next" or with an empty one ends there too (the SDK finds no cursor and returns what it has).
+    /// Only null is in the reference; the other two are the SDK's behaviour, not a documented contract. Stricter than
+    /// the SDK in one thing: a "next" that says something no cursor can be read from is not taken as the end.
+    /// </summary>
     private static NextPage ReadNext(JsonElement root, out string? cursor)
     {
         cursor = null;
-        // The listing always carries "next": without it, nothing says that it ended.
-        if (!root.TryGetProperty("next", out var next)) return NextPage.Unreadable;
-        if (next.ValueKind == JsonValueKind.Null) return NextPage.None;
+        if (!root.TryGetProperty("next", out var next) || next.ValueKind == JsonValueKind.Null) return NextPage.None;
         if (next.ValueKind != JsonValueKind.String) return NextPage.Unreadable;
 
         var text = next.GetString()!.Trim();

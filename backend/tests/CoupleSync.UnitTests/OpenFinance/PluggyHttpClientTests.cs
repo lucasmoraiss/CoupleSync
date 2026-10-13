@@ -656,8 +656,7 @@ public sealed class PluggyHttpClientTests
     [InlineData("\"?accountId=account\"")]                           // a query string without the cursor
     [InlineData("\"accountId=account&dateFrom=2026-07-01\"")]
     [InlineData("\"?accountId=account&after=\"")]                    // an empty cursor
-    [InlineData(null)]                                              // no "next" at all
-    public async Task GetTransactions_WhenNextCannotBeRead_StopsThere_AndSaysTheListingIsNotComplete(string? nextJson)
+    public async Task GetTransactions_WhenNextCannotBeRead_StopsThere_AndSaysTheListingIsNotComplete(string nextJson)
     {
         var handler = new PagesAnswer(Page("t-1", nextJson), Page("t-2", "null"));
 
@@ -669,18 +668,35 @@ public sealed class PluggyHttpClientTests
         Assert.Contains(_log.Lines, l => l.StartsWith("Warning", StringComparison.Ordinal) && l.Contains("could not be read", StringComparison.Ordinal));
     }
 
+    // The end of the listing, as the loop of the official SDK (pluggy-node, fetchAllTransactions) ends it: "next"
+    // null, and also no "next" at all or an empty one (there the SDK finds no cursor and returns what it has).
     [Theory]
     [InlineData("null")]
     [InlineData("\"\"")]
     [InlineData("\"   \"")]
-    public async Task GetTransactions_WhenNextIsNullOrEmpty_TheListingIsComplete(string nextJson)
+    [InlineData(null)] // no "next" at all
+    public async Task GetTransactions_WhenNextIsNullEmptyOrAbsent_TheListingIsComplete(string? nextJson)
     {
         var handler = new PagesAnswer(Page("t-1", nextJson), Page("t-2", "null"));
 
         var listing = await ClientOf(handler).GetTransactionsAsync(Connection(), "account", From, To, CancellationToken.None);
 
         Assert.True(listing.Complete);
+        Assert.Equal("t-1", Assert.Single(listing.Transactions).Id);
         Assert.Equal(1, handler.DataCalls);
+        Assert.DoesNotContain(_log.Lines, l => l.StartsWith("Warning", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetTransactions_OfAServerThatNeverSendsNext_ReadsThePageItGot_AsAWholeListing()
+    {
+        _pluggy.OmitNext = true;
+
+        var listing = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+
+        Assert.True(listing.Complete);
+        Assert.Equal(3, listing.Transactions.Count);
+        Assert.Equal(1, _pluggy.Count("GET", FakePluggyServer.TransactionsPath));
     }
 
     [Fact]

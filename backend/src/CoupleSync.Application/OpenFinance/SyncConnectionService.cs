@@ -24,11 +24,16 @@ public sealed class SyncConnectionService
     public const string NoBankCode = "SYNC_NO_BANK";
     public const string TimedOutCode = "SYNC_TIMED_OUT";
 
+    /// <summary>Pluggy did not hand over the whole listing of some account: what came is stored, the run is not a success.</summary>
+    public const string IncompleteCode = "SYNC_INCOMPLETE";
+
     public const string InterruptedMessage =
         "A sincronização foi interrompida porque o servidor reiniciou. Sincronize de novo.";
     public const string TimedOutMessage =
         "A sincronização demorou demais e foi encerrada. Sincronize de novo.";
     public const string FailedMessage = "Não foi possível sincronizar agora. Tente de novo em alguns minutos.";
+    public const string IncompleteMessage =
+        "O Pluggy não entregou a lista completa das transações desta vez. O que chegou foi guardado; sincronize de novo para buscar o restante.";
     public const string OwnerNotInGroupMessage =
         "Quem conectou estes bancos não faz mais parte do grupo. Nada foi sincronizado.";
     public const string ChangedMessage =
@@ -182,7 +187,7 @@ public sealed class SyncConnectionService
         catch (SyncStoppedException stop)
         {
             LogFailure(run.Id, stop.Code, progress, watch, pluggy: null);
-            await FailAsync(run.Id, stop.Code, stop.Message, markConnection: false, ct);
+            await FailAsync(run.Id, stop.Code, stop.Message, markConnection: false, ct, stop.WhereItStopped);
         }
         catch (PluggyException ex)
         {
@@ -254,8 +259,14 @@ public sealed class SyncConnectionService
             _ => kind,
         };
         if (ex.HttpStatus is not { } status) return $" (Etapa: {stage}; sem resposta válida do Pluggy)";
-        var codes = ex.PluggyCode is { } pluggyCode ? $", {pluggyCode}" : string.Empty;
-        return $" (Etapa: {stage}; resposta do Pluggy: HTTP {status.ToString(CultureInfo.InvariantCulture)}{codes})";
+
+        // Pluggy's "code" is usually the HTTP status again ("410/ENDPOINT_DEPRECATED"): a person reads the number once.
+        var http = status.ToString(CultureInfo.InvariantCulture);
+        var pluggyCode = ex.PluggyCode;
+        if (pluggyCode == http) pluggyCode = null;
+        else if (pluggyCode is not null && pluggyCode.StartsWith(http + "/", StringComparison.Ordinal)) pluggyCode = pluggyCode[(http.Length + 1)..];
+        var codes = pluggyCode is null ? string.Empty : $", {pluggyCode}";
+        return $" (Etapa: {stage}; resposta do Pluggy: HTTP {http}{codes})";
     }
 
     private async Task RunAsync(SyncRun run, RunProgress progress, CancellationToken ct)
@@ -301,9 +312,23 @@ public sealed class SyncConnectionService
             if (await SyncItemAsync(run, connection, auth, item, window, ai, progress, ct)) itemsRead++;
         }
 
-        progress.Stage = RunProgress.Finish;
         if (itemsRead == 0)
+        {
+            progress.Stage = RunProgress.Finish;
             throw new SyncStoppedException(PluggyErrorCodes.ItemNeedsAction, NoBankReadableMessage);
+        }
+
+        // Some listing stopped before Pluggy said it ended. Everything that was read, of every account, is already
+        // stored; but days that were asked may not have come, so this is not a synchronisation that ended well: the
+        // run fails saying so, and the connection keeps the date of its last whole synchronisation, so that the next
+        // run asks for the same days again.
+        if (progress.IncompleteListings > 0)
+        {
+            progress.Stage = "transactions";
+            throw new SyncStoppedException(IncompleteCode, IncompleteMessage, " (Etapa: transações; listagem incompleta)");
+        }
+
+        progress.Stage = RunProgress.Finish;
 
         // Read again right before the verdict: a connection disconnected meanwhile is never written back.
         if (!await _sync.ConnectionStillHasCredentialsAsync(connection.Id, connection.ClientSecretEncrypted!, ct))
@@ -354,7 +379,8 @@ public sealed class SyncConnectionService
                 // What the bank no longer lists leaves in the same save as the line that replaces it. Only when Pluggy
                 // itself said the listing ended: what is missing from a listing that stopped before its end (a cursor
                 // that came back, a next page that could not be read, the ceiling of pages) may simply not have been
-                // read, and nothing is removed for it. What was read is mirrored all the same.
+                // read, and nothing is removed for it. What was read is mirrored all the same, the other accounts are
+                // read too, and the run fails at its end (see RunAsync).
                 IReadOnlyList<BankTransaction> leaving = [];
                 if (listing.Complete)
                 {
@@ -364,7 +390,7 @@ public sealed class SyncConnectionService
                 {
                     progress.IncompleteListings++;
                     _logger.LogWarning(
-                        "Open Finance run {RunId}: the transactions of an account did not come whole from Pluggy; nothing is removed from the mirror for it in this run.",
+                        "Open Finance run {RunId}: the transactions of an account did not come whole from Pluggy; what came is stored, nothing is removed from the mirror for it, and the run will end as incomplete.",
                         run.Id);
                 }
 
@@ -713,9 +739,16 @@ public sealed class SyncConnectionService
     /// <summary>The run cannot go on, for a reason the person can read.</summary>
     private sealed class SyncStoppedException : Exception
     {
-        public SyncStoppedException(string code, string message) : base(message) => Code = code;
+        public SyncStoppedException(string code, string message, string whereItStopped = "") : base(message)
+        {
+            Code = code;
+            WhereItStopped = whereItStopped;
+        }
 
         public string Code { get; }
+
+        /// <summary>What goes after the message in the diary of the run (the stage), when there is something to say.</summary>
+        public string WhereItStopped { get; }
     }
 
     /// <summary>How far one run went, for its line in the log: where it is, and counts. Nothing of what it read.</summary>

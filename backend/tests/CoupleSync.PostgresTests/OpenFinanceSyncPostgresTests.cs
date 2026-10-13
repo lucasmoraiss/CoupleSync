@@ -857,7 +857,7 @@ public sealed class OpenFinanceSyncPostgresTests
     }
 
     [PostgresFact]
-    public async Task AListingByCursorThatStoppedBeforeTheEnd_RemovesNothing_AndTheWholeOneOverSeveralPagesStillDoes()
+    public async Task AListingByCursorThatStoppedBeforeTheEnd_RemovesNothing_FailsTheRun_AndTheWholeOneOverSeveralPagesStillRemoves()
     {
         // Issue #77, on PostgreSQL: the run reads GET /v2/transactions page by page, and what is missing from a listing
         // that did not come whole proves nothing.
@@ -875,8 +875,12 @@ public sealed class OpenFinanceSyncPostgresTests
         // The pending purchase of the card is not listed any more, and "next" cannot be read: the listing is not whole.
         pluggy.Transactions[FakePluggyServer.CreditCardAccountId].RemoveAll(t => t.Id == FakePluggyServer.CardPendingTransactionId);
         pluggy.RawNextJson = "12345";
+        var syncedBefore = await database.ScalarAsync<DateTime>("SELECT last_sync_at_utc FROM bank_connections");
         var partial = await InsertRunAsync(database, ana, connectionId, "Pending");
-        Assert.Equal("Done", (await WaitAsync(ana, partial)).GetProperty("status").GetString());
+        var partialRun = await WaitAsync(ana, partial);
+        Assert.Equal("Failed", partialRun.GetProperty("status").GetString());
+        Assert.Equal("SYNC_INCOMPLETE", partialRun.GetProperty("errorCode").GetString());
+        Assert.Equal(syncedBefore, await database.ScalarAsync<DateTime>("SELECT last_sync_at_utc FROM bank_connections"));
         Assert.Equal(
             1,
             await database.ScalarAsync<long>(
@@ -894,6 +898,9 @@ public sealed class OpenFinanceSyncPostgresTests
                 "SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.CardPendingTransactionId)));
         Assert.Equal(4, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
         Assert.Equal(4, await database.ScalarAsync<long>("SELECT count(DISTINCT pluggy_transaction_id) FROM bank_transactions"));
+        Assert.True(await database.ScalarAsync<DateTime>("SELECT last_sync_at_utc FROM bank_connections") > syncedBefore);
+        var windows = pluggy.WindowsAsked(FakePluggyServer.CreditCardAccountId);
+        Assert.Equal(windows[1].From, windows[2].From); // the run after the partial one asked the same first day
     }
 
     // ---------------------------------------------------------------- support
