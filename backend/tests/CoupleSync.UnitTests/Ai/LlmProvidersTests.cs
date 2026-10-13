@@ -420,7 +420,7 @@ public sealed class LlmProvidersTests
     // ---------------------------------------------------------------- configuration
 
     [Fact]
-    public void Configuration_Defaults_AreTheChainsAndBudgetsOfTheDesign_WithOnlyGeminiFlashModels()
+    public void Configuration_Defaults_AreTheChainsAndBudgetsOfTheDesign_GeminiFlashModelsThenTheGroqReserve()
     {
         var options = new AiOptions();
         AiConfiguration.Apply(options, Config());
@@ -436,11 +436,13 @@ public sealed class LlmProvidersTests
         string[] fast = ["gemini|gemini-flash-lite-latest", "gemini|gemini-2.5-flash", "gemini|gemini-3.1-flash-lite"];
         // Quality first: few calls, and the text matters.
         string[] quality = ["gemini|gemini-flash-latest", "gemini|gemini-3-flash-preview", "gemini|gemini-flash-lite-latest"];
-        Assert.Equal(fast, Links(options, AiChains.Assistant));
-        Assert.Equal(fast, Links(options, AiChains.Categorize));
-        Assert.Equal(fast, Links(options, AiChains.Daily));
-        Assert.Equal(quality, Links(options, AiChains.Weekly));
-        Assert.Equal(quality, Links(options, AiChains.Education));
+        // Groq closes every chain as the reserve (it only exists while GROQ_API_KEY has a value).
+        const string reserve = "groq|openai/gpt-oss-120b";
+        Assert.Equal([.. fast, reserve], Links(options, AiChains.Assistant));
+        Assert.Equal([.. fast, reserve], Links(options, AiChains.Categorize));
+        Assert.Equal([.. fast, reserve], Links(options, AiChains.Daily));
+        Assert.Equal([.. quality, reserve], Links(options, AiChains.Weekly));
+        Assert.Equal([.. quality, reserve], Links(options, AiChains.Education));
         Assert.Equal(5, options.Chains.Count);
         Assert.Empty(fast.Intersect(quality.Take(2)));
 
@@ -451,8 +453,10 @@ public sealed class LlmProvidersTests
         Assert.Equal(5, options.LimitFor("gemini", "gemini-2.5-flash").Rpm);
         Assert.Equal(10, options.LimitFor("gemini", "gemini-flash-lite-latest").Rpm);
         Assert.Equal(10, options.LimitFor("gemini", "gemini-3.1-flash-lite").Rpm);
-        Assert.All(options.Chains.Values.SelectMany(c => c), link => Assert.Null(options.LimitFor(link.Provider, link.Model).Rpd));
-        Assert.All(options.Chains.Values.SelectMany(c => c), link =>
+        var geminiLinks = options.Chains.Values.SelectMany(c => c).Where(link => link.Provider != "groq").ToList();
+        Assert.Equal(15, geminiLinks.Count);
+        Assert.All(geminiLinks, link => Assert.Null(options.LimitFor(link.Provider, link.Model).Rpd));
+        Assert.All(geminiLinks, link =>
         {
             Assert.Equal("gemini", link.Provider);
             Assert.Contains("flash", link.Model);
@@ -493,7 +497,7 @@ public sealed class LlmProvidersTests
         Assert.Equal((7, 1234L, 8, 9), (options.GroupDailyCalls, options.GroupDailyTokens, options.JobDailyCalls, options.GlobalDailyInteractiveCalls));
         // The configured chain replaces the default one; a malformed link is dropped; the other chains keep their default.
         Assert.Equal(["gemini|gemini-2.5-flash", "groq|openai/gpt-oss-120b"], Links(options, AiChains.Assistant));
-        Assert.Equal(3, options.Chains[AiChains.Weekly].Count);
+        Assert.Equal(4, options.Chains[AiChains.Weekly].Count);
 
         var gemini = options.LimitFor("gemini", "gemini-flash-latest");
         Assert.Null(gemini.Rpd);
@@ -541,7 +545,8 @@ public sealed class LlmProvidersTests
         FakeLlmProviderGuard.EnsureSafe(Config(("GEMINI_API_KEY", FakeKey), ("RENDER", "true")));
         FakeLlmProviderGuard.EnsureSafe(Config(("Ai:UseFakeProvider", "false"), ("GEMINI_API_KEY", FakeKey)));
         FakeLlmProviderGuard.EnsureSafe(Config(("Ai:UseFakeProvider", "true")));
-        FakeLlmProviderGuard.EnsureSafe(Config(("Ai:UseFakeProvider", "true"), ("GEMINI_API_KEY", " "), ("GROQ_API_KEY", FakeKey)));
+        // A variable that is the key of no provider does not count.
+        FakeLlmProviderGuard.EnsureSafe(Config(("Ai:UseFakeProvider", "true"), ("GEMINI_API_KEY", " "), ("MISTRAL_API_KEY", FakeKey)));
     }
 
     [Fact]
@@ -552,6 +557,8 @@ public sealed class LlmProvidersTests
             [("GEMINI_API_KEY", FakeKey)],
             [("Gemini:ApiKey", FakeKey)],
             [("RENDER", "true")],
+            // Groq is built in: its key alone is a real provider key.
+            [("GROQ_API_KEY", FakeKey)],
             [("Ai:OpenAiCompatible:0:Name", "groq"), ("Ai:OpenAiCompatible:0:ApiKeyVariable", "GROQ_API_KEY"), ("GROQ_API_KEY", FakeKey)],
         ];
 

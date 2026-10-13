@@ -45,7 +45,7 @@ function status(overrides: Partial<AiStatusResponse> = {}): AiStatusResponse {
   return {
     available: true,
     enabled: false,
-    consentVersion: 1,
+    consentVersion: 2,
     acceptedBy: [],
     myAcceptance: null,
     onboardingPending: true,
@@ -157,7 +157,7 @@ describe('ativar, desligar e responder à pergunta', () => {
 
     await useAiStatusStore.getState().activate();
 
-    expect(mockAccept).toHaveBeenCalledWith(1);
+    expect(mockAccept).toHaveBeenCalledWith(2);
     expect(forSession().status).toEqual(ENABLED);
   });
 

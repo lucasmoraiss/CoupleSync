@@ -36,7 +36,7 @@ const mockServer = {
       data: {
         available: true,
         enabled,
-        consentVersion: 1,
+        consentVersion: 2,
         acceptedBy,
         myAcceptance: mine ? { acceptedAtUtc: mine } : null,
         // A pergunta é devida a quem não aceitou e ainda não respondeu (nem viu que outra pessoa ativou).
@@ -116,7 +116,7 @@ describe('uma pessoa ativa e a outra vê quem ativou', () => {
 
     await store().activate();
 
-    expect(mockServer.calls).toEqual(['accept:1:caio']);
+    expect(mockServer.calls).toEqual(['accept:2:caio']);
     expect(welcomeView(now(), 'caio')).toEqual({ kind: 'done' });
     expect(shouldShowActivationCard(now())).toBe(false);
     expect(isAssistantVisible(now())).toBe(true);
@@ -131,7 +131,7 @@ describe('uma pessoa ativa e a outra vê quem ativou', () => {
     // "Entendi": a resposta fica no servidor, a análise continua ativada e o aviso não volta.
     await store().answerOnboarding();
 
-    expect(mockServer.calls).toEqual(['accept:1:caio', 'preferences:{"onboardingAnswered":true}:davi']);
+    expect(mockServer.calls).toEqual(['accept:2:caio', 'preferences:{"onboardingAnswered":true}:davi']);
     expect(now().enabled).toBe(true);
     expect(shouldOpenWelcome(now(), false)).toBe(false);
     expect(shouldOpenWelcome(await openAppAs('davi'), false)).toBe(false);
@@ -144,7 +144,7 @@ describe('uma pessoa ativa e a outra vê quem ativou', () => {
 
     await store().revoke('group');
 
-    expect(mockServer.calls).toEqual(['accept:1:caio', 'revoke:group:davi']);
+    expect(mockServer.calls).toEqual(['accept:2:caio', 'revoke:group:davi']);
     expect(now().enabled).toBe(false);
     expect(shouldShowActivationCard(now())).toBe(true);
 

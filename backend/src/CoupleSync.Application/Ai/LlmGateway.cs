@@ -99,6 +99,7 @@ public sealed class LlmGateway : ILlmGateway
             if (!state.IsAvailable(now)) continue;
 
             var limit = _options.LimitFor(link.Provider, link.Model);
+            if (NeverFitsTheMinute(limit, estimatedTokens)) continue;
             if (await WouldExceedTheDayAsync(link, limit, estimatedTokens, now, ct)) continue;
             if (!await ReserveMinuteAsync(link, limit, estimatedTokens, mode, ct)) continue;
 
@@ -213,6 +214,14 @@ public sealed class LlmGateway : ILlmGateway
         if (limit.Rpd is { } rpd && day.Calls + 1 > AiOptions.Usable(rpd)) return true;
         return limit.Tpd is { } tpd && day.Tokens + estimatedTokens > AiOptions.Usable(tpd);
     }
+
+    /// <summary>
+    /// A request bigger than the usable part of the tokens per minute of the link never fits in its window, however
+    /// long it waited: the link is skipped for this request (an interactive call and a job alike), without waiting
+    /// and without a call. A link with no limit of tokens per minute accepts any size.
+    /// </summary>
+    private static bool NeverFitsTheMinute(AiLimit limit, int estimatedTokens)
+        => limit.Tpm is { } tpm && estimatedTokens > AiOptions.Usable(tpm);
 
     /// <summary>
     /// The minute window. Full: an interactive call skips the link; a job waits for it (up to the configured

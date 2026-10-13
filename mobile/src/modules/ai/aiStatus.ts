@@ -8,7 +8,17 @@ import { getApiErrorCode, getApiErrorMessage, getApiErrorStatus } from '@/servic
 import type { AiStatusResponse, AiUsageDayResponse, AiUsageProviderResponse } from '@/types/api';
 
 /** Versão do texto "Análise com IA" que este app mostra. A mesma do servidor (AiConsent.CurrentVersion). */
-export const AI_CONSENT_VERSION = 1;
+export const AI_CONSENT_VERSION = 2;
+
+/**
+ * Os destinos que o texto da análise com IA deve citar: os que o servidor diz ter ligados AGORA. Sem status, ou com
+ * um status guardado de antes da versão atual do texto (que não conhecia o destino novo), devolve null — e o texto
+ * cita todos os que esta versão do aceite cobre (privacyContent). Ninguém aceita lendo menos do que pode acontecer.
+ */
+export function aiDestinations(status: AiStatusResponse | null): AiStatusResponse['providers'] | null {
+  if (!status || status.consentVersion !== AI_CONSENT_VERSION || status.providers.length === 0) return null;
+  return status.providers;
+}
 
 /** O botão "Assistente" (Painel) só existe quando o servidor diz que há IA. Sem status: não aparece. */
 export function isAssistantVisible(status: AiStatusResponse | null): boolean {

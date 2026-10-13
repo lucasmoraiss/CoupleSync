@@ -67,7 +67,7 @@ function aiStatus(overrides: Partial<AiStatusResponse> = {}): AiStatusResponse {
   return {
     available: true,
     enabled: false,
-    consentVersion: 1,
+    consentVersion: 2,
     acceptedBy: [],
     myAcceptance: null,
     onboardingPending: false,
