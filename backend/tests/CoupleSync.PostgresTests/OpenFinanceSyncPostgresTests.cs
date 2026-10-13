@@ -962,6 +962,78 @@ public sealed class OpenFinanceSyncPostgresTests
         Assert.NotEqual(historyFrom, pluggy.WindowsAsked(other)[2].From);
     }
 
+    [PostgresFact]
+    public async Task ARunThatStoredAnIncompleteListing_AndFailedForAnotherReason_StillMakesTheNextOneAskTheWholeHistory()
+    {
+        // Issue #77, on PostgreSQL: any failed run after the last whole synchronisation makes the next one read whole.
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connectionId = await ConnectWithBankAsync(ana, itemId: FakePluggyServer.OtherItemWithAccounts);
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        var historyFrom = Text(DateOnly.FromDateTime(BrazilTime.ToLocal(DateTime.UtcNow)).AddMonths(-3));
+
+        // A second bank is added later: a checking account and a card, each with months of history.
+        var today = DateTime.UtcNow.Date;
+        var oldOnes = new Dictionary<string, string[]>
+        {
+            [FakePluggyServer.CheckingAccountId] = ["c1b2c3d4-0000-4000-8000-0000000077e1", "c1b2c3d4-0000-4000-8000-0000000077e2"],
+            [FakePluggyServer.CreditCardAccountId] = ["c1b2c3d4-0000-4000-8000-0000000077e3", "c1b2c3d4-0000-4000-8000-0000000077e4"],
+        };
+        foreach (var (account, olds) in oldOnes)
+        {
+            pluggy.Transactions[account].AddRange(
+            [
+                new FakeTransaction(olds[0], today.AddDays(-20).AddHours(10), 40m) { Description = "Oficina Exemplo" },
+                new FakeTransaction(olds[1], today.AddDays(-45).AddHours(10), 41m) { Description = "Escola Exemplo" },
+            ]);
+        }
+        var added = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
+        Assert.True(HttpStatusCode.OK == added.StatusCode, await added.Content.ReadAsStringAsync());
+        // In the next run the listing of the first of the two accounts stops after its first page (and that page is
+        // stored), and then Pluggy does not answer for the other: the run fails for that, not as an incomplete one.
+        string? incomplete = null;
+        pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path != FakePluggyServer.TransactionsPath) return Task.CompletedTask;
+            var account = oldOnes.Keys.FirstOrDefault(id => request.Query.Contains(id, StringComparison.Ordinal));
+            if (account is not null) incomplete ??= account;
+            var cut = account is not null && account == incomplete;
+            pluggy.MaxPageSize = cut ? 1 : 500;
+            pluggy.RawNextJson = cut ? "12345" : null;
+            return account is not null && !cut
+                ? Task.FromException(new HttpRequestException("Connection refused (fake)."))
+                : Task.CompletedTask;
+        };
+
+        var failed = await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"));
+
+        Assert.Equal("PLUGGY_UNAVAILABLE", failed.GetProperty("errorCode").GetString());
+        Assert.NotNull(incomplete);
+        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions")); // the first bank's, and the one page that came
+        Assert.Equal(historyFrom, Assert.Single(pluggy.WindowsAsked(incomplete!)).From);
+
+        pluggy.BeforeAnswer = null;
+        pluggy.MaxPageSize = 500;
+        pluggy.RawNextJson = null;
+        var whole = await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"));
+
+        Assert.Equal("Done", whole.GetProperty("status").GetString());
+        Assert.Equal(historyFrom, pluggy.WindowsAsked(incomplete!)[1].From);
+        Assert.Equal(
+            4,
+            await database.ScalarAsync<long>(
+                "SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = ANY(@ids)", ("ids", oldOnes.Values.SelectMany(v => v).ToArray())));
+        Assert.Equal(10, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+        Assert.Equal(10, await database.ScalarAsync<long>("SELECT count(DISTINCT pluggy_transaction_id) FROM bank_transactions"));
+
+        // After the run that ended well, the usual days again.
+        Assert.Equal("Done", (await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"))).GetProperty("status").GetString());
+        Assert.NotEqual(historyFrom, pluggy.WindowsAsked(incomplete!)[2].From);
+    }
+
     // ---------------------------------------------------------------- support
 
     /// <summary>The API with a server key, the Pluggy client pointed at the fake and the synchronisation job looking at its queue every 50 ms.</summary>

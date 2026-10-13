@@ -302,10 +302,11 @@ public sealed class SyncConnectionService
         if (await JudgeGroupAsync(ct)) await SaveAsync(connection, ct, JudgeGroupAsync);
 
         var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret, connection.ClientSecretEncrypted!);
-        // A run of this connection came incomplete since its last whole synchronisation: what it stored moved the
-        // last day of the accounts it read, so that day says nothing about what was read. Every account is asked
-        // whole again, until a run ends well.
-        var readWhole = await _sync.HasRunFailedWithAsync(connection.Id, connection.CoupleId, IncompleteCode, connection.LastSyncAtUtc, ct);
+        // A run of this connection failed since its last whole synchronisation. Whatever the reason it ended with
+        // (an incomplete listing, Pluggy failing for another account, the server restarting, a timeout), it may have
+        // stored a listing that did not come whole before it ended, and that moved the last day of the account: that
+        // day no longer says what was read. Every account is asked whole again, until a run ends well.
+        var readWhole = await _sync.HasFailedRunAfterAsync(connection.Id, connection.CoupleId, connection.LastSyncAtUtc, ct);
         var window = SyncWindow.For(connection, _clock.UtcNow) with { Whole = readWhole };
         var ai = new AiBudget(run.AiCategorizationConsent ? MaxAiSuggestionsPerRun : 0, AiTimeBudget);
 
@@ -324,10 +325,9 @@ public sealed class SyncConnectionService
 
         // Some listing stopped before Pluggy said it ended. Everything that was read, of every account, is already
         // stored; but days that were asked may not have come, so this is not a synchronisation that ended well: the
-        // run fails saying so, and the connection keeps the date of its last whole synchronisation. This failure is
-        // what makes the runs after it ask every account from the earlier of the window of the connection and the
-        // start of the history (never later than the first day any account asked for in this run), until one ends
-        // well.
+        // run fails saying so, and the connection keeps the date of its last whole synchronisation. Like any other
+        // failure, it makes the runs after it ask every account from the earlier of the window of the connection and
+        // the start of the history, until one ends well.
         if (progress.IncompleteListings > 0)
         {
             progress.Stage = "transactions";
@@ -818,7 +818,7 @@ public sealed record SyncWindow(DateOnly From, DateOnly HistoryFrom, DateOnly To
 {
     /// <summary>
     /// Every account is asked from the earlier of <see cref="From"/> and <see cref="HistoryFrom"/>, whatever the
-    /// mirror has of it: a run before this one stored a listing that did not come whole, and the last day of an
+    /// mirror has of it: a run before this one failed and may have stored a listing that did not come whole, so the last day of an
     /// account no longer tells what was read of it.
     /// </summary>
     public bool Whole { get; init; }

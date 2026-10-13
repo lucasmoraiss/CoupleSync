@@ -34,10 +34,10 @@ public interface IBankSyncRepository
     Task<IReadOnlyList<BankConnection>> GetConnectionsToScheduleAsync(CancellationToken ct);
 
     /// <summary>
-    /// True when a run of the connection failed with <paramref name="errorCode"/> after <paramref name="afterUtc"/>
+    /// True when a run of the connection failed, whatever the reason, and ended after <paramref name="afterUtc"/>
     /// (at any time, when null).
     /// </summary>
-    Task<bool> HasRunFailedWithAsync(Guid connectionId, Guid coupleId, string errorCode, DateTime? afterUtc, CancellationToken ct);
+    Task<bool> HasFailedRunAfterAsync(Guid connectionId, Guid coupleId, DateTime? afterUtc, CancellationToken ct);
 
     /// <summary>True when the connection has a run waiting or running, or one created at or after <paramref name="sinceUtc"/>.</summary>
     Task<bool> HasOpenOrRecentRunAsync(Guid connectionId, DateTime sinceUtc, CancellationToken ct);

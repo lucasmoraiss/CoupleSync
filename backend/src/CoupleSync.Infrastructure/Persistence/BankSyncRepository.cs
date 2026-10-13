@@ -74,14 +74,13 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .OrderBy(c => c.CreatedAtUtc)
             .ToListAsync(ct);
 
-    public Task<bool> HasRunFailedWithAsync(Guid connectionId, Guid coupleId, string errorCode, DateTime? afterUtc, CancellationToken ct)
+    public Task<bool> HasFailedRunAfterAsync(Guid connectionId, Guid coupleId, DateTime? afterUtc, CancellationToken ct)
         => _dbContext.SyncRuns
             .IgnoreQueryFilters()
             .AnyAsync(
                 r => r.ConnectionId == connectionId
                      && r.CoupleId == coupleId
                      && r.Status == SyncRunStatus.Failed
-                     && r.ErrorCode == errorCode
                      && (afterUtc == null || r.FinishedAtUtc > afterUtc),
                 ct);
 

@@ -303,6 +303,77 @@ public sealed class OpenFinancePluggyV2Tests
     }
 
     [Fact]
+    public async Task ARunThatStoredAnIncompleteListing_AndFailedForAnotherReason_StillMakesTheNextOneAskTheWholeHistory()
+    {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana, historyMonths: 3);
+        await AddItemAsync(ana, connectionId, FakePluggyServer.OtherItemWithAccounts);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        var historyFrom = Text(BrazilDay(factory.Clock.UtcNow).AddMonths(-3));
+
+        // A second bank is added later: a checking account and a card, each with months of history.
+        var today = DateTime.UtcNow.Date;
+        var oldOnes = new Dictionary<string, string[]>
+        {
+            [Checking] = ["c1b2c3d4-0000-4000-8000-0000000077e1", "c1b2c3d4-0000-4000-8000-0000000077e2"],
+            [Card] = ["c1b2c3d4-0000-4000-8000-0000000077e3", "c1b2c3d4-0000-4000-8000-0000000077e4"],
+        };
+        foreach (var (account, olds) in oldOnes)
+        {
+            factory.Pluggy.Transactions[account].AddRange(
+            [
+                new FakeTransaction(olds[0], today.AddDays(-20).AddHours(10), 40m) { Description = "Oficina Exemplo" },
+                new FakeTransaction(olds[1], today.AddDays(-45).AddHours(10), 41m) { Description = "Escola Exemplo" },
+            ]);
+        }
+        await AddItemAsync(ana, connectionId, FakePluggyServer.ItemWithAccounts);
+        // In the next run the listing of the first of the two accounts stops after its first page (and that page is
+        // stored), and then Pluggy does not answer for the other: the run fails for that, not as an incomplete one.
+        string? incomplete = null;
+        factory.Pluggy.BeforeAnswer = request =>
+        {
+            if (request.Path != FakePluggyServer.TransactionsPath) return Task.CompletedTask;
+            var account = oldOnes.Keys.FirstOrDefault(id => request.Query.Contains(id, StringComparison.Ordinal));
+            if (account is not null) incomplete ??= account;
+            var cut = account is not null && account == incomplete;
+            factory.Pluggy.MaxPageSize = cut ? 1 : 500;
+            factory.Pluggy.RawNextJson = cut ? "12345" : null;
+            return account is not null && !cut
+                ? Task.FromException(new HttpRequestException("Connection refused (fake)."))
+                : Task.CompletedTask;
+        };
+
+        var failed = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal("Failed", failed["status"]);
+        Assert.Equal("PLUGGY_UNAVAILABLE", failed["error_code"]);
+        Assert.NotNull(incomplete);
+        var afterFailure = await MirrorIdsAsync(factory);
+        Assert.Equal(2, afterFailure.Count); // the transaction of the first bank, and the one page that came of the account cut short
+        Assert.DoesNotContain(afterFailure, id => oldOnes[incomplete!].Contains(id));
+        Assert.Equal(historyFrom, Assert.Single(factory.Pluggy.WindowsAsked(incomplete!)).From);
+
+        // Pluggy is back. That account has a recent transaction in the mirror, and still its whole history is asked again.
+        factory.Pluggy.BeforeAnswer = null;
+        factory.Pluggy.MaxPageSize = 500;
+        factory.Pluggy.RawNextJson = null;
+
+        var whole = await SyncAsync(factory, ana, connectionId);
+
+        Assert.Equal("Done", whole["status"]);
+        Assert.Equal(historyFrom, factory.Pluggy.WindowsAsked(incomplete!)[1].From);
+        var ids = await MirrorIdsAsync(factory);
+        Assert.All(oldOnes.Values.SelectMany(v => v), id => Assert.Contains(id, ids));
+        Assert.Equal(10, ids.Count); // 1 of the first bank, 5 of the checking account, 4 of the card
+        Assert.Equal(10, ids.Distinct().Count());
+
+        // After a run that ended well, the usual days again.
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        Assert.NotEqual(historyFrom, factory.Pluggy.WindowsAsked(incomplete!)[2].From);
+    }
+
+    [Fact]
     public async Task InOneRun_TheAccountThatCameWholeLosesWhatVanished_TheOneThatDidNotKeepsIt_AndTheRunEndsIncomplete()
     {
         await using var factory = NewFactory();
