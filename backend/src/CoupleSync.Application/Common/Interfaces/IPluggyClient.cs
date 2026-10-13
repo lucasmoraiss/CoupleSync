@@ -20,7 +20,7 @@ public interface IPluggyClient
     /// page. Both days are inclusive. A listing that had to stop before the end (a cursor Pluggy repeats, a next page
     /// that cannot be read, the ceiling of pages) comes back with what was read and
     /// <see cref="PluggyTransactionListing.Complete"/> false: nothing may be concluded from what is missing in it,
-    /// and the days asked were not all read.
+    /// the days asked were not all read, and the synchronisation stores nothing of it.
     /// </summary>
     Task<PluggyTransactionListing> GetTransactionsAsync(PluggyAuth auth, string accountId, DateOnly from, DateOnly to, CancellationToken ct);
 

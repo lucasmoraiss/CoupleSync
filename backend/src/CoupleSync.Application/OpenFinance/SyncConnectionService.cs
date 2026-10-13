@@ -24,7 +24,7 @@ public sealed class SyncConnectionService
     public const string NoBankCode = "SYNC_NO_BANK";
     public const string TimedOutCode = "SYNC_TIMED_OUT";
 
-    /// <summary>Pluggy did not hand over the whole listing of some account: what came is stored, the run is not a success.</summary>
+    /// <summary>Pluggy did not hand over the whole listing of some account: nothing of that listing is stored, the run is not a success.</summary>
     public const string IncompleteCode = "SYNC_INCOMPLETE";
 
     public const string InterruptedMessage =
@@ -33,7 +33,7 @@ public sealed class SyncConnectionService
         "A sincronização demorou demais e foi encerrada. Sincronize de novo.";
     public const string FailedMessage = "Não foi possível sincronizar agora. Tente de novo em alguns minutos.";
     public const string IncompleteMessage =
-        "O Pluggy não entregou a lista completa das transações desta vez. O que chegou foi guardado. Tente sincronizar de novo.";
+        "O Pluggy não entregou a lista completa das transações desta vez, e nada dessa lista foi guardado. Tente sincronizar de novo.";
     public const string OwnerNotInGroupMessage =
         "Quem conectou estes bancos não faz mais parte do grupo. Nada foi sincronizado.";
     public const string ChangedMessage =
@@ -302,12 +302,7 @@ public sealed class SyncConnectionService
         if (await JudgeGroupAsync(ct)) await SaveAsync(connection, ct, JudgeGroupAsync);
 
         var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret, connection.ClientSecretEncrypted!);
-        // A run of this connection failed since its last whole synchronisation. Whatever the reason it ended with
-        // (an incomplete listing, Pluggy failing for another account, the server restarting, a timeout), it may have
-        // stored a listing that did not come whole before it ended, and that moved the last day of the account: that
-        // day no longer says what was read. Every account is asked whole again, until a run ends well.
-        var readWhole = await _sync.HasFailedRunAfterAsync(connection.Id, connection.CoupleId, connection.LastSyncAtUtc, ct);
-        var window = SyncWindow.For(connection, _clock.UtcNow) with { Whole = readWhole };
+        var window = SyncWindow.For(connection, _clock.UtcNow);
         var ai = new AiBudget(run.AiCategorizationConsent ? MaxAiSuggestionsPerRun : 0, AiTimeBudget);
 
         var itemsRead = 0;
@@ -323,11 +318,10 @@ public sealed class SyncConnectionService
             throw new SyncStoppedException(PluggyErrorCodes.ItemNeedsAction, NoBankReadableMessage);
         }
 
-        // Some listing stopped before Pluggy said it ended. Everything that was read, of every account, is already
-        // stored; but days that were asked may not have come, so this is not a synchronisation that ended well: the
-        // run fails saying so, and the connection keeps the date of its last whole synchronisation. Like any other
-        // failure, it makes the runs after it ask every account from the earlier of the window of the connection and
-        // the start of the history, until one ends well.
+        // Some listing stopped before Pluggy said it ended, and nothing of it was stored. The accounts whose listing
+        // came whole are stored as always; but this is not a synchronisation that ended well: the run fails saying
+        // so, and the connection keeps the date of its last whole synchronisation. The account left out is as it was
+        // before this run, so the next run asks for the same days of it.
         if (progress.IncompleteListings > 0)
         {
             progress.Stage = "transactions";
@@ -379,27 +373,25 @@ public sealed class SyncConnectionService
                 // could not be read (login error at the bank, another bank of the same connection going on alone).
                 var from = window.FromFor(await _sync.GetLastTransactionDayAsync(account.Id, ct));
                 var listing = await _pluggy.GetTransactionsAsync(auth, account.PluggyAccountId, from, window.To, ct);
-                progress.AccountsRead++;
-                var transactions = listing.Transactions;
-                var (arrived, readAgain) = await UpsertTransactionsAsync(run, connection, account, transactions, ai, progress, ct);
-                // What the bank no longer lists leaves in the same save as the line that replaces it. Only when Pluggy
-                // itself said the listing ended: what is missing from a listing that stopped before its end (a cursor
-                // that came back, a next page that could not be read, the ceiling of pages) may simply not have been
-                // read, and nothing is removed for it. What was read is mirrored all the same, the other accounts are
-                // read too, and the run fails at its end (see RunAsync).
-                IReadOnlyList<BankTransaction> leaving = [];
-                if (listing.Complete)
-                {
-                    leaving = await RemoveVanishedAsync(account, transactions, from, window.To, ct);
-                }
-                else
+                // A listing that stopped before Pluggy said it ended (a cursor that came back, a next page that could
+                // not be read, the ceiling of pages) is left out whole: nothing of it is stored and nothing is removed
+                // for it. Storing a part would move the last day the mirror has of the account, which is where the
+                // next reading starts from, and the days that did not come would never be asked for again. The other
+                // accounts are read all the same, and the run fails at its end (see RunAsync).
+                if (!listing.Complete)
                 {
                     progress.IncompleteListings++;
                     _logger.LogWarning(
-                        "Open Finance run {RunId}: the transactions of an account did not come whole from Pluggy; what came is stored, nothing is removed from the mirror for it, and the run will end as incomplete.",
+                        "Open Finance run {RunId}: the transactions of an account did not come whole from Pluggy; nothing of that listing is stored or removed, and the run will end as incomplete.",
                         run.Id);
+                    continue;
                 }
 
+                progress.AccountsRead++;
+                var transactions = listing.Transactions;
+                var (arrived, readAgain) = await UpsertTransactionsAsync(run, connection, account, transactions, ai, progress, ct);
+                // What the bank no longer lists leaves in the same save as the line that replaces it.
+                var leaving = await RemoveVanishedAsync(account, transactions, from, window.To, ct);
                 // Before anyone sees them: transfers between accounts of the group, bill payments and suspected
                 // duplicates. The last one also for every line of the account that already waited, of any age: what
                 // the app has may have changed since they arrived, and the history stored before these rules existed
@@ -765,14 +757,14 @@ public sealed class SyncConnectionService
         /// <summary>"prepare", then "item", "accounts", "transactions" and "bills" for each bank, then "finish".</summary>
         public string Stage { get; set; } = "prepare";
 
-        /// <summary>Accounts whose listing of transactions Pluggy answered.</summary>
+        /// <summary>Accounts whose listing of transactions came whole and was mirrored.</summary>
         public int AccountsRead { get; set; }
 
         public int TransactionsNew { get; set; }
 
         public int TransactionsUpdated { get; set; }
 
-        /// <summary>Listings that stopped before Pluggy said they ended.</summary>
+        /// <summary>Listings that stopped before Pluggy said they ended: nothing of them was stored.</summary>
         public int IncompleteListings { get; set; }
     }
 
@@ -816,13 +808,6 @@ public sealed class SyncConnectionService
 /// </summary>
 public sealed record SyncWindow(DateOnly From, DateOnly HistoryFrom, DateOnly To)
 {
-    /// <summary>
-    /// Every account is asked from the earlier of <see cref="From"/> and <see cref="HistoryFrom"/>, whatever the
-    /// mirror has of it: a run before this one failed and may have stored a listing that did not come whole, so the last day of an
-    /// account no longer tells what was read of it.
-    /// </summary>
-    public bool Whole { get; init; }
-
     public static SyncWindow For(BankConnection connection, DateTime nowUtc)
     {
         var today = DateOnly.FromDateTime(BrazilTime.ToLocal(nowUtc));
@@ -843,7 +828,6 @@ public sealed record SyncWindow(DateOnly From, DateOnly HistoryFrom, DateOnly To
     /// </summary>
     public DateOnly FromFor(DateOnly? lastDayOfAccount)
     {
-        if (Whole) return HistoryFrom < From ? HistoryFrom : From;
         if (lastDayOfAccount is not { } last) return HistoryFrom;
         var fromAccount = last.AddDays(-SyncConnectionService.OverlapDays);
         if (fromAccount < HistoryFrom) fromAccount = HistoryFrom;

@@ -857,7 +857,7 @@ public sealed class OpenFinanceSyncPostgresTests
     }
 
     [PostgresFact]
-    public async Task AListingByCursorThatStoppedBeforeTheEnd_RemovesNothing_FailsTheRun_AndTheWholeOneOverSeveralPagesStillRemoves()
+    public async Task AListingByCursorThatStoppedBeforeTheEnd_StoresNothingOfIt_RemovesNothing_FailsTheRun_AndTheWholeOneOverSeveralPagesStillRemoves()
     {
         // Issue #77, on PostgreSQL: the run reads GET /v2/transactions page by page, and what is missing from a listing
         // that did not come whole proves nothing.
@@ -872,8 +872,12 @@ public sealed class OpenFinanceSyncPostgresTests
         Assert.Equal(2, pluggy.Requests.Count(r => r.Path == FakePluggyServer.TransactionsPath && r.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal)));
         Assert.Equal(0, pluggy.Count("GET", FakePluggyServer.LegacyTransactionsPath));
 
-        // The pending purchase of the card is not listed any more, and "next" cannot be read: the listing is not whole.
+        // The pending purchase of the card is not listed any more, a new one is, and "next" cannot be read: the listing
+        // is not whole.
+        const string arrivedMeanwhile = "c1b2c3d4-0000-4000-8000-000000000273";
         pluggy.Transactions[FakePluggyServer.CreditCardAccountId].RemoveAll(t => t.Id == FakePluggyServer.CardPendingTransactionId);
+        pluggy.Transactions[FakePluggyServer.CreditCardAccountId].Insert(
+            0, new FakeTransaction(arrivedMeanwhile, DateTime.UtcNow.Date.AddDays(-2).AddHours(11), 64m) { Description = "Papelaria Exemplo" });
         pluggy.RawNextJson = "12345";
         var syncedBefore = await database.ScalarAsync<DateTime>("SELECT last_sync_at_utc FROM bank_connections");
         var partial = await InsertRunAsync(database, ana, connectionId, "Pending");
@@ -885,9 +889,13 @@ public sealed class OpenFinanceSyncPostgresTests
             1,
             await database.ScalarAsync<long>(
                 "SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.CardPendingTransactionId)));
+        // Nothing of the listing that did not come whole was stored.
+        Assert.Equal(
+            0,
+            await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", arrivedMeanwhile)));
         Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
 
-        // Whole again, one transaction per page: now the absence counts, and nothing was doubled on the way.
+        // Whole again, one transaction per page: now the absence counts, and what arrived is stored once.
         pluggy.RawNextJson = null;
         pluggy.MaxPageSize = 1;
         var whole = await InsertRunAsync(database, ana, connectionId, "Pending");
@@ -896,20 +904,21 @@ public sealed class OpenFinanceSyncPostgresTests
             0,
             await database.ScalarAsync<long>(
                 "SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.CardPendingTransactionId)));
-        Assert.Equal(4, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
-        Assert.Equal(4, await database.ScalarAsync<long>("SELECT count(DISTINCT pluggy_transaction_id) FROM bank_transactions"));
+        Assert.Equal(
+            1,
+            await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", arrivedMeanwhile)));
+        Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+        Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(DISTINCT pluggy_transaction_id) FROM bank_transactions"));
         Assert.True(await database.ScalarAsync<DateTime>("SELECT last_sync_at_utc FROM bank_connections") > syncedBefore);
-        // The run after the partial one asked the whole history, which covers the days the partial one had asked for.
+        // Nothing was stored nor moved by the partial run: the one after it asked the very same days.
         var windows = pluggy.WindowsAsked(FakePluggyServer.CreditCardAccountId);
-        Assert.Equal(windows[0].From, windows[2].From);
-        Assert.True(string.CompareOrdinal(windows[2].From, windows[1].From) <= 0, $"{windows[2].From} should not be after {windows[1].From}");
+        Assert.Equal(windows[1].From, windows[2].From);
     }
 
     [PostgresFact]
-    public async Task ABankAddedLater_WhoseFirstListingCameIncomplete_IsAskedForItsWholeHistoryAgain_AndEndsWholeWithoutDoubling()
+    public async Task ABankAddedLater_WhoseFirstListingCameIncomplete_HasNothingStored_IsAskedForItsWholeHistoryAgain_AndEndsWholeWithoutDoubling()
     {
-        // Issue #77, on PostgreSQL: what tells the next run to ask everything again is the incomplete run in sync_runs
-        // (after the last whole synchronisation of the connection).
+        // Issue #77, on PostgreSQL: nothing of an incomplete listing is stored, so the account is still one never read.
         await using var database = await _server.CreateDatabaseAsync();
         await using var factory = new PostgresApiFactory(database);
         var pluggy = new FakePluggyServer();
@@ -937,10 +946,11 @@ public sealed class OpenFinanceSyncPostgresTests
 
         Assert.Equal("SYNC_INCOMPLETE", partial.GetProperty("errorCode").GetString());
         Assert.Equal(
-            1,
+            0,
             await database.ScalarAsync<long>(
                 "SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = ANY(@ids)",
                 ("ids", new[] { FakePluggyServer.OtherAccountTransactionId, old1, old2 })));
+        Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
         Assert.Equal(historyFrom, Assert.Single(pluggy.WindowsAsked(other)).From);
 
         pluggy.MaxPageSize = 500;
@@ -963,9 +973,9 @@ public sealed class OpenFinanceSyncPostgresTests
     }
 
     [PostgresFact]
-    public async Task ARunThatStoredAnIncompleteListing_AndFailedForAnotherReason_StillMakesTheNextOneAskTheWholeHistory()
+    public async Task ARunWithAnIncompleteListing_ThatFailedForAnotherReason_StoredNothingOfIt_AndTheNextOneAsksItsWholeHistory()
     {
-        // Issue #77, on PostgreSQL: any failed run after the last whole synchronisation makes the next one read whole.
+        // Issue #77, on PostgreSQL: whatever the run ends with, an incomplete listing leaves nothing in the mirror.
         await using var database = await _server.CreateDatabaseAsync();
         await using var factory = new PostgresApiFactory(database);
         var pluggy = new FakePluggyServer();
@@ -992,8 +1002,8 @@ public sealed class OpenFinanceSyncPostgresTests
         }
         var added = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
         Assert.True(HttpStatusCode.OK == added.StatusCode, await added.Content.ReadAsStringAsync());
-        // In the next run the listing of the first of the two accounts stops after its first page (and that page is
-        // stored), and then Pluggy does not answer for the other: the run fails for that, not as an incomplete one.
+        // In the next run the listing of the first of the two accounts stops after its first page, and then Pluggy
+        // does not answer for the other: the run fails for that, not as an incomplete one.
         string? incomplete = null;
         pluggy.BeforeAnswer = request =>
         {
@@ -1012,7 +1022,7 @@ public sealed class OpenFinanceSyncPostgresTests
 
         Assert.Equal("PLUGGY_UNAVAILABLE", failed.GetProperty("errorCode").GetString());
         Assert.NotNull(incomplete);
-        Assert.Equal(2, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions")); // the first bank's, and the one page that came
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions")); // the first bank's; nothing of the page that came
         Assert.Equal(historyFrom, Assert.Single(pluggy.WindowsAsked(incomplete!)).From);
 
         pluggy.BeforeAnswer = null;
@@ -1032,6 +1042,57 @@ public sealed class OpenFinanceSyncPostgresTests
         // After the run that ended well, the usual days again.
         Assert.Equal("Done", (await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"))).GetProperty("status").GetString());
         Assert.NotEqual(historyFrom, pluggy.WindowsAsked(incomplete!)[2].From);
+    }
+
+    [PostgresFact]
+    public async Task AfterAnIncompleteListing_AndARunThatEndedWellWithoutReadingThatBank_ItsWholeHistoryIsStillAsked()
+    {
+        // Issue #77, on PostgreSQL: an incomplete listing stores nothing, so the last day of the account stays true.
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connectionId = await ConnectWithBankAsync(ana, itemId: FakePluggyServer.OtherItemWithAccounts);
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        var historyFrom = Text(DateOnly.FromDateTime(BrazilTime.ToLocal(DateTime.UtcNow)).AddMonths(-3));
+
+        const string checking = FakePluggyServer.CheckingAccountId;
+        const string old1 = "c1b2c3d4-0000-4000-8000-0000000077f1";
+        const string old2 = "c1b2c3d4-0000-4000-8000-0000000077f2";
+        var today = DateTime.UtcNow.Date;
+        pluggy.Transactions[checking].AddRange(
+        [
+            new FakeTransaction(old1, today.AddDays(-20).AddHours(10), -40m) { Description = "Oficina Exemplo" },
+            new FakeTransaction(old2, today.AddDays(-45).AddHours(10), -41m) { Description = "Escola Exemplo" },
+        ]);
+        var added = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
+        Assert.True(HttpStatusCode.OK == added.StatusCode, await added.Content.ReadAsStringAsync());
+
+        // Run 1: the listings stop after their first page. Nothing of them is stored.
+        pluggy.MaxPageSize = 1;
+        pluggy.RawNextJson = "12345";
+        var partial = await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"));
+        Assert.Equal("SYNC_INCOMPLETE", partial.GetProperty("errorCode").GetString());
+        Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+
+        // Run 2: the bank added asks for the login again; the other bank is read and the run ends well.
+        pluggy.MaxPageSize = 500;
+        pluggy.RawNextJson = null;
+        pluggy.ItemStatusOverride[FakePluggyServer.ItemWithAccounts] = "LOGIN_ERROR";
+        Assert.Equal("Done", (await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"))).GetProperty("status").GetString());
+        Assert.Single(pluggy.WindowsAsked(checking));
+
+        // Run 3: the bank is back, and the whole history of its account is asked and stored once.
+        pluggy.ItemStatusOverride.Remove(FakePluggyServer.ItemWithAccounts);
+        Assert.Equal("Done", (await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"))).GetProperty("status").GetString());
+
+        Assert.Equal(historyFrom, pluggy.WindowsAsked(checking)[1].From);
+        Assert.Equal(
+            2,
+            await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = ANY(@ids)", ("ids", new[] { old1, old2 })));
+        Assert.Equal(8, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+        Assert.Equal(8, await database.ScalarAsync<long>("SELECT count(DISTINCT pluggy_transaction_id) FROM bank_transactions"));
     }
 
     // ---------------------------------------------------------------- support

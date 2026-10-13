@@ -33,12 +33,6 @@ public interface IBankSyncRepository
     /// <summary>For the scheduler: every connection that can be synchronised (active or in error), any group.</summary>
     Task<IReadOnlyList<BankConnection>> GetConnectionsToScheduleAsync(CancellationToken ct);
 
-    /// <summary>
-    /// True when a run of the connection failed, whatever the reason, and ended after <paramref name="afterUtc"/>
-    /// (at any time, when null).
-    /// </summary>
-    Task<bool> HasFailedRunAfterAsync(Guid connectionId, Guid coupleId, DateTime? afterUtc, CancellationToken ct);
-
     /// <summary>True when the connection has a run waiting or running, or one created at or after <paramref name="sinceUtc"/>.</summary>
     Task<bool> HasOpenOrRecentRunAsync(Guid connectionId, DateTime sinceUtc, CancellationToken ct);
 

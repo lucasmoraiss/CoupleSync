@@ -79,7 +79,7 @@ public sealed class OpenFinancePluggyV2Tests
     [InlineData("a cursor that comes back")]
     [InlineData("a next page that cannot be read")]
     [InlineData("a listing that never ends")]
-    public async Task AListingThatStoppedBeforeTheEnd_KeepsWhatWasRead_RemovesNothing_FailsTheRun_AndTheNextOneAsksThoseDaysAndTheWholeHistory(string reason)
+    public async Task AListingThatStoppedBeforeTheEnd_StoresNothingOfIt_RemovesNothing_FailsTheRun_AndTheNextOneAsksTheSameDays(string reason)
     {
         const string arrivedMeanwhile = "c1b2c3d4-0000-4000-8000-000000000272";
         await using var factory = NewFactory();
@@ -113,17 +113,20 @@ public sealed class OpenFinancePluggyV2Tests
 
         var partial = await SyncAsync(factory, ana, connectionId, seconds: 120);
 
-        // Not a success: part of the history did not come. The run says so, in words the person can act on.
+        // Not a success: the listing did not come whole. The run says so, without promising anything.
         Assert.Equal("Failed", partial["status"]);
         Assert.Equal("SYNC_INCOMPLETE", partial["error_code"]);
         Assert.Equal(
-            "O Pluggy não entregou a lista completa das transações desta vez. O que chegou foi guardado. Tente sincronizar de novo. (Etapa: transações; listagem incompleta)",
+            "O Pluggy não entregou a lista completa das transações desta vez, e nada dessa lista foi guardado. Tente sincronizar de novo. (Etapa: transações; listagem incompleta)",
             partial["error_message"]);
+        // Nothing of a listing that is not whole is stored (the last day of the account in the mirror stays true)...
         var kept = await MirrorIdsAsync(factory);
-        Assert.Contains(arrivedMeanwhile, kept); // what was read is stored
-        Assert.Equal(1L, partial["transactions_new"]);
-        Assert.Contains(FakePluggyServer.CardPendingTransactionId, kept); // missing from a listing that is not whole proves nothing
-        Assert.Equal(7, kept.Count);
+        Assert.DoesNotContain(arrivedMeanwhile, kept);
+        Assert.Equal(0L, partial["transactions_new"]);
+        Assert.Equal(0L, partial["transactions_updated"]);
+        // ...and nothing is removed for it: missing from such a listing proves nothing.
+        Assert.Contains(FakePluggyServer.CardPendingTransactionId, kept);
+        Assert.Equal(6, kept.Count);
         // The last synchronisation does not move.
         var connection = Assert.Single(await factory.RowsAsync("SELECT status, last_sync_at_utc, last_error_code FROM bank_connections"));
         Assert.Equal(syncedBefore, connection["last_sync_at_utc"]);
@@ -134,14 +137,18 @@ public sealed class OpenFinancePluggyV2Tests
             l.StartsWith("Warning CoupleSync.Application.OpenFinance.SyncConnectionService:", StringComparison.Ordinal)
             && l.Contains("did not come whole", StringComparison.Ordinal));
         Assert.Contains(factory.Logs.Lines, l => l.StartsWith(
-            $"Information CoupleSync.Application.OpenFinance.SyncConnectionService: Open Finance run {partialId} ended: Failed (SYNC_INCOMPLETE); stage transactions; accounts read 2; ",
+            $"Information CoupleSync.Application.OpenFinance.SyncConnectionService: Open Finance run {partialId} ended: Failed (SYNC_INCOMPLETE); stage transactions; accounts read 0; transactions new 0, updated 0; incomplete listings 2; ",
             StringComparison.Ordinal));
-        // It is a failure for the short pause too: who connected is not held for ten minutes.
-        await AssertErrorAsync(
-            await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null),
-            HttpStatusCode.Conflict,
-            "SYNC_TOO_SOON",
-            "A última tentativa de sincronizar esta conexão acabou de falhar. Aguarde alguns segundos e tente de novo.");
+        // It is a failure for the short pause too: who connected is not held for ten minutes. (Not looked at for the
+        // listing that never ends: its two thousand calls may take longer than the pause itself on a slow machine.)
+        if (reason != "a listing that never ends")
+        {
+            await AssertErrorAsync(
+                await ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null),
+                HttpStatusCode.Conflict,
+                "SYNC_TOO_SOON",
+                "A última tentativa de sincronizar esta conexão acabou de falhar. Aguarde alguns segundos e tente de novo.");
+        }
 
         // The same absence, on a listing Pluggy says is whole (here over several pages): the line leaves, as before.
         factory.Pluggy.RepeatCursor = false;
@@ -151,20 +158,19 @@ public sealed class OpenFinancePluggyV2Tests
 
         Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
 
-        // The run after the partial one asks every account whole: from the start of the history, which covers the
-        // days the partial one had asked for.
-        var historyFrom = Text(BrazilDay(factory.Clock.UtcNow).AddMonths(-3));
+        // Nothing was stored nor moved by the partial run: the one after it asks the very same days.
         foreach (var account in new[] { Checking, Card })
         {
             var asked = factory.Pluggy.WindowsAsked(account);
             Assert.Equal(3, asked.Count);
-            Assert.Equal(historyFrom, asked[2].From);
-            Assert.True(string.CompareOrdinal(asked[2].From, asked[1].From) <= 0, $"{asked[2].From} should not be after {asked[1].From}");
+            Assert.Equal(asked[1].From, asked[2].From);
         }
 
         var left = await MirrorIdsAsync(factory);
         Assert.DoesNotContain(FakePluggyServer.CardPendingTransactionId, left);
+        Assert.Contains(arrivedMeanwhile, left);
         Assert.Equal(6, left.Count);
+        Assert.Equal(6, left.Distinct().Count());
         Assert.NotEqual(syncedBefore, Assert.Single(await factory.RowsAsync("SELECT last_sync_at_utc FROM bank_connections"))["last_sync_at_utc"]);
     }
 
@@ -180,8 +186,8 @@ public sealed class OpenFinancePluggyV2Tests
 
         Assert.Equal("Failed", partial["status"]);
         Assert.Equal("SYNC_INCOMPLETE", partial["error_code"]);
-        Assert.Equal(5L, partial["transactions_new"]);
-        Assert.Equal(5, (await MirrorIdsAsync(factory)).Count);
+        Assert.Equal(0L, partial["transactions_new"]);
+        Assert.Empty(await MirrorIdsAsync(factory));
         Assert.Null(Assert.Single(await factory.RowsAsync("SELECT last_sync_at_utc FROM bank_connections"))["last_sync_at_utc"]);
         // What the app shows is what the route of the run gives.
         var seen = await ana.Client.GetFromJsonAsync<JsonElement>($"{Base}/sync-runs/{Guid.Parse((string)partial["id"]!)}");
@@ -192,7 +198,8 @@ public sealed class OpenFinancePluggyV2Tests
         var whole = await SyncAsync(factory, ana, connectionId);
 
         Assert.Equal("Done", whole["status"]);
-        Assert.Equal(0L, whole["transactions_new"]);
+        Assert.Equal(5L, whole["transactions_new"]);
+        Assert.Equal(5, (await MirrorIdsAsync(factory)).Count);
         var historyFrom = Text(BrazilDay(factory.Clock.UtcNow).AddMonths(-3));
         foreach (var account in new[] { Checking, Card })
             Assert.Equal(new[] { historyFrom, historyFrom }, factory.Pluggy.WindowsAsked(account).Select(w => w.From));
@@ -247,7 +254,7 @@ public sealed class OpenFinancePluggyV2Tests
     }
 
     [Fact]
-    public async Task ABankAddedLater_WhoseFirstListingCameIncomplete_IsAskedForItsWholeHistoryAgain_UntilARunEndsWell()
+    public async Task ABankAddedLater_WhoseFirstListingCameIncomplete_HasNothingStored_AndIsAskedForItsWholeHistoryAgain()
     {
         await using var factory = NewFactory();
         var ana = await factory.RegisterAsync("Ana");
@@ -274,13 +281,14 @@ public sealed class OpenFinancePluggyV2Tests
 
         Assert.Equal("SYNC_INCOMPLETE", partial["error_code"]);
         var afterPartial = await MirrorIdsAsync(factory);
-        Assert.Contains(FakePluggyServer.OtherAccountTransactionId, afterPartial); // only the newest came, and it is stored
+        Assert.DoesNotContain(FakePluggyServer.OtherAccountTransactionId, afterPartial); // only the newest came, and it is not stored
         Assert.DoesNotContain(old1, afterPartial);
         Assert.DoesNotContain(old2, afterPartial);
+        Assert.Equal(5, afterPartial.Count);
         Assert.Equal(historyFrom, Assert.Single(factory.Pluggy.WindowsAsked(other)).From);
 
-        // Pluggy answers whole again. The account now has a transaction of two days ago in the mirror, and still the
-        // run asks for its whole history: the days that did not come are asked again.
+        // Pluggy answers whole again. The account still has nothing in the mirror, so the run asks for its whole
+        // history, as for any account never read.
         factory.Pluggy.MaxPageSize = 500;
         factory.Pluggy.RawNextJson = null;
 
@@ -293,9 +301,9 @@ public sealed class OpenFinancePluggyV2Tests
         Assert.Contains(old2, ids);
         Assert.Equal(8, ids.Count); // 5 of the first bank, 3 of the one added
         Assert.Equal(8, ids.Distinct().Count());
-        Assert.Equal(2L, whole["transactions_new"]);
+        Assert.Equal(3L, whole["transactions_new"]);
 
-        // Once a run ended well, the days asked are the usual ones again.
+        // Read whole once, the days asked are the usual ones.
         Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
         var usual = factory.Pluggy.WindowsAsked(other)[2].From;
         Assert.NotEqual(historyFrom, usual);
@@ -303,7 +311,7 @@ public sealed class OpenFinancePluggyV2Tests
     }
 
     [Fact]
-    public async Task ARunThatStoredAnIncompleteListing_AndFailedForAnotherReason_StillMakesTheNextOneAskTheWholeHistory()
+    public async Task ARunWithAnIncompleteListing_ThatFailedForAnotherReason_StoredNothingOfIt_AndTheNextOneAsksItsWholeHistory()
     {
         await using var factory = NewFactory();
         var ana = await factory.RegisterAsync("Ana");
@@ -328,8 +336,8 @@ public sealed class OpenFinancePluggyV2Tests
             ]);
         }
         await AddItemAsync(ana, connectionId, FakePluggyServer.ItemWithAccounts);
-        // In the next run the listing of the first of the two accounts stops after its first page (and that page is
-        // stored), and then Pluggy does not answer for the other: the run fails for that, not as an incomplete one.
+        // In the next run the listing of the first of the two accounts stops after its first page, and then Pluggy
+        // does not answer for the other: the run fails for that, not as an incomplete one.
         string? incomplete = null;
         factory.Pluggy.BeforeAnswer = request =>
         {
@@ -350,11 +358,10 @@ public sealed class OpenFinancePluggyV2Tests
         Assert.Equal("PLUGGY_UNAVAILABLE", failed["error_code"]);
         Assert.NotNull(incomplete);
         var afterFailure = await MirrorIdsAsync(factory);
-        Assert.Equal(2, afterFailure.Count); // the transaction of the first bank, and the one page that came of the account cut short
-        Assert.DoesNotContain(afterFailure, id => oldOnes[incomplete!].Contains(id));
+        Assert.Equal(new[] { FakePluggyServer.OtherAccountTransactionId }, afterFailure); // nothing of the page that came of the account cut short
         Assert.Equal(historyFrom, Assert.Single(factory.Pluggy.WindowsAsked(incomplete!)).From);
 
-        // Pluggy is back. That account has a recent transaction in the mirror, and still its whole history is asked again.
+        // Pluggy is back. That account has nothing in the mirror: its whole history is asked again.
         factory.Pluggy.BeforeAnswer = null;
         factory.Pluggy.MaxPageSize = 500;
         factory.Pluggy.RawNextJson = null;
@@ -368,14 +375,62 @@ public sealed class OpenFinancePluggyV2Tests
         Assert.Equal(10, ids.Count); // 1 of the first bank, 5 of the checking account, 4 of the card
         Assert.Equal(10, ids.Distinct().Count());
 
-        // After a run that ended well, the usual days again.
+        // Read whole once, the usual days again.
         Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
         Assert.NotEqual(historyFrom, factory.Pluggy.WindowsAsked(incomplete!)[2].From);
     }
 
     [Fact]
-    public async Task InOneRun_TheAccountThatCameWholeLosesWhatVanished_TheOneThatDidNotKeepsIt_AndTheRunEndsIncomplete()
+    public async Task AfterAnIncompleteListing_AndARunThatEndedWellWithoutReadingThatBank_ItsWholeHistoryIsStillAsked()
     {
+        await using var factory = NewFactory();
+        var ana = await factory.RegisterAsync("Ana");
+        var connectionId = await ConnectAsync(ana, historyMonths: 3);
+        await AddItemAsync(ana, connectionId, FakePluggyServer.OtherItemWithAccounts);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        var historyFrom = Text(BrazilDay(factory.Clock.UtcNow).AddMonths(-3));
+
+        // A second bank is added later; its checking account has months of history.
+        const string old1 = "c1b2c3d4-0000-4000-8000-0000000077f1";
+        const string old2 = "c1b2c3d4-0000-4000-8000-0000000077f2";
+        var today = DateTime.UtcNow.Date;
+        factory.Pluggy.Transactions[Checking].AddRange(
+        [
+            new FakeTransaction(old1, today.AddDays(-20).AddHours(10), -40m) { Description = "Oficina Exemplo" },
+            new FakeTransaction(old2, today.AddDays(-45).AddHours(10), -41m) { Description = "Escola Exemplo" },
+        ]);
+        await AddItemAsync(ana, connectionId, FakePluggyServer.ItemWithAccounts);
+
+        // Run 1: the listings stop after their first page. Nothing of them is stored.
+        factory.Pluggy.MaxPageSize = 1;
+        factory.Pluggy.RawNextJson = "12345";
+        Assert.Equal("SYNC_INCOMPLETE", (await SyncAsync(factory, ana, connectionId))["error_code"]);
+        Assert.Equal(new[] { FakePluggyServer.OtherAccountTransactionId }, await MirrorIdsAsync(factory));
+
+        // Run 2: Pluggy is fine, but the bank added asks for the login again. The other bank is read: the run ends well.
+        factory.Pluggy.MaxPageSize = 500;
+        factory.Pluggy.RawNextJson = null;
+        factory.Pluggy.ItemStatusOverride[FakePluggyServer.ItemWithAccounts] = "LOGIN_ERROR";
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+        Assert.Single(factory.Pluggy.WindowsAsked(Checking)); // not read in this run
+
+        // Run 3: the bank is back. Its account was never stored, so its whole history is asked, and comes.
+        factory.Pluggy.ItemStatusOverride.Remove(FakePluggyServer.ItemWithAccounts);
+        Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
+
+        Assert.Equal(historyFrom, factory.Pluggy.WindowsAsked(Checking)[1].From);
+        var ids = await MirrorIdsAsync(factory);
+        Assert.Contains(old1, ids);
+        Assert.Contains(old2, ids);
+        Assert.Equal(8, ids.Count); // 1 of the first bank, 5 of the checking account, 2 of the card
+        Assert.Equal(8, ids.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task InOneRun_TheAccountThatCameWholeIsStoredAndLosesWhatVanished_TheOneThatDidNotIsLeftAsItWas_AndTheRunEndsIncomplete()
+    {
+        const string newAtCard = "c1b2c3d4-0000-4000-8000-0000000077d2";
+        const string newAtChecking = "c1b2c3d4-0000-4000-8000-0000000077d3";
         await using var factory = NewFactory();
         var ana = await factory.RegisterAsync("Ana");
         var connectionId = await ConnectWithBankAsync(ana);
@@ -386,10 +441,13 @@ public sealed class OpenFinancePluggyV2Tests
         Assert.Equal("Done", (await SyncAsync(factory, ana, connectionId))["status"]);
         Assert.Equal(6, (await MirrorIdsAsync(factory)).Count);
 
-        // Both pending lines vanish at Pluggy. The card (one transaction left) fits one page: its listing is whole.
-        // The checking account (three left) takes two pages, and the second points back at its own cursor.
+        // Both pending lines vanish at Pluggy and each account has a new purchase. The card (two transactions) fits
+        // one page: its listing is whole. The checking account (four) takes two pages, and the second points back at
+        // its own cursor.
         factory.Pluggy.Transactions[Card].RemoveAll(t => t.Id == FakePluggyServer.CardPendingTransactionId);
         factory.Pluggy.Transactions[Checking].RemoveAll(t => t.Id == pendingAtChecking);
+        factory.Pluggy.Transactions[Card].Add(new FakeTransaction(newAtCard, today.AddDays(-1).AddHours(12), 18m) { Description = "Banca Exemplo" });
+        factory.Pluggy.Transactions[Checking].Insert(0, new FakeTransaction(newAtChecking, today.AddDays(-1).AddHours(13), -19m) { Description = "Feira Exemplo" });
         factory.Pluggy.MaxPageSize = 2;
         factory.Pluggy.RepeatCursor = true;
 
@@ -398,12 +456,16 @@ public sealed class OpenFinancePluggyV2Tests
         Assert.Equal("Failed", run["status"]);
         Assert.Equal("SYNC_INCOMPLETE", run["error_code"]);
         var ids = await MirrorIdsAsync(factory);
-        Assert.DoesNotContain(FakePluggyServer.CardPendingTransactionId, ids); // whole listing: what vanished leaves
-        Assert.Contains(pendingAtChecking, ids); // partial listing: nothing leaves
-        Assert.Equal(5, ids.Count);
+        Assert.DoesNotContain(FakePluggyServer.CardPendingTransactionId, ids); // whole listing: what vanished leaves...
+        Assert.Contains(newAtCard, ids); // ...and what arrived is stored, though the run fails
+        Assert.Contains(pendingAtChecking, ids); // partial listing: nothing leaves...
+        Assert.DoesNotContain(newAtChecking, ids); // ...and nothing of it is stored
+        Assert.Equal(6, ids.Count);
+        Assert.Equal(1L, run["transactions_new"]);
         var runId = Guid.Parse((string)run["id"]!);
-        Assert.Contains(factory.Logs.Lines, l => l.Contains($"Open Finance run {runId} ended: Failed (SYNC_INCOMPLETE); stage transactions; accounts read 2; ", StringComparison.Ordinal)
-                                                 && l.Contains("incomplete listings 1;", StringComparison.Ordinal));
+        Assert.Contains(factory.Logs.Lines, l => l.Contains(
+            $"Open Finance run {runId} ended: Failed (SYNC_INCOMPLETE); stage transactions; accounts read 1; transactions new 1, updated 1; incomplete listings 1; ",
+            StringComparison.Ordinal));
     }
 
     // ---------------------------------------------------------------- a refusal is said as a refusal
