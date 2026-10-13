@@ -32,7 +32,7 @@ export interface SyncOptions {
   readonly force?: boolean;
   /** Pedido silencioso da abertura do app. Nunca força. */
   readonly appOpen?: boolean;
-  /** A análise com IA está ativada para o grupo (modules/ai/aiStatus.ts: aiUploadConsent), como no envio do extrato. */
+  /** A análise com IA está ligada para o grupo (modules/ai/aiStatus.ts: aiUploadConsent), como no envio do extrato. */
   readonly aiConsent?: boolean;
   /** Período escolhido no passo 5 do wizard. */
   readonly historyMonths?: number;

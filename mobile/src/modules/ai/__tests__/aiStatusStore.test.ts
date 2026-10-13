@@ -1,5 +1,6 @@
-// Issue #38: o status da IA guardado por pessoa e por grupo. Sair da conta, entrar outro usuário ou trocar de
-// grupo nunca deixa o valor de um valer para o outro, e resposta atrasada é descartada.
+// O status da IA guardado por pessoa e por grupo. Sair da conta, entrar outro usuário ou trocar de grupo nunca
+// deixa o valor de um valer para o outro, e resposta atrasada é descartada. A IA vem ligada para todo grupo: o
+// store só consulta, desliga para o grupo e liga de novo — não há pergunta, aceite a retirar nem tela a abrir.
 const secureStore: Record<string, string> = {};
 
 jest.mock('expo-secure-store', () => ({
@@ -25,17 +26,9 @@ jest.mock('@/services/apiClient', () => ({
   },
 }));
 
-import {
-  aiStatusStorageKey,
-  currentAiStatus,
-  openWelcomeIfDue,
-  routeAfterGroupSetup,
-  selectForSession,
-  selectLoadForSession,
-  useAiStatusStore,
-  wasWelcomeShown,
-} from '../aiStatusStore';
-import { AI_STATUS_RETRY_DELAYS_MS, aiStatusNotice, aiStatusNoticeView, isAssistantVisible, serializeStoredAiStatus, shouldShowActivationCard } from '../aiStatus';
+import { aiStatusStorageKey, currentAiStatus, selectForSession, selectLoadForSession, useAiStatusStore } from '../aiStatusStore';
+import * as aiStatusStoreModule from '../aiStatusStore';
+import { AI_STATUS_RETRY_DELAYS_MS, aiStatusNotice, aiStatusNoticeView, assistantGate, isAssistantVisible, serializeStoredAiStatus } from '../aiStatus';
 import * as SecureStore from 'expo-secure-store';
 import { clearUserData, resetUserCaches } from '@/state/userData';
 import { useSessionStore } from '@/state/sessionStore';
@@ -105,20 +98,19 @@ describe('consulta do status', () => {
 
     await expect(useAiStatusStore.getState().refresh()).resolves.toBeNull();
 
-    expect(forSession()).toEqual({ status: ENABLED, loadFailed: true, welcomeShown: false });
+    expect(forSession()).toEqual({ status: ENABLED, loadFailed: true });
   });
 
   it('sair da conta apaga o status: o próximo usuário no aparelho não herda nada', async () => {
     await signIn('user-1');
     mockGetStatus.mockResolvedValue({ data: ENABLED });
     await useAiStatusStore.getState().refresh();
-    useAiStatusStore.getState().markWelcomeShown();
 
     await clearUserData();
     await signIn('user-2');
 
     expect(useAiStatusStore.getState().status).toBeNull();
-    expect(forSession()).toEqual({ status: null, loadFailed: false, welcomeShown: false });
+    expect(forSession()).toEqual({ status: null, loadFailed: false });
     expect(currentAiStatus()).toBeNull();
   });
 
@@ -126,11 +118,10 @@ describe('consulta do status', () => {
     await signIn('user-1', 'couple-1');
     mockGetStatus.mockResolvedValue({ data: ENABLED });
     await useAiStatusStore.getState().refresh();
-    useAiStatusStore.getState().markWelcomeShown();
 
     await useSessionStore.getState().setActiveGroup('access-2', 'couple-2', 'refresh-2');
 
-    expect(forSession()).toEqual({ status: null, loadFailed: false, welcomeShown: false });
+    expect(forSession()).toEqual({ status: null, loadFailed: false });
     expect(currentAiStatus()).toBeNull();
   });
 
@@ -150,36 +141,43 @@ describe('consulta do status', () => {
   });
 });
 
-describe('ativar, desligar e responder à pergunta', () => {
-  it('ativar envia a versão atual do texto e guarda o status devolvido', async () => {
+describe('ligar de novo e desligar para o grupo', () => {
+  it('ligar de novo usa POST /ai/consent com a versão 2 (a rota que a API anterior e a nova têm) e guarda o status devolvido', async () => {
     await signIn('user-1');
     mockAccept.mockResolvedValue({ data: ENABLED });
 
-    await useAiStatusStore.getState().activate();
+    await useAiStatusStore.getState().turnOn();
 
-    expect(mockAccept).toHaveBeenCalledWith(2);
+    expect(mockAccept.mock.calls).toEqual([[2]]);
     expect(forSession().status).toEqual(ENABLED);
   });
 
-  it('desligar para o grupo e retirar o próprio aceite usam o escopo certo', async () => {
+  it('desligar para o grupo usa o escopo "group"; o escopo "mine" (retirar o meu aceite) não é mais pedido', async () => {
     await signIn('user-1');
     mockRevoke.mockResolvedValue({ data: status({ onboardingPending: false }) });
 
-    await useAiStatusStore.getState().revoke('group');
-    await useAiStatusStore.getState().revoke('mine');
+    await useAiStatusStore.getState().turnOffForGroup();
 
-    expect(mockRevoke.mock.calls).toEqual([['group'], ['mine']]);
+    expect(mockRevoke.mock.calls).toEqual([['group']]);
     expect(forSession().status?.enabled).toBe(false);
   });
 
-  it('"Agora não" grava a resposta no servidor (a pergunta não volta em outro aparelho)', async () => {
+  it('o store não tem mais pergunta a responder, aceite a retirar nem tela a marcar; e nada do que ele faz chama PATCH /ai/preferences', async () => {
     await signIn('user-1');
-    mockUpdatePreferences.mockResolvedValue({ data: status({ onboardingPending: false }) });
+    mockGetStatus.mockResolvedValue({ data: status({ onboardingPending: true }) });
+    mockAccept.mockResolvedValue({ data: ENABLED });
+    mockRevoke.mockResolvedValue({ data: status() });
 
-    await useAiStatusStore.getState().answerOnboarding();
+    const store = useAiStatusStore.getState();
+    for (const gone of ['activate', 'revoke', 'answerOnboarding', 'markWelcomeShown', 'welcomeShown']) {
+      expect(store).not.toHaveProperty(gone);
+    }
 
-    expect(mockUpdatePreferences).toHaveBeenCalledWith({ onboardingAnswered: true });
-    expect(forSession().status?.onboardingPending).toBe(false);
+    await store.refresh();
+    await store.turnOffForGroup();
+    await store.turnOn();
+
+    expect(mockUpdatePreferences).not.toHaveBeenCalled();
   });
 
   it('uma escrita que falha sobe o erro para a tela e não muda o que estava guardado', async () => {
@@ -189,54 +187,32 @@ describe('ativar, desligar e responder à pergunta', () => {
     const failure = { response: { status: 503, data: { code: 'AI_UNAVAILABLE', message: 'A análise com IA não está disponível no momento.' } } };
     mockAccept.mockRejectedValue(failure);
 
-    await expect(useAiStatusStore.getState().activate()).rejects.toBe(failure);
+    await expect(useAiStatusStore.getState().turnOn()).rejects.toBe(failure);
 
-    expect(forSession()).toEqual({ status: status(), loadFailed: false, welcomeShown: false });
-  });
-
-  it('a tela de boas-vindas fica marcada como mostrada só para o dono atual', async () => {
-    await signIn('user-1', 'couple-1');
-    useAiStatusStore.getState().markWelcomeShown();
-    expect(forSession().welcomeShown).toBe(true);
-
-    await useSessionStore.getState().setActiveGroup('access-2', 'couple-2', 'refresh-2');
-    expect(forSession().welcomeShown).toBe(false);
+    expect(forSession()).toEqual({ status: status(), loadFailed: false });
   });
 });
 
-describe('depois de criar ou entrar num grupo', () => {
-  it('pergunta pendente: vai para a tela de boas-vindas e marca como mostrada (o Painel não abre de novo)', async () => {
-    await signIn('user-1');
-    mockGetStatus.mockResolvedValue({ data: status({ onboardingPending: true }) });
-
-    await expect(routeAfterGroupSetup()).resolves.toBe('/(main)/ai/welcome');
-
-    expect(wasWelcomeShown()).toBe(true);
+describe('nada abre sozinho por causa da IA', () => {
+  it('o módulo não exporta mais rota de boas-vindas nem função que decida para onde ir ou que abra tela', () => {
+    for (const gone of ['AI_WELCOME_ROUTE', 'HOME_ROUTE', 'routeAfterGroupSetup', 'openWelcomeIfDue', 'wasWelcomeShown']) {
+      expect(aiStatusStoreModule).not.toHaveProperty(gone);
+    }
   });
 
-  it('pergunta já respondida, ou IA indisponível no servidor: Painel', async () => {
+  it('uma API anterior que ainda responda "pergunta pendente" e "desligada" é só guardada: o Assistente pede para ligar, e ligar resolve', async () => {
     await signIn('user-1');
-    mockGetStatus.mockResolvedValueOnce({ data: status({ onboardingPending: false }) });
-    await expect(routeAfterGroupSetup()).resolves.toBe('/');
+    const fromOldApi = status({ enabled: false, onboardingPending: true });
+    mockGetStatus.mockResolvedValue({ data: fromOldApi });
 
-    mockGetStatus.mockResolvedValueOnce({ data: status({ available: false, onboardingPending: false }) });
-    await expect(routeAfterGroupSetup()).resolves.toBe('/');
-    expect(wasWelcomeShown()).toBe(false);
-  });
+    await expect(useAiStatusStore.getState().refresh()).resolves.toEqual(fromOldApi);
 
-  it('erro ao consultar o status: Painel', async () => {
-    await signIn('user-1');
-    mockGetStatus.mockRejectedValue({ code: 'ERR_NETWORK', message: 'Network Error' });
+    expect(forSession()).toEqual({ status: fromOldApi, loadFailed: false });
+    expect(assistantGate(forSession().status, false)).toBe('off-for-group');
 
-    await expect(routeAfterGroupSetup()).resolves.toBe('/');
-    expect(wasWelcomeShown()).toBe(false);
-  });
-
-  it('servidor demorando: não segura a entrada no app, vai para o Painel', async () => {
-    await signIn('user-1');
-    mockGetStatus.mockReturnValue(new Promise(() => undefined));
-
-    await expect(routeAfterGroupSetup(20)).resolves.toBe('/');
+    mockAccept.mockResolvedValue({ data: ENABLED });
+    await useAiStatusStore.getState().turnOn();
+    expect(assistantGate(forSession().status, false)).toBe('ready');
   });
 });
 
@@ -276,7 +252,7 @@ describe('o último status fica guardado no aparelho, por pessoa', () => {
     expect(loadForSession()).toEqual({ fromStorage: false, retrying: false });
   });
 
-  it('abertura a frio, servidor ainda sem responder: o botão Assistente e o cartão vêm do valor guardado', async () => {
+  it('abertura a frio, servidor ainda sem responder: o botão Assistente vem do valor guardado', async () => {
     secureStore[aiStatusStorageKey('user-1')] = serializeStoredAiStatus('couple-1', status());
     await signIn('user-1', 'couple-1');
     const server = pendingStatus();
@@ -287,7 +263,6 @@ describe('o último status fica guardado no aparelho, por pessoa', () => {
 
     expect(forSession().status).toEqual(status());
     expect(isAssistantVisible(forSession().status)).toBe(true);
-    expect(shouldShowActivationCard(forSession().status)).toBe(true);
     expect(loadForSession().fromStorage).toBe(true);
 
     server.release({ data: ENABLED });
@@ -336,15 +311,15 @@ describe('o último status fica guardado no aparelho, por pessoa', () => {
     expect(loadForSession().fromStorage).toBe(false);
   });
 
-  it('ativar e desligar também atualizam o valor guardado', async () => {
+  it('ligar de novo e desligar também atualizam o valor guardado', async () => {
     await signIn('user-1', 'couple-1');
     mockAccept.mockResolvedValue({ data: ENABLED });
-    await useAiStatusStore.getState().activate();
+    await useAiStatusStore.getState().turnOn();
     await settle();
     expect(JSON.parse(secureStore[aiStatusStorageKey('user-1')]).status.enabled).toBe(true);
 
     mockRevoke.mockResolvedValue({ data: status({ onboardingPending: false }) });
-    await useAiStatusStore.getState().revoke('group');
+    await useAiStatusStore.getState().turnOffForGroup();
     await settle();
     expect(JSON.parse(secureStore[aiStatusStorageKey('user-1')]).status.enabled).toBe(false);
   });
@@ -413,10 +388,9 @@ describe('a consulta que falha é tentada de novo sozinha', () => {
 
     await jest.advanceTimersByTimeAsync(AI_STATUS_RETRY_DELAYS_MS[1]);
     expect(mockGetStatus).toHaveBeenCalledTimes(3);
-    expect(forSession()).toEqual({ status: status(), loadFailed: false, welcomeShown: false });
+    expect(forSession()).toEqual({ status: status(), loadFailed: false });
     expect(loadForSession()).toEqual({ fromStorage: false, retrying: false });
     expect(isAssistantVisible(forSession().status)).toBe(true);
-    expect(shouldShowActivationCard(forSession().status)).toBe(true);
 
     await jest.advanceTimersByTimeAsync(10 * 60_000);
     expect(mockGetStatus).toHaveBeenCalledTimes(3);
@@ -504,7 +478,7 @@ describe('a consulta que falha é tentada de novo sozinha', () => {
     const reading = useAiStatusStore.getState().refresh();
     mockAccept.mockResolvedValue({ data: ENABLED });
 
-    await useAiStatusStore.getState().activate();
+    await useAiStatusStore.getState().turnOn();
     // A consulta começou antes de ativar: o que ela traz é de antes.
     slowRead.release({ data: status({ enabled: false }) });
     await reading;
@@ -522,12 +496,12 @@ describe('a consulta que falha é tentada de novo sozinha', () => {
     const reading = useAiStatusStore.getState().refresh();
     mockAccept.mockResolvedValue({ data: ENABLED });
 
-    await useAiStatusStore.getState().activate();
+    await useAiStatusStore.getState().turnOn();
     fail(NETWORK_DOWN);
     await reading;
     await jest.advanceTimersByTimeAsync(10 * 60_000);
 
-    expect(forSession()).toEqual({ status: ENABLED, loadFailed: false, welcomeShown: false });
+    expect(forSession()).toEqual({ status: ENABLED, loadFailed: false });
     expect(mockGetStatus).toHaveBeenCalledTimes(1);
   });
 
@@ -537,7 +511,7 @@ describe('a consulta que falha é tentada de novo sozinha', () => {
     mockGetStatus.mockReturnValueOnce(slowRead.promise);
     const before = useAiStatusStore.getState().refresh();
     mockAccept.mockResolvedValue({ data: ENABLED });
-    await useAiStatusStore.getState().activate();
+    await useAiStatusStore.getState().turnOn();
     const OFF_AGAIN = status({ enabled: false, onboardingPending: false });
     mockGetStatus.mockResolvedValueOnce({ data: OFF_AGAIN });
 
@@ -555,11 +529,11 @@ describe('a consulta que falha é tentada de novo sozinha', () => {
     await useAiStatusStore.getState().refresh();
     mockAccept.mockResolvedValue({ data: ENABLED });
 
-    await useAiStatusStore.getState().activate();
+    await useAiStatusStore.getState().turnOn();
     await jest.advanceTimersByTimeAsync(10 * 60_000);
 
     expect(mockGetStatus).toHaveBeenCalledTimes(1);
-    expect(forSession()).toEqual({ status: ENABLED, loadFailed: false, welcomeShown: false });
+    expect(forSession()).toEqual({ status: ENABLED, loadFailed: false });
   });
 });
 
@@ -579,100 +553,8 @@ describe('cada resposta do servidor é avisada às telas; o valor guardado não'
     expect(useAiStatusStore.getState().freshCount).toBe(1);
 
     mockAccept.mockResolvedValue({ data: ENABLED });
-    await useAiStatusStore.getState().activate();
+    await useAiStatusStore.getState().turnOn();
     expect(useAiStatusStore.getState().freshCount).toBe(2);
-  });
-});
-
-describe('abrir a tela de boas-vindas a partir do Painel', () => {
-  const PENDING = status({ onboardingPending: true });
-
-  async function ready() {
-    await signIn('user-1');
-    mockGetStatus.mockResolvedValue({ data: PENDING });
-    await useAiStatusStore.getState().refresh();
-  }
-
-  it('pergunta devida, Painel em foco e nenhuma outra tela automática na frente: abre uma vez só', async () => {
-    await ready();
-    const open = jest.fn();
-    const deps = { isFocused: () => true, otherPromptPending: async () => false, open };
-
-    await expect(openWelcomeIfDue(PENDING, deps)).resolves.toBe(true);
-    await expect(openWelcomeIfDue(PENDING, deps)).resolves.toBe(false);
-
-    expect(open).toHaveBeenCalledTimes(1);
-    expect(wasWelcomeShown()).toBe(true);
-  });
-
-  it('o consentimento da captura vai abrir: a tela da IA espera a vez dela (não abre e não fica marcada como mostrada)', async () => {
-    await ready();
-    const open = jest.fn();
-
-    await expect(openWelcomeIfDue(PENDING, { isFocused: () => true, otherPromptPending: async () => true, open })).resolves.toBe(false);
-
-    expect(open).not.toHaveBeenCalled();
-    expect(wasWelcomeShown()).toBe(false);
-    // Na volta ao Painel, com a captura respondida, a pergunta da IA abre.
-    await expect(openWelcomeIfDue(PENDING, { isFocused: () => true, otherPromptPending: async () => false, open })).resolves.toBe(true);
-  });
-
-  it('o Painel perdeu o foco enquanto se conferia (outra tela abriu por cima): não abre nem marca', async () => {
-    await ready();
-    const open = jest.fn();
-    let focused = true;
-    const otherPromptPending = async () => {
-      focused = false;
-      return false;
-    };
-
-    await expect(openWelcomeIfDue(PENDING, { isFocused: () => focused, otherPromptPending, open })).resolves.toBe(false);
-
-    expect(open).not.toHaveBeenCalled();
-    expect(wasWelcomeShown()).toBe(false);
-  });
-
-  it('a sessão mudou enquanto se conferia: não abre para a sessão seguinte', async () => {
-    await ready();
-    const open = jest.fn();
-    const otherPromptPending = async () => {
-      await useSessionStore.getState().setActiveGroup('access-2', 'couple-2', 'refresh-2');
-      return false;
-    };
-
-    await expect(openWelcomeIfDue(PENDING, { isFocused: () => true, otherPromptPending, open })).resolves.toBe(false);
-    expect(open).not.toHaveBeenCalled();
-  });
-
-  it('pergunta já respondida: nem confere as outras telas', async () => {
-    await ready();
-    const otherPromptPending = jest.fn(async () => false);
-    const open = jest.fn();
-
-    await expect(openWelcomeIfDue(status({ onboardingPending: false }), { isFocused: () => true, otherPromptPending, open })).resolves.toBe(false);
-
-    expect(otherPromptPending).not.toHaveBeenCalled();
-    expect(open).not.toHaveBeenCalled();
-  });
-
-  it('conferir as outras telas falhou: a pergunta da IA abre assim mesmo', async () => {
-    await ready();
-    const open = jest.fn();
-    const otherPromptPending = async (): Promise<boolean> => {
-      throw new Error('ponte nativa');
-    };
-
-    await expect(openWelcomeIfDue(PENDING, { isFocused: () => true, otherPromptPending, open })).resolves.toBe(true);
-    expect(open).toHaveBeenCalledTimes(1);
-  });
-
-  it('depois de criar ou entrar num grupo, com o consentimento da captura para abrir: Painel, e a pergunta da IA fica para depois', async () => {
-    await signIn('user-1');
-    mockGetStatus.mockResolvedValue({ data: PENDING });
-
-    await expect(routeAfterGroupSetup(4000, async () => true)).resolves.toBe('/');
-
-    expect(wasWelcomeShown()).toBe(false);
   });
 });
 

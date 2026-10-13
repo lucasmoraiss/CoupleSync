@@ -139,14 +139,13 @@ function whereTo(destinations: readonly AiDestination[], withArticle: boolean): 
 }
 
 /**
- * O texto do aceite da análise com IA: exatamente estes sete pontos, nesta ordem. É o que a pessoa lê antes de
- * ativar para o grupo (tela de boas-vindas, Configurações > Inteligência artificial) e a seção em destaque da tela
- * Privacidade. O aceite tem versão própria no servidor (AI_CONSENT_VERSION em modules/ai/aiStatus.ts): mudar um
- * destes pontos de forma relevante pede versão nova lá e aqui — nunca o CONSENT_VERSION do aparelho, que apagaria
- * os aceites de captura e de Open Finance.
+ * O texto da análise com IA: exatamente estes sete pontos, nesta ordem. É informação — a IA vem ligada para todo
+ * grupo e ninguém precisa aceitar nada —, mostrada na seção em destaque da tela Privacidade. O texto tem versão
+ * própria no servidor (AI_CONSENT_VERSION em modules/ai/aiStatus.ts), que não liga nem desliga grupo nenhum; mudar
+ * um destes pontos nunca mexe no CONSENT_VERSION do aparelho, que apagaria os aceites de captura e de Open Finance.
  *
  * "Para onde" e "Com franqueza" citam os destinos que o servidor diz ter ligados (`aiDestinations` em
- * modules/ai/aiStatus.ts). Sem essa lista, citam todos os que esta versão do aceite cobre.
+ * modules/ai/aiStatus.ts). Sem essa lista, citam todos os que esta versão do texto cobre.
  */
 export function aiAnalysisPoints(destinations?: readonly AiDestination[] | null): readonly string[] {
   const list = destinationsOrAll(destinations);
@@ -155,7 +154,7 @@ export function aiAnalysisPoints(destinations?: readonly AiDestination[] | null)
     'O que nunca vai: nomes, e-mails e CPF de vocês. O que o app não envia por conta própria: nomes das metas, nomes das rendas, números de conta ou cartão e nomes de quem recebeu ou enviou transferências (elas vão só como "transferência"). O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta ou de quem recebeu uma transferência, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.',
     `Para onde: ${whereTo(list, false)} — transferência internacional de dados.`,
     `Com franqueza: "${list.map(frankAbout).join(' ')}"`,
-    'Quem ativa liga a análise para o grupo inteiro; o outro membro é avisado no app e pode desligar a qualquer hora em Configurações; desligar não apaga o histórico, que pode ser apagado à parte.',
+    'A análise já vem ligada para o grupo inteiro, sem ninguém precisar ativar. Qualquer pessoa do grupo pode desligar para todos, e ligar de novo, a qualquer hora em Configurações > Inteligência artificial; desligar não apaga o histórico, que pode ser apagado à parte.',
     'O resumo semanal por e-mail é opcional, por pessoa, enviado pela Brevo (o serviço de e-mail que o app já usa).',
     'Os cálculos (assinaturas, parcelas, previsão) são feitos no próprio servidor do app e funcionam sem a IA.',
   ];
@@ -166,13 +165,13 @@ export function aiAnalysisSections(destinations?: readonly AiDestination[] | nul
   return [{ title: AI_ANALYSIS_TITLE, paragraphs: aiAnalysisPoints(destinations) }];
 }
 
-/** Uma linha do que vai e para onde, na tela de boas-vindas (o texto inteiro abre em "Ler tudo"). */
+/** Uma linha do que vai e para onde, em Configurações > Inteligência artificial (o texto inteiro fica em Privacidade). */
 export function aiAnalysisSummary(destinations?: readonly AiDestination[] | null): string {
   return `Vão para ${whereTo(destinationsOrAll(destinations), true)}, resumos das finanças do grupo e as suas perguntas — nunca nomes, e-mails ou CPF de vocês.`;
 }
 
-/** No texto geral, a IA só é citada assim: os detalhes e o aceite ficam na seção própria. */
-export const AI_OWN_CONSENT_NOTE = 'A análise com IA tem aceite próprio; veja Configurações > Inteligência artificial.';
+/** No texto geral, a IA só é citada assim: os detalhes ficam na seção própria. */
+export const AI_OWN_SECTION_NOTE = 'A análise com IA vem ligada para o grupo e pode ser desligada; veja a seção "Análise com IA" e Configurações > Inteligência artificial.';
 
 export const OPEN_FINANCE_CONSENT_TITLE = 'Open Finance: conectar seus bancos';
 
@@ -212,11 +211,11 @@ export const OPEN_FINANCE_CONSENT_SECTIONS: readonly TextSection[] = [
   {
     title: 'Inteligência artificial',
     paragraphs: [
-      // O que é verdade com a sincronização (issue #25) e a análise com IA do grupo (issue #38) juntas: a descrição
-      // de uma linha do banco não vai a provedor nenhum (a categorização por IA está desligada no servidor); o que
-      // a IA recebe das despesas do banco é o que recebe de qualquer despesa do grupo — os totais por categoria —
-      // e só das que foram confirmadas na revisão, que é quando viram despesa do grupo.
-      `Conectar um banco não liga a IA nem muda o aceite dela. Sem a análise com IA ativada para o grupo, nada do que vier do banco é enviado à IA. Com ela ativada, as despesas do banco que alguém do grupo confirmou na revisão entram, como qualquer outra despesa, nos resumos calculados das finanças do grupo (totais por categoria). ${AI_OWN_CONSENT_NOTE}`,
+      // O que é verdade com a sincronização (issue #25) e a análise com IA do grupo juntas: a descrição de uma
+      // linha do banco não vai a provedor nenhum (a categorização por IA está desligada no servidor); o que a IA
+      // recebe das despesas do banco é o que recebe de qualquer despesa do grupo — os totais por categoria — e só
+      // das que foram confirmadas na revisão, que é quando viram despesa do grupo. A IA vem ligada para o grupo.
+      `Conectar um banco não muda nada na análise com IA. Com ela ligada para o grupo, as despesas do banco que alguém do grupo confirmou na revisão entram, como qualquer outra despesa, nos resumos calculados das finanças do grupo (totais por categoria). Se o grupo desligar a análise com IA, nada do que vier do banco é enviado à IA. ${AI_OWN_SECTION_NOTE}`,
     ],
   },
 ];
@@ -225,7 +224,7 @@ export const PRIVACY_TITLE = 'Privacidade';
 
 /**
  * As seções do texto geral da tela Privacidade. A análise com IA não é descrita aqui: tem a seção própria
- * (aiAnalysisSections) e o aceite próprio, no servidor.
+ * (aiAnalysisSections).
  */
 export function privacySections(): readonly TextSection[] {
   return [
@@ -252,7 +251,7 @@ export function privacySections(): readonly TextSection[] {
       paragraphs: [
         'Com os membros do seu grupo: eles veem as transações, rendas, orçamento e metas do grupo e, se você conectar um banco pelo Open Finance, as contas, saldos e cartões dessa conexão.',
         'Com o Pluggy, somente se você conectar um banco pelo Open Finance: o servidor usa as credenciais que você informou para consultar, no Pluggy, os dados dos seus bancos. Nenhum dado seu do CoupleSync é enviado ao Pluggy além dessas credenciais e dos Item IDs.',
-        AI_OWN_CONSENT_NOTE,
+        AI_OWN_SECTION_NOTE,
         'Com o Google Firebase Cloud Messaging, que entrega as notificações push do app ao seu aparelho (recebe o código do aparelho e o texto do alerta).',
         'Com os provedores de hospedagem e de banco de dados em que o servidor roda, que guardam os dados em nome do CoupleSync.',
         'Dependendo da configuração do servidor, o PDF do extrato pode ser lido pelo Azure Document Intelligence (Microsoft); por padrão a leitura é feita no próprio servidor.',
@@ -269,8 +268,9 @@ export function privacySections(): readonly TextSection[] {
 }
 
 /**
- * As linhas de "Suas respostas neste aparelho". O aceite da análise com IA não está aqui: ele é do grupo, fica no
- * servidor e aparece em Configurações > Inteligência artificial (o campo `aiChat` do registro local não é mais usado).
+ * As linhas de "Suas respostas neste aparelho". A análise com IA não está aqui: não tem aceite, vem ligada para o
+ * grupo e o estado dela aparece em Configurações > Inteligência artificial (o campo `aiChat` do registro local não
+ * é mais usado).
  */
 export function consentStatusLines(
   record: ConsentRecord,

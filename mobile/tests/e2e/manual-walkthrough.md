@@ -17,12 +17,12 @@ its own account (a unique e-mail per run) and does not depend on the others.
 | --- | --- |
 | `01-cadastro-e-grupo.yaml` | Sign up, create a group, see the 8-character invite code, reach the Painel |
 | `02-login-e-logout.yaml` | Sign out (confirming the dialog), sign in again, close and reopen the app and still be signed in |
-| `03-entrar-em-grupo.yaml` | A second account joins the first one's group with the invite code read from the screen; both members are listed |
+| `03-entrar-em-grupo.yaml` | A second account joins the first one's group with the invite code read from the screen; both members are listed. Nobody is asked about the AI; in Configurações > Inteligência artificial the second account switches it off for the group and back on |
 | `04-transacao-manual.yaml` | Two manual transactions in a row (the form opens empty the second time), edit one, delete the other (confirming the dialog), check the list |
 | `05-metas-e-rendas.yaml` | Create a goal and an income source and see them on their screens |
 | `06-abas.yaml` | Open every tab; none shows an error state |
 | `07-captura-de-notificacao.yaml` + `partes/07-conferir-transacao-capturada.yaml` | With Android's notification access granted, accept the capture consent, receive one made-up bank notification and see it as a transaction |
-| `08-ia-ativar-e-assistente.yaml` | On the first use of a group, switch the AI analysis on at the welcome screen, see the Painel without the "desligada" card, open the Assistente from the Painel and get the answer of the fake AI provider of the test API |
+| `08-ia-assistente-direto.yaml` | On the first use of a group there is no AI question: straight to the Painel, open the Assistente from it and get the answer of the fake AI provider of the test API |
 
 Flow 07 is driven by `scripts/app-e2e-run-flows.sh` (Maestro cannot run `adb`). The notification comes from a
 test double installed only on the emulator (`mobile/tests/e2e/notification-stub/`), whose application id is one

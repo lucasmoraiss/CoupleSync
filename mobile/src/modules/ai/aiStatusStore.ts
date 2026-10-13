@@ -3,28 +3,23 @@
 // - Pertence a (usuário, grupo): quem lê confere o dono contra a sessão atual, então depois de trocar de grupo ou
 //   de conta o valor antigo não vale para ninguém, mesmo antes de a nova consulta voltar.
 // - Fica também guardado no aparelho, numa chave por pessoa (com o grupo a que pertence): na abertura seguinte o
-//   botão do Assistente e o cartão de ativar aparecem na hora, pelo último valor, enquanto o servidor não
-//   responde. O valor guardado nunca passa por cima de uma resposta do servidor, e não abre a tela de boas-vindas.
+//   botão do Assistente aparece na hora, pelo último valor, enquanto o servidor não responde. O valor guardado
+//   nunca passa por cima de uma resposta do servidor.
 // - A consulta que falha (API acordando, sem rede) é tentada de novo sozinha, algumas vezes, com espera crescente;
 //   pedir de novo (foco do Painel, puxar para atualizar, botão do aviso) consulta na hora.
 // - Sair da conta apaga tudo, da memória e do aparelho (limpador registrado em userData.ts).
 // - Toda consulta, nova tentativa e escrita fica presa à época da sessão: resposta que chega depois de sair, de
 //   outro login ou da troca de grupo é descartada. A resposta de uma consulta que começou antes de uma escrita
-//   (ativar, desligar) e chega depois dela também: vale o que a escrita devolveu.
-// - Ligar, desligar e responder à pergunta ficam no servidor; o aparelho só guarda a cópia do último status.
+//   (ligar, desligar) e chega depois dela também: vale o que a escrita devolveu.
+// - A IA vem ligada para todo grupo: aqui não há pergunta nem tela que abra sozinha. Desligar para o grupo e ligar
+//   de novo ficam no servidor; o aparelho só guarda a cópia do último status.
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { aiApiClient } from '@/services/apiClient';
 import { getSessionEpoch, useSessionStore } from '@/state/sessionStore';
 import { registerUserDataCleaner } from '@/state/userData';
 import type { AiStatusResponse } from '@/types/api';
-import {
-  AI_CONSENT_VERSION,
-  AI_STATUS_RETRY_DELAYS_MS,
-  parseStoredAiStatus,
-  serializeStoredAiStatus,
-  shouldOpenWelcome,
-} from './aiStatus';
+import { AI_CONSENT_VERSION, AI_STATUS_RETRY_DELAYS_MS, parseStoredAiStatus, serializeStoredAiStatus } from './aiStatus';
 
 interface AiStatusState {
   ownerUserId: string | null;
@@ -32,8 +27,6 @@ interface AiStatusState {
   status: AiStatusResponse | null;
   /** A última consulta deste dono falhou (sem rede, servidor fora). O valor anterior, se havia, continua. */
   loadFailed: boolean;
-  /** A tela de boas-vindas já foi aberta sozinha para este dono nesta abertura do app. */
-  welcomeShown: boolean;
   /** `status` veio do que estava guardado no aparelho; o servidor ainda não respondeu nesta abertura. */
   fromStorage: boolean;
   /** A consulta falhou e outra tentativa está marcada. */
@@ -45,13 +38,13 @@ interface AiStatusState {
 interface AiStatusActions {
   /** Consulta o servidor agora. Devolve o status novo, ou null se falhou ou se a sessão mudou no meio. */
   refresh: () => Promise<AiStatusResponse | null>;
-  /** Ativa a análise para o grupo (aceite da versão atual do texto). Erros sobem para a tela mostrar. */
-  activate: () => Promise<AiStatusResponse | null>;
-  /** `group`: desliga para o grupo inteiro. `mine`: retira só o aceite desta pessoa. */
-  revoke: (scope: 'mine' | 'group') => Promise<AiStatusResponse | null>;
-  /** "Agora não" / "Entendi": a pergunta não volta, neste nem em outro aparelho. */
-  answerOnboarding: () => Promise<AiStatusResponse | null>;
-  markWelcomeShown: () => void;
+  /**
+   * Liga de novo a IA do grupo que a desligou: POST /ai/consent com a versão do texto, a rota que já existia (na
+   * API anterior ela também liga, gravando o aceite). Erros sobem para a tela mostrar.
+   */
+  turnOn: () => Promise<AiStatusResponse | null>;
+  /** Desliga a IA para o grupo inteiro (DELETE /ai/consent?scope=group). Erros sobem para a tela mostrar. */
+  turnOffForGroup: () => Promise<AiStatusResponse | null>;
   /** Esquece tudo: a memória, as tentativas marcadas e a cópia guardada no aparelho. */
   reset: () => Promise<void>;
 }
@@ -61,7 +54,6 @@ const INITIAL: AiStatusState = {
   ownerCoupleId: null,
   status: null,
   loadFailed: false,
-  welcomeShown: false,
   fromStorage: false,
   retrying: false,
   freshCount: 0,
@@ -99,7 +91,7 @@ export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, ge
   /** A consulta em andamento e a época em que começou: pedidos simultâneos viram uma chamada só. */
   let reading: { epoch: number; promise: Promise<AiStatusResponse | null> } | null = null;
   /**
-   * Quantas escritas (ativar, desligar, responder) já tiveram a resposta guardada. Uma consulta que começou antes
+   * Quantas escritas (ligar, desligar) já tiveram a resposta guardada. Uma consulta que começou antes
    * de uma delas traz o que valia antes: a resposta dela, ou a falha, não passa por cima do resultado da escrita.
    */
   let writesDone = 0;
@@ -138,7 +130,7 @@ export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, ge
     }
   }
 
-  /** Passa a guardar para o dono da sessão atual; o que era de outro dono (status, "já mostrou") é esquecido. */
+  /** Passa a guardar para o dono da sessão atual; o que era de outro dono é esquecido. */
   function claim(owner: Owner, epoch: number): void {
     if (owns(owner)) return;
     cancelRetry();
@@ -216,15 +208,8 @@ export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, ge
       if (owner && owns(owner) && get().loadFailed) set({ loadFailed: false, retrying: false });
       return startRead(0);
     },
-    activate: () => write(() => aiApiClient.accept(AI_CONSENT_VERSION)),
-    revoke: (scope) => write(() => aiApiClient.revoke(scope)),
-    answerOnboarding: () => write(() => aiApiClient.updatePreferences({ onboardingAnswered: true })),
-    markWelcomeShown: () => {
-      const owner = sessionOwner();
-      if (!owner) return;
-      claim(owner, getSessionEpoch());
-      set({ welcomeShown: true });
-    },
+    turnOn: () => write(() => aiApiClient.accept(AI_CONSENT_VERSION)),
+    turnOffForGroup: () => write(() => aiApiClient.revoke('group')),
     reset: async () => {
       const previousOwner = get().ownerUserId;
       cancelRetry();
@@ -249,14 +234,12 @@ export const useAiStatusStore = create<AiStatusState & AiStatusActions>((set, ge
 
 /** O que vale para a sessão atual: o estado guardado só conta se for do usuário e do grupo de agora. */
 export function selectForSession(
-  state: Pick<AiStatusState, 'ownerUserId' | 'ownerCoupleId' | 'status' | 'loadFailed' | 'welcomeShown'>,
+  state: Pick<AiStatusState, 'ownerUserId' | 'ownerCoupleId' | 'status' | 'loadFailed'>,
   userId: string | null,
   coupleId: string | null,
-): { status: AiStatusResponse | null; loadFailed: boolean; welcomeShown: boolean } {
+): { status: AiStatusResponse | null; loadFailed: boolean } {
   const mine = userId !== null && coupleId !== null && state.ownerUserId === userId && state.ownerCoupleId === coupleId;
-  return mine
-    ? { status: state.status, loadFailed: state.loadFailed, welcomeShown: state.welcomeShown }
-    : { status: null, loadFailed: false, welcomeShown: false };
+  return mine ? { status: state.status, loadFailed: state.loadFailed } : { status: null, loadFailed: false };
 }
 
 /** Como o status da sessão atual chegou: do aparelho (o servidor ainda não respondeu) e se há nova tentativa marcada. */
@@ -269,12 +252,6 @@ export function selectLoadForSession(
   return mine ? { fromStorage: state.fromStorage, retrying: state.retrying } : { fromStorage: false, retrying: false };
 }
 
-/** A tela de boas-vindas já abriu sozinha para a pessoa e o grupo da sessão atual, nesta abertura do app? */
-export function wasWelcomeShown(): boolean {
-  const { userId, coupleId } = useSessionStore.getState();
-  return selectForSession(useAiStatusStore.getState(), userId, coupleId).welcomeShown;
-}
-
 /** Fora do React (ex.: ao montar o envio de um extrato): o status da sessão atual, ou null. */
 export function currentAiStatus(): AiStatusResponse | null {
   const { userId, coupleId } = useSessionStore.getState();
@@ -282,68 +259,3 @@ export function currentAiStatus(): AiStatusResponse | null {
 }
 
 registerUserDataCleaner(() => useAiStatusStore.getState().reset());
-
-export const AI_WELCOME_ROUTE = '/(main)/ai/welcome';
-export const HOME_ROUTE = '/';
-
-/** Outra tela que abre sozinha vai abrir antes (hoje: o consentimento da captura)? Ver capturePromptGate.ts. */
-type OtherPromptPending = () => Promise<boolean>;
-
-const nothingAhead: OtherPromptPending = async () => false;
-
-async function isOtherPromptAhead(otherPromptPending: OtherPromptPending): Promise<boolean> {
-  try {
-    return await otherPromptPending();
-  } catch {
-    return false; // Não deu para saber: a pergunta da IA não fica presa por isso.
-  }
-}
-
-/**
- * Para onde ir depois de criar ou entrar num grupo: a tela de boas-vindas da IA, se o servidor disser que a
- * pergunta é devida a esta pessoa neste grupo; senão o Painel. Erro, ou demora além de `timeoutMs`, é Painel
- * (que consulta de novo ao abrir): entrar no app nunca fica esperando pela IA. Se outra tela automática vai abrir
- * na chegada (o consentimento da captura), também é Painel, e a pergunta da IA fica para a volta a ele.
- */
-export async function routeAfterGroupSetup(
-  timeoutMs = 4000,
-  otherPromptPending: OtherPromptPending = nothingAhead,
-): Promise<typeof AI_WELCOME_ROUTE | typeof HOME_ROUTE> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const gaveUp = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), timeoutMs);
-  });
-  try {
-    const status = await Promise.race([useAiStatusStore.getState().refresh(), gaveUp]);
-    if (!shouldOpenWelcome(status, false)) return HOME_ROUTE;
-    if (await isOtherPromptAhead(otherPromptPending)) return HOME_ROUTE;
-    // Esta abertura conta como "mostrada": o Painel não abre a tela de novo logo em seguida.
-    useAiStatusStore.getState().markWelcomeShown();
-    return AI_WELCOME_ROUTE;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-export interface OpenWelcomeDeps {
-  /** O Painel ainda está em foco? (Uma aba montada mas escondida não abre tela nenhuma.) */
-  isFocused(): boolean;
-  otherPromptPending: OtherPromptPending;
-  open(): void;
-}
-
-/**
- * No Painel, a cada resposta do servidor: abre a tela de boas-vindas se a pergunta é devida, uma vez por abertura
- * do app. Não abre se outra tela automática vem antes, se o Painel perdeu o foco ou se a sessão mudou enquanto
- * isso era conferido — e nesses casos não fica marcada como mostrada, então abre na próxima volta ao Painel.
- */
-export async function openWelcomeIfDue(fresh: AiStatusResponse, deps: OpenWelcomeDeps): Promise<boolean> {
-  if (!shouldOpenWelcome(fresh, wasWelcomeShown())) return false;
-  const epoch = getSessionEpoch();
-  const ahead = await isOtherPromptAhead(deps.otherPromptPending);
-  if (ahead || getSessionEpoch() !== epoch || !deps.isFocused()) return false;
-  if (!shouldOpenWelcome(currentAiStatus(), wasWelcomeShown())) return false;
-  useAiStatusStore.getState().markWelcomeShown();
-  deps.open();
-  return true;
-}

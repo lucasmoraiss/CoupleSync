@@ -1,12 +1,12 @@
-// Issue #38: o que as telas decidem a partir de GET /ai/status. Tudo aqui é inventado (nomes de exemplo).
-import * as fs from 'fs';
-import * as path from 'path';
+// O que as telas decidem a partir de GET /ai/status. A IA vem ligada para todo grupo, sem pergunta nem aceite: só
+// `available` e `enabled` decidem. Tudo aqui é inventado (nomes de exemplo).
 import {
   AI_CONSENT_VERSION,
+  AI_GROUP_STATE_TEXT,
   AI_STATUS_NOTICE_TEXT,
   AI_STATUS_RETRY_DELAYS_MS,
-  activationSummary,
   aiDestinations,
+  aiGroupState,
   aiSettingsActions,
   aiStatusNotice,
   parseStoredAiStatus,
@@ -17,17 +17,12 @@ import {
   chatErrorMessage,
   groupBudgetText,
   isAssistantVisible,
-  leaveWelcomeIfDue,
   modelQuotaText,
-  shouldShowActivationCard,
-  shouldOpenWelcome,
   usageTotals,
-  welcomeView,
 } from '../aiStatus';
+import * as aiStatusModule from '../aiStatus';
 import { NETWORK_ERROR_MESSAGE, TIMEOUT_ERROR_MESSAGE } from '@/services/apiError';
 import type { AiStatusResponse } from '@/types/api';
-
-const date = (iso: string | null) => `[${(iso ?? '').slice(0, 10)}]`;
 
 function status(overrides: Partial<AiStatusResponse> = {}): AiStatusResponse {
   return {
@@ -48,7 +43,11 @@ function status(overrides: Partial<AiStatusResponse> = {}): AiStatusResponse {
 }
 
 const byAna = { userId: 'user-ana', name: 'Ana Exemplo', acceptedAtUtc: '2026-10-08T15:00:00Z' };
-const byBruno = { userId: 'user-bruno', name: 'Bruno Exemplo', acceptedAtUtc: '2026-10-09T15:00:00Z' };
+
+/** O que a API responde hoje para um grupo qualquer: ligada, sem aceite de ninguém, sem pergunta. */
+const ON_WITHOUT_ACCEPTANCE = status({ enabled: true, acceptedBy: [], myAcceptance: null, onboardingPending: false });
+/** O que só uma API anterior responderia: pergunta pendente. Nenhuma regra daqui olha para isso. */
+const ON_WITH_OLD_QUESTION = status({ enabled: true, onboardingPending: true });
 
 function apiError(statusCode: number, code: string, message = 'mensagem do servidor') {
   return { response: { status: statusCode, data: { code, message } } };
@@ -77,27 +76,18 @@ describe('destinos que o texto da análise com IA cita', () => {
   });
 });
 
-describe('visibilidade do Assistente e do cartão de ativar', () => {
-  it('sem status (ainda não carregou, ou a consulta falhou) nada de IA aparece no Painel', () => {
+describe('visibilidade do Assistente no Painel', () => {
+  it('sem status (ainda não carregou, ou a consulta falhou) o botão não aparece', () => {
     expect(isAssistantVisible(null)).toBe(false);
-    expect(shouldShowActivationCard(null)).toBe(false);
   });
 
-  it('com a IA indisponível no servidor o botão some e não há cartão de ativar', () => {
-    const off = status({ available: false, enabled: true });
-    expect(isAssistantVisible(off)).toBe(false);
-    expect(shouldShowActivationCard(off)).toBe(false);
+  it('com a IA indisponível no servidor o botão some', () => {
+    expect(isAssistantVisible(status({ available: false, enabled: true }))).toBe(false);
   });
 
-  it('disponível e desligada para o grupo: botão visível e cartão "Análise com IA desligada"', () => {
-    expect(isAssistantVisible(status())).toBe(true);
-    expect(shouldShowActivationCard(status())).toBe(true);
-  });
-
-  it('ativada: botão visível e sem cartão', () => {
-    const on = status({ enabled: true, acceptedBy: [byAna] });
-    expect(isAssistantVisible(on)).toBe(true);
-    expect(shouldShowActivationCard(on)).toBe(false);
+  it('com IA no servidor o botão aparece: ligada sem aceite de ninguém, e também desligada para o grupo', () => {
+    expect(isAssistantVisible(ON_WITHOUT_ACCEPTANCE)).toBe(true);
+    expect(isAssistantVisible(status({ enabled: false }))).toBe(true);
   });
 });
 
@@ -107,77 +97,53 @@ describe('o que a tela do Assistente mostra', () => {
     expect(assistantGate(null, true)).toBe('error');
   });
 
-  it('indisponível, pedir ativação ou conversa, conforme o servidor', () => {
-    expect(assistantGate(status({ available: false }), false)).toBe('unavailable');
-    expect(assistantGate(status(), false)).toBe('needs-activation');
+  it('a conversa, direto, para o grupo ligado: sem aceite de ninguém, com aceite, e mesmo com "pergunta pendente" de uma API anterior', () => {
+    expect(assistantGate(ON_WITHOUT_ACCEPTANCE, false)).toBe('ready');
     expect(assistantGate(status({ enabled: true, acceptedBy: [byAna] }), false)).toBe('ready');
+    expect(assistantGate(ON_WITH_OLD_QUESTION, false)).toBe('ready');
+  });
+
+  it('indisponível no servidor, ou desligada para o grupo', () => {
+    expect(assistantGate(status({ available: false, enabled: true }), false)).toBe('unavailable');
+    expect(assistantGate(status({ enabled: false }), false)).toBe('off-for-group');
   });
 
   it('com um valor anterior, uma falha de rede não tira a pessoa da conversa', () => {
-    expect(assistantGate(status({ enabled: true, acceptedBy: [byAna] }), true)).toBe('ready');
-  });
-
-  it('o aceite antigo guardado no aparelho não entra na decisão: só o status do servidor', () => {
-    // A função nem recebe o registro local; um grupo desligado no servidor pede ativação.
-    expect(assistantGate(status({ enabled: false }), false)).toBe('needs-activation');
+    expect(assistantGate(ON_WITHOUT_ACCEPTANCE, true)).toBe('ready');
   });
 });
 
-describe('tela de boas-vindas', () => {
-  it('abre sozinha só quando o servidor diz que a pergunta está pendente e ela ainda não foi mostrada nesta sessão', () => {
-    expect(shouldOpenWelcome(status(), false)).toBe(true);
-    expect(shouldOpenWelcome(status(), true)).toBe(false);
-    expect(shouldOpenWelcome(status({ onboardingPending: false }), false)).toBe(false);
-    expect(shouldOpenWelcome(status({ available: false }), false)).toBe(false);
-    expect(shouldOpenWelcome(null, false)).toBe(false);
-  });
-
-  it('ninguém ativou: pergunta de ativação', () => {
-    expect(welcomeView(status(), 'user-ana')).toEqual({ kind: 'ask' });
-  });
-
-  it('o parceiro já ativou: aviso com o nome de quem ativou', () => {
-    expect(welcomeView(status({ enabled: true, acceptedBy: [byBruno] }), 'user-ana')).toEqual({
-      kind: 'activated-by-other',
-      names: 'Bruno',
-    });
-  });
-
-  it('dois outros membros ativaram: os dois nomes', () => {
-    const carla = { userId: 'user-carla', name: 'Carla Exemplo', acceptedAtUtc: '2026-10-10T15:00:00Z' };
-    expect(welcomeView(status({ enabled: true, acceptedBy: [byBruno, carla] }), 'user-ana')).toEqual({
-      kind: 'activated-by-other',
-      names: 'Bruno e Carla',
-    });
-  });
-
-  it('IA indisponível: nada a mostrar (a tela volta ao Painel)', () => {
-    expect(welcomeView(status({ available: false }), 'user-ana')).toEqual({ kind: 'unavailable' });
-  });
-
-  it('a própria pessoa já ativou: nada a perguntar', () => {
-    const mine = status({ enabled: true, acceptedBy: [byAna], myAcceptance: { acceptedAtUtc: byAna.acceptedAtUtc }, onboardingPending: false });
-    expect(welcomeView(mine, 'user-ana')).toEqual({ kind: 'done' });
+describe('não há mais pergunta, boas-vindas, cartão de ativar nem "ativada por"', () => {
+  it('o módulo não exporta mais nenhuma das regras que abriam a pergunta ou dependiam de aceite', () => {
+    for (const gone of ['shouldOpenWelcome', 'welcomeView', 'leaveWelcomeIfDue', 'shouldShowActivationCard', 'activationSummary']) {
+      expect(aiStatusModule).not.toHaveProperty(gone);
+    }
   });
 });
 
 describe('estado em Configurações > Inteligência artificial', () => {
-  it('desligada', () => {
-    expect(activationSummary(status(), date)).toBe('Desligada');
+  it('ligada: basta haver IA e o grupo não ter desligado — com ou sem aceite de alguém', () => {
+    expect(aiGroupState(ON_WITHOUT_ACCEPTANCE)).toBe('on');
+    expect(aiGroupState(status({ enabled: true, acceptedBy: [byAna] }))).toBe('on');
+    expect(aiGroupState(ON_WITH_OLD_QUESTION)).toBe('on');
+    expect(AI_GROUP_STATE_TEXT.on).toBe('Ligada');
   });
 
-  it('ativada por uma pessoa, com a data', () => {
-    expect(activationSummary(status({ enabled: true, acceptedBy: [byAna] }), date)).toBe('Ativada por Ana Exemplo em [2026-10-08]');
+  it('desligada para o grupo', () => {
+    expect(aiGroupState(status({ enabled: false }))).toBe('off-for-group');
+    // Vinda de uma API anterior, com aceites de quem já saiu da conta ou "pergunta pendente": é a mesma tela.
+    expect(aiGroupState(status({ enabled: false, onboardingPending: true }))).toBe('off-for-group');
+    expect(AI_GROUP_STATE_TEXT['off-for-group']).toBe('Desligada para o grupo');
   });
 
-  it('ativada por duas pessoas', () => {
-    expect(activationSummary(status({ enabled: true, acceptedBy: [byAna, byBruno] }), date)).toBe(
-      'Ativada por Ana Exemplo em [2026-10-08] e por Bruno Exemplo em [2026-10-09]',
-    );
+  it('indisponível no servidor, esteja o grupo ligado ou não', () => {
+    expect(aiGroupState(status({ available: false, enabled: true }))).toBe('unavailable');
+    expect(aiGroupState(status({ available: false, enabled: false }))).toBe('unavailable');
+    expect(AI_GROUP_STATE_TEXT.unavailable).toBe('Indisponível no momento');
   });
 
-  it('indisponível no servidor', () => {
-    expect(activationSummary(status({ available: false }), date)).toBe('Indisponível no momento');
+  it('nenhum dos textos de estado manda ativar nem fala em aceite', () => {
+    for (const text of Object.values(AI_GROUP_STATE_TEXT)) expect(text).not.toMatch(/ativ|aceit/i);
   });
 });
 
@@ -196,11 +162,16 @@ describe('frases do Assistente por desfecho', () => {
     expect(chatErrorMessage(apiError(502, 'AI_PROVIDER_FAILED'))).toBe('A IA não respondeu agora. Tente de novo em alguns minutos.');
   });
 
-  it('IA desligada no servidor e grupo sem ativação', () => {
+  it('IA desligada no servidor, e IA desligada para o grupo', () => {
     expect(chatErrorMessage(apiError(404, 'AI_CHAT_DISABLED'))).toBe('A análise com IA não está disponível no momento.');
-    expect(chatErrorMessage(apiError(403, 'AI_CONSENT_REQUIRED'))).toBe(
-      'A análise com IA está desligada para este grupo. Ative em Configurações > Inteligência artificial.',
-    );
+    // O 403 que o servidor responde ao grupo que desligou (e que a API anterior respondia a quem não tinha aceite):
+    // sempre a frase do app, em português, qualquer que seja o texto que o servidor mandou.
+    const phrase = 'A IA está desligada para este grupo. Para voltar a usar, ligue em Configurações > Inteligência artificial.';
+    expect(chatErrorMessage(apiError(403, 'AI_CONSENT_REQUIRED'))).toBe(phrase);
+    expect(
+      chatErrorMessage(apiError(403, 'AI_CONSENT_REQUIRED', 'A análise com IA está desligada para este grupo. Ative em Configurações > Inteligência artificial.')),
+    ).toBe(phrase);
+    expect(phrase).not.toMatch(/ative|aceit/i);
   });
 
   it('limite por hora: a mensagem do servidor', () => {
@@ -295,6 +266,20 @@ describe('o último status guardado no aparelho', () => {
     expect(parseStoredAiStatus(serializeStoredAiStatus('couple-1', status()), 'couple-1')).toEqual(status());
   });
 
+  it('o formato v1 que a versão anterior do app gravou continua sendo lido, com ou sem aceite e com a pergunta pendente', () => {
+    // Texto exatamente como o app instalado deixou no aparelho (grupo desligado, pergunta pendente).
+    const leftByInstalledApp =
+      '{"v":1,"coupleId":"couple-1","status":{"available":true,"enabled":false,"consentVersion":2,"acceptedBy":[],"myAcceptance":null,' +
+      '"onboardingPending":true,"weeklyEmailEnabled":false,"emailVerified":false,"emailConfigured":false,' +
+      '"providers":[{"name":"Google (Gemini)","country":"Estados Unidos","trainsOnData":true}],' +
+      '"features":{"assistant":true,"insights":false,"education":false,"weeklyEmail":false},' +
+      '"budget":{"callsToday":0,"callLimit":25,"resetsAtLocal":"2026-10-09T00:00:00"}}}';
+    expect(parseStoredAiStatus(leftByInstalledApp, 'couple-1')).toEqual(status());
+    // E o que a API responde hoje (ligada, sem aceite de ninguém) é guardado e lido no mesmo formato.
+    expect(serializeStoredAiStatus('couple-1', ON_WITHOUT_ACCEPTANCE)).toContain('"v":1');
+    expect(parseStoredAiStatus(serializeStoredAiStatus('couple-1', ON_WITHOUT_ACCEPTANCE), 'couple-1')).toEqual(ON_WITHOUT_ACCEPTANCE);
+  });
+
   it('de outro grupo, vazio, corrompido, de outra versão ou sem a forma esperada: é como não ter nada guardado', () => {
     expect(parseStoredAiStatus(serializeStoredAiStatus('couple-1', on), 'couple-2')).toBeNull();
     expect(parseStoredAiStatus(null, 'couple-1')).toBeNull();
@@ -309,68 +294,37 @@ describe('o último status guardado no aparelho', () => {
 });
 
 describe('Configurações > Inteligência artificial: o que cada pessoa pode fazer', () => {
-  it('desligada: só ativar', () => {
-    expect(aiSettingsActions(status())).toEqual({ activate: true, turnOffForGroup: false, withdrawMine: false });
-  });
-
-  it('ativada por outra pessoa: desligar para o grupo, mas não há aceite próprio a retirar', () => {
-    expect(aiSettingsActions(status({ enabled: true, acceptedBy: [byAna] }))).toEqual({ activate: false, turnOffForGroup: true, withdrawMine: false });
-  });
-
-  it('ativada por mim: desligar para o grupo e retirar o meu aceite', () => {
+  it('ligada (com ou sem aceite de alguém): só desligar para o grupo', () => {
+    expect(aiSettingsActions(ON_WITHOUT_ACCEPTANCE)).toEqual({ turnOn: false, turnOffForGroup: true });
     expect(aiSettingsActions(status({ enabled: true, acceptedBy: [byAna], myAcceptance: { acceptedAtUtc: byAna.acceptedAtUtc } }))).toEqual({
-      activate: false,
+      turnOn: false,
       turnOffForGroup: true,
-      withdrawMine: true,
     });
   });
 
-  it('IA indisponível no servidor: nada a ativar', () => {
-    expect(aiSettingsActions(status({ available: false }))).toEqual({ activate: false, turnOffForGroup: false, withdrawMine: false });
+  it('desligada para o grupo: só ligar de novo', () => {
+    expect(aiSettingsActions(status({ enabled: false }))).toEqual({ turnOn: true, turnOffForGroup: false });
+  });
+
+  it('IA indisponível no servidor: não há o que ligar', () => {
+    expect(aiSettingsActions(status({ available: false, enabled: false }))).toEqual({ turnOn: false, turnOffForGroup: false });
+  });
+
+  it('não existe mais "retirar meu aceite" nem "ativar" que leve a uma pergunta', () => {
+    expect(Object.keys(aiSettingsActions(ON_WITHOUT_ACCEPTANCE)).sort()).toEqual(['turnOffForGroup', 'turnOn']);
   });
 });
 
-describe('extrato: quando as descrições podem ir para a IA', () => {
-  it('só com a IA disponível e o grupo ativado no servidor', () => {
-    expect(aiUploadConsent(null)).toBe(false);
-    expect(aiUploadConsent(status())).toBe(false);
-    expect(aiUploadConsent(status({ available: false, enabled: true }))).toBe(false);
+describe('extrato e Open Finance: quando o campo de IA vai ligado', () => {
+  it('sempre que há IA e o grupo não desligou — sem depender de aceite de ninguém', () => {
+    expect(aiUploadConsent(ON_WITHOUT_ACCEPTANCE)).toBe(true);
+    expect(aiUploadConsent(ON_WITH_OLD_QUESTION)).toBe(true);
     expect(aiUploadConsent(status({ enabled: true, acceptedBy: [byAna] }))).toBe(true);
   });
-});
 
-// Issue #60, item 6: a tela de boas-vindas é aba oculta e fica montada, escondida, depois da primeira visita. Quando
-// o status muda (o dono desligou toda a IA; a pessoa ativou em outro aparelho) ela não tem mais o que perguntar e
-// sai para o Painel — mas a instância escondida tirava a pessoa da tela em que ela estava.
-describe('tela de boas-vindas: sair sozinha para o Painel', () => {
-  const screen = (focused: boolean) => {
-    const leave = jest.fn();
-    return { leave, deps: { isFocused: () => focused, leave } };
-  };
-
-  it('em foco, sem nada a perguntar e sem gravação em andamento: sai', () => {
-    const s = screen(true);
-    expect(leaveWelcomeIfDue(true, false, s.deps)).toBe(true);
-    expect(s.leave).toHaveBeenCalledTimes(1);
+  it('desligado sem status, com a IA indisponível ou com o grupo desligado', () => {
+    expect(aiUploadConsent(null)).toBe(false);
+    expect(aiUploadConsent(status({ enabled: false }))).toBe(false);
+    expect(aiUploadConsent(status({ available: false, enabled: true }))).toBe(false);
   });
-
-  it('escondida (a pessoa está em outra tela): não navega, mesmo sem nada a perguntar', () => {
-    const s = screen(false);
-    expect(leaveWelcomeIfDue(true, false, s.deps)).toBe(false);
-    expect(s.leave).not.toHaveBeenCalled();
-  });
-
-  it('com a pergunta a fazer, ou gravando a resposta: fica', () => {
-    const asking = screen(true);
-    expect(leaveWelcomeIfDue(false, false, asking.deps)).toBe(false);
-    expect(asking.leave).not.toHaveBeenCalled();
-
-    const saving = screen(true);
-    expect(leaveWelcomeIfDue(true, true, saving.deps)).toBe(false);
-    expect(saving.leave).not.toHaveBeenCalled();
-  });
-
-  // A ligação com o foco de verdade (a tela montada já em foco, a escondida, a ordem dos efeitos do expo-router)
-  // está em welcomeLeave.test.ts. A premissa que estava aqui — "isFocused() de useAiStatus já é verdade na
-  // montagem" — era falsa (revisão final 1, I1).
 });

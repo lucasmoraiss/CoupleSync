@@ -138,7 +138,7 @@ export default function SettingsScreen() {
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => router.push('/(main)/settings/ai' as any)}
-            accessibilityLabel="Abrir a inteligência artificial: ativar, desligar e ver o consumo"
+            accessibilityLabel="Abrir a inteligência artificial: ligar ou desligar e ver o consumo"
             accessibilityRole="button"
           >
             <Text style={styles.menuText}>Inteligência artificial</Text>

@@ -27,10 +27,8 @@ import { EmailVerificationBanner } from '@/components/EmailVerificationBanner';
 import { AppUpdateBanner } from '@/components/AppUpdateBanner';
 import { GroupSwitcher } from '@/components/GroupSwitcher';
 import { spokenBRL } from '@/utils/a11y';
-import { aiStatusNoticeView, isAssistantVisible, shouldShowActivationCard } from '@/modules/ai/aiStatus';
-import { openWelcomeIfDue } from '@/modules/ai/aiStatusStore';
+import { aiStatusNoticeView, isAssistantVisible } from '@/modules/ai/aiStatus';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
-import { isCaptureConsentAhead } from '@/modules/integrations/notification-capture/useCaptureConsentSync';
 import { upcomingBillsCard } from '@/modules/openfinance/accounts';
 import { useOnRefocus } from '@/navigation/resetOnFocus';
 import {
@@ -165,17 +163,9 @@ export default function DashboardScreen() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Análise com IA: o status é consultado a cada vez que o Painel recebe foco. Quem ainda não respondeu à pergunta
-  // (ou não viu que o outro membro ativou) é levado à tela de boas-vindas, uma vez por abertura do app.
-  // Vale cada resposta do servidor (a do foco, a de uma nova tentativa depois de uma falha). Se o consentimento da
-  // captura vai abrir sozinho, ele vem primeiro e a pergunta da IA fica para a próxima volta ao Painel.
-  const ai = useAiStatus((fresh) => {
-    void openWelcomeIfDue(fresh, {
-      isFocused: ai.isFocused,
-      otherPromptPending: isCaptureConsentAhead,
-      open: () => router.push('/(main)/ai/welcome' as any),
-    });
-  });
+  // Análise com IA: o status é consultado a cada vez que o Painel recebe foco. A IA vem ligada para o grupo: o
+  // Painel não pergunta nada, não abre tela nenhuma por causa dela e não tem cartão de ativar.
+  const ai = useAiStatus();
   const aiStatus = ai.status;
   // Sem status nenhum (nem o guardado no aparelho): o Painel diz o que está acontecendo com a IA, em vez de
   // simplesmente não mostrar nada dela.
@@ -244,20 +234,6 @@ export default function DashboardScreen() {
         <EmailVerificationBanner />
 
         <AppUpdateBanner />
-
-        {/* Enquanto o grupo não ativou a análise com IA (os números do Painel continuam iguais). */}
-        {shouldShowActivationCard(aiStatus) && (
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.aiCard}
-            onPress={() => router.push('/(main)/ai/welcome' as any)}
-            accessibilityLabel="Análise com IA desligada. Ativar"
-          >
-            <Ionicons name="sparkles-outline" size={20} color={colors.primaryLight} />
-            <Text style={styles.aiCardText}>Análise com IA desligada</Text>
-            <Text style={styles.aiCardAction}>Ativar</Text>
-          </TouchableOpacity>
-        )}
 
         {/* O status da IA ainda não chegou e não há valor guardado: verificando, tentando de novo ou falhou. */}
         {aiNotice !== null && (

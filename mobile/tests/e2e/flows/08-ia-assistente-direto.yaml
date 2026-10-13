@@ -1,8 +1,9 @@
-# Ativar a análise com IA no primeiro uso e abrir o Assistente pelo Painel.
+# A análise com IA vem ligada para o grupo: no primeiro uso não há pergunta nem tela de ativar, e o Assistente
+# abre direto pelo Painel. (Desligar para o grupo e ligar de novo, com duas contas, é o fluxo 03.)
 # A API de teste roda com o provedor falso de IA (Ai__UseFakeProvider=true em scripts/app-e2e-api.sh): nenhuma
 # chave, nenhuma chamada a provedor de verdade, e a resposta do Assistente é sempre a mesma frase.
 appId: com.couplesync.app
-name: 08 - IA - ativar e Assistente
+name: 08 - IA - Assistente direto
 ---
 - evalScript: ${output.email = 'e2e-08-' + Date.now() + '@example.com'}
 - launchApp:
@@ -15,27 +16,23 @@ name: 08 - IA - ativar e Assistente
 - runFlow: comum/criar-grupo.yaml
 - tapOn: "Ir para o Painel"
 
-# Primeiro uso do grupo: a tela de boas-vindas da análise com IA, com as duas respostas.
-- extendedWaitUntil:
-    visible: "Quer que a IA analise as finanças do grupo\\?"
-    timeout: 60000
-- assertVisible: "Agora não ativar a análise com IA"
-- tapOn: "Ativar a análise com IA para o grupo"
-
-# Painel: sem o cartão "Análise com IA desligada" e com o botão do Assistente no cabeçalho.
+# Primeiro uso do grupo: direto no Painel, com o botão do Assistente no cabeçalho. Nenhuma pergunta sobre a IA,
+# nenhum cartão de ativar.
 - extendedWaitUntil:
     visible: "Total de gastos"
     timeout: 60000
 - extendedWaitUntil:
     visible: "Abrir o Assistente"
     timeout: 30000
+- assertNotVisible: "Quer que a IA analise as finanças do grupo\\?"
 - assertNotVisible: "Análise com IA desligada.*"
 - tapOn: "Abrir o Assistente"
 
-# O Assistente abre e responde (pelo provedor falso).
+# O Assistente abre na conversa, sem pedir para ativar nada, e responde (pelo provedor falso).
 - extendedWaitUntil:
     visible: "Pergunta para o Assistente"
     timeout: 30000
+- assertNotVisible: "A IA está desligada para este grupo"
 - tapOn: "Pergunta para o Assistente"
 - inputText: "Quanto gastamos este mes"
 - tapOn: "Enviar mensagem"

@@ -127,7 +127,6 @@ export default function MainLayout() {
       <Tabs.Screen name="settings/index" options={{ title: 'Config', tabBarLabel: 'Config', tabBarAccessibilityLabel: 'Configurações', tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="settings-outline" color={color} size={size} focused={focused} /> }} />
       {/* O Assistente não é aba: abre pelo botão do Painel. Se aparece ou não vem do servidor (GET /ai/status). */}
       <Tabs.Screen name="chat/index" options={{ title: 'Assistente', href: null }} />
-      <Tabs.Screen name="ai/welcome" options={{ href: null }} />
       <Tabs.Screen name="settings/ai" options={{ href: null }} />
       <Tabs.Screen name="settings/alerts" options={{ href: null }} />
       <Tabs.Screen name="settings/group" options={{ href: null }} />

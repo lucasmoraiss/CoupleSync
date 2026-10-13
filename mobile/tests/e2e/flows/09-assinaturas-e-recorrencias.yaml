@@ -25,8 +25,6 @@ env:
 - inputText: ${SENHA}
 - hideKeyboard
 - tapOn: "Entrar"
-# No primeiro uso do grupo o app pergunta pela análise com IA antes de mostrar o Painel.
-- runFlow: comum/responder-agora-nao-a-ia.yaml
 
 # Painel: o cartão das recorrências com o total mensal da assinatura semeada (a possível não soma: é contada ao lado).
 - extendedWaitUntil:

@@ -1,7 +1,7 @@
 # Segunda conta entra no grupo da primeira pelo código de convite (lido da tela, nunca fixo).
-# Como são duas contas no mesmo grupo, é também aqui que se vê a análise com IA entre duas pessoas: a primeira
-# ativa para o grupo; a segunda, ao entrar, é avisada de quem ativou, e em Configurações > Inteligência artificial
-# desliga para o grupo, ativa de novo e retira o próprio aceite.
+# Como são duas contas no mesmo grupo, é também aqui que se vê a análise com IA entre duas pessoas: ela já vem
+# ligada para o grupo, ninguém é perguntado nem avisado ao criar ou ao entrar; em Configurações > Inteligência
+# artificial a segunda conta desliga para o grupo, vê o Assistente dizer que está desligada, e liga de novo direto.
 appId: com.couplesync.app
 name: 03 - Entrar em grupo
 ---
@@ -22,18 +22,15 @@ name: 03 - Entrar em grupo
 - evalScript: ${output.codigo = maestro.copiedText}
 - assertTrue: ${output.codigo.length == 8}
 
-# A primeira conta ativa a análise com IA para o grupo, na pergunta do primeiro uso.
+# A primeira conta chega direto ao Painel, com a IA já ligada: sem pergunta, com o Assistente no cabeçalho.
 - tapOn: "Ir para o Painel"
-- extendedWaitUntil:
-    visible: "Quer que a IA analise as finanças do grupo\\?"
-    timeout: 60000
-- tapOn: "Ativar a análise com IA para o grupo"
 - extendedWaitUntil:
     visible: "Total de gastos"
     timeout: 60000
 - extendedWaitUntil:
     visible: "Abrir o Assistente"
     timeout: 30000
+- assertNotVisible: "Quer que a IA analise as finanças do grupo\\?"
 
 # Segunda conta, como num outro aparelho: o app é aberto do zero.
 - launchApp:
@@ -52,35 +49,32 @@ name: 03 - Entrar em grupo
 - hideKeyboard
 - tapOn: "Confirmar entrada no grupo"
 
-# Quem entra num grupo em que outra pessoa já ativou não é perguntado: é avisado de quem ativou, e pode desligar.
-- extendedWaitUntil:
-    visible: "Caio ativou a análise com IA para o grupo"
-    timeout: 60000
-- assertVisible: "Desligar a análise com IA para o grupo"
-- assertNotVisible: "Agora não ativar a análise com IA"
-- tapOn: "Entendi, manter a análise com IA ativada"
+# Quem entra num grupo também chega direto ao Painel: não é perguntado nem avisado de nada sobre a IA, que já
+# está ligada para o grupo (o Assistente está no Painel e não há cartão de ativar).
 - extendedWaitUntil:
     visible: "Total de gastos"
     timeout: 60000
-# Ativada para o grupo: o Assistente está no Painel e não há o cartão de ativar.
 - extendedWaitUntil:
     visible: "Abrir o Assistente"
     timeout: 30000
+- assertNotVisible: "Quer que a IA analise as finanças do grupo\\?"
 - assertNotVisible: "Análise com IA desligada.*"
 
-# Configurações > Inteligência artificial: quem ativou e quando; quem não aceitou não tem aceite a retirar.
+# Configurações > Inteligência artificial: o estado é "Ligada", sem ninguém ter ativado nada; não há aceite a
+# retirar nem o que ligar.
 - tapOn: "Configurações"
 - extendedWaitUntil:
     visible: "Abrir o grupo: membros e código de convite"
     timeout: 30000
 - scrollUntilVisible:
-    element: "Abrir a inteligência artificial: ativar, desligar e ver o consumo"
+    element: "Abrir a inteligência artificial: ligar ou desligar e ver o consumo"
     direction: DOWN
     timeout: 20000
-- tapOn: "Abrir a inteligência artificial: ativar, desligar e ver o consumo"
+- tapOn: "Abrir a inteligência artificial: ligar ou desligar e ver o consumo"
 - extendedWaitUntil:
-    visible: "Ativada por Caio Teste em .*"
+    visible: "Ligada"
     timeout: 30000
+- assertNotVisible: "Ligar de novo a análise com IA para o grupo"
 - assertNotVisible: "Retirar o meu aceite da análise com IA"
 
 # Qualquer membro desliga para o grupo (com confirmação).
@@ -90,37 +84,34 @@ name: 03 - Entrar em grupo
     timeout: 15000
 - tapOn: "Desligar"
 - extendedWaitUntil:
-    visible: "Desligada"
+    visible: "Desligada para o grupo"
     timeout: 30000
 - assertNotVisible: "Desligar a análise com IA para o grupo"
+- assertVisible: "Ligar de novo a análise com IA para o grupo"
 
-# Ativar de novo passa pelo texto e pela pergunta; agora o aceite é da segunda conta.
-- tapOn: "Ativar a análise com IA: ver o que é enviado e decidir"
-- extendedWaitUntil:
-    visible: "Quer que a IA analise as finanças do grupo\\?"
-    timeout: 30000
-- tapOn: "Ativar a análise com IA para o grupo"
+# Com a IA desligada para o grupo, o Assistente continua no Painel e diz que está desligada, com o caminho de
+# volta para Configurações > Inteligência artificial.
+- tapOn: "Painel"
 - extendedWaitUntil:
     visible: "Total de gastos"
-    timeout: 60000
-- tapOn: "Configurações"
-- extendedWaitUntil:
-    visible: "Abrir o grupo: membros e código de convite"
     timeout: 30000
-- scrollUntilVisible:
-    element: "Abrir a inteligência artificial: ativar, desligar e ver o consumo"
-    direction: DOWN
-    timeout: 20000
-- tapOn: "Abrir a inteligência artificial: ativar, desligar e ver o consumo"
+- tapOn: "Abrir o Assistente"
 - extendedWaitUntil:
-    visible: "Ativada por Davi Teste em .*"
+    visible: "A IA está desligada para este grupo"
     timeout: 30000
+- assertNotVisible: "Pergunta para o Assistente"
+- tapOn: "Abrir as configurações de inteligência artificial para ligar de novo"
 
-# Retirar o próprio aceite: era o único, então a análise desliga para o grupo.
-- tapOn: "Retirar o meu aceite da análise com IA"
+# Ligar de novo é direto: um toque, sem texto a aceitar nem tela de pergunta.
 - extendedWaitUntil:
-    visible: "Desligada"
+    visible: "Desligada para o grupo"
     timeout: 30000
+- tapOn: "Ligar de novo a análise com IA para o grupo"
+- extendedWaitUntil:
+    visible: "Ligada"
+    timeout: 30000
+- assertNotVisible: "Quer que a IA analise as finanças do grupo\\?"
+- assertVisible: "Desligar a análise com IA para o grupo"
 - assertNotVisible: "Tentar novamente"
 - tapOn: "Voltar para as configurações"
 
@@ -145,12 +136,13 @@ name: 03 - Entrar em grupo
 - assertVisible: "Davi Teste \\(você\\)"
 - assertNotVisible: "Tentar novamente"
 
-# De volta ao Painel: com a análise desligada, o cartão de ativar está lá, e o Assistente continua à mão.
+# De volta ao Painel: com a IA ligada de novo, o Assistente está lá e abre na conversa.
 - tapOn: "Painel"
 - extendedWaitUntil:
     visible: "Total de gastos"
     timeout: 30000
+- assertNotVisible: "Análise com IA desligada.*"
+- tapOn: "Abrir o Assistente"
 - extendedWaitUntil:
-    visible: "Análise com IA desligada. Ativar"
+    visible: "Pergunta para o Assistente"
     timeout: 30000
-- assertVisible: "Abrir o Assistente"
