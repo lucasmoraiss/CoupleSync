@@ -1354,8 +1354,10 @@ public sealed class OpenFinanceIntegrationTests
         Assert.Equal("application/json; charset=utf-8", auth.Headers["Content-Type"]);
     }
 
+    // Issue #77: was "..._AndAnswersPluggyUnavailable". A redirect is an answer of Pluggy (one the app does not
+    // follow), not Pluggy failing to answer: it is said as a refusal.
     [Fact]
-    public async Task ARedirectFromPluggy_IsNotFollowed_AndAnswersPluggyUnavailable()
+    public async Task ARedirectFromPluggy_IsNotFollowed_AndAnswersPluggyRefused()
     {
         await using var pluggy = new RedirectingPluggyServer();
         await using var factory = new OpenFinanceApiFactory { LoopbackPluggyAddress = pluggy.Address };
@@ -1364,8 +1366,8 @@ public sealed class OpenFinanceIntegrationTests
 
         var response = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
 
-        await AssertErrorAsync(response, HttpStatusCode.BadGateway, "PLUGGY_UNAVAILABLE",
-            "O Pluggy não respondeu agora. Tente de novo em alguns minutos.");
+        await AssertErrorAsync(response, HttpStatusCode.BadGateway, "PLUGGY_REFUSED",
+            "O Pluggy recusou o pedido do CoupleSync. Tentar de novo não adianta: o problema precisa de uma correção no aplicativo.");
         Assert.Contains($"GET /items/{FakePluggyServer.ItemWithAccounts}", pluggy.Requests); // the 302 was really answered
         Assert.DoesNotContain(pluggy.Requests, request => request.Contains(RedirectingPluggyServer.ElsewherePath, StringComparison.Ordinal));
         Assert.Empty(pluggy.KeysSentElsewhere); // the API key went nowhere else

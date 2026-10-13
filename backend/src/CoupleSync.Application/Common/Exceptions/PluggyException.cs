@@ -8,6 +8,9 @@ public static class PluggyErrorCodes
     public const string ItemNeedsAction = "PLUGGY_ITEM_NEEDS_ACTION";
     public const string Unavailable = "PLUGGY_UNAVAILABLE";
     public const string RateLimited = "PLUGGY_RATE_LIMITED";
+
+    /// <summary>Pluggy answered, and refused the request itself (a 4xx or 3xx nothing else explains): asking again changes nothing.</summary>
+    public const string Refused = "PLUGGY_REFUSED";
 }
 
 /// <summary>
@@ -16,10 +19,25 @@ public static class PluggyErrorCodes
 /// </summary>
 public sealed class PluggyException : AppException
 {
-    public PluggyException(string code)
+    public PluggyException(string code, string? callKind = null, int? httpStatus = null, string? pluggyCode = null)
         : base(code, MessageFor(code), StatusFor(code))
     {
+        CallKind = callKind;
+        HttpStatus = httpStatus;
+        PluggyCode = pluggyCode;
     }
+
+    /// <summary>Which call failed ("auth", "item", "accounts", "transactions", "bills", "item-update"), when a call did.</summary>
+    public string? CallKind { get; }
+
+    /// <summary>The HTTP status Pluggy answered with; null when there was no answer (network, timeout).</summary>
+    public int? HttpStatus { get; }
+
+    /// <summary>
+    /// <c>code</c> and <c>codeDescription</c> of Pluggy's error body ("410/ENDPOINT_DEPRECATED"), cut and cleaned: for
+    /// the log and the diary of the run, never a text of Pluggy shown as it came.
+    /// </summary>
+    public string? PluggyCode { get; }
 
     public static string MessageFor(string code) => code switch
     {
@@ -33,6 +51,8 @@ public sealed class PluggyException : AppException
             "O Pluggy limitou as consultas por enquanto. Aguarde alguns minutos e tente de novo.",
         PluggyErrorCodes.Unavailable =>
             "O Pluggy não respondeu agora. Tente de novo em alguns minutos.",
+        PluggyErrorCodes.Refused =>
+            "O Pluggy recusou o pedido do CoupleSync. Tentar de novo não adianta: o problema precisa de uma correção no aplicativo.",
         _ => throw new ArgumentOutOfRangeException(nameof(code), code, "Unknown Pluggy error code."),
     };
 

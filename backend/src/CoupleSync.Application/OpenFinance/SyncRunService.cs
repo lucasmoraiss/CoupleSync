@@ -19,8 +19,20 @@ public sealed class SyncRunService
     public const string AlreadyRunningMessage =
         "Já há uma sincronização em andamento para esta conexão. Aguarde ela terminar.";
 
-    /// <summary>One run per connection in this interval, whoever asked and however it ended.</summary>
+    /// <summary>
+    /// One run per connection in this interval, counted from a run that ended well (whoever asked for it). After a
+    /// run that failed it only holds the silent request of the app being opened: nobody is waiting for that one, and
+    /// it would be made again at every opening.
+    /// </summary>
     public static readonly TimeSpan MinInterval = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// After a run that failed, who connected may ask again this long after that run was asked for: at most one
+    /// attempt per connection in this interval. Not zero: a button pressed over and over (or a client in a loop)
+    /// would otherwise put one run after the other in the queue, each one calling Pluggy again. A run that failed
+    /// after a long time (interrupted, timed out) holds nothing: its message tells the person to synchronise again.
+    /// </summary>
+    public static readonly TimeSpan RetryAfterFailureInterval = TimeSpan.FromSeconds(30);
 
     /// <summary>The hour (Brasília) from which the scheduler enqueues the runs of the day.</summary>
     public const int DailyHour = 6;
@@ -80,8 +92,18 @@ public sealed class SyncRunService
         // One still waiting or running (whenever it was asked for): there is no hour to promise, only to wait for it.
         if (latest is { IsOpen: true })
             throw AlreadyRunning();
-        if (latest is not null && now - latest.CreatedAtUtc < MinInterval)
+        if (latest is { Status: SyncRunStatus.Failed })
+        {
+            // Nothing was synchronised: the ten minutes do not start. Only a short pause for who asks, and the usual
+            // interval for the request nobody made.
+            var pause = appOpen ? MinInterval : RetryAfterFailureInterval;
+            if (now - latest.CreatedAtUtc < pause)
+                throw FailedJustNow(latest.CreatedAtUtc + pause, silent: appOpen);
+        }
+        else if (latest is not null && now - latest.CreatedAtUtc < MinInterval)
+        {
             throw TooSoon(latest.CreatedAtUtc + MinInterval);
+        }
 
         if (historyMonths is { } chosen)
             connection.SetHistoryMonths(chosen, now);
@@ -167,13 +189,30 @@ public sealed class SyncRunService
 
     private static AppException AlreadyRunning() => new ConflictException(AlreadyRunningCode, AlreadyRunningMessage);
 
+    /// <summary>The last run ended well less than <see cref="MinInterval"/> ago.</summary>
     private static AppException TooSoon(DateTime nextAtUtc)
+        => TooSoon(
+            nextAtUtc,
+            local => $"Esta conexão foi sincronizada há pouco. A próxima sincronização pode ser pedida às {local} (horário de Brasília).");
+
+    /// <summary>
+    /// The last run failed a moment ago. The same code (the app already knows it), with a text that is true here:
+    /// nothing was synchronised.
+    /// </summary>
+    private static AppException FailedJustNow(DateTime nextAtUtc, bool silent)
+        => TooSoon(
+            nextAtUtc,
+            local => silent
+                ? $"A última tentativa de sincronizar esta conexão falhou há pouco. A sincronização automática volta a ser pedida a partir das {local} (horário de Brasília)."
+                : "A última tentativa de sincronizar esta conexão acabou de falhar. Aguarde alguns segundos e tente de novo.");
+
+    private static AppException TooSoon(DateTime nextAtUtc, Func<string, string> message)
     {
         var next = DateTime.SpecifyKind(nextAtUtc, DateTimeKind.Utc);
         var local = BrazilTime.ToLocal(next).ToString("HH:mm", CultureInfo.InvariantCulture);
         return new AppException(
             TooSoonCode,
-            $"Esta conexão foi sincronizada há pouco. A próxima sincronização pode ser pedida às {local} (horário de Brasília).",
+            message(local),
             409,
             new Dictionary<string, string[]>
             {

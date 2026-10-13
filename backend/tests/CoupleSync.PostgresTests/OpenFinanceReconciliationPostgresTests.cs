@@ -445,7 +445,7 @@ public sealed class OpenFinanceReconciliationPostgresTests
         pluggy.BeforeAnswer = request =>
         {
             // Bruno's run has the transactions of the account: its next save would ignore both legs.
-            if (request.Path == "/transactions" && request.Query.Contains(OtherChecking, StringComparison.Ordinal)
+            if (request.Path == FakePluggyServer.TransactionsPath && request.Query.Contains(OtherChecking, StringComparison.Ordinal)
                 && Interlocked.Exchange(ref once, 1) == 0)
             {
                 saves.BeforeNextSave = () => database.ExecuteAsync(
@@ -495,7 +495,7 @@ public sealed class OpenFinanceReconciliationPostgresTests
         pluggy.BeforeAnswer = request =>
         {
             // The run has the transactions of the account: right before it saves what it decided, Ana discards a leg.
-            if (request.Path == "/transactions" && request.Query.Contains(OtherChecking, StringComparison.Ordinal)
+            if (request.Path == FakePluggyServer.TransactionsPath && request.Query.Contains(OtherChecking, StringComparison.Ordinal)
                 && Interlocked.Exchange(ref once, 1) == 0)
             {
                 saves.BeforeNextSave = async () =>

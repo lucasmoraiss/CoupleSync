@@ -107,7 +107,16 @@ internal sealed class FakePluggyServer : HttpMessageHandler
         ];
     }
 
-    /// <summary>GET /transactions answers from here, by account id (replace or change to test other shapes).</summary>
+    /// <summary>The route of the transactions: the listing by cursor. The old one (<see cref="LegacyTransactionsPath"/>) answers 410.</summary>
+    public const string TransactionsPath = "/v2/transactions";
+
+    /// <summary>GET /transactions, paged by number: discontinued by Pluggy. Always 410 here, with the body Pluggy gives.</summary>
+    public const string LegacyTransactionsPath = "/transactions";
+
+    public const string LegacyTransactionsGoneBody =
+        """{"code":410,"codeDescription":"ENDPOINT_DEPRECATED","message":"This endpoint is deprecated. Use GET /v2/transactions with cursor pagination instead.","errorId":"00000000-fake-4000-8000-errorid00001"}""";
+
+    /// <summary>GET /v2/transactions answers from here, by account id (replace or change to test other shapes).</summary>
     public Dictionary<string, List<FakeTransaction>> Transactions { get; } = new(StringComparer.Ordinal);
 
     /// <summary>GET /bills answers from here, by account id (the card of the fixture has none until a test says so).</summary>
@@ -119,14 +128,41 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     /// <summary>When set, GET /bills answers this body whatever the account (to test shapes the fixture does not build).</summary>
     public string? BillsBody { get; set; }
 
-    /// <summary>The server never gives more than this per page, whatever the page size asked (to test the paging).</summary>
+    /// <summary>
+    /// The server never gives more than this per page (to test the paging): the fixed page of GET /v2/transactions,
+    /// and the most GET /bills gives whatever the page size asked.
+    /// </summary>
     public int MaxPageSize { get; set; } = 500;
 
-    /// <summary>When set, the answer of GET /transactions has no "totalPages" (the client must notice the last page itself).</summary>
+    /// <summary>When set, the answer of GET /bills has no "totalPages" (the client must notice the last page itself).</summary>
     public bool OmitTotalPages { get; set; }
 
-    /// <summary>When set, GET /transactions answers this status.</summary>
+    /// <summary>When set, GET /v2/transactions answers this status.</summary>
     public HttpStatusCode? TransactionsStatus { get; set; }
+
+    /// <summary>The body that goes with <see cref="TransactionsStatus"/>.</summary>
+    public string TransactionsErrorBody { get; set; } = """{"code":0,"message":"forced"}""";
+
+    /// <summary>How "next" points at the following page of GET /v2/transactions. The documented one is the default.</summary>
+    public FakeNextShape NextShape { get; set; } = FakeNextShape.QueryString;
+
+    /// <summary>When set, "next" of every page is this JSON, as written (to test what the client cannot read).</summary>
+    public string? RawNextJson { get; set; }
+
+    /// <summary>When set, the answer of GET /v2/transactions has no "next" at all.</summary>
+    public bool OmitNext { get; set; }
+
+    /// <summary>When set, every page reached with a cursor points back at that same cursor (a listing that goes in circles).</summary>
+    public bool RepeatCursor { get; set; }
+
+    /// <summary>When set, there is always a next page, each with a cursor never seen (a listing that never ends).</summary>
+    public bool NeverEnds { get; set; }
+
+    /// <summary>
+    /// When set, "dateTo" is compared as the instant 00:00 UTC of that day instead of the whole day (the other way the
+    /// documentation can be read): what happened during the last day asked is not listed.
+    /// </summary>
+    public bool DateToIsAnInstant { get; set; }
 
     /// <summary>When set, PATCH /items/{id} answers this status.</summary>
     public HttpStatusCode? ItemUpdateStatus { get; set; }
@@ -137,16 +173,16 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     /// <summary>Name of the bank GET /items/{id} gives for an item, instead of the one of the fixture.</summary>
     public Dictionary<string, string> ConnectorNameOverride { get; } = new(StringComparer.Ordinal);
 
-    /// <summary>The (from, to) of every GET /transactions of an account, in order.</summary>
+    /// <summary>The (dateFrom, dateTo) of every listing of the transactions of an account (its first page), in order.</summary>
     public List<(string From, string To)> WindowsAsked(string accountId)
     {
         lock (_gate)
         {
             return Requests
-                .Where(r => r.Method == "GET" && r.Path == "/transactions")
+                .Where(r => r.Method == "GET" && r.Path == TransactionsPath)
                 .Select(r => HttpUtility.ParseQueryString(r.Query))
-                .Where(q => q["accountId"] == accountId && (q["page"] ?? "1") == "1")
-                .Select(q => (q["from"] ?? string.Empty, q["to"] ?? string.Empty))
+                .Where(q => q["accountId"] == accountId && q["after"] is null)
+                .Select(q => (q["dateFrom"] ?? string.Empty, q["dateTo"] ?? string.Empty))
                 .ToList();
         }
     }
@@ -240,10 +276,13 @@ internal sealed class FakePluggyServer : HttpMessageHandler
                 : Json(HttpStatusCode.NotFound, """{"code":404,"message":"item not found"}""");
         }
 
-        if (request.Method == HttpMethod.Get && path == "/transactions")
+        if (request.Method == HttpMethod.Get && path == LegacyTransactionsPath)
+            return Json(HttpStatusCode.Gone, LegacyTransactionsGoneBody);
+
+        if (request.Method == HttpMethod.Get && path == TransactionsPath)
         {
-            if (TransactionsStatus is { } transactionsStatus) return Json(transactionsStatus, """{"code":0,"message":"forced"}""");
-            return Json(HttpStatusCode.OK, TransactionsPage(HttpUtility.ParseQueryString(request.RequestUri.Query)));
+            if (TransactionsStatus is { } transactionsStatus) return Json(transactionsStatus, TransactionsErrorBody);
+            return TransactionsPage(HttpUtility.ParseQueryString(request.RequestUri.Query));
         }
 
         if (request.Method == HttpMethod.Get && path == "/bills")
@@ -284,26 +323,81 @@ internal sealed class FakePluggyServer : HttpMessageHandler
         return Json(HttpStatusCode.NotFound, """{"code":404,"message":"route not found"}""");
     }
 
-    /// <summary>What Pluggy does with ?accountId=&amp;from=&amp;to=&amp;page=&amp;pageSize=: the days are inclusive, in UTC.</summary>
-    private string TransactionsPage(System.Collections.Specialized.NameValueCollection query)
+    private static readonly string[] TransactionsParameters = ["accountId", "dateFrom", "dateTo", "createdAtFrom", "ids", "after"];
+
+    private const string CursorPrefix = "cur+/";
+    private const string CursorSuffix = "==";
+
+    /// <summary>
+    /// A cursor in the alphabet of Base64 ("+", "/" and "="): it only comes back whole when the client escapes it in
+    /// the address.
+    /// </summary>
+    public static string CursorOf(int offset) => CursorPrefix + offset.ToString(CultureInfo.InvariantCulture) + CursorSuffix;
+
+    private static int? OffsetOf(string cursor)
+        => cursor.StartsWith(CursorPrefix, StringComparison.Ordinal) && cursor.EndsWith(CursorSuffix, StringComparison.Ordinal)
+           && int.TryParse(cursor[CursorPrefix.Length..^CursorSuffix.Length], NumberStyles.None, CultureInfo.InvariantCulture, out var offset)
+            ? offset
+            : null;
+
+    /// <summary>
+    /// What Pluggy does with GET /v2/transactions?accountId=&amp;dateFrom=&amp;dateTo=&amp;after=: both days inclusive (UTC), a
+    /// fixed page, "next" pointing at the following page (null at the end), and 400 for any parameter it does not
+    /// know (page, pageSize, from, to...) or a cursor it did not give.
+    /// </summary>
+    private HttpResponseMessage TransactionsPage(System.Collections.Specialized.NameValueCollection query)
     {
+        var keys = query.AllKeys;
+        if (keys.Any(key => key is null || !TransactionsParameters.Contains(key, StringComparer.Ordinal))
+            || keys.Any(key => query.GetValues(key)!.Length != 1))
+        {
+            return Json(HttpStatusCode.BadRequest, """{"code":400,"codeDescription":"INVALID_QUERY_PARAMETERS","message":"Unknown or repeated query parameter (fake)."}""");
+        }
+
+        var accountId = query["accountId"] ?? string.Empty;
         List<FakeTransaction> all;
         lock (_gate)
         {
-            all = Transactions.TryGetValue(query["accountId"] ?? string.Empty, out var stored) ? stored.ToList() : [];
+            all = Transactions.TryGetValue(accountId, out var stored) ? stored.ToList() : [];
         }
 
-        if (DateTime.TryParseExact(query["from"], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var from))
+        if (DateTime.TryParseExact(query["dateFrom"], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var from))
             all = all.Where(t => t.Date.Date >= from.Date).ToList();
-        if (DateTime.TryParseExact(query["to"], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var to))
-            all = all.Where(t => t.Date.Date <= to.Date).ToList();
+        if (DateTime.TryParseExact(query["dateTo"], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var to))
+            all = all.Where(t => DateToIsAnInstant ? t.Date <= to.Date : t.Date.Date <= to.Date).ToList();
+        var offset = 0;
+        var after = query["after"];
+        if (after is not null)
+        {
+            if (OffsetOf(after) is not { } asked)
+                return Json(HttpStatusCode.BadRequest, """{"code":400,"codeDescription":"INVALID_CURSOR","message":"Invalid cursor (fake)."}""");
+            offset = asked;
+        }
 
-        var pageSize = Math.Min(int.TryParse(query["pageSize"], NumberStyles.None, CultureInfo.InvariantCulture, out var asked) ? asked : 500, MaxPageSize);
-        var page = int.TryParse(query["page"], NumberStyles.None, CultureInfo.InvariantCulture, out var number) ? number : 1;
-        var totalPages = (int)Math.Ceiling(all.Count / (double)pageSize);
-        var results = string.Join(",", all.Skip((page - 1) * pageSize).Take(pageSize).Select(t => t.ToJson(query["accountId"]!)));
-        var paging = OmitTotalPages ? string.Empty : $"\"totalPages\": {totalPages.ToString(CultureInfo.InvariantCulture)}, ";
-        return $"{{ \"total\": {all.Count.ToString(CultureInfo.InvariantCulture)}, {paging}\"page\": {page.ToString(CultureInfo.InvariantCulture)}, \"results\": [{results}] }}";
+        var results = string.Join(",", all.Skip(offset).Take(MaxPageSize).Select(t => t.ToJson(accountId)));
+        var following = offset + MaxPageSize;
+        string? cursor = null;
+        if (RepeatCursor && after is not null) cursor = after;
+        else if (following < all.Count || NeverEnds) cursor = CursorOf(following);
+
+        string next;
+        if (OmitNext) next = string.Empty;
+        else if (RawNextJson is { } raw) next = ", \"next\": " + raw;
+        else next = ", \"next\": " + (cursor is null ? "null" : JsonSerializer.Serialize(NextText(accountId, cursor)));
+        return Json(HttpStatusCode.OK, "{ \"results\": [" + results + "]" + next + " }");
+    }
+
+    private string NextText(string accountId, string cursor)
+    {
+        var escaped = Uri.EscapeDataString(cursor);
+        return NextShape switch
+        {
+            FakeNextShape.BareCursor => cursor,
+            FakeNextShape.QueryStringWithoutQuestionMark => $"after={escaped}&accountId={accountId}",
+            FakeNextShape.AbsoluteUrl => $"{BaseUrl}{TransactionsPath}?accountId={accountId}&after={escaped}",
+            FakeNextShape.RelativeUrl => $"{TransactionsPath}?after={escaped}&accountId={accountId}",
+            _ => $"?accountId={accountId}&after={escaped}",
+        };
     }
 
     /// <summary>What Pluggy does with GET /bills?accountId=&amp;page=&amp;pageSize=: the same paging of the other listings.</summary>
@@ -412,8 +506,27 @@ internal sealed class FakePluggyServer : HttpMessageHandler
 
 internal sealed record RecordedRequest(string Method, string Path, string Query, string? ApiKey, string? Body);
 
+/// <summary>The forms "next" of GET /v2/transactions was seen in: the documentation, the SDKs and other integrations.</summary>
+internal enum FakeNextShape
+{
+    /// <summary>The documented one: the query string of the next page, ready to append ("?accountId=...&amp;after=...").</summary>
+    QueryString,
+
+    /// <summary>The same without the question mark ("after=...&amp;accountId=...").</summary>
+    QueryStringWithoutQuestionMark,
+
+    /// <summary>Only the cursor.</summary>
+    BareCursor,
+
+    /// <summary>The whole address of the next page.</summary>
+    AbsoluteUrl,
+
+    /// <summary>The address of the next page without the host.</summary>
+    RelativeUrl,
+}
+
 /// <summary>
-/// One transaction as GET /transactions lists it (the fields of the Pluggy documentation). A negative amount is money
+/// One transaction as GET /v2/transactions lists it (the fields of the Pluggy documentation). A negative amount is money
 /// leaving a bank account; on a credit card a purchase is positive, with type DEBIT.
 /// </summary>
 internal sealed record FakeTransaction(string Id, DateTime Date, decimal Amount)

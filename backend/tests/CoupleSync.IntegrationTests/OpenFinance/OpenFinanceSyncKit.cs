@@ -88,8 +88,8 @@ internal static class OpenFinanceSyncKit
 
     /// <summary>Enqueues a run and waits for the hosted job to finish it.</summary>
     public static async Task<Dictionary<string, object?>> SyncAsync(
-        OpenFinanceApiFactory factory, Member member, Guid connectionId, bool force = false, bool aiConsent = false)
-        => await WaitForRunAsync(factory, await EnqueueAsync(factory, member, connectionId, force, aiConsent));
+        OpenFinanceApiFactory factory, Member member, Guid connectionId, bool force = false, bool aiConsent = false, int seconds = 30)
+        => await WaitForRunAsync(factory, await EnqueueAsync(factory, member, connectionId, force, aiConsent), seconds);
 
     public static Task<List<Dictionary<string, object?>>> MirrorAsync(OpenFinanceApiFactory factory)
         => factory.RowsAsync("SELECT * FROM bank_transactions ORDER BY pluggy_transaction_id");

@@ -463,7 +463,7 @@ public sealed class OpenFinanceSyncPostgresTests
         // its transaction) when someone reviews one of them: confirms the restaurant, discards the one that fell.
         pluggy.BeforeAnswer = request =>
         {
-            if (request.Path != "/transactions") return Task.CompletedTask;
+            if (request.Path != FakePluggyServer.TransactionsPath) return Task.CompletedTask;
             if (request.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal))
             {
                 saves.BeforeNextSave = async () =>
@@ -509,7 +509,7 @@ public sealed class OpenFinanceSyncPostgresTests
         var connectionId = await ConnectWithBankAsync(ana);
         // Pluggy takes its time: the first run is still running while the others are asked for.
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        pluggy.BeforeAnswer = request => request.Path == "/transactions" ? release.Task : Task.CompletedTask;
+        pluggy.BeforeAnswer = request => request.Path == FakePluggyServer.TransactionsPath ? release.Task : Task.CompletedTask;
 
         var answers = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => ana.Client.PostAsync($"{Base}/connections/{connectionId}/sync", null)));
         release.SetResult();
@@ -580,7 +580,7 @@ public sealed class OpenFinanceSyncPostgresTests
         var seen = 0;
         pluggy.BeforeAnswer = async request =>
         {
-            if (request.Path != "/transactions" || Interlocked.Increment(ref seen) != 2) return;
+            if (request.Path != FakePluggyServer.TransactionsPath || Interlocked.Increment(ref seen) != 2) return;
             reached.SetResult();
             await release.Task;
         };
@@ -618,7 +618,7 @@ public sealed class OpenFinanceSyncPostgresTests
         var once = 0;
         pluggy.BeforeAnswer = async request =>
         {
-            if (request.Path != "/transactions" || Interlocked.Exchange(ref once, 1) == 1) return;
+            if (request.Path != FakePluggyServer.TransactionsPath || Interlocked.Exchange(ref once, 1) == 1) return;
             Assert.Equal(HttpStatusCode.NoContent, (await ana.Client.DeleteAsync($"{Base}/connections/{connectionId}")).StatusCode);
         };
 
@@ -708,7 +708,7 @@ public sealed class OpenFinanceSyncPostgresTests
         var once = 0;
         pluggy.BeforeAnswer = request =>
         {
-            if (request.Path == "/transactions"
+            if (request.Path == FakePluggyServer.TransactionsPath
                 && request.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal)
                 && Interlocked.Exchange(ref once, 1) == 0)
             {
@@ -854,6 +854,46 @@ public sealed class OpenFinanceSyncPostgresTests
         Assert.Equal("Discarded", left[FakePluggyServer.RestaurantTransactionId]);
         Assert.Equal(4, left.Count);
         Assert.Equal(Text(lastDayOfCard.AddDays(-7)), pluggy.WindowsAsked(FakePluggyServer.CreditCardAccountId)[1].From);
+    }
+
+    [PostgresFact]
+    public async Task AListingByCursorThatStoppedBeforeTheEnd_RemovesNothing_AndTheWholeOneOverSeveralPagesStillDoes()
+    {
+        // Issue #77, on PostgreSQL: the run reads GET /v2/transactions page by page, and what is missing from a listing
+        // that did not come whole proves nothing.
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer { MaxPageSize = 2 };
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+        Assert.Equal(2, pluggy.Requests.Count(r => r.Path == FakePluggyServer.TransactionsPath && r.Query.Contains(FakePluggyServer.CheckingAccountId, StringComparison.Ordinal)));
+        Assert.Equal(0, pluggy.Count("GET", FakePluggyServer.LegacyTransactionsPath));
+
+        // The pending purchase of the card is not listed any more, and "next" cannot be read: the listing is not whole.
+        pluggy.Transactions[FakePluggyServer.CreditCardAccountId].RemoveAll(t => t.Id == FakePluggyServer.CardPendingTransactionId);
+        pluggy.RawNextJson = "12345";
+        var partial = await InsertRunAsync(database, ana, connectionId, "Pending");
+        Assert.Equal("Done", (await WaitAsync(ana, partial)).GetProperty("status").GetString());
+        Assert.Equal(
+            1,
+            await database.ScalarAsync<long>(
+                "SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.CardPendingTransactionId)));
+        Assert.Equal(5, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+
+        // Whole again, one transaction per page: now the absence counts, and nothing was doubled on the way.
+        pluggy.RawNextJson = null;
+        pluggy.MaxPageSize = 1;
+        var whole = await InsertRunAsync(database, ana, connectionId, "Pending");
+        Assert.Equal("Done", (await WaitAsync(ana, whole)).GetProperty("status").GetString());
+        Assert.Equal(
+            0,
+            await database.ScalarAsync<long>(
+                "SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = @id", ("id", FakePluggyServer.CardPendingTransactionId)));
+        Assert.Equal(4, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+        Assert.Equal(4, await database.ScalarAsync<long>("SELECT count(DISTINCT pluggy_transaction_id) FROM bank_transactions"));
     }
 
     // ---------------------------------------------------------------- support

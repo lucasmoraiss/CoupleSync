@@ -1,10 +1,12 @@
 using System.Globalization;
 using System.Net;
+using System.Web;
 using CoupleSync.Application.Common.Exceptions;
 using CoupleSync.Application.Common.Interfaces;
 using CoupleSync.Infrastructure.Integrations.Pluggy;
 using CoupleSync.TestSupport;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -26,11 +28,19 @@ public sealed class PluggyHttpClientTests
         _cache = new MemoryCache(new MemoryCacheOptions { Clock = _clock });
     }
 
+    private readonly ListLogger _log = new();
+
     private PluggyHttpClient Client(string baseUrl = FakePluggyServer.BaseUrl) => new(
         new SingleHandlerFactory(_pluggy),
         _cache,
         Options.Create(new OpenFinanceOptions { PluggyBaseUrl = baseUrl }),
-        NullLogger<PluggyHttpClient>.Instance);
+        _log);
+
+    private PluggyHttpClient ClientOf(HttpMessageHandler handler) => new(
+        new SingleHandlerFactory(handler),
+        _cache,
+        Options.Create(new OpenFinanceOptions { PluggyBaseUrl = FakePluggyServer.BaseUrl }),
+        _log);
 
     private const string StoredSecret = "fake-encrypted-secret-as-stored-1";
 
@@ -479,14 +489,17 @@ public sealed class PluggyHttpClientTests
     [Fact]
     public async Task GetTransactions_AsksForTheAccountAndTheDays_AndReadsEveryField()
     {
-        var transactions = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+        var listing = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+        var transactions = listing.Transactions;
 
+        // Issue #77: the listing by cursor, with the names of its parameters and nothing it refuses.
         var request = _pluggy.Requests.Last();
-        Assert.Equal(("GET", "/transactions"), (request.Method, request.Path));
+        Assert.Equal(("GET", "/v2/transactions"), (request.Method, request.Path));
         Assert.Equal(
-            $"?accountId={FakePluggyServer.CheckingAccountId}&from={From:yyyy-MM-dd}&to={To:yyyy-MM-dd}&pageSize=500&page=1",
+            $"?accountId={FakePluggyServer.CheckingAccountId}&dateFrom={From:yyyy-MM-dd}&dateTo={To:yyyy-MM-dd}",
             request.Query);
         Assert.Equal("fake-api-key-1", request.ApiKey);
+        Assert.True(listing.Complete);
 
         Assert.Equal(3, transactions.Count);
         var restaurant = transactions.Single(t => t.Id == FakePluggyServer.RestaurantTransactionId);
@@ -521,7 +534,7 @@ public sealed class PluggyHttpClientTests
             new FakeTransaction("t26-no-payment-data", today.AddDays(-1), 320.00m) { Type = "CREDIT" },
         ];
 
-        var transactions = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+        var transactions = (await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None)).Transactions;
 
         var withPayer = transactions.Single(t => t.Id == "t26-with-payer");
         Assert.Equal("BRUNO EXEMPLO SILVA", withPayer.PayerName);
@@ -534,7 +547,7 @@ public sealed class PluggyHttpClientTests
     [Fact]
     public async Task GetTransactions_OfACreditCard_ReadsInstallmentsBillAndPendingStatus()
     {
-        var transactions = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CreditCardAccountId, From, To, CancellationToken.None);
+        var transactions = (await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CreditCardAccountId, From, To, CancellationToken.None)).Transactions;
 
         var purchase = transactions.Single(t => t.Id == FakePluggyServer.CardPurchaseTransactionId);
         Assert.Equal(300.00m, purchase.Amount);
@@ -543,24 +556,165 @@ public sealed class PluggyHttpClientTests
         Assert.Equal("PENDING", transactions.Single(t => t.Id == FakePluggyServer.CardPendingTransactionId).Status);
     }
 
+    // Issue #77: the listing is paged by cursor (GET /v2/transactions). This takes the place of the test of the pages
+    // by number, with and without "totalPages": the cursor listing has neither a page number nor a page count.
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task GetTransactions_ReadsEveryPageUntilTheLast(bool withoutTotalPages)
+    [InlineData(nameof(FakeNextShape.QueryString))]
+    [InlineData(nameof(FakeNextShape.QueryStringWithoutQuestionMark))]
+    [InlineData(nameof(FakeNextShape.BareCursor))]
+    [InlineData(nameof(FakeNextShape.AbsoluteUrl))]
+    [InlineData(nameof(FakeNextShape.RelativeUrl))]
+    public async Task GetTransactions_FollowsTheCursorUntilTheLastPage_WhateverTheFormOfNext(string shape)
     {
         var today = DateTime.UtcNow.Date;
         _pluggy.Transactions[FakePluggyServer.CheckingAccountId] = Enumerable.Range(1, 1203)
             .Select(i => new FakeTransaction($"c1b2c3d4-0000-4000-8000-{i:D12}", today.AddDays(-1).AddSeconds(i), -i))
             .ToList();
-        _pluggy.OmitTotalPages = withoutTotalPages;
+        _pluggy.NextShape = Enum.Parse<FakeNextShape>(shape);
 
-        var transactions = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+        var listing = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
 
-        Assert.Equal(1203, transactions.Count);
-        Assert.Equal(1203, transactions.Select(t => t.Id).Distinct().Count());
-        var pages = _pluggy.Requests.Where(r => r.Path == "/transactions").Select(r => r.Query[(r.Query.LastIndexOf('=') + 1)..]).ToList();
-        Assert.Equal(new[] { "1", "2", "3" }, pages);
+        Assert.True(listing.Complete);
+        Assert.Equal(1203, listing.Transactions.Count);
+        Assert.Equal(1203, listing.Transactions.Select(t => t.Id).Distinct().Count());
+        var pages = _pluggy.Requests.Where(r => r.Path == FakePluggyServer.TransactionsPath).Select(r => HttpUtility.ParseQueryString(r.Query)).ToList();
+        // The cursor goes back as Pluggy gave it (decoded from "next", escaped again in the address).
+        Assert.Equal(new[] { null, FakePluggyServer.CursorOf(500), FakePluggyServer.CursorOf(1000) }, pages.Select(q => q["after"]));
+        // Every page asks for the same account and days, and nothing the cursor listing refuses (page, pageSize, from, to).
+        Assert.All(pages, q =>
+        {
+            Assert.Equal(FakePluggyServer.CheckingAccountId, q["accountId"]);
+            Assert.Equal(From.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), q["dateFrom"]);
+            Assert.Equal(To.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), q["dateTo"]);
+            Assert.Subset(new HashSet<string?> { "accountId", "dateFrom", "dateTo", "after" }, q.AllKeys.ToHashSet());
+        });
+        Assert.Equal(0, _pluggy.Count("GET", FakePluggyServer.LegacyTransactionsPath));
         Assert.Equal(1, _pluggy.AuthCalls);
+    }
+
+    [Fact]
+    public async Task TheFixtureAnswersAsPluggyDoes_410OnTheOldRoute_And400ForAParameterTheCursorListingDoesNotKnow()
+    {
+        await Client().GetItemAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None); // a key is issued
+        using var http = new HttpClient(_pluggy, disposeHandler: false);
+        http.DefaultRequestHeaders.Add(PluggyHttpClient.ApiKeyHeader, "fake-api-key-1");
+        var account = FakePluggyServer.CheckingAccountId;
+
+        var legacy = await http.GetAsync($"{FakePluggyServer.BaseUrl}/transactions?accountId={account}&from=2026-07-01&to=2026-10-07&pageSize=500&page=1");
+        Assert.Equal(HttpStatusCode.Gone, legacy.StatusCode);
+        Assert.Contains("ENDPOINT_DEPRECATED", await legacy.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        foreach (var refused in new[] { "page=1", "pageSize=500", "from=2026-07-01", "to=2026-10-07" })
+        {
+            var answer = await http.GetAsync($"{FakePluggyServer.BaseUrl}/v2/transactions?accountId={account}&{refused}");
+            Assert.True(HttpStatusCode.BadRequest == answer.StatusCode, refused);
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync($"{FakePluggyServer.BaseUrl}/v2/transactions?accountId={account}&dateFrom=2026-07-01&dateTo=2026-10-07")).StatusCode);
+    }
+
+    [Fact]
+    public async Task GetTransactions_WhenNextIsTheCursorJustSent_StopsThere_AndSaysTheListingIsNotComplete()
+    {
+        var today = DateTime.UtcNow.Date;
+        _pluggy.Transactions[FakePluggyServer.CheckingAccountId] = Enumerable.Range(1, 5)
+            .Select(i => new FakeTransaction($"c1b2c3d4-0000-4000-8000-{i:D12}", today.AddDays(-1).AddSeconds(i), -i))
+            .ToList();
+        _pluggy.MaxPageSize = 2;
+        _pluggy.RepeatCursor = true;
+
+        var listing = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+
+        Assert.False(listing.Complete);
+        Assert.Equal(4, listing.Transactions.Count); // the two pages read are kept
+        Assert.Equal(2, _pluggy.Count("GET", FakePluggyServer.TransactionsPath)); // and the same page is not asked for again
+        Assert.Contains(_log.Lines, l => l.StartsWith("Warning", StringComparison.Ordinal) && l.Contains("repeated a cursor", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetTransactions_WhenAnOlderCursorComesBack_StopsThere_AndSaysTheListingIsNotComplete()
+    {
+        var handler = new PagesAnswer(
+            Page("t-1", "\"?accountId=account&after=cursor-A\""),
+            Page("t-2", "\"?accountId=account&after=cursor-B\""),
+            Page("t-3", "\"?accountId=account&after=cursor-A\""),
+            Page("t-4", "null"));
+
+        var listing = await ClientOf(handler).GetTransactionsAsync(Connection(), "account", From, To, CancellationToken.None);
+
+        Assert.False(listing.Complete);
+        Assert.Equal(new[] { "t-1", "t-2", "t-3" }, listing.Transactions.Select(t => t.Id));
+        Assert.Equal(3, handler.DataCalls);
+        Assert.Contains(_log.Lines, l => l.StartsWith("Warning", StringComparison.Ordinal) && l.Contains("repeated a cursor", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("12345")]                                           // not a text
+    [InlineData("{\"after\":\"cursor-A\"}")]                         // an object
+    [InlineData("true")]
+    [InlineData("\"https://pluggy.test/v2/transactions\"")]          // an address without the cursor
+    [InlineData("\"?accountId=account\"")]                           // a query string without the cursor
+    [InlineData("\"accountId=account&dateFrom=2026-07-01\"")]
+    [InlineData("\"?accountId=account&after=\"")]                    // an empty cursor
+    [InlineData(null)]                                              // no "next" at all
+    public async Task GetTransactions_WhenNextCannotBeRead_StopsThere_AndSaysTheListingIsNotComplete(string? nextJson)
+    {
+        var handler = new PagesAnswer(Page("t-1", nextJson), Page("t-2", "null"));
+
+        var listing = await ClientOf(handler).GetTransactionsAsync(Connection(), "account", From, To, CancellationToken.None);
+
+        Assert.False(listing.Complete);
+        Assert.Equal("t-1", Assert.Single(listing.Transactions).Id);
+        Assert.Equal(1, handler.DataCalls);
+        Assert.Contains(_log.Lines, l => l.StartsWith("Warning", StringComparison.Ordinal) && l.Contains("could not be read", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"\"")]
+    [InlineData("\"   \"")]
+    public async Task GetTransactions_WhenNextIsNullOrEmpty_TheListingIsComplete(string nextJson)
+    {
+        var handler = new PagesAnswer(Page("t-1", nextJson), Page("t-2", "null"));
+
+        var listing = await ClientOf(handler).GetTransactionsAsync(Connection(), "account", From, To, CancellationToken.None);
+
+        Assert.True(listing.Complete);
+        Assert.Equal(1, handler.DataCalls);
+    }
+
+    [Fact]
+    public async Task GetTransactions_OfAListingThatNeverEnds_StopsAtTheCeilingOfPages_AndSaysItIsNotComplete()
+    {
+        _pluggy.NeverEnds = true;
+
+        var listing = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+
+        Assert.False(listing.Complete);
+        Assert.Equal(3, listing.Transactions.Count);
+        Assert.Equal(PluggyHttpClient.MaxTransactionPages, _pluggy.Count("GET", FakePluggyServer.TransactionsPath));
+        Assert.Contains(_log.Lines, l => l.StartsWith("Warning", StringComparison.Ordinal) && l.Contains("ceiling", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("?accountId=account&after=a%2Bb%2Fc%3D%3D", "a+b/c==")]   // escaped, as an address carries it
+    [InlineData("?after=a+b/c==&accountId=account", "a+b/c==")]          // not escaped: taken as written
+    [InlineData("a+b/c==", "a+b/c==")]                                   // the bare cursor is never decoded
+    [InlineData("a%2Bb", "a%2Bb")]
+    [InlineData("  after=cursor-A  ", "cursor-A")]
+    [InlineData("https://api.pluggy.ai/v2/transactions?accountId=account&after=cursor%20A#top", "cursor A")]
+    public async Task GetTransactions_SendsBackOnlyTheCursorOfNext_Decoded(string next, string cursor)
+    {
+        var handler = new PagesAnswer(Page("t-1", System.Text.Json.JsonSerializer.Serialize(next)), Page("t-2", "null"));
+
+        var listing = await ClientOf(handler).GetTransactionsAsync(Connection(), "account", From, To, CancellationToken.None);
+
+        Assert.True(listing.Complete);
+        Assert.Equal(2, listing.Transactions.Count);
+        var second = handler.DataQueries[1];
+        Assert.Equal(
+            $"?accountId=account&dateFrom={From:yyyy-MM-dd}&dateTo={To:yyyy-MM-dd}&after={Uri.EscapeDataString(cursor)}",
+            second);
     }
 
     [Fact]
@@ -568,10 +722,11 @@ public sealed class PluggyHttpClientTests
     {
         _pluggy.Transactions.Remove(FakePluggyServer.CheckingAccountId);
 
-        var transactions = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+        var listing = await Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
 
-        Assert.Empty(transactions);
-        Assert.Equal(1, _pluggy.Count("GET", "/transactions"));
+        Assert.Empty(listing.Transactions);
+        Assert.True(listing.Complete);
+        Assert.Equal(1, _pluggy.Count("GET", FakePluggyServer.TransactionsPath));
     }
 
     [Theory]
@@ -592,12 +747,12 @@ public sealed class PluggyHttpClientTests
                 },
             ];
 
-            var transaction = Assert.Single(await Client().GetTransactionsAsync(
-                Connection(), FakePluggyServer.CheckingAccountId, new DateOnly(2026, 7, 1), new DateOnly(2026, 10, 7), CancellationToken.None));
+            var transaction = Assert.Single((await Client().GetTransactionsAsync(
+                Connection(), FakePluggyServer.CheckingAccountId, new DateOnly(2026, 7, 1), new DateOnly(2026, 10, 7), CancellationToken.None)).Transactions);
 
             Assert.Equal(-1234.56m, transaction.Amount);
             Assert.Equal(new DateTime(2026, 10, 5, 0, 0, 0, DateTimeKind.Utc), transaction.DateUtc);
-            Assert.EndsWith("&from=2026-07-01&to=2026-10-07&pageSize=500&page=1", _pluggy.Requests.Last().Query, StringComparison.Ordinal);
+            Assert.EndsWith("&dateFrom=2026-07-01&dateTo=2026-10-07", _pluggy.Requests.Last().Query, StringComparison.Ordinal);
         }
         finally
         {
@@ -609,19 +764,19 @@ public sealed class PluggyHttpClientTests
     public async Task GetTransactions_SkipsWhatHasNoIdDateOrValue_AndToleratesMissingParts()
     {
         var handler = new FixedDataAnswer("""
-            { "total": 4, "totalPages": 1, "page": 1, "results": [
+            { "results": [
               { "id": "t-ok", "date": "2026-10-05T12:00:00.000Z", "amount": -10 },
               { "date": "2026-10-05T12:00:00.000Z", "amount": -10 },
               { "id": "t-no-date", "amount": -10 },
               { "id": "t-no-amount", "date": "2026-10-05T12:00:00.000Z" },
               "not an object"
-            ] }
+            ], "next": null }
             """);
         var client = new PluggyHttpClient(
             new SingleHandlerFactory(handler), _cache,
             Options.Create(new OpenFinanceOptions { PluggyBaseUrl = FakePluggyServer.BaseUrl }), NullLogger<PluggyHttpClient>.Instance);
 
-        var transaction = Assert.Single(await client.GetTransactionsAsync(Connection(), "account", From, To, CancellationToken.None));
+        var transaction = Assert.Single((await client.GetTransactionsAsync(Connection(), "account", From, To, CancellationToken.None)).Transactions);
 
         Assert.Equal("t-ok", transaction.Id);
         Assert.Null(transaction.Type);
@@ -648,11 +803,198 @@ public sealed class PluggyHttpClientTests
     [InlineData(HttpStatusCode.InternalServerError, PluggyErrorCodes.Unavailable)]
     [InlineData(HttpStatusCode.Forbidden, PluggyErrorCodes.InvalidCredentials)]
     [InlineData(HttpStatusCode.NotFound, PluggyErrorCodes.ItemNotFound)]
+    // Issue #77: "did not answer" is only for no answer at all and for 5xx; a refusal says it is a refusal.
+    [InlineData(HttpStatusCode.BadGateway, PluggyErrorCodes.Unavailable)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, PluggyErrorCodes.Unavailable)]
+    [InlineData(HttpStatusCode.GatewayTimeout, PluggyErrorCodes.Unavailable)]
+    [InlineData(HttpStatusCode.RequestTimeout, PluggyErrorCodes.Unavailable)]
+    [InlineData(HttpStatusCode.Gone, PluggyErrorCodes.Refused)]
+    [InlineData(HttpStatusCode.Conflict, PluggyErrorCodes.Refused)]
+    [InlineData(HttpStatusCode.UnprocessableEntity, PluggyErrorCodes.Refused)]
+    [InlineData(HttpStatusCode.MethodNotAllowed, PluggyErrorCodes.Refused)]
+    [InlineData(HttpStatusCode.Found, PluggyErrorCodes.Refused)]
+    [InlineData(HttpStatusCode.NotModified, PluggyErrorCodes.Refused)]
+    // A 400 of the listing is about what was asked (a parameter, a cursor), never about the Item ID.
+    [InlineData(HttpStatusCode.BadRequest, PluggyErrorCodes.Refused)]
     public async Task GetTransactions_TranslatesTheStatusIntoAClosedCode(HttpStatusCode status, string expected)
     {
         _pluggy.TransactionsStatus = status;
 
         Assert.Equal(expected, await CodeOfAsync(() => Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None)));
+    }
+
+    // ---------------------------------------------------------------- issue #77: honest errors
+
+    [Theory]
+    [InlineData(HttpStatusCode.Gone)]
+    [InlineData(HttpStatusCode.Conflict)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
+    [InlineData(HttpStatusCode.Found)]
+    public async Task AStatusNothingElseExplains_IsARefusal_OnEveryCall_NotPluggyNotAnswering(HttpStatusCode status)
+    {
+        _pluggy.DataStatus = status;
+        Assert.Equal(PluggyErrorCodes.Refused, await CodeOfAsync(() => Client().GetItemAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None)));
+        Assert.Equal(PluggyErrorCodes.Refused, await CodeOfAsync(() => Client().GetAccountsAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None)));
+
+        _pluggy.DataStatus = null;
+        _pluggy.ItemUpdateStatus = status;
+        Assert.Equal(PluggyErrorCodes.Refused, await CodeOfAsync(() => Client().RequestItemUpdateAsync(Connection(), FakePluggyServer.ItemWithAccounts, CancellationToken.None)));
+
+        _pluggy.AuthStatus = status;
+        Assert.Equal(PluggyErrorCodes.Refused, await CodeOfAsync(() => Client().AuthenticateAsync(FakePluggyServer.ClientId, FakePluggyServer.ClientSecret, CancellationToken.None)));
+    }
+
+    [Fact]
+    public void ARefusal_HasItsOwnCode_APortugueseMessageThatSaysRepeatingDoesNotHelp_And502()
+    {
+        var refusal = new PluggyException(PluggyErrorCodes.Refused);
+
+        Assert.Equal("PLUGGY_REFUSED", refusal.Code);
+        Assert.Equal(502, refusal.StatusCode);
+        Assert.Equal(
+            "O Pluggy recusou o pedido do CoupleSync. Tentar de novo não adianta: o problema precisa de uma correção no aplicativo.",
+            refusal.Message);
+        Assert.NotEqual(PluggyException.MessageFor(PluggyErrorCodes.Unavailable), refusal.Message);
+    }
+
+    [Fact]
+    public async Task The410OfADiscontinuedRoute_IsARefusal_ThatCarriesTheCallTheStatusAndWhatPluggySaid()
+    {
+        _pluggy.TransactionsStatus = HttpStatusCode.Gone;
+        _pluggy.TransactionsErrorBody = FakePluggyServer.LegacyTransactionsGoneBody; // "code" is a number here
+
+        var failure = await Assert.ThrowsAsync<PluggyException>(
+            () => Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None));
+
+        Assert.Equal(PluggyErrorCodes.Refused, failure.Code);
+        Assert.Equal("transactions", failure.CallKind);
+        Assert.Equal(410, failure.HttpStatus);
+        Assert.Equal("410/ENDPOINT_DEPRECATED", failure.PluggyCode);
+        Assert.Contains(_log.Lines, l =>
+            l.StartsWith("Warning", StringComparison.Ordinal)
+            && l.Contains("Pluggy transactions call answered 410", StringComparison.Ordinal)
+            && l.Contains("410/ENDPOINT_DEPRECATED", StringComparison.Ordinal));
+        // What Pluggy wrote for a person to read is not copied anywhere.
+        Assert.DoesNotContain(_log.Lines, l => l.Contains("This endpoint is deprecated", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("""{"code":"INVALID_CURSOR","message":"x"}""", "INVALID_CURSOR")]                      // "code" as text
+    [InlineData("""{"code":400,"message":"x"}""", "400")]
+    [InlineData("""{"codeDescription":"VALIDATION_ERROR"}""", "VALIDATION_ERROR")]
+    [InlineData("""{"code":400.5,"codeDescription":"A B\r\nC <script> ção"}""", "400.5/ABCscripto")]   // only letters, digits, "_", "-" and "."
+    [InlineData("""{"code":null,"codeDescription":{"x":1}}""", null)]
+    [InlineData("""{"message":"only a message"}""", null)]
+    [InlineData("""["not","an","object"]""", null)]
+    [InlineData("<html>gateway</html>", null)]
+    [InlineData("", null)]
+    public async Task TheErrorBodyOfPluggy_IsReadForItsCodes_CleanedAndNeverTrusted(string body, string? expected)
+    {
+        _pluggy.TransactionsStatus = HttpStatusCode.BadRequest;
+        _pluggy.TransactionsErrorBody = body;
+
+        var failure = await Assert.ThrowsAsync<PluggyException>(
+            () => Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None));
+
+        Assert.Equal(PluggyErrorCodes.Refused, failure.Code);
+        Assert.Equal(400, failure.HttpStatus);
+        Assert.Equal(expected, failure.PluggyCode);
+    }
+
+    [Fact]
+    public async Task TheErrorBodyOfPluggy_IsCutToALimit()
+    {
+        _pluggy.TransactionsStatus = HttpStatusCode.BadRequest;
+        _pluggy.TransactionsErrorBody = "{\"code\":\"" + new string('A', 300) + "\",\"codeDescription\":\"" + new string('B', 300) + "\"}";
+        var cut = await Assert.ThrowsAsync<PluggyException>(
+            () => Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None));
+        Assert.Equal(new string('A', 64) + "/" + new string('B', 64), cut.PluggyCode);
+
+        // A body far larger than an error of an API is not even looked at.
+        _pluggy.TransactionsErrorBody = "{\"codeDescription\":\"TOO_BIG\",\"padding\":\"" + new string('x', 20_000) + "\"}";
+        var ignored = await Assert.ThrowsAsync<PluggyException>(
+            () => Client().GetTransactionsAsync(Connection(), FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None));
+        Assert.Equal(PluggyErrorCodes.Refused, ignored.Code);
+        Assert.Null(ignored.PluggyCode);
+    }
+
+    [Fact]
+    public async Task AFailureWithoutAnAnswer_CarriesTheCall_AndNoStatus()
+    {
+        var auth = Connection();
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        _pluggy.NetworkDown = true;
+
+        var failure = await Assert.ThrowsAsync<PluggyException>(
+            () => Client().GetTransactionsAsync(auth, FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None));
+
+        Assert.Equal(PluggyErrorCodes.Unavailable, failure.Code);
+        Assert.Equal("transactions", failure.CallKind);
+        Assert.Null(failure.HttpStatus);
+        Assert.Null(failure.PluggyCode);
+        // One line for this call too, with how long it took to fail.
+        Assert.Single(_log.Lines, l => System.Text.RegularExpressions.Regex.IsMatch(
+            l, @"^Warning: Pluggy transactions call failed before an answer after \d+ ms: .+\.$"));
+
+        _pluggy.NetworkDown = false;
+        _pluggy.TimesOut = true;
+        await CodeOfAsync(() => Client().GetTransactionsAsync(auth, FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None));
+        Assert.Single(_log.Lines, l => System.Text.RegularExpressions.Regex.IsMatch(l, @"^Warning: Pluggy transactions call timed out after \d+ ms\.$"));
+    }
+
+    // ---------------------------------------------------------------- issue #77: one line of log per call
+
+    [Fact]
+    public async Task EveryCallToPluggy_WritesOneInformationLine_WithTheKindTheStatusTheTimeThePageAndTheCount()
+    {
+        _pluggy.MaxPageSize = 2;
+        var auth = Connection();
+
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        await Client().GetAccountsAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        await Client().GetTransactionsAsync(auth, FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+        await Client().GetBillsAsync(auth, FakePluggyServer.CreditCardAccountId, CancellationToken.None);
+
+        var lines = _log.Lines.Where(l => l.StartsWith("Information", StringComparison.Ordinal)).ToList();
+        Assert.Equal(6, lines.Count); // auth, item, accounts, two pages of transactions, bills
+        Assert.Matches(@"^Information: Pluggy auth call answered 200 in \d+ ms; page -; items -; next cursor absent\.$", lines[0]);
+        Assert.Matches(@"^Information: Pluggy item call answered 200 in \d+ ms; page -; items -; next cursor absent\.$", lines[1]);
+        Assert.Matches(@"^Information: Pluggy accounts call answered 200 in \d+ ms; page -; items 2; next cursor absent\.$", lines[2]);
+        Assert.Matches(@"^Information: Pluggy transactions call answered 200 in \d+ ms; page 1; items 2; next cursor present\.$", lines[3]);
+        Assert.Matches(@"^Information: Pluggy transactions call answered 200 in \d+ ms; page 2; items 1; next cursor absent\.$", lines[4]);
+        Assert.Matches(@"^Information: Pluggy bills call answered 200 in \d+ ms; page 1; items 0; next cursor absent\.$", lines[5]);
+    }
+
+    [Fact]
+    public async Task TheLogOfTheCalls_HasNoSecret_NoIdentifierOfTheBank_NoCursor_AndNothingOfATransaction()
+    {
+        _pluggy.MaxPageSize = 1;
+        var auth = Connection();
+        await Client().GetItemAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        await Client().GetAccountsAsync(auth, FakePluggyServer.ItemWithAccounts, CancellationToken.None);
+        await Client().GetTransactionsAsync(auth, FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+        _pluggy.RepeatCursor = true;
+        await Client().GetTransactionsAsync(auth, FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+        _pluggy.RepeatCursor = false;
+        _pluggy.RawNextJson = "\"https://pluggy.test/v2/transactions?secret-in-next=1\"";
+        await Client().GetTransactionsAsync(auth, FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None);
+        _pluggy.TransactionsStatus = HttpStatusCode.Gone;
+        _pluggy.TransactionsErrorBody = FakePluggyServer.LegacyTransactionsGoneBody;
+        await CodeOfAsync(() => Client().GetTransactionsAsync(auth, FakePluggyServer.CheckingAccountId, From, To, CancellationToken.None));
+
+        Assert.NotEmpty(_log.Lines);
+        foreach (var forbidden in new[]
+                 {
+                     FakePluggyServer.ClientId, FakePluggyServer.ClientSecret, "fake-api-key-", StoredSecret,
+                     FakePluggyServer.ItemWithAccounts, FakePluggyServer.CheckingAccountId, FakePluggyServer.CheckingAccountNumber,
+                     "cur+/", "cur%2B", "secret-in-next", FakePluggyServer.BaseUrl,
+                     "Cantina Exemplo", "Corrida Exemplo", "COMPRA DEBITO", FakePluggyServer.MerchantCnpj, FakePluggyServer.RawOnlyMarker,
+                     "58.90", "1175.66", "3500.00", "errorid",
+                 })
+        {
+            Assert.DoesNotContain(_log.Lines, l => l.Contains(forbidden, StringComparison.Ordinal));
+        }
     }
 
     [Fact]
@@ -693,6 +1035,54 @@ public sealed class PluggyHttpClientTests
     }
 
     // ---------------------------------------------------------------- support
+
+    /// <summary>One page of the cursor listing with one transaction; <paramref name="nextJson"/> null leaves "next" out.</summary>
+    private static string Page(string transactionId, string? nextJson)
+        => "{ \"results\": [ { \"id\": \"" + transactionId + "\", \"date\": \"2026-10-05T12:00:00.000Z\", \"amount\": -10 } ]"
+           + (nextJson is null ? string.Empty : ", \"next\": " + nextJson) + " }";
+
+    /// <summary>Hands out one key and answers the data calls with the given bodies, in order (the last one from then on).</summary>
+    private sealed class PagesAnswer : HttpMessageHandler
+    {
+        private readonly string[] _bodies;
+
+        public PagesAnswer(params string[] bodies) => _bodies = bodies;
+
+        public int DataCalls => DataQueries.Count;
+
+        public List<string> DataQueries { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.AbsolutePath == "/auth")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"apiKey":"fake-api-key-pages"}""") });
+
+            Assert.Equal("/v2/transactions", request.RequestUri.AbsolutePath);
+            DataQueries.Add(request.RequestUri.Query);
+            var body = _bodies[Math.Min(DataQueries.Count, _bodies.Length) - 1];
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+        }
+    }
+
+    /// <summary>Every line the client logs, as "Level: message".</summary>
+    private sealed class ListLogger : ILogger<PluggyHttpClient>
+    {
+        private readonly List<string> _lines = new();
+
+        public IReadOnlyList<string> Lines
+        {
+            get { lock (_lines) return _lines.ToList(); }
+        }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (_lines) _lines.Add($"{logLevel}: {formatter(state, exception)}");
+        }
+    }
 
     /// <summary>Hands out one key and answers every data call with the same body.</summary>
     private sealed class FixedDataAnswer : HttpMessageHandler

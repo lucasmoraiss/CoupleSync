@@ -119,7 +119,7 @@ public sealed class OpenFinanceReconciliationTests
         var happened = new StrongBox<int>(0);
         factory.Pluggy.BeforeAnswer = request =>
         {
-            if (request.Path == "/transactions" && request.Query.Contains(account, StringComparison.Ordinal)
+            if (request.Path == FakePluggyServer.TransactionsPath && request.Query.Contains(account, StringComparison.Ordinal)
                 && Interlocked.Exchange(ref happened.Value, 1) == 0)
             {
                 factory.BeforeNextSave = meanwhile;
@@ -863,7 +863,7 @@ public sealed class OpenFinanceReconciliationTests
         factory.Pluggy.BeforeAnswer = request =>
         {
             // Bruno's run has the transactions of the account: its next save is the one that would ignore both legs.
-            if (request.Path == "/transactions" && request.Query.Contains(OtherChecking, StringComparison.Ordinal)
+            if (request.Path == FakePluggyServer.TransactionsPath && request.Query.Contains(OtherChecking, StringComparison.Ordinal)
                 && Interlocked.Exchange(ref once, 1) == 0)
             {
                 factory.BeforeNextSave = async () =>
@@ -2954,7 +2954,7 @@ public sealed class OpenFinanceReconciliationTests
         var typedOnce = 0;
         factory.Pluggy.BeforeAnswer = async request =>
         {
-            if (request.Path == "/transactions" && request.Query.Contains(Checking, StringComparison.Ordinal)
+            if (request.Path == FakePluggyServer.TransactionsPath && request.Query.Contains(Checking, StringComparison.Ordinal)
                 && Interlocked.Exchange(ref typedOnce, 1) == 0)
             {
                 await ManualAsync(ana, 46.00m, twoMonthsAgo, "Antiga, digitada durante a run");
