@@ -58,14 +58,16 @@ public sealed class OpenFinanceTests
         var incomeSum = await database.ScalarAsync<decimal>("SELECT sum(amount) FROM income_sources");
         var columnsBefore = await ColumnsOfAsync(database, existingTables);
 
+        // "Changes no existing column" is said of this migration: a later one adds couples.ai_disabled_at_utc.
+        await MigrationTests.MigrateAsync(database, "20261007205425_AddOpenFinanceConnections");
+        Assert.Equal(columnsBefore, await ColumnsOfAsync(database, existingTables));
         await MigrationTests.MigrateAsync(database);
 
-        // Additive: no existing table lost a row or changed a column.
+        // Additive: no existing table lost a row.
         foreach (var table in existingTables)
             Assert.Equal(countsBefore[table], await database.ScalarAsync<long>($"SELECT count(*) FROM \"{table}\""));
         Assert.Equal(transactionSum, await database.ScalarAsync<decimal>("SELECT sum(amount) FROM transactions"));
         Assert.Equal(incomeSum, await database.ScalarAsync<decimal>("SELECT sum(amount) FROM income_sources"));
-        Assert.Equal(columnsBefore, await ColumnsOfAsync(database, existingTables));
 
         // The three tables are there, empty.
         foreach (var table in NewTables)
