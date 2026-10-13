@@ -10,6 +10,10 @@
 // na resposta como segurada e fica na lista, marcada, esperando a resposta. O que o
 // servidor ignorou sozinho (transferência entre contas do grupo, pagamento de fatura) fica na seção Ignoradas,
 // saídas e entradas, cada uma com "restaurar".
+//
+// Entradas (dinheiro que entrou: salário, Pix recebido): ficam numa seção à parte e nunca entram em "Selecionar
+// tudo". Cada uma vira renda do mês só quando a pessoa toca em "Registrar como renda do mês" (o nome é editável;
+// o valor, não), ou é descartada.
 import { getApiErrorMessage } from '@/services/apiError';
 import { monthLabelFromIso } from '@/utils/format';
 import type {
@@ -17,6 +21,7 @@ import type {
   BankReviewLineResponse,
   BankReviewMatchResponse,
   BankReviewMonthResponse,
+  BankReviewResponse,
   ConfirmBankReviewRequest,
   ConfirmBankReviewResponse,
 } from '@/types/api';
@@ -50,10 +55,10 @@ export function hasSuspectedDuplicate(line: Pick<BankReviewLineResponse, 'match'
 
 /**
  * A linha tem caixa e pode ir em "Confirmar selecionadas": pode virar despesa e não tem possível duplicada (essa
- * só entra pela resposta da pessoa, uma a uma).
+ * só entra pela resposta da pessoa, uma a uma). Uma entrada nunca: ela vira renda, uma a uma, pela ação dela.
  */
-export function isSelectable(line: Confirmability & Pick<BankReviewLineResponse, 'match'>): boolean {
-  return unselectableReason(line) === null && !hasSuspectedDuplicate(line);
+export function isSelectable(line: Confirmability & Pick<BankReviewLineResponse, 'match' | 'type'>): boolean {
+  return line.type !== 'Credit' && unselectableReason(line) === null && !hasSuspectedDuplicate(line);
 }
 
 /**
@@ -337,18 +342,109 @@ export function ignoredLineText(line: Pick<BankReviewLineResponse, 'day' | 'amou
 /**
  * Toda linha ignorada pode ser restaurada, a entrada também: o servidor ignora entradas sozinho (dinheiro que veio
  * de alguém do grupo, a perna de entrada de uma transferência) e pode errar. A saída restaurada volta para as
- * despesas desta tela, à vista. A entrada restaurada deixa de ser ignorada mas some daqui, porque esta tela só
- * lista despesas: é esse o aviso. null: nada a avisar.
+ * despesas desta tela, à vista. A entrada restaurada volta para as Entradas, mais abaixo: é esse o aviso. Com um
+ * servidor que ainda não lista entradas (`listsIncomes` falso) ela some daqui, e o aviso diz isso. null: nada a avisar.
  */
-export function restoredNoticeText(line: Pick<BankReviewLineResponse, 'type'>): string | null {
-  return line.type === 'Credit'
-    ? 'Entrada restaurada: ela deixou de ser ignorada. Esta lista é só de despesas, por isso ela não aparece aqui.'
-    : null;
+export function restoredNoticeText(line: Pick<BankReviewLineResponse, 'type'>, listsIncomes: boolean = false): string | null {
+  if (line.type !== 'Credit') return null;
+  return listsIncomes
+    ? 'Entrada restaurada: ela voltou para as Entradas desta tela.'
+    : 'Entrada restaurada: ela deixou de ser ignorada. Esta lista é só de despesas, por isso ela não aparece aqui.';
 }
 
 /** O que o botão "restaurar" de uma linha diz em voz alta. */
 export function restoreLabel(line: Pick<BankReviewLineResponse, 'type' | 'merchant' | 'description'>): string {
   return line.type === 'Credit' ? `Restaurar entrada ${lineTitle(line)}` : `Restaurar ${lineTitle(line)}`;
+}
+
+// ---------------------------------------------------------------- entradas (viram renda do mês)
+
+export const REGISTER_INCOME_LABEL = 'Registrar como renda do mês';
+export const REGISTER_INCOME_FAILED_TEXT = 'Não foi possível registrar a renda. Tente novamente.';
+/** O maior nome que uma renda pode ter (o mesmo limite do servidor). */
+export const INCOME_NAME_MAX = 64;
+const FALLBACK_INCOME_NAME = 'Entrada do banco';
+
+/**
+ * Por que a entrada não pode virar renda (aparece em cinza, só com "descartar"); null quando pode. As mesmas
+ * condições de uma despesa: efetivada no banco, com valor e em reais (toda renda entra em somas em reais).
+ */
+export function incomeBlockedReason(line: Confirmability): string | null {
+  if (line.bankStatus === 'Pending') return 'Pendente no banco: poderá virar renda quando o banco efetivar.';
+  if (!(line.amount > 0)) return 'Sem valor: não vira renda. Você pode descartar.';
+  if (line.currency !== 'BRL') return 'Em outra moeda: ainda não pode virar renda. Você pode descartar.';
+  return null;
+}
+
+export function canRegisterIncome(line: Confirmability): boolean {
+  return incomeBlockedReason(line) === null;
+}
+
+/** O nome com que a renda nasce se a pessoa não digitar outro: o que o banco diz da entrada, no tamanho de um nome. */
+export function defaultIncomeName(line: Pick<BankReviewLineResponse, 'description' | 'merchant'>): string {
+  const text = line.description?.trim() || line.merchant?.trim() || FALLBACK_INCOME_NAME;
+  if (text.length <= INCOME_NAME_MAX) return text;
+  // O corte é em caractere inteiro: um emoji (duas unidades) que ficaria pela metade sai por completo, como no servidor.
+  const last = text.charCodeAt(INCOME_NAME_MAX - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? INCOME_NAME_MAX - 1 : INCOME_NAME_MAX;
+  return text.slice(0, end).trim();
+}
+
+/** null: o nome digitado serve (vazio também: vale a descrição da entrada). */
+export function incomeNameError(name: string): string | null {
+  return name.trim().length > INCOME_NAME_MAX ? `O nome deve ter no máximo ${INCOME_NAME_MAX} caracteres.` : null;
+}
+
+/**
+ * O corpo de POST review/confirm que registra a entrada como renda do mês. O nome vai só quando a pessoa digitou
+ * outro que não o sugerido (sem ele o servidor usa a descrição). O valor e o mês nunca vão: são os da linha.
+ */
+export function incomeRequest(line: Pick<BankReviewLineResponse, 'id' | 'description' | 'merchant'>, typedName: string): ConfirmBankReviewRequest {
+  const name = typedName.trim();
+  return name && name !== defaultIncomeName(line) ? { incomes: [{ id: line.id, name }] } : { incomes: [{ id: line.id }] };
+}
+
+export function incomeResultMessage(line: Pick<BankReviewLineResponse, 'id' | 'day'>, result: ConfirmBankReviewResponse): string {
+  if ((result.incomes ?? []).some((income) => income.id === line.id)) {
+    return `Renda registrada em ${monthTitle((line.day ?? '').slice(0, 7))}.`;
+  }
+  if ((result.alreadyConfirmed ?? 0) > 0) return 'Esta entrada já estava registrada como renda.';
+  if ((result.skippedOtherCurrency ?? []).includes(line.id)) return 'Em outra moeda: não foi registrada. Ela continua na revisão.';
+  if ((result.skipped ?? []).includes(line.id)) return 'Sem valor: não foi registrada. Ela continua na revisão.';
+  return 'Nada foi registrado.';
+}
+
+/** "05/10/2026 · entrada de R$ 3.500,00". O valor sai na moeda da linha. */
+export function incomeLineText(line: Pick<BankReviewLineResponse, 'day' | 'amount' | 'currency'>): string {
+  return `${dayLabel(line.day)} · entrada de ${lineAmountText(line.amount, line.currency)}`;
+}
+
+/** A linha descartada: as entradas dizem que são entradas (a lista tem os dois tipos). */
+export function discardedLineText(line: Pick<BankReviewLineResponse, 'day' | 'amount' | 'currency' | 'type'>): string {
+  return line.type === 'Credit' ? incomeLineText(line) : `${dayLabel(line.day)} · ${lineAmountText(line.amount, line.currency)}`;
+}
+
+/**
+ * O que espera em cada mês, despesas e entradas juntas, do mês mais recente para o mais antigo: é com isto que a
+ * revisão escolhe o mês em que abre e mostra onde mais há o que revisar. Servidor anterior às entradas não manda a
+ * segunda lista.
+ */
+export function mergePendingByMonth(
+  expenses: readonly BankReviewMonthResponse[] | null | undefined,
+  incomes: readonly BankReviewMonthResponse[] | null | undefined,
+): BankReviewMonthResponse[] {
+  const byMonth = new Map<string, number>();
+  for (const entry of [...(expenses ?? []), ...(incomes ?? [])]) {
+    byMonth.set(entry.month, (byMonth.get(entry.month) ?? 0) + entry.pending);
+  }
+  return [...byMonth.entries()]
+    .sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0))
+    .map(([month, pending]) => ({ month, pending }));
+}
+
+/** Quantas linhas do banco podem ser registradas agora, em todos os meses: despesas e entradas. */
+export function pendingReviewCount(review: Pick<BankReviewResponse, 'pendingAllMonths' | 'pendingIncomesAllMonths'> | null | undefined): number {
+  return (review?.pendingAllMonths ?? 0) + (review?.pendingIncomesAllMonths ?? 0);
 }
 
 // ---------------------------------------------------------------- linhas por dia

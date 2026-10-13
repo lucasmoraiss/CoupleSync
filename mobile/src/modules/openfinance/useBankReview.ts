@@ -5,6 +5,7 @@ import { openFinanceApiClient } from '@/services/apiClient';
 import { isNoGroupError } from '@/services/apiError';
 import { useSessionStore } from '@/state/sessionStore';
 import type { BankReviewResponse } from '@/types/api';
+import { pendingReviewCount } from './review';
 
 export const BANK_REVIEW_KEY = ['openfinance-review'] as const;
 
@@ -29,9 +30,9 @@ interface ReviewCounts {
 const NO_COUNTS: ReviewCounts = { pending: 0, ignored: 0 };
 
 /**
- * Para o atalho da tela de Transações: quantas despesas do banco podem ser confirmadas e quantas linhas estão
- * ignoradas automaticamente (todos os meses). Qualquer erro (servidor sem a rota, sem rede) é "nenhuma": o atalho
- * só não aparece. Servidor que ainda não conta as ignoradas: zero.
+ * Para o atalho da tela de Transações: quantas linhas do banco podem ser registradas (despesas e entradas) e
+ * quantas estão ignoradas automaticamente (todos os meses). Qualquer erro (servidor sem a rota, sem rede) é
+ * "nenhuma": o atalho só não aparece. Servidor que ainda não conta as ignoradas: zero.
  */
 export function usePendingBankReviewCount(): ReviewCounts & { readonly refetch: () => void } {
   const signedIn = useSessionStore((state) => !!state.accessToken);
@@ -40,7 +41,7 @@ export function usePendingBankReviewCount(): ReviewCounts & { readonly refetch: 
     queryFn: async () => {
       try {
         const review = (await openFinanceApiClient.getReview()).data;
-        return { pending: review.pendingAllMonths ?? 0, ignored: review.ignoredAllMonths ?? 0 };
+        return { pending: pendingReviewCount(review), ignored: review.ignoredAllMonths ?? 0 };
       } catch {
         return NO_COUNTS;
       }

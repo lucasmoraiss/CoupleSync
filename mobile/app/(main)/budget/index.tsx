@@ -24,6 +24,7 @@ import { LoadingState } from '@/components/LoadingState';
 import { ErrorState } from '@/components/ErrorState';
 import { useToast } from '@/components/Toast/useToast';
 import type { IncomeSourceResponse, IncomeGroupResponse } from '@/types/api';
+import { incomeOriginText } from '@/modules/openfinance/incomeOrigin';
 import { brazilMonth } from '@/utils/month';
 import { amountCentsError, centsFromDigits } from '@/utils/amount';
 import { spokenBRL } from '@/utils/a11y';
@@ -94,6 +95,8 @@ function IncomeSourceRow({
   const [amountCents, setAmountCents] = useState(Math.round(source.amount * 100));
 
   const { toast } = useToast();
+  // Renda registrada a partir de uma entrada do banco (Open Finance): a linha diz de onde ela veio.
+  const origin = incomeOriginText(source);
 
   const handleSave = useCallback(() => {
     const error = amountCentsError(amountCents);
@@ -124,6 +127,7 @@ function IncomeSourceRow({
         <View style={styles.sourceInfo}>
           <Text style={styles.sourceName}>{source.name}</Text>
           <Text style={styles.sourceAmount} accessibilityLabel={spokenBRL(source.amount)}>{formatBRL(source.amount)}</Text>
+          {origin ? <Text style={styles.sourceOrigin}>{origin}</Text> : null}
         </View>
         {source.isShared && (
           <View style={styles.sharedBadge}>
@@ -172,6 +176,7 @@ function IncomeSourceRow({
       <View style={styles.sourceInfo}>
         <Text style={styles.sourceName}>{source.name}</Text>
         <Text style={styles.sourceAmount} accessibilityLabel={spokenBRL(source.amount)}>{formatBRL(source.amount)}</Text>
+        {origin ? <Text style={styles.sourceOrigin}>{origin}</Text> : null}
       </View>
       <View style={styles.rowActions}>
         {source.isShared && (
@@ -654,6 +659,7 @@ const styles = StyleSheet.create({
   },
   sourceInfo: { flex: 1 },
   sourceName: { fontSize: 14, color: TEXT, fontWeight: '600' },
+  sourceOrigin: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   sourceAmount: { fontSize: 15, color: ACCENT, fontWeight: '700', marginTop: 2 },
   rowActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   sharedBadge: { paddingHorizontal: 4 },

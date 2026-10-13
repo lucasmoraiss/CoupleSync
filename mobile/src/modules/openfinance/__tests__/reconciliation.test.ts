@@ -302,7 +302,7 @@ describe('a tela: toda linha ignorada tem "restaurar", a entrada também', () =>
   it('depois de restaurar, a tela mostra o aviso da linha (o da entrada) e só quando a restauração deu certo', () => {
     const handler = screen.slice(screen.indexOf('const handleRestore = async'), screen.indexOf('const backLink'));
     expect(handler).toMatch(
-      /await openFinanceApiClient\.restoreReview\(\[line\.id\]\);\s+if \(getSessionEpoch\(\) !== epoch\) return;\s+const restoredText = restoredNoticeText\(line\);\s+if \(restoredText\) setNotice\(\{ text: restoredText, error: false \}\);\s+\} catch/,
+      /await openFinanceApiClient\.restoreReview\(\[line\.id\]\);\s+if \(getSessionEpoch\(\) !== epoch\) return;\s+const restoredText = restoredNoticeText\(line, listsIncomes\);\s+if \(restoredText\) setNotice\(\{ text: restoredText, error: false \}\);\s+\} catch/,
     );
   });
 });
@@ -373,7 +373,7 @@ describe('a tela: os botões de possível duplicada', () => {
   });
 
   it('a revisão abre no mês das ignoradas quando nada espera (as duas listas vão para initialReviewMonth)', () => {
-    expect(screen).toContain('setMonth(initialReviewMonth(data.pendingByMonth, data.month, data.ignoredByMonth));');
+    expect(screen).toContain('initialReviewMonth(mergePendingByMonth(data.pendingByMonth, data.pendingIncomesByMonth), data.month, data.ignoredByMonth),');
   });
 });
 

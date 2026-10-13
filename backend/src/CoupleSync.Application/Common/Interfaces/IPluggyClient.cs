@@ -21,6 +21,12 @@ public interface IPluggyClient
     /// </summary>
     Task<IReadOnlyList<PluggyTransaction>> GetTransactionsAsync(PluggyAuth auth, string accountId, DateOnly from, DateOnly to, CancellationToken ct);
 
+    /// <summary>
+    /// GET /bills?accountId=, every page until the last one: the bills of a credit card. What has no id, no due date
+    /// or no total is left out.
+    /// </summary>
+    Task<IReadOnlyList<PluggyBill>> GetBillsAsync(PluggyAuth auth, string accountId, CancellationToken ct);
+
     /// <summary>PATCH /items/{id}: asks Pluggy to read the bank again. Pluggy answers at once; the reading takes its time.</summary>
     Task RequestItemUpdateAsync(PluggyAuth auth, string itemId, CancellationToken ct);
 
@@ -127,4 +133,21 @@ public sealed record PluggyTransaction(
     string? PayerName = null)
 {
     public override string ToString() => nameof(PluggyTransaction);
+}
+
+/// <summary>
+/// One credit card bill as Pluggy lists it. <see cref="DueDate"/> and <see cref="ClosingDate"/> are the calendar days
+/// written in <c>dueDate</c> and <c>billClosingDate</c>; <see cref="RawJson"/> is the element exactly as received.
+/// Prints nothing of its content.
+/// </summary>
+public sealed record PluggyBill(
+    string Id,
+    DateOnly DueDate,
+    DateOnly? ClosingDate,
+    decimal TotalAmount,
+    string? CurrencyCode,
+    decimal? MinimumPayment,
+    string RawJson)
+{
+    public override string ToString() => nameof(PluggyBill);
 }

@@ -123,6 +123,38 @@ public interface IBankSyncRepository
     /// <summary>The automatically ignored lines of the group, of every month: the day in Brazil of each.</summary>
     Task<IReadOnlyList<DateOnly>> GetIgnoredDaysAsync(Guid coupleId, CancellationToken ct);
 
+    // ---------------------------------------------------------------- credit card bills
+
+    /// <summary>Tracked: the bills with these Pluggy ids, in any group (the id is unique in the whole database).</summary>
+    Task<IReadOnlyList<CreditCardBill>> FindBillsByPluggyIdsAsync(IReadOnlyCollection<string> pluggyBillIds, CancellationToken ct);
+
+    Task AddBillsAsync(IEnumerable<CreditCardBill> bills, CancellationToken ct);
+
+    /// <summary>
+    /// For the job: the stored bills of the cards of the group that are still read (not the ones of a card the person
+    /// turned off, nor of a disconnected connection: nothing reads those any more) due in
+    /// [<paramref name="fromDue"/>, <paramref name="toDue"/>].
+    /// </summary>
+    Task<IReadOnlyList<CardBillFacts>> GetBillFactsForJobAsync(Guid coupleId, DateOnly fromDue, DateOnly toDue, CancellationToken ct);
+
+    /// <summary>
+    /// For the job, tracked: the lines of the group that are, or already were taken as, the payment of a bill. Money
+    /// that left, settled at the bank, never brought back to the review by a person, with its day in Brazil in
+    /// [<paramref name="fromDay"/>, <paramref name="toDay"/>], and either waiting for the review or ignored
+    /// automatically. Oldest first.
+    /// </summary>
+    Task<IReadOnlyList<BankTransaction>> GetBillPaymentCandidatesForJobAsync(Guid coupleId, DateOnly fromDay, DateOnly toDay, CancellationToken ct);
+
+    /// <summary>
+    /// The bills of the cards of the group whose connection is still connected and that the person did not turn off,
+    /// each with its card, its bank and who connected it. With both days, only the ones due in
+    /// [<paramref name="fromDue"/>, <paramref name="toDue"/>].
+    /// </summary>
+    Task<IReadOnlyList<GroupCardBill>> GetBillsOfGroupAsync(Guid coupleId, DateOnly? fromDue, DateOnly? toDue, CancellationToken ct);
+
+    /// <summary>True when someone of the group has a connection that is not disconnected.</summary>
+    Task<bool> HasConnectedConnectionAsync(Guid coupleId, CancellationToken ct);
+
     /// <summary>For the job: account id → the type Pluggy gives it (<c>BANK</c>, <c>CREDIT</c>), for every account of the group.</summary>
     Task<IReadOnlyDictionary<Guid, string>> GetAccountTypesForJobAsync(Guid coupleId, CancellationToken ct);
 
@@ -160,6 +192,15 @@ public interface IBankSyncRepository
 
     /// <summary>Every expense of the group still waiting for the review: its day in Brazil and what says whether it can be confirmed.</summary>
     Task<IReadOnlyList<PendingBankExpense>> GetPendingExpensesAsync(Guid coupleId, CancellationToken ct);
+
+    /// <summary>
+    /// The entries (money that came in) of the group whose day in Brazil is in [<paramref name="from"/>,
+    /// <paramref name="toExclusive"/>), waiting or discarded (<see cref="BankTransaction.CountsAsDiscarded"/>).
+    /// </summary>
+    Task<IReadOnlyList<BankTransaction>> GetReviewIncomesAsync(Guid coupleId, DateOnly from, DateOnly toExclusive, CancellationToken ct);
+
+    /// <summary>Every entry of the group still waiting for the review: its day in Brazil and what says whether it can become an income.</summary>
+    Task<IReadOnlyList<PendingBankExpense>> GetPendingIncomesAsync(Guid coupleId, CancellationToken ct);
 
     Task<IReadOnlyList<BankTransaction>> FindByIdsAsync(IReadOnlyCollection<Guid> ids, Guid coupleId, CancellationToken ct);
 
@@ -202,3 +243,21 @@ public sealed record BankAccountHolder(Guid AccountId, Guid UserId, string? User
 /// <summary>What the review shows of the transaction a line looks the same as.</summary>
 public sealed record MatchedTransactionSummary(
     Guid Id, TransactionSource Source, string? Description, string? Merchant, decimal Amount, string Currency, DateTime EventTimestampUtc);
+
+/// <summary>A bill of a card of the group, with what the screens show next to it. Never the raw JSON. Prints no name.</summary>
+public sealed record GroupCardBill(
+    Guid Id,
+    Guid BankAccountId,
+    string CardName,
+    string BankName,
+    Guid UserId,
+    string? UserName,
+    DateOnly DueDate,
+    DateOnly? ClosingDate,
+    decimal TotalAmount,
+    string Currency,
+    decimal? MinimumPayment,
+    bool IsClosed)
+{
+    public override string ToString() => nameof(GroupCardBill);
+}

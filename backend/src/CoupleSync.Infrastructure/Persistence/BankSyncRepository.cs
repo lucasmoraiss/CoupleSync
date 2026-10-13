@@ -284,6 +284,88 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .AnyAsync(t => t.CoupleId == coupleId && transactions.Contains(t.LinkedTransactionId) && !lines.Contains(t.Id), ct);
     }
 
+    // ---------------------------------------------------------------- credit card bills
+
+    public async Task<IReadOnlyList<CreditCardBill>> FindBillsByPluggyIdsAsync(IReadOnlyCollection<string> pluggyBillIds, CancellationToken ct)
+        => await _dbContext.CreditCardBills
+            .IgnoreQueryFilters()
+            .Where(b => pluggyBillIds.Contains(b.PluggyBillId))
+            .ToListAsync(ct);
+
+    public Task AddBillsAsync(IEnumerable<CreditCardBill> bills, CancellationToken ct)
+        => _dbContext.CreditCardBills.AddRangeAsync(bills, ct);
+
+    public async Task<IReadOnlyList<CardBillFacts>> GetBillFactsForJobAsync(Guid coupleId, DateOnly fromDue, DateOnly toDue, CancellationToken ct)
+        => await _dbContext.CreditCardBills
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(b => b.CoupleId == coupleId && b.DueDate >= fromDue && b.DueDate <= toDue
+                        // A card the person turned off, or of a disconnected connection, is no longer read: its
+                        // stored bills say nothing of today.
+                        && _dbContext.BankAccounts.Any(a =>
+                            a.Id == b.BankAccountId && a.CoupleId == coupleId && a.SyncEnabled
+                            && _dbContext.BankItems.Any(i =>
+                                i.Id == a.ItemId && i.CoupleId == coupleId
+                                && _dbContext.BankConnections.Any(c =>
+                                    c.Id == i.ConnectionId && c.CoupleId == coupleId && c.Status != BankConnectionStatus.Disconnected))))
+            .Select(b => new CardBillFacts(b.Id, b.TotalAmount, b.Currency, b.DueDate, b.IsClosed))
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<BankTransaction>> GetBillPaymentCandidatesForJobAsync(Guid coupleId, DateOnly fromDay, DateOnly toDay, CancellationToken ct)
+        => (await _dbContext.BankTransactions
+                .IgnoreQueryFilters()
+                .Where(t => t.CoupleId == coupleId
+                            && t.Type == BankTransactionType.Debit
+                            && t.Status == BankTransactionStatus.Posted
+                            && (t.ReviewState == BankTransactionReviewState.Pending || t.ReviewState == BankTransactionReviewState.Ignored)
+                            && t.PersonDecidedAtUtc == null
+                            && t.LocalDate >= fromDay
+                            && t.LocalDate <= toDay)
+                .ToListAsync(ct))
+            .OrderBy(t => t.Date)
+            .ThenBy(t => t.PluggyTransactionId, StringComparer.Ordinal)
+            .ToList();
+
+    public async Task<IReadOnlyList<GroupCardBill>> GetBillsOfGroupAsync(Guid coupleId, DateOnly? fromDue, DateOnly? toDue, CancellationToken ct)
+    {
+        var bills =
+            from bill in _dbContext.CreditCardBills.AsNoTracking()
+            join account in _dbContext.BankAccounts.AsNoTracking() on bill.BankAccountId equals account.Id
+            join item in _dbContext.BankItems.AsNoTracking() on account.ItemId equals item.Id
+            join connection in _dbContext.BankConnections.AsNoTracking() on item.ConnectionId equals connection.Id
+            join user in _dbContext.Users.AsNoTracking() on connection.UserId equals user.Id
+            // Every table of the chain names the group: none of them is another group's.
+            where bill.CoupleId == coupleId && account.CoupleId == coupleId && item.CoupleId == coupleId && connection.CoupleId == coupleId
+                  && connection.Status != BankConnectionStatus.Disconnected
+                  // A card the person turned off is no longer read, like a disconnected connection: its bills stay
+                  // stored (turning it on shows them again) and are not shown meanwhile.
+                  && account.SyncEnabled
+            select new { bill, account.Name, account.MarketingName, item.ConnectorName, connection.UserId, UserName = user.Name };
+        if (fromDue is { } from) bills = bills.Where(r => r.bill.DueDate >= from);
+        if (toDue is { } to) bills = bills.Where(r => r.bill.DueDate <= to);
+
+        return (await bills.ToListAsync(ct))
+            .Select(r => new GroupCardBill(
+                r.bill.Id,
+                r.bill.BankAccountId,
+                string.IsNullOrWhiteSpace(r.Name) ? r.MarketingName ?? string.Empty : r.Name,
+                r.ConnectorName,
+                r.UserId,
+                r.UserName,
+                r.bill.DueDate,
+                r.bill.ClosingDate,
+                r.bill.TotalAmount,
+                r.bill.Currency,
+                r.bill.MinimumPayment,
+                r.bill.IsClosed))
+            .ToList();
+    }
+
+    public Task<bool> HasConnectedConnectionAsync(Guid coupleId, CancellationToken ct)
+        => _dbContext.BankConnections
+            .AsNoTracking()
+            .AnyAsync(c => c.CoupleId == coupleId && c.Status != BankConnectionStatus.Disconnected, ct);
+
     public async Task<IReadOnlyList<BankAccountHolder>> GetAccountHoldersForJobAsync(Guid coupleId, CancellationToken ct)
         => await (
                 from account in _dbContext.BankAccounts.IgnoreQueryFilters().AsNoTracking()
@@ -474,6 +556,29 @@ public sealed class BankSyncRepository : IBankSyncRepository
             .AsNoTracking()
             .Where(t => t.CoupleId == coupleId
                         && t.Type == BankTransactionType.Debit
+                        && t.ReviewState == BankTransactionReviewState.Pending)
+            .Select(t => new PendingBankExpense(t.LocalDate, t.Status, t.Amount, t.Currency))
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<BankTransaction>> GetReviewIncomesAsync(Guid coupleId, DateOnly from, DateOnly toExclusive, CancellationToken ct)
+        => await _dbContext.BankTransactions
+            .AsNoTracking()
+            .Where(t => t.CoupleId == coupleId
+                        && t.Type == BankTransactionType.Credit
+                        && t.LocalDate >= from
+                        && t.LocalDate < toExclusive
+                        && (ReviewStates.Contains(t.ReviewState)
+                            // Registered as an income that was deleted at that very moment: a discarded line.
+                            || (t.ReviewState == BankTransactionReviewState.Confirmed
+                                && t.LinkedIncomeSourceId == null
+                                && t.LinkedTransactionId == null)))
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<PendingBankExpense>> GetPendingIncomesAsync(Guid coupleId, CancellationToken ct)
+        => await _dbContext.BankTransactions
+            .AsNoTracking()
+            .Where(t => t.CoupleId == coupleId
+                        && t.Type == BankTransactionType.Credit
                         && t.ReviewState == BankTransactionReviewState.Pending)
             .Select(t => new PendingBankExpense(t.LocalDate, t.Status, t.Amount, t.Currency))
             .ToListAsync(ct);

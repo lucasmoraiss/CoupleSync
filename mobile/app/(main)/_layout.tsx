@@ -138,6 +138,8 @@ export default function MainLayout() {
       <Tabs.Screen name="settings/openfinance/index" options={{ href: null }} />
       <Tabs.Screen name="settings/openfinance/wizard" options={{ href: null }} />
       <Tabs.Screen name="openfinance/review" options={{ href: null }} />
+      {/* Contas (Open Finance) não é aba: abre pelo cartão "Faturas a vencer" do Painel. */}
+      <Tabs.Screen name="accounts/index" options={{ title: 'Contas', href: null }} />
       <Tabs.Screen name="recurring/index" options={{ href: null }} />
       <Tabs.Screen name="ocr-upload" options={{ href: null }} />
       <Tabs.Screen name="ocr-review" options={{ href: null }} />

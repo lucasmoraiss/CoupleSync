@@ -416,6 +416,32 @@ public sealed class ImportJobLifecycleTests
         Assert.True(jobs.ConflictRaised);
     }
 
+    [Fact]
+    public async Task WhenTheSaveOfTheResultIsEndedByADeadlock_TheWorkerDoesNotReadItAsRecovery_AndTheJobGoesToANewAttempt()
+    {
+        var jobs = new ConcurrencyRaceRepository { EndedByTheDatabase = true };
+        var job = ImportJob.Create(CoupleId, UserId, "couples/x/y", "application/pdf", Now);
+        jobs.Jobs.Add(job);
+        var provider = new FixedProvider("""{"provider":"local-pdf","transactions":[{"date":"2026-01-10","description":"Padaria","amount":12.5,"type":"Debit"}]}""");
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IImportJobRepository>(jobs);
+        services.AddSingleton<IOcrProvider>(provider);
+        services.AddSingleton<IStorageAdapter>(new CountingStorage());
+        services.AddSingleton<IDateTimeProvider>(new FakeDateTimeProvider(Now));
+        services.AddSingleton(new OcrProcessingService(
+            new UniqueIndexTransactionRepository(), new NullCategoryClassifier(), new FakeBudgetRepository()));
+        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        await new OcrBackgroundJob(scopeFactory, NullLogger<OcrBackgroundJob>.Instance)
+            .ProcessPendingJobsAsync(CancellationToken.None);
+
+        // Nobody changed the job: it is not left in Processing with its result dropped, it waits for a new attempt.
+        Assert.True(jobs.ConflictRaised);
+        Assert.Equal(1, job.RetryCount);
+        Assert.Equal(ImportJobStatus.Pending, job.Status);
+    }
+
     private sealed class FixedProvider(string json) : IOcrProvider
     {
         public int Calls { get; private set; }
@@ -433,6 +459,9 @@ public sealed class ImportJobLifecycleTests
         public List<ImportJob> Jobs { get; } = new();
         public bool ConflictRaised { get; private set; }
 
+        /// <summary>When set, the conflict is the database ending the save (a deadlock): no one changed the row.</summary>
+        public bool EndedByTheDatabase { get; init; }
+
         public Task<ImportJob?> GetByIdAsync(Guid id, Guid coupleId, CancellationToken ct)
             => Task.FromResult(Jobs.FirstOrDefault(j => j.Id == id && j.CoupleId == coupleId));
 
@@ -443,7 +472,9 @@ public sealed class ImportJobLifecycleTests
             if (Jobs.Any(j => j.Status == ImportJobStatus.Ready))
             {
                 ConflictRaised = true;
-                throw new CoupleSync.Application.Common.Exceptions.ConcurrencyConflictException("recovery failed the job first");
+                throw EndedByTheDatabase
+                    ? new CoupleSync.Application.Common.Exceptions.ConcurrencyConflictException("deadlock detected") { EndedByTheDatabase = true }
+                    : new CoupleSync.Application.Common.Exceptions.ConcurrencyConflictException("recovery failed the job first");
             }
 
             return Task.CompletedTask;

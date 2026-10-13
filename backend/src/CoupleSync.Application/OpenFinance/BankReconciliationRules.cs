@@ -34,6 +34,12 @@ public sealed record ExistingTransactionFacts(
 public sealed record SuspicionQuestion(MoneyMovement Line, Guid? CurrentSuspectId = null, string? ConnectorName = null);
 
 /// <summary>
+/// A bill of a credit card of the group, as far as the rules look at it. <paramref name="IsClosed"/> says the total
+/// no longer changes (see <see cref="CreditCardBill.IsClosedOn"/>).
+/// </summary>
+public sealed record CardBillFacts(Guid Id, decimal TotalAmount, string? Currency, DateOnly DueDate, bool IsClosed);
+
+/// <summary>
 /// The rules that say when two records are the same money (issue #26): a transfer between accounts of the group, the
 /// payment of a credit card bill, a credit that came from someone of the group, and a bank transaction that looks
 /// like a transaction the app already has. Pure functions over plain values: nothing here knows Pluggy, the database
@@ -114,15 +120,51 @@ public static class BankReconciliationRules
     }
 
     /// <summary>
-    /// Money leaving a checking/savings account to pay a credit card bill. Today the description decides. The other
-    /// half of the rule (the value equals the total of a closed bill of a card of the group, due within 10 days)
-    /// enters here with the bills of the cards (issue #27).
+    /// Money leaving a checking/savings account to pay a credit card bill, as its description says. The other half of
+    /// the rule, the value, is <see cref="FindBillPaid"/>.
     /// </summary>
     public static bool IsBillPayment(MoneyMovement movement, string? accountType, string? rawDescription)
+        => CanPayABill(movement, accountType) && IsBillPaymentDescription(rawDescription);
+
+    /// <summary>How many days apart the debit and the due date of the bill may be, before or after, for the debit to be its payment.</summary>
+    public const int BillPaymentDayTolerance = 10;
+
+    /// <summary>True for money, in reais and with a value, leaving a checking/savings account: only that pays a bill.</summary>
+    public static bool CanPayABill(MoneyMovement movement, string? accountType)
         => movement.Direction == MoneyDirection.Out
            && HasComparableValue(movement)
-           && string.Equals(accountType?.Trim(), BankAccountType, StringComparison.OrdinalIgnoreCase)
-           && IsBillPaymentDescription(rawDescription);
+           && string.Equals(accountType?.Trim(), BankAccountType, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True for a credit card account.</summary>
+    public static bool IsCreditCard(string? accountType)
+        => string.Equals(accountType?.Trim(), CreditCardAccountType, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A bill a debit can be the payment of: closed (its total no longer changes), in reais, with something to pay.</summary>
+    public static bool IsPayableBill(CardBillFacts bill)
+        => bill.IsClosed && bill.TotalAmount > 0 && CurrencyRules.IsBrl(bill.Currency);
+
+    /// <summary>
+    /// Money that left, of exactly the total of a payable bill that is due at most
+    /// <see cref="BillPaymentDayTolerance"/> days before or after the day of the debit.
+    /// </summary>
+    public static bool PaysBill(MoneyMovement movement, CardBillFacts bill)
+        => movement.Direction == MoneyDirection.Out
+           && HasComparableValue(movement)
+           && IsPayableBill(bill)
+           && bill.TotalAmount == movement.Amount
+           && Math.Abs(bill.DueDate.DayNumber - movement.LocalDay.DayNumber) <= BillPaymentDayTolerance;
+
+    /// <summary>
+    /// The bill of <paramref name="bills"/> the movement pays: the one due nearest to its day, then the one due
+    /// first, then the smallest id (so that the same data always gives the same answer); null when it pays none.
+    /// </summary>
+    public static CardBillFacts? FindBillPaid(MoneyMovement movement, IEnumerable<CardBillFacts> bills)
+        => bills
+            .Where(bill => PaysBill(movement, bill))
+            .OrderBy(bill => Math.Abs(bill.DueDate.DayNumber - movement.LocalDay.DayNumber))
+            .ThenBy(bill => bill.DueDate)
+            .ThenBy(bill => bill.Id)
+            .FirstOrDefault();
 
     /// <summary>
     /// True when the two names are the same person: every word of <paramref name="holderName"/> (at least two) is a

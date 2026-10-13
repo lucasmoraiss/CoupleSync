@@ -66,6 +66,7 @@ import type {
   CreateBankConnectionRequest,
   SyncRunResponse,
   BankReviewResponse,
+  BankAccountsOverviewResponse,
   ConfirmBankReviewRequest,
   ConfirmBankReviewResponse,
   RestoreBankReviewResponse,
@@ -501,6 +502,10 @@ export const openFinanceApiClient = {
 
   getSyncRun: (runId: string): Promise<AxiosResponse<SyncRunResponse>> =>
     axiosInstance.get<SyncRunResponse>(`/api/v1/openfinance/sync-runs/${runId}`),
+
+  /** As contas e os cartões que o grupo conectou, por pessoa, com saldo e faturas. Todos do grupo leem. */
+  getAccounts: (): Promise<AxiosResponse<BankAccountsOverviewResponse>> =>
+    axiosInstance.get<BankAccountsOverviewResponse>('/api/v1/openfinance/accounts'),
 
   /** As despesas do banco esperando a revisão no mês ("AAAA-MM"; sem ele, o mês corrente) e as descartadas. */
   getReview: (month?: string): Promise<AxiosResponse<BankReviewResponse>> =>

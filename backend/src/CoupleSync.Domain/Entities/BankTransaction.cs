@@ -123,7 +123,7 @@ public sealed class BankTransaction : ICoupleScoped
     public BankTransactionReviewState ReviewState { get; private set; }
     public Guid? LinkedTransactionId { get; private set; }
 
-    /// <summary>Phase 4 (incomes). Never written yet.</summary>
+    /// <summary>The income of the month created from this line (money that came in), while it is <c>Confirmed</c>.</summary>
     public Guid? LinkedIncomeSourceId { get; private set; }
 
     /// <summary>
@@ -169,6 +169,13 @@ public sealed class BankTransaction : ICoupleScoped
     /// </summary>
     public static bool CanBecomeExpense(BankTransactionStatus status, decimal amount, string? currency)
         => status == BankTransactionStatus.Posted && amount != 0 && CurrencyRules.IsBrl(currency);
+
+    /// <summary>
+    /// What can become an income of the month: money that came in, settled at the bank, with a value, in reais (the
+    /// same conditions of an expense: every sum of the app is in reais).
+    /// </summary>
+    public static bool CanBecomeIncome(BankTransactionStatus status, decimal amount, string? currency)
+        => CanBecomeExpense(status, amount, currency);
 
     public static BankTransaction Create(
         Guid coupleId,
@@ -239,10 +246,17 @@ public sealed class BankTransaction : ICoupleScoped
     public bool LostItsTransaction => ReviewState == BankTransactionReviewState.Reconciled && LinkedTransactionId is null;
 
     /// <summary>
-    /// What the review treats as discarded (listed apart, can be restored): what the person discarded, and a line
-    /// that <see cref="LostItsTransaction"/>.
+    /// True when the line (money that came in) was registered as an income that is no longer there: it was deleted at
+    /// the very moment of the confirmation, and the store cleared the link.
     /// </summary>
-    public bool CountsAsDiscarded => ReviewState == BankTransactionReviewState.Discarded || LostItsTransaction;
+    public bool LostItsIncome
+        => !IsExpense && ReviewState == BankTransactionReviewState.Confirmed && LinkedIncomeSourceId is null && LinkedTransactionId is null;
+
+    /// <summary>
+    /// What the review treats as discarded (listed apart, can be restored): what the person discarded, and a line
+    /// that <see cref="LostItsTransaction"/> or <see cref="LostItsIncome"/>.
+    /// </summary>
+    public bool CountsAsDiscarded => ReviewState == BankTransactionReviewState.Discarded || LostItsTransaction || LostItsIncome;
 
     /// <summary>
     /// What an automatic rule decided about the line was not stored (the save was refused because someone reviewed
@@ -269,6 +283,17 @@ public sealed class BankTransaction : ICoupleScoped
         UpdatedAtUtc = nowUtc;
     }
 
+    /// <summary>The row (money that came in) became an income of the month.</summary>
+    public void ConfirmAsIncome(Guid incomeSourceId, DateTime nowUtc)
+    {
+        ReviewState = BankTransactionReviewState.Confirmed;
+        LinkedIncomeSourceId = incomeSourceId;
+        LinkedTransactionId = null;
+        MatchedTransactionId = null;
+        ReviewedAtUtc = nowUtc;
+        UpdatedAtUtc = nowUtc;
+    }
+
     /// <summary>The person said the row is the transaction the app already had: it points to that one.</summary>
     public void Reconcile(Guid existingTransactionId, DateTime nowUtc)
     {
@@ -279,11 +304,12 @@ public sealed class BankTransaction : ICoupleScoped
         UpdatedAtUtc = nowUtc;
     }
 
-    /// <summary>Discarded by the person, or the transaction it pointed to was deleted: no link stays.</summary>
+    /// <summary>Discarded by the person, or the transaction (or the income) it pointed to was deleted: no link stays.</summary>
     public void Discard(DateTime nowUtc)
     {
         ReviewState = BankTransactionReviewState.Discarded;
         LinkedTransactionId = null;
+        LinkedIncomeSourceId = null;
         MatchedTransactionId = null;
         ReviewedAtUtc = nowUtc;
         UpdatedAtUtc = nowUtc;
@@ -297,6 +323,7 @@ public sealed class BankTransaction : ICoupleScoped
     {
         ReviewState = BankTransactionReviewState.Pending;
         LinkedTransactionId = null;
+        LinkedIncomeSourceId = null;
         MatchedTransactionId = null;
         AutoReason = null;
         ReviewedAtUtc = null;

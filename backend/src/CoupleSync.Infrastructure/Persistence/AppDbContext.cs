@@ -61,6 +61,8 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<BankTransaction> BankTransactions => Set<BankTransaction>();
 
+    public DbSet<CreditCardBill> CreditCardBills => Set<CreditCardBill>();
+
     public DbSet<AiUsage> AiUsages => Set<AiUsage>();
 
     public DbSet<AiConsent> AiConsents => Set<AiConsent>();
@@ -731,6 +733,7 @@ public sealed class AppDbContext : DbContext
             entity.Ignore(x => x.AbsoluteAmount);
             entity.Ignore(x => x.OpenToAutomaticRules);
             entity.Ignore(x => x.CanBePairedAsTransfer);
+            entity.Ignore(x => x.LostItsIncome);
 
             // A Pluggy transaction is mirrored once in the whole database: synchronising again never duplicates.
             entity.HasIndex(x => x.PluggyTransactionId).IsUnique();
@@ -783,6 +786,41 @@ public sealed class AppDbContext : DbContext
                 .HasForeignKey(x => x.SyncRunId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .IsRequired(false);
+        });
+
+        modelBuilder.Entity<CreditCardBill>(entity =>
+        {
+            entity.ToTable("credit_card_bills");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CoupleId).HasColumnName("couple_id").IsRequired();
+            entity.Property(x => x.BankAccountId).HasColumnName("bank_account_id").IsRequired();
+            entity.Property(x => x.PluggyBillId).HasColumnName("pluggy_bill_id").HasMaxLength(CreditCardBill.MaxPluggyIdLength).IsRequired();
+            entity.Property(x => x.DueDate).HasColumnName("due_date").IsRequired();
+            entity.Property(x => x.ClosingDate).HasColumnName("closing_date");
+            entity.Property(x => x.TotalAmount).HasColumnName("total_amount").HasPrecision(18, 2).IsRequired();
+            entity.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(CreditCardBill.MaxCurrencyLength).IsRequired();
+            entity.Property(x => x.MinimumPayment).HasColumnName("minimum_payment").HasPrecision(18, 2);
+            entity.Property(x => x.IsClosed).HasColumnName("is_closed").IsRequired();
+            // The bill exactly as Pluggy sent it. Never logged, never returned by the API.
+            entity.Property(x => x.RawJson).HasColumnName("raw_json").HasColumnType("jsonb").IsRequired();
+            entity.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+            entity.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
+
+            // A Pluggy bill is mirrored once in the whole database: synchronising again never duplicates.
+            entity.HasIndex(x => x.PluggyBillId).IsUnique();
+            entity.HasIndex(x => new { x.CoupleId, x.DueDate });
+            entity.HasIndex(x => x.BankAccountId);
+
+            entity.HasOne<Couple>()
+                .WithMany()
+                .HasForeignKey(x => x.CoupleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<BankAccount>()
+                .WithMany()
+                .HasForeignKey(x => x.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AiUsage>(entity =>
