@@ -54,6 +54,7 @@ FLOW_NAMES=(
   "06-abas"
   "$CAPTURE_FLOW"
   "08-ia-ativar-e-assistente"
+  "09-assinaturas-e-recorrencias"
 )
 # Flows listed here are reported but do not fail the job. Empty on purpose: every flow is required.
 INFORMATIONAL_FLOWS=()
@@ -356,7 +357,9 @@ maestro_run() {
   # In the background and waited for: bash only runs a signal trap between foreground commands, and the
   # summary must be written at once when the hard ceiling of the workflow step ends this script (TERM).
   (
+    # API_URL: where the flows that prepare their data through the API (09) find it, on this machine.
     timeout "$limit" maestro test \
+      -e "API_URL=$API_BASE" \
       --format junit --output "$EVIDENCE/maestro/$label.xml" \
       --debug-output "$EVIDENCE/maestro/$label" --flatten-debug-output \
       "$file" 2>&1 | tee "$EVIDENCE/maestro/$label.log"

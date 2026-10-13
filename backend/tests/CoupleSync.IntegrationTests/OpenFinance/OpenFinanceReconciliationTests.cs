@@ -2979,4 +2979,96 @@ public sealed class OpenFinanceReconciliationTests
         Assert.Equal(("Pending", null, null), await StateAsync(factory, "t26-recent"));
         Assert.Equal(answer == "asNew" ? 3 : 2, await TransactionCountAsync(factory));
     }
+
+    // ================================================================ "É a mesma" e a lista de recorrências (#39)
+
+    private const string RecurringList = "/api/v1/ai/recurring";
+
+    /// <summary>
+    /// Ana with two monthly charges of "Streaming Exemplo" and a third, of the same value, typed with no establishment
+    /// (so it is not part of the series), plus the bank line that repeats the third and names the establishment.
+    /// </summary>
+    private static async Task<(Member Ana, Guid Connection, Guid Third, Guid Line)> WithSeriesMissingTheNameAsync(
+        OpenFinanceApiFactory factory, string? thirdMerchant = null)
+    {
+        var (ana, connection) = await AnaAsync(factory);
+        await ManualAsync(ana, 39.90m, Noon(-60), "Assinatura", "Streaming Exemplo", "LAZER");
+        await ManualAsync(ana, 39.90m, Noon(-30), "Assinatura", "Streaming Exemplo", "LAZER");
+        var third = await ManualAsync(ana, 39.90m, Noon(), "Pagamento do mes", thirdMerchant, "LAZER");
+        Bank(factory, Checking, new FakeTransaction("t39-streaming", Noon(1), -39.90m)
+        {
+            Description = "Streaming Exemplo",
+            MerchantName = "Streaming Exemplo",
+            Category = "Entertainment",
+            CategoryId = "10000000",
+        });
+        await DoneAsync(factory, ana, connection);
+        return (ana, connection, third, await LineIdAsync(factory, "t39-streaming"));
+    }
+
+    private static async Task<JsonElement> RecurringAsync(Member member)
+    {
+        var response = await member.Client.GetAsync(RecurringList);
+        Assert.True(HttpStatusCode.OK == response.StatusCode, await response.Content.ReadAsStringAsync());
+        return await JsonAsync(response);
+    }
+
+    [Fact]
+    public async Task ItIsTheSame_ThatFillsInTheEstablishment_MakesTheNextListOfRecurrencesCalculateAgain_WithoutWaitingSixHours()
+    {
+        await using var factory = NewFactory();
+        var (ana, _, third, line) = await WithSeriesMissingTheNameAsync(factory);
+        var before = await RecurringAsync(ana);
+        Assert.Equal(0, before.GetProperty("subscriptions").GetArrayLength()); // two charges are not a series
+        Assert.Equal(3, await TransactionCountAsync(factory));
+
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = line } } }));
+
+        Assert.Equal("Streaming Exemplo", Assert.Single(await factory.RowsAsync($"SELECT merchant FROM transactions WHERE id = '{Sql(third)}'"))["merchant"]);
+        var after = await RecurringAsync(ana);
+        var subscription = Assert.Single(after.GetProperty("subscriptions").EnumerateArray());
+        Assert.Equal("Streaming Exemplo", subscription.GetProperty("name").GetString());
+        Assert.Equal(3, subscription.GetProperty("occurrences").GetInt32());
+        Assert.True(after.GetProperty("detectedAtUtc").GetDateTime() > before.GetProperty("detectedAtUtc").GetDateTime());
+    }
+
+    [Fact]
+    public async Task ItIsTheSame_ThatChangesNothingOfTheTransaction_LeavesTheListOfRecurrencesAsItWas()
+    {
+        await using var factory = NewFactory();
+        // The transaction already has the establishment of the bank and a category: there is nothing to fill in.
+        var (ana, _, _, line) = await WithSeriesMissingTheNameAsync(factory, thirdMerchant: "Streaming Exemplo");
+        var before = await RecurringAsync(ana);
+        Assert.Equal(1, before.GetProperty("subscriptions").GetArrayLength());
+
+        await OkAsync(ConfirmAsync(ana, new { reconcile = new[] { new { id = line } } }));
+
+        var after = await RecurringAsync(ana);
+        Assert.Equal(before.GetProperty("detectedAtUtc").GetDateTime(), after.GetProperty("detectedAtUtc").GetDateTime());
+    }
+
+    [Fact]
+    public async Task ItIsTheSame_ThatIsRefused_DoesNotChangeTheTransaction_NorMakeTheListOfRecurrencesCalculateAgain()
+    {
+        await using var factory = NewFactory();
+        var (ana, connection, third, line) = await WithSeriesMissingTheNameAsync(factory);
+        // A second line with no transaction that looks like it: answering "it is the same" for it refuses the whole request.
+        Bank(factory, Checking,
+            new FakeTransaction("t39-streaming", Noon(1), -39.90m)
+            {
+                Description = "Streaming Exemplo", MerchantName = "Streaming Exemplo", Category = "Entertainment", CategoryId = "10000000",
+            },
+            Debit("t39-alone", Noon(2), 8.00m));
+        await DoneAsync(factory, ana, connection);
+        var alone = await LineIdAsync(factory, "t39-alone");
+        var before = await RecurringAsync(ana);
+
+        var refused = await ConfirmAsync(ana, new { reconcile = new[] { new { id = line }, new { id = alone } } });
+
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Null(Assert.Single(await factory.RowsAsync($"SELECT merchant FROM transactions WHERE id = '{Sql(third)}'"))["merchant"]);
+        var after = await RecurringAsync(ana);
+        Assert.Equal(before.GetProperty("detectedAtUtc").GetDateTime(), after.GetProperty("detectedAtUtc").GetDateTime());
+        Assert.Equal(0, after.GetProperty("subscriptions").GetArrayLength());
+    }
 }
