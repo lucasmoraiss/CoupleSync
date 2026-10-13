@@ -118,7 +118,7 @@ public sealed class PluggyHttpClient : IPluggyClient
     public const int MaxTransactionPages = 1000;
 
     /// <summary>
-    /// GET /v2/transactions, page after page by the cursor of "next", until "next" is null. Only <c>accountId</c>,
+    /// GET /v2/transactions, page after page by the cursor of "next", until "next" is null, empty or not there. Only <c>accountId</c>,
     /// <c>dateFrom</c>, <c>dateTo</c> and <c>after</c> are ever sent: the listing refuses what it does not know
     /// (<c>page</c>, <c>pageSize</c>, <c>from</c>, <c>to</c>). The listing ends early, and says it is not complete,
     /// when Pluggy gives a cursor already sent (it would go in circles), a "next" that is there and that no cursor
