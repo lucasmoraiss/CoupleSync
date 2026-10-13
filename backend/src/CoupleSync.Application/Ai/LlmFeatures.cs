@@ -40,11 +40,11 @@ public static class LlmFeatures
 }
 
 /// <summary>
-/// The providers the current AI consent text covers. It stays in code, next to the consent version: a provider
-/// configured before the text names it (and before the group accepts again) receives nothing — the gateway ignores
-/// its links. Version 2 of the text: Google (Gemini) and Groq.
-/// Adding or changing a provider here goes together with a new <c>AiConsent.CurrentVersion</c>, in the same deploy
-/// in which the provider starts to count: nobody may have accepted a text that did not name it. Taking a key away
+/// The providers the AI text of the app (Privacidade, version <c>AiConsent.CurrentVersion</c>) names as where the
+/// data goes. It stays in code, next to that version: a provider configured before the text names it receives
+/// nothing — the gateway ignores its links. Version 2 of the text: Google (Gemini) and Groq.
+/// Nobody accepts the text any more (the AI is on for every group), so this list is what keeps the promise of the
+/// text: adding a provider here goes together with the text that names it, in the same delivery. Taking a key away
 /// needs nothing.
 /// </summary>
 public static class AiConsentCoverage

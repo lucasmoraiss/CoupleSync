@@ -28,7 +28,7 @@ export default function CoupleSetupScreen() {
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [createdCode, setCreatedCode] = useState<string | null>(null);
-  // Saindo desta tela para o app (consultando se a pergunta da análise com IA é devida).
+  // Saindo desta tela para o app.
   const [leaving, setLeaving] = useState(false);
   // ?add=1: o usuário já tem grupo e veio criar ou entrar em mais um (há para onde voltar).
   const { add } = useLocalSearchParams<{ add?: string }>();

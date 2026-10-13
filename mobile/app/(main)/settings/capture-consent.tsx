@@ -26,7 +26,7 @@ function CaptureConsentScreen() {
   const { data: myGroups } = useMyGroups();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  // Saiu da tela (inclusive pelo voltar do Android, sem responder): a pergunta da IA deixa de esperar por ela.
+  // Saiu da tela (inclusive pelo voltar do Android, sem responder): a marca de "está abrindo" é desfeita.
   useFocusEffect(captureConsentScreenFocusEffect);
 
   const handleAccept = async () => {

@@ -258,7 +258,7 @@ describe('teclado no Assistente', () => {
   });
 });
 
-describe('a pergunta da IA e o consentimento da captura não disputam a tela', () => {
+describe('o consentimento da captura continua marcando que está abrindo (a pergunta da IA, que esperava por ele, não existe mais)', () => {
   it('a captura marca que está abrindo antes de gravar e de navegar, e desfaz a marca se não abriu', () => {
     const hook = read('src/modules/integrations/notification-capture/useCaptureConsentSync.ts');
     expect(hook).toMatch(
