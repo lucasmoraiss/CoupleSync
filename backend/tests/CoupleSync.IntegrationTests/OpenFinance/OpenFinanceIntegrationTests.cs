@@ -1367,7 +1367,7 @@ public sealed class OpenFinanceIntegrationTests
         var response = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.ItemWithAccounts });
 
         await AssertErrorAsync(response, HttpStatusCode.BadGateway, "PLUGGY_REFUSED",
-            "O Pluggy recusou o pedido do CoupleSync. Tentar de novo não adianta: o problema precisa de uma correção no aplicativo.");
+            "O Pluggy recusou este pedido. Tentar de novo agora não deve resolver.");
         Assert.Contains($"GET /items/{FakePluggyServer.ItemWithAccounts}", pluggy.Requests); // the 302 was really answered
         Assert.DoesNotContain(pluggy.Requests, request => request.Contains(RedirectingPluggyServer.ElsewherePath, StringComparison.Ordinal));
         Assert.Empty(pluggy.KeysSentElsewhere); // the API key went nowhere else

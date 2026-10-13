@@ -899,8 +899,67 @@ public sealed class OpenFinanceSyncPostgresTests
         Assert.Equal(4, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
         Assert.Equal(4, await database.ScalarAsync<long>("SELECT count(DISTINCT pluggy_transaction_id) FROM bank_transactions"));
         Assert.True(await database.ScalarAsync<DateTime>("SELECT last_sync_at_utc FROM bank_connections") > syncedBefore);
+        // The run after the partial one asked the whole history, which covers the days the partial one had asked for.
         var windows = pluggy.WindowsAsked(FakePluggyServer.CreditCardAccountId);
-        Assert.Equal(windows[1].From, windows[2].From); // the run after the partial one asked the same first day
+        Assert.Equal(windows[0].From, windows[2].From);
+        Assert.True(string.CompareOrdinal(windows[2].From, windows[1].From) <= 0, $"{windows[2].From} should not be after {windows[1].From}");
+    }
+
+    [PostgresFact]
+    public async Task ABankAddedLater_WhoseFirstListingCameIncomplete_IsAskedForItsWholeHistoryAgain_AndEndsWholeWithoutDoubling()
+    {
+        // Issue #77, on PostgreSQL: what tells the next run to ask everything again is the incomplete run in sync_runs
+        // (after the last whole synchronisation of the connection).
+        await using var database = await _server.CreateDatabaseAsync();
+        await using var factory = new PostgresApiFactory(database);
+        var pluggy = new FakePluggyServer();
+        await using var host = WithOpenFinanceSync(factory, pluggy);
+        var ana = await OpenFinanceTests.RegisterAsync(factory, host, "Ana");
+        var connectionId = await ConnectWithBankAsync(ana);
+        Assert.Equal("Done", (await SyncAsync(ana, connectionId)).GetProperty("status").GetString());
+        var historyFrom = Text(DateOnly.FromDateTime(BrazilTime.ToLocal(DateTime.UtcNow)).AddMonths(-3));
+
+        const string other = FakePluggyServer.OtherCheckingAccountId;
+        const string old1 = "c1b2c3d4-0000-4000-8000-0000000077c1";
+        const string old2 = "c1b2c3d4-0000-4000-8000-0000000077c2";
+        var today = DateTime.UtcNow.Date;
+        pluggy.Transactions[other].AddRange(
+        [
+            new FakeTransaction(old1, today.AddDays(-20).AddHours(10), -40m) { Description = "Oficina Exemplo" },
+            new FakeTransaction(old2, today.AddDays(-45).AddHours(10), -41m) { Description = "Escola Exemplo" },
+        ]);
+        var added = await ana.Client.PostAsJsonAsync($"{Base}/connections/{connectionId}/items", new { itemId = FakePluggyServer.OtherItemWithAccounts });
+        Assert.True(HttpStatusCode.OK == added.StatusCode, await added.Content.ReadAsStringAsync());
+        pluggy.MaxPageSize = 1;
+        pluggy.RawNextJson = "12345";
+
+        var partial = await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"));
+
+        Assert.Equal("SYNC_INCOMPLETE", partial.GetProperty("errorCode").GetString());
+        Assert.Equal(
+            1,
+            await database.ScalarAsync<long>(
+                "SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = ANY(@ids)",
+                ("ids", new[] { FakePluggyServer.OtherAccountTransactionId, old1, old2 })));
+        Assert.Equal(historyFrom, Assert.Single(pluggy.WindowsAsked(other)).From);
+
+        pluggy.MaxPageSize = 500;
+        pluggy.RawNextJson = null;
+        var whole = await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"));
+
+        Assert.Equal("Done", whole.GetProperty("status").GetString());
+        Assert.Equal(historyFrom, pluggy.WindowsAsked(other)[1].From);
+        Assert.Equal(
+            3,
+            await database.ScalarAsync<long>(
+                "SELECT count(*) FROM bank_transactions WHERE pluggy_transaction_id = ANY(@ids)",
+                ("ids", new[] { FakePluggyServer.OtherAccountTransactionId, old1, old2 })));
+        Assert.Equal(8, await database.ScalarAsync<long>("SELECT count(*) FROM bank_transactions"));
+        Assert.Equal(8, await database.ScalarAsync<long>("SELECT count(DISTINCT pluggy_transaction_id) FROM bank_transactions"));
+
+        // After the whole one, the usual days again.
+        Assert.Equal("Done", (await WaitAsync(ana, await InsertRunAsync(database, ana, connectionId, "Pending"))).GetProperty("status").GetString());
+        Assert.NotEqual(historyFrom, pluggy.WindowsAsked(other)[2].From);
     }
 
     // ---------------------------------------------------------------- support

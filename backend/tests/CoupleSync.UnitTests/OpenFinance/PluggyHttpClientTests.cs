@@ -869,7 +869,7 @@ public sealed class PluggyHttpClientTests
         Assert.Equal("PLUGGY_REFUSED", refusal.Code);
         Assert.Equal(502, refusal.StatusCode);
         Assert.Equal(
-            "O Pluggy recusou o pedido do CoupleSync. Tentar de novo não adianta: o problema precisa de uma correção no aplicativo.",
+            "O Pluggy recusou este pedido. Tentar de novo agora não deve resolver.",
             refusal.Message);
         Assert.NotEqual(PluggyException.MessageFor(PluggyErrorCodes.Unavailable), refusal.Message);
     }

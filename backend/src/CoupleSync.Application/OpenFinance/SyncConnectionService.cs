@@ -33,7 +33,7 @@ public sealed class SyncConnectionService
         "A sincronização demorou demais e foi encerrada. Sincronize de novo.";
     public const string FailedMessage = "Não foi possível sincronizar agora. Tente de novo em alguns minutos.";
     public const string IncompleteMessage =
-        "O Pluggy não entregou a lista completa das transações desta vez. O que chegou foi guardado; sincronize de novo para buscar o restante.";
+        "O Pluggy não entregou a lista completa das transações desta vez. O que chegou foi guardado. Tente sincronizar de novo.";
     public const string OwnerNotInGroupMessage =
         "Quem conectou estes bancos não faz mais parte do grupo. Nada foi sincronizado.";
     public const string ChangedMessage =
@@ -302,7 +302,11 @@ public sealed class SyncConnectionService
         if (await JudgeGroupAsync(ct)) await SaveAsync(connection, ct, JudgeGroupAsync);
 
         var auth = PluggyAuth.ForConnection(connection.Id, clientId, clientSecret, connection.ClientSecretEncrypted!);
-        var window = SyncWindow.For(connection, _clock.UtcNow);
+        // A run of this connection came incomplete since its last whole synchronisation: what it stored moved the
+        // last day of the accounts it read, so that day says nothing about what was read. Every account is asked
+        // whole again, until a run ends well.
+        var readWhole = await _sync.HasRunFailedWithAsync(connection.Id, connection.CoupleId, IncompleteCode, connection.LastSyncAtUtc, ct);
+        var window = SyncWindow.For(connection, _clock.UtcNow) with { Whole = readWhole };
         var ai = new AiBudget(run.AiCategorizationConsent ? MaxAiSuggestionsPerRun : 0, AiTimeBudget);
 
         var itemsRead = 0;
@@ -320,8 +324,10 @@ public sealed class SyncConnectionService
 
         // Some listing stopped before Pluggy said it ended. Everything that was read, of every account, is already
         // stored; but days that were asked may not have come, so this is not a synchronisation that ended well: the
-        // run fails saying so, and the connection keeps the date of its last whole synchronisation, so that the next
-        // run asks for the same days again.
+        // run fails saying so, and the connection keeps the date of its last whole synchronisation. This failure is
+        // what makes the runs after it ask every account from the earlier of the window of the connection and the
+        // start of the history (never later than the first day any account asked for in this run), until one ends
+        // well.
         if (progress.IncompleteListings > 0)
         {
             progress.Stage = "transactions";
@@ -810,6 +816,13 @@ public sealed class SyncConnectionService
 /// </summary>
 public sealed record SyncWindow(DateOnly From, DateOnly HistoryFrom, DateOnly To)
 {
+    /// <summary>
+    /// Every account is asked from the earlier of <see cref="From"/> and <see cref="HistoryFrom"/>, whatever the
+    /// mirror has of it: a run before this one stored a listing that did not come whole, and the last day of an
+    /// account no longer tells what was read of it.
+    /// </summary>
+    public bool Whole { get; init; }
+
     public static SyncWindow For(BankConnection connection, DateTime nowUtc)
     {
         var today = DateOnly.FromDateTime(BrazilTime.ToLocal(nowUtc));
@@ -830,6 +843,7 @@ public sealed record SyncWindow(DateOnly From, DateOnly HistoryFrom, DateOnly To
     /// </summary>
     public DateOnly FromFor(DateOnly? lastDayOfAccount)
     {
+        if (Whole) return HistoryFrom < From ? HistoryFrom : From;
         if (lastDayOfAccount is not { } last) return HistoryFrom;
         var fromAccount = last.AddDays(-SyncConnectionService.OverlapDays);
         if (fromAccount < HistoryFrom) fromAccount = HistoryFrom;

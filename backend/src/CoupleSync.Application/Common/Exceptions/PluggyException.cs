@@ -9,7 +9,10 @@ public static class PluggyErrorCodes
     public const string Unavailable = "PLUGGY_UNAVAILABLE";
     public const string RateLimited = "PLUGGY_RATE_LIMITED";
 
-    /// <summary>Pluggy answered, and refused the request itself (a 4xx or 3xx nothing else explains): asking again changes nothing.</summary>
+    /// <summary>
+    /// Pluggy answered, and refused the request itself (a 4xx or 3xx nothing else explains). Why is not known here
+    /// (the request, the plan, the state of the item...): the message only says what is true in every case.
+    /// </summary>
     public const string Refused = "PLUGGY_REFUSED";
 }
 
@@ -52,7 +55,7 @@ public sealed class PluggyException : AppException
         PluggyErrorCodes.Unavailable =>
             "O Pluggy não respondeu agora. Tente de novo em alguns minutos.",
         PluggyErrorCodes.Refused =>
-            "O Pluggy recusou o pedido do CoupleSync. Tentar de novo não adianta: o problema precisa de uma correção no aplicativo.",
+            "O Pluggy recusou este pedido. Tentar de novo agora não deve resolver.",
         _ => throw new ArgumentOutOfRangeException(nameof(code), code, "Unknown Pluggy error code."),
     };
 
