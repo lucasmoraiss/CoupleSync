@@ -119,6 +119,11 @@ describe('tela do Assistente', () => {
     expect(screen).toMatch(/router\.push\('\/\(main\)\/ai\/welcome'/);
   });
 
+  it('a explicação do Assistente desligado cita os destinos que o servidor tem ligados (ou todos, sem status)', () => {
+    expect(screen).toMatch(/\$\{aiAnalysisSummary\(aiDestinations\(status\)\)\}/);
+    expect(screen).not.toMatch(/AI_ANALYSIS_SUMMARY/);
+  });
+
   it('tem estado de espera que muda quando a resposta demora, e sugestões de pergunta na tela vazia', () => {
     expect(screen).toMatch(/Pensando na resposta…/);
     expect(screen).toMatch(/Ainda pensando… a resposta pode levar até meio minuto\./);
@@ -146,9 +151,10 @@ describe('tela de boas-vindas da análise com IA', () => {
   it('tem a pergunta, três linhas do que a IA faz, a linha do que vai e para onde e "Ler tudo" com os sete pontos', () => {
     expect(screen).toMatch(/Quer que a IA analise as finanças do grupo\?/);
     expect((/const WHAT_IT_DOES: readonly string\[\] = \[([\s\S]*?)\];/.exec(screen)?.[1].match(/^\s+'/gm) ?? []).length).toBe(3);
-    expect(screen).toMatch(/\{AI_ANALYSIS_SUMMARY\}/);
+    expect(screen).toMatch(/const destinations = aiDestinations\(status\);/);
+    expect(screen).toMatch(/\{aiAnalysisSummary\(destinations\)\}/);
     expect(screen).toMatch(/'Ler tudo sobre a análise com IA'/);
-    expect(screen).toMatch(/AI_ANALYSIS_POINTS\.map/);
+    expect(screen).toMatch(/aiAnalysisPoints\(destinations\)\.map/);
   });
 
   it('tem os dois botões da pergunta, com rótulos acessíveis', () => {

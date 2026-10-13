@@ -40,6 +40,13 @@ public static class AiConfiguration
 {
     public const string GeminiKeyVariable = "GEMINI_API_KEY";
 
+    /// <summary>
+    /// Groq is configured in code, not in the panel of the host: the Render service is not synchronised from
+    /// render.yaml, so the only thing production adds is this secret. Without a value in it Groq does not exist.
+    /// </summary>
+    public const string GroqKeyVariable = "GROQ_API_KEY";
+    public const string GroqBaseUrl = "https://api.groq.com/openai/v1";
+
     public static void Apply(AiOptions options, IConfiguration configuration)
     {
         var section = configuration.GetSection(AiOptions.SectionName);
@@ -101,9 +108,13 @@ public static class AiConfiguration
         return string.Empty;
     }
 
-    /// <summary>The configured OpenAI-compatible providers (those with a name), without their keys.</summary>
+    /// <summary>
+    /// The OpenAI-compatible providers, without their keys: Groq (built in) and the ones of the configuration (those
+    /// with a name). A configured entry named "groq" replaces the built-in one.
+    /// </summary>
     public static List<OpenAiCompatibleEntry> CompatibleProviders(IConfiguration configuration)
-        => configuration.GetSection($"{AiOptions.SectionName}:OpenAiCompatible").GetChildren()
+    {
+        var configured = configuration.GetSection($"{AiOptions.SectionName}:OpenAiCompatible").GetChildren()
             .Select(entry => new OpenAiCompatibleEntry
             {
                 Name = (entry[nameof(OpenAiCompatibleEntry.Name)] ?? string.Empty).Trim(),
@@ -112,6 +123,19 @@ public static class AiConfiguration
             })
             .Where(entry => entry.Name.Length > 0)
             .ToList();
+
+        if (!configured.Any(entry => string.Equals(entry.Name, AiOptions.GroqProviderName, StringComparison.OrdinalIgnoreCase)))
+        {
+            configured.Insert(0, new OpenAiCompatibleEntry
+            {
+                Name = AiOptions.GroqProviderName,
+                BaseUrl = GroqBaseUrl,
+                ApiKeyVariable = GroqKeyVariable,
+            });
+        }
+
+        return configured;
+    }
 
     private static LlmLink? ParseLink(string? value)
     {
@@ -128,7 +152,7 @@ public static class AiConfiguration
 
 /// <summary>
 /// The API refuses to start with the fake provider on when (a) a real provider key has a value — GEMINI_API_KEY,
-/// which has one in production, or the key of any configured compatible provider — or (b) the RENDER variable
+/// which has one in production, or the key of any compatible provider (Groq counts even with no configuration: it is built in) — or (b) the RENDER variable
 /// exists (Render sets RENDER=true on every service, in every runtime). It does not look at ASPNETCORE_ENVIRONMENT:
 /// "App E2E" runs the image as Production. On Render a mistaken Ai__UseFakeProvider makes the new version fail at
 /// start-up, the deploy is marked as failed and the previous version stays up: the fake never answers real users.

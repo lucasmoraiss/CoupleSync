@@ -1,10 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  AI_ANALYSIS_POINTS,
-  AI_ANALYSIS_SECTIONS,
-  AI_ANALYSIS_SUMMARY,
   AI_ANALYSIS_TITLE,
+  AI_KNOWN_DESTINATIONS,
+  aiAnalysisPoints,
+  aiAnalysisSections,
+  aiAnalysisSummary,
   AI_OWN_CONSENT_NOTE,
   CAPTURE_APPS,
   CAPTURE_CONSENT_SECTIONS,
@@ -125,10 +126,14 @@ describe('"Suas respostas neste aparelho"', () => {
   });
 });
 
+// Os destinos como GET /ai/status os devolve.
+const GOOGLE = { name: 'Google (Gemini)', country: 'Estados Unidos', trainsOnData: true };
+const GROQ = { name: 'Groq', country: 'Estados Unidos', trainsOnData: false };
+
 describe('seção "Análise com IA" (issue #38)', () => {
-  it('tem exatamente os sete pontos do texto aprovado, nesta ordem', () => {
+  it('só com o Google ligado, tem exatamente os sete pontos do texto aprovado, nesta ordem', () => {
     expect(AI_ANALYSIS_TITLE).toBe('Análise com IA');
-    expect(AI_ANALYSIS_POINTS).toEqual([
+    expect(aiAnalysisPoints([GOOGLE])).toEqual([
       'O que vai: resumos calculados das finanças do grupo (totais por categoria, lojas, assinaturas, parcelas, valores das metas, tipos de renda), nomes de lojas para categorizar e as perguntas feitas ao Assistente, como foram escritas.',
       'O que nunca vai: nomes, e-mails e CPF de vocês. O que o app não envia por conta própria: nomes das metas, nomes das rendas, números de conta ou cartão e nomes de quem recebeu ou enviou transferências (elas vão só como "transferência"). O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta ou de quem recebeu uma transferência, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.',
       'Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.',
@@ -140,7 +145,8 @@ describe('seção "Análise com IA" (issue #38)', () => {
   });
 
   it('é uma seção só, separada do texto geral, com os sete pontos', () => {
-    expect(AI_ANALYSIS_SECTIONS).toEqual([{ title: 'Análise com IA', paragraphs: AI_ANALYSIS_POINTS }]);
+    expect(aiAnalysisSections([GOOGLE])).toEqual([{ title: 'Análise com IA', paragraphs: aiAnalysisPoints([GOOGLE]) }]);
+    expect(aiAnalysisSections([GOOGLE, GROQ])).toEqual([{ title: 'Análise com IA', paragraphs: aiAnalysisPoints([GOOGLE, GROQ]) }]);
     expect(GENERAL.map((s) => s.title)).not.toContain('Análise com IA');
   });
 
@@ -154,14 +160,61 @@ describe('seção "Análise com IA" (issue #38)', () => {
   });
 
   it('a linha da tela de boas-vindas diz o que vai e para onde, sem contradizer os sete pontos', () => {
-    expect(AI_ANALYSIS_SUMMARY).toContain('Google (Gemini), nos Estados Unidos');
-    expect(AI_ANALYSIS_SUMMARY).toContain('resumos das finanças do grupo');
-    expect(AI_ANALYSIS_SUMMARY).toContain('nunca nomes, e-mails ou CPF');
+    expect(aiAnalysisSummary([GOOGLE])).toBe(
+      'Vão para o Google (Gemini), nos Estados Unidos, resumos das finanças do grupo e as suas perguntas — nunca nomes, e-mails ou CPF de vocês.',
+    );
+  });
+
+  describe('segundo provedor (Groq): o texto cita os destinos que o servidor tem ligados', () => {
+    const WHERE = 2;
+    const FRANK = 3;
+
+    it('com o Groq ligado, "Para onde" e "Com franqueza" citam os dois; os outros cinco pontos não mudam', () => {
+      const one = aiAnalysisPoints([GOOGLE]);
+      const two = aiAnalysisPoints([GOOGLE, GROQ]);
+
+      expect(two).toHaveLength(7);
+      expect(two[WHERE]).toBe('Para onde: Google (Gemini) e Groq, nos Estados Unidos — transferência internacional de dados.');
+      expect(two[FRANK]).toBe(
+        'Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e revisores humanos podem lê-lo. ' +
+          'O Groq declara, nos termos de uso dele, que não usa o conteúdo enviado para treinar modelos; ele pode guardar pedidos e respostas por até 30 dias para investigar abuso ou falhas."',
+      );
+      for (const index of [0, 1, 4, 5, 6]) expect(two[index]).toBe(one[index]);
+    });
+
+    it('sem o Groq ligado, o Groq não aparece em lugar nenhum do texto', () => {
+      expect(aiAnalysisPoints([GOOGLE]).join('\n')).not.toMatch(/Groq/);
+      expect(aiAnalysisSummary([GOOGLE])).not.toMatch(/Groq/);
+    });
+
+    it('a linha da tela de boas-vindas cita os dois quando os dois estão ligados', () => {
+      expect(aiAnalysisSummary([GOOGLE, GROQ])).toBe(
+        'Vão para o Google (Gemini) e para o Groq, nos Estados Unidos, resumos das finanças do grupo e as suas perguntas — nunca nomes, e-mails ou CPF de vocês.',
+      );
+    });
+
+    it('sem saber o que o servidor tem ligado, o texto cita todos os destinos que o aceite cobre — nunca menos', () => {
+      expect(AI_KNOWN_DESTINATIONS).toEqual([GOOGLE, GROQ]);
+      for (const unknown of [null, undefined, []] as const) {
+        expect(aiAnalysisPoints(unknown)).toEqual(aiAnalysisPoints([GOOGLE, GROQ]));
+        expect(aiAnalysisSummary(unknown)).toBe(aiAnalysisSummary([GOOGLE, GROQ]));
+      }
+    });
+
+    it('um destino que o app não conhece pelo nome é descrito pelo que o servidor informa, com o país', () => {
+      const other = { name: 'Outro', country: 'França', trainsOnData: true };
+      const points = aiAnalysisPoints([GOOGLE, other]);
+      expect(points[WHERE]).toBe('Para onde: Google (Gemini) (nos Estados Unidos) e Outro (em França) — transferência internacional de dados.');
+      expect(points[FRANK]).toContain('Outro pode usar o conteúdo enviado para melhorar os produtos dele.');
+      expect(aiAnalysisPoints([{ ...other, trainsOnData: false }])[FRANK]).toBe(
+        'Com franqueza: "Outro declara que não usa o conteúdo enviado para treinar modelos."',
+      );
+    });
   });
 
   it('a tela Privacidade mostra a seção em destaque, separada do texto geral, e leva às Configurações de IA', () => {
     const screen = fs.readFileSync(path.join(__dirname, '../../../../app/(main)/settings/privacy.tsx'), 'utf8');
-    expect(screen).toContain('AI_ANALYSIS_SECTIONS');
+    expect(screen).toContain('aiAnalysisSections(aiDestinations(status))');
     expect(screen).toContain('styles.aiBox');
     expect(screen).toMatch(/router\.push\('\/\(main\)\/settings\/ai'/);
     expect(screen).not.toContain('aiAvailability');

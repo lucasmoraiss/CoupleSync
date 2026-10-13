@@ -40,6 +40,23 @@ public sealed class AiOptions
     public const string GeminiProviderName = "gemini";
     public const string FakeProviderName = "fake";
 
+    /// <summary>The second provider (OpenAI-compatible). It only exists for the chains while GROQ_API_KEY has a value.</summary>
+    public const string GroqProviderName = "groq";
+
+    // Chosen from Groq's public documentation on 2026-10-08 and checked with the real key on 2026-10-12: the account
+    // lists it among the chat models and it accepts the request as the code builds it (strict json_schema,
+    // max_tokens). A production model that accepts a strict JSON schema; published free limits per model: 30
+    // requests and 8,000 tokens per minute, 1,000 requests and 200,000 tokens per day. The response headers confirm
+    // 1,000 requests per day and 8,000 tokens per minute; the other two numbers are only the published ones. Not
+    // checked: the real 429, large requests, quality in Portuguese against Gemini (needed before promoting Groq
+    // above reserve). This is the one place to change the model.
+    public const string GroqReserveModel = "openai/gpt-oss-120b";
+
+    public const int GroqRpm = 30;
+    public const long GroqTpm = 8_000;
+    public const int GroqRpd = 1_000;
+    public const long GroqTpd = 200_000;
+
     // Measured with the real key on 2026-10-08: the alias gemini-flash-latest is the most capable Flash that answers
     // (it resolves to 3.8); gemini-flash-lite-latest resolves to 3.5 lite; the three fixed ids answer as themselves.
     // Five different models, each with a quota of its own.
@@ -82,15 +99,22 @@ public sealed class AiOptions
     /// then the preview, then the lite alias. Speed and quota first where there is volume (Assistant, daily insight,
     /// categorization): lite alias, then two fixed models — never the two models of the summaries, so that a day
     /// full of conversation cannot exhaust them (design 2.2).
+    /// Groq closes every chain as the reserve, after the Gemini links: who uses the app today gets the same answer
+    /// from the same model, and Groq only answers when no Gemini link could. That covers a FAST failure of the Gemini
+    /// links (quota over, HTTP or network error, model withdrawn). It does not cover a Gemini link that is SLOW: in an
+    /// interactive call it takes the whole time of the call and Groq is not even tried. Splitting the time among the
+    /// links is not done here. Without GROQ_API_KEY its link resolves to no provider and the chain is the Gemini one.
     /// </summary>
     public Dictionary<string, IReadOnlyList<LlmLink>> Chains { get; } = new(StringComparer.OrdinalIgnoreCase)
     {
-        [AiChains.Assistant] = [new(GeminiProviderName, FlashLiteLatest), new(GeminiProviderName, Flash25), new(GeminiProviderName, Flash31Lite)],
-        [AiChains.Categorize] = [new(GeminiProviderName, FlashLiteLatest), new(GeminiProviderName, Flash25), new(GeminiProviderName, Flash31Lite)],
-        [AiChains.Daily] = [new(GeminiProviderName, FlashLiteLatest), new(GeminiProviderName, Flash25), new(GeminiProviderName, Flash31Lite)],
-        [AiChains.Weekly] = [new(GeminiProviderName, FlashLatest), new(GeminiProviderName, Flash3Preview), new(GeminiProviderName, FlashLiteLatest)],
-        [AiChains.Education] = [new(GeminiProviderName, FlashLatest), new(GeminiProviderName, Flash3Preview), new(GeminiProviderName, FlashLiteLatest)],
+        [AiChains.Assistant] = [new(GeminiProviderName, FlashLiteLatest), new(GeminiProviderName, Flash25), new(GeminiProviderName, Flash31Lite), GroqReserve],
+        [AiChains.Categorize] = [new(GeminiProviderName, FlashLiteLatest), new(GeminiProviderName, Flash25), new(GeminiProviderName, Flash31Lite), GroqReserve],
+        [AiChains.Daily] = [new(GeminiProviderName, FlashLiteLatest), new(GeminiProviderName, Flash25), new(GeminiProviderName, Flash31Lite), GroqReserve],
+        [AiChains.Weekly] = [new(GeminiProviderName, FlashLatest), new(GeminiProviderName, Flash3Preview), new(GeminiProviderName, FlashLiteLatest), GroqReserve],
+        [AiChains.Education] = [new(GeminiProviderName, FlashLatest), new(GeminiProviderName, Flash3Preview), new(GeminiProviderName, FlashLiteLatest), GroqReserve],
     };
+
+    private static LlmLink GroqReserve => new(GroqProviderName, GroqReserveModel);
 
     /// <summary>Configured limits. A model without an entry gets the default of <see cref="LimitFor"/>.</summary>
     public List<AiLimit> Limits { get; } = new();
@@ -99,7 +123,8 @@ public sealed class AiOptions
     /// The limits of a model. Gemini models without an entry get only a pace per minute: 5 requests (the lowest
     /// number quoted by third parties, to pace the jobs), or 10 for the "lite" models (seven calls in a row to
     /// gemini-flash-lite-latest went through with the real key). Their daily quotas are not published and were not
-    /// measured, so they stay unknown and the chain learns them from the 429. Replace per model with Ai__Limits.
+    /// measured, so they stay unknown and the chain learns them from the 429. Groq models get the limits Groq
+    /// publishes for the free plan, which are per model. Replace per model with Ai__Limits.
     /// </summary>
     public AiLimit LimitFor(string provider, string model)
     {
@@ -107,6 +132,9 @@ public sealed class AiOptions
             string.Equals(l.Provider, provider, StringComparison.OrdinalIgnoreCase)
             && string.Equals(l.Model, model, StringComparison.OrdinalIgnoreCase));
         if (configured is not null) return configured;
+
+        if (string.Equals(provider, GroqProviderName, StringComparison.OrdinalIgnoreCase))
+            return new AiLimit { Provider = provider, Model = model, Rpd = GroqRpd, Tpd = GroqTpd, Rpm = GroqRpm, Tpm = GroqTpm };
 
         if (!string.Equals(provider, GeminiProviderName, StringComparison.OrdinalIgnoreCase))
             return new AiLimit { Provider = provider, Model = model };
