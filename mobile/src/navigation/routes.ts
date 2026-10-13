@@ -17,8 +17,7 @@ export const PARENT_ROUTE = {
   'ocr-upload': '/(main)/transactions',
   'ocr-review': '/(main)/transactions',
   'settings/ai': '/(main)/settings',
-  // A tela de boas-vindas da IA e o Assistente abrem do Painel e voltam para ele.
-  'ai/welcome': '/',
+  // O Assistente abre do Painel e volta para ele.
   'chat/index': '/',
   // Revisão do banco (Open Finance): aberta do atalho da tela de Transações e do fim do wizard.
   'openfinance/review': '/(main)/transactions',

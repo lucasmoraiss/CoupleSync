@@ -85,7 +85,7 @@ export function useCaptureConsentSync(canPrompt = true): void {
 
   useEffect(() => {
     if (!decision.prompt || !canPrompt) return;
-    // Marcado já, antes de gravar e de navegar: a pergunta da análise com IA não abre por cima desta tela.
+    // Marcado já, antes de gravar e de navegar: nenhuma outra tela que abra sozinha abre por cima desta.
     noteCapturePromptOpening(sessionUserId);
     void useConsentStore.getState().markCapturePromptShown().then((recorded) => {
       if (recorded) router.push(CAPTURE_CONSENT_ROUTE as any);
@@ -95,8 +95,9 @@ export function useCaptureConsentSync(canPrompt = true): void {
 }
 
 /**
- * A tela de consentimento da captura vai abrir sozinha (ou está abrindo) para a pessoa logada? Quem pergunta é a
- * tela de boas-vindas da análise com IA, que espera a vez dela (capturePromptGate.ts).
+ * A tela de consentimento da captura vai abrir sozinha (ou está abrindo) para a pessoa logada? Para outra tela
+ * que abra sozinha esperar a vez dela (capturePromptGate.ts). Sem quem pergunte hoje: a pergunta da análise com IA,
+ * que usava isto, não existe mais.
  */
 export function isCaptureConsentAhead(): Promise<boolean> {
   return isCapturePromptAhead({

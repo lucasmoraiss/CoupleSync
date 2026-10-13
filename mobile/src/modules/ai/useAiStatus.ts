@@ -58,7 +58,7 @@ export function useAiStatus(onFreshWhileFocused?: (status: AiStatusResponse) => 
     if (fresh) onFresh.current?.(fresh);
   }, [freshCount]);
 
-  const mine = selectForSession({ ownerUserId, ownerCoupleId, status, loadFailed, welcomeShown: false }, userId, coupleId);
+  const mine = selectForSession({ ownerUserId, ownerCoupleId, status, loadFailed }, userId, coupleId);
   const load = selectLoadForSession({ ownerUserId, ownerCoupleId, fromStorage, retrying }, userId, coupleId);
   return { status: mine.status, loadFailed: mine.loadFailed, retrying: load.retrying, refresh, isFocused };
 }

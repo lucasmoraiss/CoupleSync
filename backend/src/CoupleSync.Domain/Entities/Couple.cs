@@ -39,6 +39,14 @@ public sealed class Couple
     /// <summary>The member who manages the group (removes members, renews the code); null only for a group with no member left.</summary>
     public Guid? OwnerUserId { get; private set; }
 
+    /// <summary>
+    /// When a member switched the AI off for this group, on purpose. Null — every group that never did it, and every
+    /// group again after someone switches it back on — means the AI is on: it needs no acceptance from anyone.
+    /// </summary>
+    public DateTime? AiDisabledAtUtc { get; private set; }
+
+    public bool IsAiEnabled => AiDisabledAtUtc is null;
+
     public IReadOnlyCollection<CoupleMember> Members => _members;
 
     public static Couple Create(string joinCode, DateTime createdAtUtc)
@@ -58,6 +66,17 @@ public sealed class Couple
     {
         JoinCode = NormalizeJoinCode(joinCode);
         JoinCodeExpiresAtUtc = nowUtc + JoinCodeValidity;
+    }
+
+    /// <summary>"Off for the group". A group that is already off keeps the date of when it was switched off.</summary>
+    public void SwitchAiOff(DateTime nowUtc)
+    {
+        AiDisabledAtUtc ??= nowUtc.Kind == DateTimeKind.Utc ? nowUtc : DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc);
+    }
+
+    public void SwitchAiOn()
+    {
+        AiDisabledAtUtc = null;
     }
 
     public bool HasMember(Guid userId) => _members.Any(x => x.UserId == userId);

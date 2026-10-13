@@ -24,7 +24,7 @@ public sealed class ChatController : ControllerBase
 
     /// <summary>
     /// Send a message to the AI financial assistant. 404 AI_CHAT_DISABLED while the AI is not available on the server,
-    /// 403 AI_CONSENT_REQUIRED while the group has not switched it on, 429 when a budget of the day is used up.
+    /// 403 AI_CONSENT_REQUIRED only while the group has switched it off on purpose, 429 when a budget of the day is used up.
     /// </summary>
     [HttpPost("chat")]
     [ProducesResponseType(typeof(ChatResponse), StatusCodes.Status200OK)]

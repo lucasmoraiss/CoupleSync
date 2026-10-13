@@ -6,7 +6,7 @@ import {
   aiAnalysisPoints,
   aiAnalysisSections,
   aiAnalysisSummary,
-  AI_OWN_CONSENT_NOTE,
+  AI_OWN_SECTION_NOTE,
   CAPTURE_APPS,
   CAPTURE_CONSENT_SECTIONS,
   CAPTURE_SOURCES,
@@ -115,7 +115,7 @@ describe('"Suas respostas neste aparelho"', () => {
   };
   const date = (iso: string) => `[${iso.slice(0, 10)}]`;
 
-  it('não há linha de IA, nem para quem tinha aceitado o chat antigo: o aceite de IA é do grupo e fica no servidor', () => {
+  it('não há linha de IA, nem para quem tinha aceitado o chat antigo: a IA não tem aceite, vem ligada para o grupo', () => {
     expect(consentStatusLines(EMPTY_CONSENT, date)).toEqual(['Captura de notificações: não aceita.']);
     expect(consentStatusLines(accepted, date)).toEqual(['Captura de notificações: aceita em [2026-10-01] (ligada).']);
   });
@@ -138,7 +138,7 @@ describe('seção "Análise com IA" (issue #38)', () => {
       'O que nunca vai: nomes, e-mails e CPF de vocês. O que o app não envia por conta própria: nomes das metas, nomes das rendas, números de conta ou cartão e nomes de quem recebeu ou enviou transferências (elas vão só como "transferência"). O que você escreve numa pergunta é enviado como você escreveu: se citar o nome de uma meta ou de quem recebeu uma transferência, ele vai junto. Nomes de vocês, CPF, telefone, e-mail e chave Pix digitados numa pergunta são retirados antes do envio. Nomes de lojas vão como aparecem no extrato.',
       'Para onde: Google (Gemini), nos Estados Unidos — transferência internacional de dados.',
       'Com franqueza: "No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os produtos dele e revisores humanos podem lê-lo."',
-      'Quem ativa liga a análise para o grupo inteiro; o outro membro é avisado no app e pode desligar a qualquer hora em Configurações; desligar não apaga o histórico, que pode ser apagado à parte.',
+      'A análise já vem ligada para o grupo inteiro, sem ninguém precisar ativar. Qualquer pessoa do grupo pode desligar para todos, e ligar de novo, a qualquer hora em Configurações > Inteligência artificial; desligar não apaga o histórico, que pode ser apagado à parte.',
       'O resumo semanal por e-mail é opcional, por pessoa, enviado pela Brevo (o serviço de e-mail que o app já usa).',
       'Os cálculos (assinaturas, parcelas, previsão) são feitos no próprio servidor do app e funcionam sem a IA.',
     ]);
@@ -150,16 +150,32 @@ describe('seção "Análise com IA" (issue #38)', () => {
     expect(GENERAL.map((s) => s.title)).not.toContain('Análise com IA');
   });
 
-  it('no texto geral a IA só aparece como "tem aceite próprio": nenhum parágrafo antigo sobre o Chat IA ou o Gemini sobra', () => {
+  it('nenhum ponto do texto da IA diz que é preciso ativar ou aceitar para ela funcionar; o que vai, para onde e a franqueza continuam lá', () => {
+    for (const destinations of [[GOOGLE], [GOOGLE, GROQ], null]) {
+      const points = aiAnalysisPoints(destinations);
+      expect(points).toHaveLength(7);
+      expect(points.join('\n')).not.toMatch(/quem ativa|é avisado|aceite|aceitar|precisa ativar|ative /i);
+      expect(points[0]).toMatch(/^O que vai: /);
+      expect(points[1]).toMatch(/^O que nunca vai: /);
+      expect(points[2]).toMatch(/^Para onde: .*transferência internacional de dados\.$/);
+      expect(points[3]).toMatch(/^Com franqueza: /);
+      expect(points[4]).toMatch(/^A análise já vem ligada para o grupo inteiro, sem ninguém precisar ativar\./);
+    }
+  });
+
+  it('no texto geral a IA só aparece como "vem ligada e pode ser desligada": nenhum parágrafo antigo sobre o Chat IA, o Gemini ou aceite sobra', () => {
     const text = flat(GENERAL);
-    expect(AI_OWN_CONSENT_NOTE).toBe('A análise com IA tem aceite próprio; veja Configurações > Inteligência artificial.');
-    expect(text).toContain(AI_OWN_CONSENT_NOTE);
+    expect(AI_OWN_SECTION_NOTE).toBe(
+      'A análise com IA vem ligada para o grupo e pode ser desligada; veja a seção "Análise com IA" e Configurações > Inteligência artificial.',
+    );
+    expect(text).toContain(AI_OWN_SECTION_NOTE);
+    expect(text).not.toMatch(/aceite próprio/);
     expect(text).not.toMatch(/Chat IA/);
     expect(text).not.toMatch(/Gemini/);
     expect(text).not.toMatch(/Nesta versão ele está desligado/);
   });
 
-  it('a linha da tela de boas-vindas diz o que vai e para onde, sem contradizer os sete pontos', () => {
+  it('a linha de Configurações > Inteligência artificial diz o que vai e para onde, sem contradizer os sete pontos', () => {
     expect(aiAnalysisSummary([GOOGLE])).toBe(
       'Vão para o Google (Gemini), nos Estados Unidos, resumos das finanças do grupo e as suas perguntas — nunca nomes, e-mails ou CPF de vocês.',
     );
@@ -187,13 +203,13 @@ describe('seção "Análise com IA" (issue #38)', () => {
       expect(aiAnalysisSummary([GOOGLE])).not.toMatch(/Groq/);
     });
 
-    it('a linha da tela de boas-vindas cita os dois quando os dois estão ligados', () => {
+    it('a linha de Configurações > Inteligência artificial cita os dois quando os dois estão ligados', () => {
       expect(aiAnalysisSummary([GOOGLE, GROQ])).toBe(
         'Vão para o Google (Gemini) e para o Groq, nos Estados Unidos, resumos das finanças do grupo e as suas perguntas — nunca nomes, e-mails ou CPF de vocês.',
       );
     });
 
-    it('sem saber o que o servidor tem ligado, o texto cita todos os destinos que o aceite cobre — nunca menos', () => {
+    it('sem saber o que o servidor tem ligado, o texto cita todos os destinos que esta versão cobre — nunca menos', () => {
       expect(AI_KNOWN_DESTINATIONS).toEqual([GOOGLE, GROQ]);
       for (const unknown of [null, undefined, []] as const) {
         expect(aiAnalysisPoints(unknown)).toEqual(aiAnalysisPoints([GOOGLE, GROQ]));
@@ -217,6 +233,9 @@ describe('seção "Análise com IA" (issue #38)', () => {
     expect(screen).toContain('aiAnalysisSections(aiDestinations(status))');
     expect(screen).toContain('styles.aiBox');
     expect(screen).toMatch(/router\.push\('\/\(main\)\/settings\/ai'/);
+    expect(screen).toContain('accessibilityLabel="Abrir as configurações de inteligência artificial: ligar ou desligar e ver o consumo"');
+    expect(screen).toContain('>Ligar ou desligar e ver o consumo<');
+    expect(screen).not.toMatch(/Ativar, desligar/i);
     expect(screen).not.toContain('aiAvailability');
   });
 });

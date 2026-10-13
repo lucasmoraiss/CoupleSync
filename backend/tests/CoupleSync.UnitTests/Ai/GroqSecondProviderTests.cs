@@ -335,8 +335,8 @@ public sealed class GroqSecondProviderTests : IDisposable
 }
 
 /// <summary>
-/// A group whose acceptance is of the PREVIOUS version of the AI text (the one that named only Google): until someone
-/// accepts the version in force, nothing is sent to any provider — neither to the old one nor to the new one.
+/// A group whose only acceptance is of the PREVIOUS version of the AI text (the one that named only Google): the AI
+/// is on for it like for any other group, and the chain reaches the new provider with nobody accepting anything.
 /// The gateway, the gate and the repository are the real ones, on a real database (SQLite).
 /// </summary>
 [Trait("Category", "AiChat")]
@@ -378,27 +378,25 @@ public sealed class OldAiConsentVersionTests : IDisposable
     }
 
     [Fact]
-    public async Task AnAcceptanceOfVersion1_SendsNothingToAnyProvider_UntilVersion2IsAccepted()
+    public async Task AGroupWhoseOnlyAcceptanceIsOfVersion1_IsAnsweredInEveryFeature_WithoutAcceptingVersion2()
     {
         var gemini = new ScriptedProvider("gemini", "gemini-flash-latest", ScriptedProvider.Result(LlmOutcome.Error));
         var groq = new ScriptedProvider("groq", "openai/gpt-oss-120b");
         _kit.Chain(AiChains.Assistant, gemini, groq);
         Accept(version: 1);
 
+        // The Assistant and the categorization of the import: the second provider answers when the first fails.
         foreach (var feature in new[] { LlmFeatures.Chat, LlmFeatures.Categorize })
         {
             _kit.Chain(LlmFeatures.ChainOf(feature), gemini, groq);
-            var blocked = await Gateway().GenerateAsync<TestAnswer>(_coupleId, LlmGatewayTestKit.Request(feature), LlmCallMode.Interactive, CancellationToken.None);
-            Assert.Equal(LlmGatewayOutcome.NotConsented, blocked.Outcome);
+            var answered = await Gateway().GenerateAsync<TestAnswer>(_coupleId, LlmGatewayTestKit.Request(feature), LlmCallMode.Interactive, CancellationToken.None);
+            Assert.Equal((LlmGatewayOutcome.Ok, "groq"), (answered.Outcome, answered.Provider));
         }
 
-        Assert.Equal((0, 0), (gemini.Calls, groq.Calls));
-        Assert.Empty(_kit.Rows());
-
-        Accept(version: 2);
-        var answered = await Gateway().GenerateAsync<TestAnswer>(_coupleId, LlmGatewayTestKit.Request(), LlmCallMode.Interactive, CancellationToken.None);
-
-        Assert.Equal((LlmGatewayOutcome.Ok, "groq"), (answered.Outcome, answered.Provider));
-        Assert.Equal((1, 1), (gemini.Calls, groq.Calls));
+        Assert.Equal((2, 2), (gemini.Calls, groq.Calls));
+        // Nothing was written or changed in ai_consents on the way.
+        using var db = _kit.NewContext();
+        var row = Assert.Single(db.AiConsents.ToList());
+        Assert.Equal((1, true), (row.Version, row.IsActive));
     }
 }

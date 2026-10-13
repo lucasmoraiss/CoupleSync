@@ -48,12 +48,14 @@ public sealed class AiUsageTests
         var transactionSum = await database.ScalarAsync<decimal>("SELECT sum(amount) FROM transactions");
         var columnsBefore = await ColumnsOfAsync(database, existingTables);
 
+        // "Changes no existing column" is said of this migration: a later one adds couples.ai_disabled_at_utc.
+        await MigrationTests.MigrateAsync(database, "20261008023328_AddAiUsage");
+        Assert.Equal(columnsBefore, await ColumnsOfAsync(database, existingTables));
         await MigrationTests.MigrateAsync(database);
 
         foreach (var table in existingTables)
             Assert.Equal(countsBefore[table], await database.ScalarAsync<long>($"SELECT count(*) FROM \"{table}\""));
         Assert.Equal(transactionSum, await database.ScalarAsync<decimal>("SELECT sum(amount) FROM transactions"));
-        Assert.Equal(columnsBefore, await ColumnsOfAsync(database, existingTables));
 
         Assert.Equal(1, await database.ScalarAsync<long>("SELECT count(*) FROM information_schema.tables WHERE table_name = 'ai_usage'"));
         Assert.Equal(0, await database.ScalarAsync<long>("SELECT count(*) FROM ai_usage"));

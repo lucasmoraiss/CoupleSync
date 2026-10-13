@@ -10,9 +10,10 @@ namespace CoupleSync.IntegrationTests.AiChat;
 
 /// <summary>
 /// Groq as the second provider (design 2.2 and 7.3, decision 15), through HTTP on SQLite. What the person is told
-/// follows what is really configured: Groq is listed only while its key exists and a chain has a link of it. And the
-/// AI text has a new version: a group whose acceptance is of the version that named only Google is asked again, and
-/// until someone accepts nothing is sent. No test talks to a real provider; the key is invented.
+/// follows what is really configured: Groq is listed only while its key exists and a chain has a link of it. The AI
+/// text has a version 2 that names Groq, but no version switches a group off: a group whose only acceptance is of
+/// the version that named only Google is on like any other, and nobody is asked again. No test talks to a real
+/// provider; the key is invented.
 /// </summary>
 [Trait("Category", "AiChat")]
 public sealed class AiSecondProviderTests
@@ -67,71 +68,55 @@ public sealed class AiSecondProviderTests
     // ---------------------------------------------------------------- the new version of the text
 
     [Fact]
-    public async Task AGroupThatAcceptedVersion1_IsAskedAgain_NothingIsSentMeanwhile_AndTheNewAcceptanceIsVersion2()
+    public async Task AGroupThatAcceptedVersion1_IsOn_NobodyIsAskedAgain_AndActivatingWithVersion1IsNotRefused()
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
         var (ana, bruno) = await GroupThatAcceptedTheOldVersionAsync(factory);
 
-        // Ana accepted the old text: the question comes back to her. The group is off for both.
-        var anaStatus = await StatusOf(ana.Client);
-        Assert.Equal(2, anaStatus.GetProperty("consentVersion").GetInt32());
-        Assert.False(anaStatus.GetProperty("enabled").GetBoolean());
-        Assert.True(anaStatus.GetProperty("onboardingPending").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, anaStatus.GetProperty("myAcceptance").ValueKind);
-        Assert.Equal(0, anaStatus.GetProperty("acceptedBy").GetArrayLength());
-
-        // Bruno never accepted and had answered "Entendi": nobody "switched it on" under the text in force, so he is
-        // not told that Ana did, and he is not asked.
-        var brunoStatus = await StatusOf(bruno.Client);
-        Assert.False(brunoStatus.GetProperty("enabled").GetBoolean());
-        Assert.False(brunoStatus.GetProperty("onboardingPending").GetBoolean());
-        Assert.Equal(0, brunoStatus.GetProperty("acceptedBy").GetArrayLength());
-
-        // Nothing leaves for any provider.
+        // The group is on for both and nobody is asked. The row of version 1 is not an acceptance of the text in
+        // force, so it is not listed as one — for Ana or for Bruno.
         foreach (var member in new[] { ana, bruno })
         {
+            var status = await StatusOf(member.Client);
+            Assert.Equal(2, status.GetProperty("consentVersion").GetInt32());
+            Assert.True(status.GetProperty("enabled").GetBoolean());
+            Assert.False(status.GetProperty("onboardingPending").GetBoolean());
+            Assert.Equal(JsonValueKind.Null, status.GetProperty("myAcceptance").ValueKind);
+            Assert.Equal(0, status.GetProperty("acceptedBy").GetArrayLength());
+
             var chat = await member.Client.PostAsJsonAsync(Chat, new { Message = "Quanto gastamos?", History = Array.Empty<object>() });
-            Assert.Equal(HttpStatusCode.Forbidden, chat.StatusCode);
-            Assert.Equal("AI_CONSENT_REQUIRED", (await ErrorOf(chat)).Code);
+            Assert.Equal(HttpStatusCode.OK, chat.StatusCode);
         }
 
-        Assert.Empty(factory.UsageRows());
+        Assert.Equal(2, factory.UsageRows().Count);
 
-        // The installed app (without the update) still sends version 1: refused, in Portuguese, nothing stored.
+        // An app that still sends version 1: 200, never AI_CONSENT_VERSION_OUTDATED. No acceptance of the text in
+        // force is written for a version that is not it, and the row of version 1 stays as it was.
         var old = await ana.Client.PostAsJsonAsync(Consent, new { Version = 1 });
-        Assert.Equal(HttpStatusCode.Conflict, old.StatusCode);
-        var error = await ErrorOf(old);
-        Assert.Equal("AI_CONSENT_VERSION_OUTDATED", error.Code);
-        Assert.Equal("O texto sobre a análise com IA mudou. Feche o app e abra de novo para ver o texto novo antes de ativar.", error.Message);
-        Assert.False((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
+        Assert.Equal(HttpStatusCode.OK, old.StatusCode);
+        Assert.True((await old.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("enabled").GetBoolean());
         Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 2"));
+        Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 1 AND revoked_at_utc IS NULL"));
 
-        // The updated app accepts version 2.
+        // The installed app sends version 2: stored as her acceptance, listed to both, and still nobody is asked.
         var accepted = await ana.Client.PostAsJsonAsync(Consent, new { Version = 2 });
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         Assert.Equal(1, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE version = 2 AND revoked_at_utc IS NULL"));
 
-        anaStatus = await StatusOf(ana.Client);
-        Assert.True(anaStatus.GetProperty("enabled").GetBoolean());
-        Assert.False(anaStatus.GetProperty("onboardingPending").GetBoolean());
-
-        // Now someone did switch it on under the text in force: Bruno is told, with her name.
-        brunoStatus = await StatusOf(bruno.Client);
-        Assert.True(brunoStatus.GetProperty("enabled").GetBoolean());
-        Assert.True(brunoStatus.GetProperty("onboardingPending").GetBoolean());
-        Assert.Equal("Ana Exemplo", Assert.Single(brunoStatus.GetProperty("acceptedBy").EnumerateArray()).GetProperty("name").GetString());
-
-        var answered = await bruno.Client.PostAsJsonAsync(Chat, new { Message = "Quanto gastamos?", History = Array.Empty<object>() });
-        Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
-        Assert.Single(factory.UsageRows());
+        foreach (var member in new[] { ana, bruno })
+        {
+            var status = await StatusOf(member.Client);
+            Assert.True(status.GetProperty("enabled").GetBoolean());
+            Assert.False(status.GetProperty("onboardingPending").GetBoolean());
+            Assert.Equal("Ana Exemplo", Assert.Single(status.GetProperty("acceptedBy").EnumerateArray()).GetProperty("name").GetString());
+        }
     }
 
     [Fact]
-    public async Task AnsweringNotNow_ToTheNewText_EndsTheOldAcceptance_AndTheQuestionDoesNotComeBack()
+    public async Task AnsweringNotNow_ToTheNewText_EndsTheOldAcceptance_AndTheGroupStaysOn()
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
         var (ana, bruno) = await GroupThatAcceptedTheOldVersionAsync(factory);
-        Assert.True((await StatusOf(ana.Client)).GetProperty("onboardingPending").GetBoolean());
 
         var notNow = await ana.Client.PatchAsync(Preferences, JsonContent.Create(new { OnboardingAnswered = true }));
         Assert.Equal(HttpStatusCode.OK, notNow.StatusCode);
@@ -140,7 +125,8 @@ public sealed class AiSecondProviderTests
         {
             var status = await StatusOf(member.Client);
             Assert.False(status.GetProperty("onboardingPending").GetBoolean());
-            Assert.False(status.GetProperty("enabled").GetBoolean());
+            // "Not now" from an app that still shows the old question is not "off for the group".
+            Assert.True(status.GetProperty("enabled").GetBoolean());
         }
 
         // The old acceptance is over (revoked by her), not erased.
@@ -166,8 +152,6 @@ public sealed class AiSecondProviderTests
             await db.SaveChangesAsync();
         }
 
-        Assert.True((await StatusOf(bruno.Client)).GetProperty("onboardingPending").GetBoolean());
-
         var notNow = await ana.Client.PatchAsync(Preferences, JsonContent.Create(new { OnboardingAnswered = true }));
         Assert.Equal(HttpStatusCode.OK, notNow.StatusCode);
 
@@ -184,9 +168,13 @@ public sealed class AiSecondProviderTests
         Assert.Equal(1, Revoked(carla.UserId, revoked: false));
         Assert.Equal(0, Revoked(carla.UserId, revoked: true));
 
-        // And Bruno is still asked, with the new text.
-        Assert.True((await StatusOf(bruno.Client)).GetProperty("onboardingPending").GetBoolean());
-        Assert.False((await StatusOf(ana.Client)).GetProperty("onboardingPending").GetBoolean());
+        // Nobody is asked, and both groups are on.
+        foreach (var member in new[] { ana, bruno, carla })
+        {
+            var status = await StatusOf(member.Client);
+            Assert.False(status.GetProperty("onboardingPending").GetBoolean());
+            Assert.True(status.GetProperty("enabled").GetBoolean());
+        }
     }
 
     [Fact]
@@ -213,7 +201,7 @@ public sealed class AiSecondProviderTests
     }
 
     [Fact]
-    public async Task SwitchingItOffForTheGroup_AlsoEndsAnOldAcceptance()
+    public async Task SwitchingItOffForTheGroup_SwitchesItOff_AndAlsoEndsAnOldAcceptance()
     {
         await using var factory = new ChatWebApplicationFactory(enabled: true);
         var (ana, bruno) = await GroupThatAcceptedTheOldVersionAsync(factory);
@@ -221,6 +209,7 @@ public sealed class AiSecondProviderTests
         var revoked = await bruno.Client.DeleteAsync($"{Consent}?scope=group");
         Assert.Equal(HttpStatusCode.OK, revoked.StatusCode);
 
+        Assert.False((await StatusOf(ana.Client)).GetProperty("enabled").GetBoolean());
         Assert.False((await StatusOf(ana.Client)).GetProperty("onboardingPending").GetBoolean());
         Assert.Equal(0, factory.Scalar<long>("SELECT count(*) FROM ai_consents WHERE revoked_at_utc IS NULL"));
     }
@@ -228,11 +217,6 @@ public sealed class AiSecondProviderTests
     // ---------------------------------------------------------------- helpers
 
     private sealed record Member(HttpClient Client, Guid UserId);
-
-    private sealed record ErrorDto(string Code, string Message);
-
-    private static async Task<ErrorDto> ErrorOf(HttpResponseMessage response)
-        => (await response.Content.ReadFromJsonAsync<ErrorDto>())!;
 
     private static async Task<JsonElement> StatusOf(HttpClient client)
     {

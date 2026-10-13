@@ -1,6 +1,6 @@
 // Assistente (aba oculta, aberta pelo Painel): conversa com a IA sobre as finanças do grupo. O histórico vive só
-// enquanto o app está aberto. Quem decide se há conversa é o servidor (GET /ai/status): IA indisponível, grupo
-// sem ativação (explicação e "Ativar") ou pronta.
+// enquanto o app está aberto. Abre direto na conversa: a IA vem ligada para o grupo. Quem decide o resto é o
+// servidor (GET /ai/status): IA indisponível, ou desligada para o grupo por alguém dele (com o caminho para ligar).
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -23,9 +23,8 @@ import type { Message } from '../hooks/useChat';
 import { colors, spacing, typography, borderRadius } from '@/theme';
 import { ErrorState } from '@/components/ErrorState';
 import { goToParent } from '@/navigation/resetOnFocus';
-import { aiDestinations, assistantGate } from '@/modules/ai/aiStatus';
+import { assistantGate } from '@/modules/ai/aiStatus';
 import { useAiStatus } from '@/modules/ai/useAiStatus';
-import { aiAnalysisSummary } from '@/modules/privacy/privacyContent';
 
 // Sugestões da tela vazia: um toque envia a pergunta.
 const SUGGESTED_QUESTIONS: readonly string[] = [
@@ -120,14 +119,14 @@ export default function ChatScreen() {
       />
     );
   }
-  if (gate === 'needs-activation') {
+  if (gate === 'off-for-group') {
     return (
       <AssistantNotice
-        title="A análise com IA está desligada para este grupo"
-        text={`O Assistente responde às suas perguntas sobre gastos, orçamento e metas do grupo. ${aiAnalysisSummary(aiDestinations(status))} Uma pessoa ativa e vale para o grupo inteiro; qualquer um desliga quando quiser.`}
-        actionLabel="Ativar"
-        actionAccessibilityLabel="Ativar a análise com IA: ver o que é enviado e decidir"
-        onAction={() => router.push('/(main)/ai/welcome' as any)}
+        title="A IA está desligada para este grupo"
+        text="Enquanto estiver desligada, nada do grupo é enviado à IA e o Assistente não responde. Qualquer pessoa do grupo pode ligar de novo em Configurações > Inteligência artificial."
+        actionLabel="Abrir Inteligência artificial"
+        actionAccessibilityLabel="Abrir as configurações de inteligência artificial para ligar de novo"
+        onAction={() => router.push('/(main)/settings/ai' as any)}
       />
     );
   }

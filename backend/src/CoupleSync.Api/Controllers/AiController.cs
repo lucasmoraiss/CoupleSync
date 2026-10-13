@@ -10,8 +10,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace CoupleSync.Api.Controllers;
 
 /// <summary>
-/// Switching the AI analysis on and off for the group of the token, the person's own choices about it and what the
-/// group consumed (design 10.2). One acceptance is enough for the group; any member switches it off.
+/// The AI of the group of the token: its status, switching it off for the group and back on, the person's own
+/// choices about it and what the group consumed. The AI is on for every group without any acceptance; the routes
+/// keep the names and the formats the installed app calls.
 /// </summary>
 [ApiController]
 [Authorize]
@@ -33,16 +34,15 @@ public sealed class AiController : ControllerBase
     public async Task<ActionResult<AiStatusResponse>> GetStatus(CancellationToken ct)
         => Ok(Map(await _service.GetStatusAsync(GetAuthenticatedCoupleId(), GetAuthenticatedUserId(), ct)));
 
-    /// <summary>Switches the AI on for the group. 409 when the version sent is not the one in force.</summary>
+    /// <summary>Switches the AI back on for the group ("Ativar"). Any version is accepted; only the one in force is recorded as an acceptance.</summary>
     [HttpPost("consent")]
     [ProducesResponseType(typeof(AiStatusResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<AiStatusResponse>> Accept([FromBody] AiConsentRequest request, CancellationToken ct)
         => Ok(Map(await _service.AcceptAsync(GetAuthenticatedCoupleId(), GetAuthenticatedUserId(), request.Version, ct)));
 
-    /// <summary>scope=mine takes back the person's own acceptance; scope=group switches the AI off for everyone.</summary>
+    /// <summary>scope=group switches the AI off for the group; scope=mine only takes back the person's own acceptance (the group stays on).</summary>
     [HttpDelete("consent")]
     [ProducesResponseType(typeof(AiStatusResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

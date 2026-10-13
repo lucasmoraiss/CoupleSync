@@ -17,9 +17,10 @@ public sealed record AiFeaturesResponse(bool Assistant, bool Insights, bool Educ
 public sealed record AiBudgetResponse(int CallsToday, int CallLimit, string ResetsAtLocal);
 
 /// <param name="Available">The AI can be used at all (not switched off on the server and a provider has a key).</param>
-/// <param name="Enabled">The group switched it on: at least one acceptance in force of a current member.</param>
+/// <param name="Enabled">True unless a member switched the AI off for the group. No acceptance is needed.</param>
+/// <param name="AcceptedBy">The acceptances really stored (of the version in force, of current members). May be empty in a group that is on.</param>
 /// <param name="MyAcceptance">Null when the person has no acceptance in force.</param>
-/// <param name="OnboardingPending">The welcome screen is due for this person in this group.</param>
+/// <param name="OnboardingPending">Always false: nobody is asked. Kept because the installed app reads it.</param>
 public sealed record AiStatusResponse(
     bool Available,
     bool Enabled,

@@ -117,13 +117,15 @@ public sealed class OpenFinanceReconciliationPostgresTests
             "SELECT pluggy_transaction_id, review_state, linked_transaction_id, amount, date, local_date, raw_json::text, auto_reason, reviewed_at_utc FROM bank_transactions ORDER BY pluggy_transaction_id";
         var linesBefore = (await database.RowsAsync(everyColumnOfBefore)).Select(r => string.Join("|", r)).ToList();
 
+        // "Changes no existing column" is said of this migration: a later one adds couples.ai_disabled_at_utc.
+        await MigrationTests.MigrateAsync(database, "20261008195546_AddOpenFinanceReconciliation");
+        Assert.Equal(columnsOfOthers, await ColumnsOfAsync(database, others));
         await MigrationTests.MigrateAsync(database);
 
         // No table loses a row, no money changes, no other table changes shape.
         foreach (var table in tables)
             Assert.Equal(counts[table], await database.ScalarAsync<long>($"SELECT count(*) FROM \"{table}\""));
         Assert.Equal(transactionSum, await database.ScalarAsync<decimal>("SELECT sum(amount) FROM transactions"));
-        Assert.Equal(columnsOfOthers, await ColumnsOfAsync(database, others));
         Assert.Equal(constraintsOfOthers, await ConstraintsOfAsync(database, others));
         Assert.Equal(linesBefore, (await database.RowsAsync(everyColumnOfBefore)).Select(r => string.Join("|", r)).ToList());
 

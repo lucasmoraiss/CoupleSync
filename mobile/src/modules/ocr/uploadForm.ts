@@ -1,6 +1,7 @@
 // Corpo do envio do extrato. O campo "aiCategorizationConsent" diz ao servidor se, para o app, a análise com IA
-// está ativada para o grupo (modules/ai/aiStatus.ts: aiUploadConsent). Sem o campo (ou "false") o servidor não
-// usa IA nessa importação; com "true" ele ainda confere a ativação do grupo antes de processar.
+// está ligada para o grupo (modules/ai/aiStatus.ts: aiUploadConsent — ligada sempre que há IA e o grupo não a
+// desligou). Sem o campo (ou "false") o servidor não usa IA nessa importação; com "true" ele ainda confere se o
+// grupo não desligou antes de processar.
 export interface FormDataLike {
   append(name: string, value: any): void;
 }
