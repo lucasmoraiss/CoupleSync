@@ -596,7 +596,8 @@ tela nova depende dos campos novos. Interface na sequência.
 | 6 | **Navegação de 4 abas** | `_layout.tsx` novo, Mais, remoção de Fluxo/Rendas/Relatórios/Metas das abas, remoção de `openfinance/review` e `QuickIncomeModal`, "Conferir e importar", Maestro reescrito | OTA |
 | 7 | **Polimento e medição** | acessibilidade, tema claro conferido tela a tela, desempenho da lista, relatório final da seção 12, rotas obsoletas marcadas, roteiro de checkpoint (#17) | OTA, tag e APK |
 
-Cada fase entra em `main` por PR com CI verde, como as anteriores. Fases 1 e 2 têm migration: avisar as sessões
+Issues (rótulos `backlog` + `redesenho`): fase 0 = #81, 1 = #82, 2 = #83, 3 = #84, 4 = #85, 5 = #86, 6 = #87,
+7 = #88. Cada fase entra em `main` por PR com CI verde, como as anteriores. Fases 1 e 2 têm migration: avisar as sessões
 paralelas antes do merge (regra em vigor). Nenhuma fase toca `docs/` nem `render.yaml`.
 
 ## 14. O que fica para o implementador
