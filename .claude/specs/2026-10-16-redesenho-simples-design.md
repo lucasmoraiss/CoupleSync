@@ -1,6 +1,6 @@
 # CoupleSync simples — redesenho de produto, categorização e navegação
 
-Data: 2026-10-16. Rascunho para aprovação do dono (seção 15 lista o que só ele decide). Este documento substitui,
+Data: 2026-10-16. Decidido com o dono no mesmo dia (seção 15). Este documento substitui,
 no que conflita, a parte de telas dos desenhos de Open Finance (`.claude/specs/2026-10-07-open-finance-design.md`)
 e de IA (`.claude/specs/2026-10-08-ia-financeira-design.md`); as regras de provedor, cota, privacidade e cadeia
 de IA daquele documento continuam valendo. Cada fase da seção 13 vira uma issue com o rótulo `backlog` e passa
@@ -110,31 +110,62 @@ Novo campo em `Transaction` [código: `backend/src/CoupleSync.Domain/Entities/Tr
 - Manual: um seletor Despesa/Receita no formulário (padrão Despesa). Extrato PDF: linhas "Entrada" (hoje
   recusadas) entram como `Receita`.
 
-### 4.2 Escopo: pessoal × compartilhado
+### 4.2 Escopo: a pessoa é a unidade; o círculo vê o que cada um permite
 
-Novo campo em `Transaction`: `IsShared` (bool). `UserId` continua sendo quem pagou/registrou.
-- **Eu** = lançamentos com `UserId` = eu que saíram do meu dinheiro: conta de escopo Pessoal, manual ou
-  notificação. Compartilhados ou não. É "o meu dinheiro".
-- **Nós** = lançamentos com `IsShared = true`, de qualquer membro do grupo. É "a casa".
-- Um lançamento meu e compartilhado aparece nas duas visões. Isso é desejado: aluguel que eu paguei é meu
-  gasto e é gasto da casa.
-- **Conta conjunta** (minha escolha): conta com `Scope = Compartilhada` é dinheiro da casa, não de quem a
-  conectou. Seus lançamentos nascem `IsShared = true`, **não entram no Eu de ninguém** e, em "Quem pagou",
-  aparecem como a conta ("Conta conjunta Itaú"), não como pessoa. `UserId` continua sendo quem conectou, só
-  para permissão de edição da conexão [código: `BankConnection`, 1 por pessoa e grupo].
-- **Padrão por conta**: `BankAccount` ganha `Scope { Pessoal, Compartilhada }`, perguntado ao conectar
-  ("Esta conta é só sua ou do casal?") e editável em Mais → Contas. Lançamentos herdam o padrão da conta no
-  momento da importação. Manual: alternador no formulário, com o último valor usado como padrão. Captura de
-  notificação: padrão do aparelho = Pessoal (minha escolha).
+Decisão do dono (16/10/2026, seção 15): o orçamento é **individual, por pessoa**; a visão do casal ou da
+família é "mais simples e direta" (um resumo, com detalhe por baixo); se o outro quiser ver mais dos
+lançamentos e do extrato de alguém, "deve haver a possibilidade", definida numa tela de configurações do
+casal/círculo/família, "tudo parametrizável e customizável". Daqui em diante o documento chama o `Couple` de
+**círculo** (casal ou família); na interface aparece o nome do grupo (issue #5) e o código não muda de nome.
+
+Modelo:
+- `Transaction` ganha `IsShared` (bool). `UserId` continua sendo quem pagou/registrou. `BankAccount` ganha
+  `Scope { Pessoal, Compartilhada }`, **padrão Pessoal** sempre (decisão 2): nada é da casa até a pessoa
+  dizer.
+- **Eu** = meus lançamentos (`UserId` = eu), compartilhados ou não, de contas Pessoais, manuais ou de
+  notificação. Meu orçamento = `BudgetPlan.UserId` = eu. Minha renda = minhas fontes + receitas das minhas
+  contas. **Funciona sem ninguém mais no círculo.**
+- **Nós** = a visão do círculo, em dois níveis:
+  - *Resumo* (sempre): total dos lançamentos `IsShared = true` de todos os membros no mês, por categoria;
+    orçamento compartilhado opcional (`BudgetPlan.UserId = null`); e, por membro, o que ele permitiu mostrar
+    (abaixo). Linhas por membro: "Lucas · R$ 2.100 · 61% do compartilhado".
+  - *Detalhe* (ao tocar num membro): os lançamentos, contas e saldos daquele membro **só até o nível que ele
+    liberou**. Quem não liberou nada aparece só com o que compartilhou.
+- **Conta conjunta**: conta marcada `Compartilhada` é dinheiro da casa, não de quem a conectou. Seus
+  lançamentos nascem `IsShared = true`, **não entram no Eu de ninguém** e, no resumo por membro, aparecem
+  como a conta ("Conta conjunta Itaú"). `UserId` fica como quem conectou, só para permissão de edição da
+  conexão [código: `BankConnection`, 1 por pessoa e grupo].
+- Um lançamento meu e compartilhado aparece nas duas visões: aluguel que eu paguei é meu gasto e é gasto da
+  casa.
+
+**Configurações do círculo** (tela nova em Mais → Grupo, seção 7.4; cada membro define só o que é dele e vê o
+que os outros definiram):
+1. *O que os outros veem de mim*: (a) **só o que eu compartilho** (padrão); (b) também meus totais por
+   categoria; (c) tudo: meus lançamentos, contas e saldos. Vale para todos os outros membros do círculo (sem
+   permissão por pessoa; minha escolha, para caber numa tela).
+2. *Minhas contas compartilhadas*: a lista das minhas contas conectadas com um interruptor cada ("É da casa").
+3. *Compartilhar por padrão*: categorias cujos lançamentos meus nascem compartilhados. Pré-marcadas (minha
+   escolha, editáveis): Moradia, Contas da casa, Mercado. Vazio = nada nasce compartilhado.
+4. *Orçamento compartilhado*: ligar ou não o plano do Nós (desligado por padrão; ligado, qualquer membro edita).
+Ao **entrar num círculo** com outra pessoa (criar o segundo membro ou aceitar o convite), uma folha de
+configuração inicial mostra esses quatro itens com os padrões e um botão "Pronto"; dá para pular e tudo fica
+no padrão (nada visível além do compartilhado).
+
+Regras derivadas:
 - **Regra aprendida de escopo**: marcar um lançamento como compartilhado/pessoal com "aplicar aos próximos de
-  [estabelecimento]" cria regra do grupo (mesma tabela da seção 6.3, coluna `IsShared?`). Regras
-  pré-carregadas (minha escolha, editáveis): categorias Moradia, Contas da casa e Mercado nascem como
-  compartilhadas quando a conta é pessoal e o grupo tem mais de um membro.
-- **Privacidade** (**dono**, seção 15.1): recomendação = lançamentos pessoais são visíveis só ao dono deles;
-  o parceiro vê os compartilhados e, no "Nós", o total pessoal de cada um como um número agregado opcional.
-  Hoje tudo é visível a todos; isso muda o contrato de `GET /transactions` (filtro por escopo e autor).
-- Migração: tudo o que existe vira `IsShared = true` (comportamento atual preservado); a partir daí vale o
-  padrão por conta.
+  [estabelecimento]" cria regra do grupo (seção 6.3, coluna `IsShared?`).
+- **API**: `GET /transactions`, `/dashboard`, `/budgets`, `/openfinance` (contas e saldos) passam a filtrar
+  pelo autor e pelo nível de visibilidade que o autor liberou para quem pergunta. Editar e excluir lançamento
+  de outro membro deixa de ser permitido [código: hoje qualquer membro edita qualquer transação]; lançamento
+  compartilhado é editável só pelo autor e pela categoria/escopo por qualquer membro (minha escolha).
+- **Usar sozinho**: o registro cria um círculo de uma pessoa automaticamente (hoje a pessoa é obrigada a
+  "criar ou entrar em grupo" antes de ver qualquer tela, `couple-setup.tsx` [código]); convidar alguém o
+  transforma em casal sem mover dados. Entrar num círculo de outra pessoa continua como hoje (vira um segundo
+  grupo; o pessoal fica acessível pela troca de grupo). Minha escolha, consequência direta de "orçamento
+  individual".
+- **Migração**: lançamentos existentes viram `IsShared = true` e as contas existentes `Compartilhada`
+  (preserva o que os casais de hoje veem); visibilidade de todos nasce em (a). O grupo de hoje do dono não
+  muda de comportamento até ele mexer nas configurações do círculo.
 
 ### 4.3 Taxonomia de categorias v2
 
@@ -346,8 +377,10 @@ a `dataviz` para gráficos.
  ● Moradia              R$ 1.100 ██████████  de 1.100
  ● Outros               R$ 90
  ────────────────────────────────────────────────────────
- [Nós] Quem pagou                                     
- Lucas R$ 2.100 (61%)  ·  Ana R$ 1.320 (39%)
+ [Nós] Por pessoa                                      ›
+ Lucas  R$ 2.100 compartilhado · total R$ 3.420 (liberou)
+ Ana    R$ 1.320 compartilhado
+ Conta conjunta Itaú  R$ 800
  ────────────────────────────────────────────────────────
  Contas                                   R$ 4.230 saldo
  Nubank ···1234 R$ 3.100 · Fatura Nubank R$ 1.890 vence 10/11
@@ -367,8 +400,10 @@ Regras:
   orçamento" no lugar da barra; sem contas conectadas → cartão "Conectar banco" uma vez, dispensável).
 - "Pode gastar" = (orçado − gasto) ÷ dias restantes; sem orçamento, mostra só "gasto até hoje" e a comparação
   com o mês anterior no mesmo dia (`GET /dashboard` ganha `previousPeriodSameDay`).
-- "Quem pagou" só no Nós. "Contas" só com Open Finance (saldo e fatura vêm de `BankAccount`, já guardados
-  [código]). "Previsão" reaproveita `GET /cashflow` (horizonte 30).
+- "Por pessoa" só no Nós: cada membro com o que compartilhou e, se liberou (seção 4.2), o total pessoal;
+  tocar abre o detalhe daquele membro até o nível liberado. "Contas" só com Open Finance (saldo e fatura vêm
+  de `BankAccount`, já guardados [código]); no Nós mostra só contas compartilhadas e as que o membro liberou.
+  "Previsão" reaproveita `GET /cashflow` (horizonte 30).
 - "A revisar" é um inbox: lista com ações em linha (confirmar categoria, escolher outra, "eram diferentes",
   dispensar). Dispensar tudo é um toque. Nunca mostra contagem maior que 99.
 - O espaço do insight da IA (fase 7 do desenho de IA) é uma linha sob o bloco do topo, só quando houver.
@@ -433,7 +468,9 @@ Regras:
   pelo banco leva selo "banco"; se um valor igual já está cadastrado como fonte no mesmo mês, não soma duas
   vezes (mesma regra de fusão da seção 6.4, pelo nome da fonte ou valor exato). A aba Rendas deixa de existir;
   adicionar/editar fonte de renda fica aqui, no mesmo formulário de hoje, simplificado.
-- Eu e Nós têm planos separados (`BudgetPlan.UserId`). "Livre" do Nós = renda total da casa − orçado do Nós;
+- Eu e Nós têm planos separados (`BudgetPlan.UserId`); o do Nós só existe se "Orçamento compartilhado" estiver
+  ligado nas Configurações do círculo (senão a aba no Nós mostra só o gasto compartilhado por categoria, sem
+  limites). "Livre" do Nós = renda total da casa − orçado do Nós;
   "Livre" do Eu = minha renda − orçado do Eu. Os dois "Livre" não se somam nem se descontam entre si (o Eu
   não sabe quanto a casa orçou; é informação, não contabilidade).
 - Alertas de 80% e estouro passam a funcionar (hoje nunca disparam porque ninguém cria plano, issue #6).
@@ -441,9 +478,10 @@ Regras:
 ### 7.4 Mais
 
 Lista simples: Contas e bancos (conexões, contas com saldo e escopo Pessoal/Compartilhada, sincronizar,
-desconectar; absorve `settings/openfinance/*`) · Metas · Relatórios · Regras de categoria · Assistente ·
-Grupo e convite · Alertas · Captura de notificações · Privacidade · Conta (e-mail, senha, sair). Um item por
-linha, sem cartões, sem descrições longas. Issue #28 (Patrimônio) entra aqui quando for feita.
+desconectar; absorve `settings/openfinance/*`) · **Círculo** (nome, membros, convite, e as Configurações do
+círculo da seção 4.2; absorve `settings/group`) · Metas · Relatórios · Regras de categoria · Assistente ·
+Alertas · Captura de notificações · Privacidade · Conta (e-mail, senha, tema, sair). Um item por linha, sem
+cartões, sem descrições longas. Issue #28 (Patrimônio) entra aqui quando for feita.
 
 ### 7.5 Primeira abertura depois da atualização
 
@@ -486,6 +524,8 @@ Seus lançamentos foram recategorizados; confira em A revisar o que ficou incert
 | `GET /review` (novo, substitui `openfinance/review`) | itens de "A revisar" com tipo e ações; `POST /review/{id}/resolve` |
 | `GET/PUT /budgets/...` | `scope`; `grossIncome` calculado; `PUT allocations` por grupo de categoria; `POST /budgets/{month}/copy-previous`, `GET /budgets/{month}/suggestions` |
 | `PATCH /openfinance/accounts/{id}` | ganha `scope` |
+| `GET/PUT /couples/me/sharing` (novo) | configurações do círculo do membro: `visibility` (shared\|totals\|all), `defaultSharedCategories[]`, `sharedBudgetEnabled`; `GET /couples/me` devolve a visibilidade de cada membro para quem pergunta |
+| `POST /auth/register` | cria o círculo de uma pessoa junto com a conta; `couple-setup` deixa de ser obrigatório |
 | `GET /ai/category-rules`, `DELETE ...` | da fase 10 de IA, com `subcategory` e `isShared` |
 | `openfinance/review*`, `cashflow` | mantidas até a fase 7; depois `review*` sai do app e é marcada obsoleta |
 
@@ -519,8 +559,9 @@ preenchimento de padrão em migration de dados separada (`Kind = Despesa`, `IsSh
   uma versão).
 - **Fusão automática errada**: desfazer em "A revisar" por 7 dias; limite conservador (valor exato, ±3 dias,
   mesma chave) medido com dados sintéticos de semente fixa antes da revisão (lição de 09/10).
-- **Privacidade do pessoal**: mudança de contrato visível ao parceiro; precisa da decisão do dono e de texto na
-  tela de Privacidade.
+- **Privacidade do pessoal**: a visibilidade por membro muda o que o parceiro vê; a migração preserva o que os
+  casais de hoje veem (tudo compartilhado) e a tela de Privacidade explica os três níveis. Toda rota que
+  devolve lançamento, conta ou saldo passa pelo mesmo filtro de visibilidade (um só ponto, testado por rota).
 - **APK antigo durante o OTA**: fases 1–3 só adicionam campos; o 1.3.0 continua lendo. A fase 6 (navegação)
   é só JavaScript.
 - **Cota de IA**: a cascata chama a IA só no resto; estimativa < 10 chamadas/dia por grupo; orçamento do
@@ -546,10 +587,10 @@ tela nova depende dos campos novos. Interface na sequência.
 
 | # | Fase | Entrega | Publicação |
 |---|---|---|---|
-| 0 | **Decisões e fundação visual** | respostas da seção 15 registradas em `decisoes-do-dono.md`; tokens, temas claro/escuro, fonte, 12 componentes de `ui/` com testes de lógica; nenhuma tela muda | OTA |
+| 0 | **Fundação visual** | tokens, temas claro/escuro (escolha manual até o APK da fase 7), fonte, 12 componentes de `ui/` com testes de lógica; nenhuma tela muda | OTA |
 | 1 | **Taxonomia v2 e tipo** | `Kind`, `Subcategory`, categorias v2 com ícone e cor, `PluggyCategoryMap` completo, dicionário ~300, migration de dados, script de recategorização com relatório antes/depois, `GET /categories` novo; app lê os rótulos novos | API, depois OTA |
 | 2 | **Cascata, aprendizado e importação direta** | `CategorizationPipeline`, regras do grupo, IA em lote com confiança, fusão automática de duplicadas, Open Finance grava direto, pendentes contam, "A revisar" na API; absorve #47 e #48 | API (migration), OTA |
-| 3 | **Eu \| Nós** | `IsShared`, `Scope` por conta, privacidade conforme decisão, filtros de API, `BudgetPlan.UserId`, regras de escopo, nome do grupo (#5) | API (migration), OTA |
+| 3 | **Eu \| Nós e círculo** | `IsShared`, `Scope` por conta (padrão Pessoal), visibilidade por membro e filtros de API conforme 4.2, `BudgetPlan.UserId`, regras de escopo, círculo de uma pessoa no registro, tela Configurações do círculo e folha de entrada, nome do grupo (#5) | API (migration), OTA |
 | 4 | **Início novo** | tela 7.1 completa com `GET /dashboard` estendido, "A revisar" no app, folha de primeira abertura | OTA |
 | 5 | **Orçamento e Lançamentos** | telas 7.2 e 7.3, folha de detalhe, deslizar, busca, filtros, formulário manual novo com sugestão; Rendas absorvida; absorve #6 e #7 | OTA |
 | 6 | **Navegação de 4 abas** | `_layout.tsx` novo, Mais, remoção de Fluxo/Rendas/Relatórios/Metas das abas, remoção de `openfinance/review` e `QuickIncomeModal`, "Conferir e importar", Maestro reescrito | OTA |
@@ -568,22 +609,24 @@ paralelas antes do merge (regra em vigor). Nenhuma fase toca `docs/` nem `render
 - Comportamento da lista com mais de 2.000 lançamentos no mês (paginação por dia, `FlatList` com seções).
 - Textos de todas as telas, em português, sem jargão ("lançamento", não "transação", na interface; a API não muda nomes).
 
-## 15. Decisões que só o dono toma
+## 15. Decisões do dono (16/10/2026)
 
-1. **Privacidade do pessoal**: (a) recomendado: lançamento pessoal visível só a quem o fez; o parceiro vê os
-   compartilhados e, se ligado, só o total pessoal do outro; (b) tudo visível a todos, como hoje, e o Eu | Nós
-   é só um filtro.
-2. **Padrão de escopo da conta conectada**: (a) recomendado: perguntar por conta ao conectar, com Moradia,
-   Contas da casa e Mercado nascendo compartilhadas; (b) tudo compartilhado por padrão; (c) tudo pessoal por
-   padrão.
-3. **Captura de notificação**: (a) recomendado: manter como fonte secundária, com fusão quando a linha do banco
-   chegar; (b) aposentar do app nesta reforma.
-4. **Tema**: (a) recomendado: claro e escuro pelo sistema, com opção manual; (b) continuar só escuro.
-5. **Aprendizado coletivo entre grupos** (chave de estabelecimento → categoria, sem valores nem ids): (a) ligar
-   quando ≥ 3 grupos concordarem; (b) recomendado para o grupo fechado de hoje: deixar pronto e desligado.
-6. **Metas**: (a) recomendado: manter em Mais, só retocada; (b) remover do app (a API fica).
-7. **Ordem**: (a) recomendado: dados primeiro (fases 1–3), telas depois; (b) Início novo antes, com os dados de
-   hoje, para ver cedo (custa refazer o Início quando os campos chegarem).
+Respostas dele às sete perguntas do rascunho, na sessão, com as palavras dele quando houve:
+
+1. **Privacidade e modelo**: "tratar como orçamento individual por pessoa, e a visão do casal ser mais simples
+   e direta (tipo top-view e low-view), mas [...] se a outra parte do casal quiser ver mais detalhes sobre
+   transações e extrato da outra pessoa, deve haver a possibilidade. Talvez uma tela de configurações do
+   casal/círculo/família pra definir esse tipo de coisa." → seção 4.2 inteira.
+2. **Escopo da conta**: "respondido no 1. Tratar como orçamento individual, mas quando a pessoa conectar num
+   círculo/casal/família, ter tudo parametrizável e customizável." → padrão Pessoal; Configurações do círculo
+   e folha de entrada (4.2).
+3. **Captura de notificação**: (a) manter como fonte secundária, com fusão quando a linha do banco chegar.
+4. **Tema**: (a) claro e escuro pelo sistema, com opção manual.
+5. **Aprendizado coletivo**: ele não entendeu a pergunta; fica a recomendação conservadora, (b) pronto e
+   desligado por configuração, até ele pedir para ligar. (Explicado a ele: usar correções de um casal para
+   ajudar outro, só pelo nome da loja, sem valores nem pessoas.)
+6. **Metas**: (a) manter em Mais, só retocada.
+7. **Ordem**: (a) dados primeiro (fases 1–3), telas depois.
 
 Minhas escolhas já tomadas, para ele conferir enquanto lê: pendentes do banco contam nos totais; fusão de
 duplicadas automática com desfazer (o antigo fica guardado, oculto); "aplicar aos próximos" ligado por padrão;
